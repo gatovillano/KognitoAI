@@ -2,6 +2,7 @@
 
 import logging
 import os
+import asyncio
 from typing import Type, Optional, List, Dict, Any, Union
 from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
@@ -72,7 +73,17 @@ class DeepResearchTool(BaseTool):
             }
 
             logger.info("Invoking Deep Research graph with inputs: %s", inputs)
-            final_state = await graph.ainvoke(inputs, config=config)
+            
+            # Envolver la invocación en un bloque para capturar si se cancela
+            try:
+                final_state = await graph.ainvoke(inputs, config=config)
+            except asyncio.CancelledError:
+                logger.error("!!! [DeepResearchTool] EL PROCESO FUE CANCELADO DURANTE LA INVOCACIÓN DEL GRAFO !!!")
+                raise
+            except Exception as e:
+                logger.error(f"!!! [DeepResearchTool] EXCEPCIÓN DURANTE LA INVOCACIÓN DEL GRAFO: {str(e)} !!!", exc_info=True)
+                raise
+                
             logger.info(f"Deep Research graph invocation completed. Final state keys: {final_state.keys()}")
             logger.debug("Full final state received: %s", final_state)
             

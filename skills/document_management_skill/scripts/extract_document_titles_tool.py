@@ -21,7 +21,7 @@ from sqlalchemy import select, update, text, Table, MetaData
 from core.config import settings
 from sqlalchemy import create_engine
 from core.memory_manager import update_document_metadata, get_full_document_content
-from core.llm_manager import get_fast_llm
+from core.llm_manager import get_llm_for_user
 from core.websocket_manager import send_personal_message
 
 # Configuración del logger para este módulo.
@@ -190,8 +190,8 @@ class ExtractDocumentTitlesTool(BaseTool):
 
                 updated_count = 0
                 processed_count = 0
-                # Obtener el LLM rápido para la extracción de títulos
-                llm = get_fast_llm()
+                # Obtener el LLM del usuario para la extracción de títulos
+                llm = await get_llm_for_user(self.account_id, purpose="fast")
                 if not llm:
                     logger.error("No hay LLM disponible para extraer títulos.")
                     await db.execute(text("""

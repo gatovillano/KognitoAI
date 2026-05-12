@@ -63,6 +63,8 @@ services:
       - ./.env:/app/.env:ro # Montar el archivo .env para que los cambios se apliquen sin reconstruir
     env_file:
       - ./.env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - kognito_network
     ipc: host # Añadir el modo IPC para el rendimiento de PyTorch
@@ -103,6 +105,8 @@ services:
       - ./.env:/app/.env:ro # Montar el archivo .env para que los cambios se apliquen sin reconstruir
     env_file:
       - ./.env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - kognito_network
     links:
@@ -163,6 +167,8 @@ services:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-telegram_bot_db}
     env_file:
       - ./.env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   # 6. Base de Datos de Grafos (Neo4j)
   # 🌐 Acceso al Browser: http://localhost:7474

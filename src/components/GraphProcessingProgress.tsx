@@ -88,7 +88,7 @@ export const GraphProcessingProgress: React.FC<GraphProcessingProgressProps> = (
                                     ({mode === 'hybrid' ? 'Híbrido' : 'Conceptual'})
                                 </span>
                             </div>
-                            {onClose && status === 'completed' && (
+                            {onClose && (
                                 <button
                                     onClick={onClose}
                                     className="text-muted-foreground hover:text-foreground transition-colors"

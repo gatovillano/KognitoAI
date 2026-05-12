@@ -44,6 +44,7 @@ interface Collection {
   workspace_id?: string;
   workspace_name?: string;
   workspace_color?: string; // Nuevo campo
+  parent_id?: string | null;
 }
 
 export default function RagCollectionsPage() {
@@ -467,7 +468,7 @@ export default function RagCollectionsPage() {
             description="Ver y gestionar todos tus repositorios de GitHub."
             className="bg-muted"
           />
-          {collections.map((collection) => (
+          {collections.filter((collection) => !collection.parent_id).map((collection) => (
             <motion.div key={collection.topic} className="relative h-full" layout initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.8 }} transition={{ type: "spring", stiffness: 300, damping: 30 }}>
               <CollectionDisplay
                 collection={collection}

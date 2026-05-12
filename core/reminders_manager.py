@@ -21,7 +21,7 @@ import uuid
 from datetime import datetime
 import pytz
 import dateparser
-from typing import Tuple
+from typing import Tuple, Optional
 
 from sqlalchemy import select
 from telegram.ext import CallbackContext
@@ -68,7 +68,14 @@ async def _send_simple_reminder_callback(context: CallbackContext):
         logger.error(f"Error al enviar recordatorio simple {reminder_id}: {e}", exc_info=True)
 
 
-async def set_simple_reminder(account_id: str, telegram_id: int, text: str, natural_language_time: str) -> Tuple[bool, str]:
+async def set_simple_reminder(
+    account_id: str, 
+    telegram_id: int, 
+    text: str, 
+    natural_language_time: str,
+    workspace_id: Optional[str] = None,
+    thread_id: Optional[str] = None
+) -> Tuple[bool, str]:
     """
     Programa un nuevo recordatorio simple.
 
@@ -77,6 +84,8 @@ async def set_simple_reminder(account_id: str, telegram_id: int, text: str, natu
         telegram_id: El ID de Telegram, necesario para la JobQueue y la zona horaria.
         text: El contenido del recordatorio.
         natural_language_time: La descripción en lenguaje natural del tiempo.
+        workspace_id: El ID del espacio de trabajo opcional.
+        thread_id: El ID del hilo de conversación opcional.
 
     Returns:
         Una tupla (bool, str) indicando éxito y un mensaje para el usuario.
@@ -101,7 +110,9 @@ async def set_simple_reminder(account_id: str, telegram_id: int, text: str, natu
             # Crear la nueva entrada en la tabla de recordatorios, asociada al account_id.
             new_reminder = Recordatorio(
                 account_id=account_id,
-                text=text,
+                workspace_id=workspace_id,
+                thread_id=thread_id,
+                message=text,
                 due_datetime=due_datetime_utc,
                 is_active=True
             )

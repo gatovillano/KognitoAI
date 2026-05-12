@@ -152,12 +152,49 @@ class GraphDB:
                 import asyncio
                 import concurrent.futures
 
+                def _serialize_neo4j_data(data):
+                    """Convierte tipos específicos de Neo4j a tipos estándar de Python."""
+                    from neo4j.time import DateTime, Date, Time, Duration
+                    from neo4j.graph import Node, Relationship, Path
+                    
+                    if isinstance(data, (DateTime, Date, Time)):
+                        return data.isoformat()
+                    if isinstance(data, Duration):
+                        return str(data)
+                    if isinstance(data, Node):
+                        # Convertir a dict y serializar propiedades recursivamente
+                        node_dict = {k: _serialize_neo4j_data(v) for k, v in data.items()}
+                        # Preservar ID y etiquetas para compatibilidad con api/knowledge_graph.py
+                        node_dict["id"] = getattr(data, "id", None)
+                        node_dict["element_id"] = getattr(data, "element_id", None)
+                        node_dict["labels"] = list(data.labels) if hasattr(data, "labels") else []
+                        return node_dict
+                    if isinstance(data, Relationship):
+                        # Convertir a dict y serializar propiedades recursivamente
+                        rel_dict = {k: _serialize_neo4j_data(v) for k, v in data.items()}
+                        rel_dict["id"] = getattr(data, "id", None)
+                        rel_dict["element_id"] = getattr(data, "element_id", None)
+                        rel_dict["type"] = getattr(data, "type", "RELATED")
+                        rel_dict["start_node_id"] = getattr(data.start_node, "id", None) if hasattr(data, "start_node") else None
+                        rel_dict["end_node_id"] = getattr(data.end_node, "id", None) if hasattr(data, "end_node") else None
+                        return rel_dict
+                    if isinstance(data, Path):
+                        return {
+                            "nodes": [_serialize_neo4j_data(n) for n in data.nodes],
+                            "relationships": [_serialize_neo4j_data(r) for r in data.relationships]
+                        }
+                    if isinstance(data, dict):
+                        return {k: _serialize_neo4j_data(v) for k, v in data.items()}
+                    if isinstance(data, list):
+                        return [_serialize_neo4j_data(item) for item in data]
+                    return data
+
                 def _execute_sync():
                     with self._driver.session() as session:
                         logger.debug(f"[_execute_sync] Query: {query}")
                         logger.debug(f"[_execute_sync] Params: {parameters}")
                         result = session.run(query, parameters)
-                        return [dict(record) for record in result]
+                        return [_serialize_neo4j_data(dict(record)) for record in result]
 
                 loop = asyncio.get_event_loop()
                 with concurrent.futures.ThreadPoolExecutor() as executor:

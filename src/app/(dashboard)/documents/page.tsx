@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -17,6 +18,7 @@ import {
   FileBox, 
   Download, 
   Calendar,
+  Copy,
   MoreVertical,
   MoreHorizontal,
   ChevronDown,
@@ -28,7 +30,11 @@ import {
   Bot,
   Folder,
   Save,
-  ExternalLink
+  ExternalLink,
+  Share2,
+  MessageSquare,
+  Link2,
+  UserPlus
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
@@ -72,6 +78,27 @@ interface OnlyOfficeDoc {
   workspace_name?: string | null;
   workspace_color?: string | null;
   folder_id?: string | null;
+  is_owner?: boolean;
+}
+
+interface ShareUserSuggestion {
+  account_id: string;
+  name?: string | null;
+  username?: string | null;
+  email?: string | null;
+}
+
+interface DocumentShareLink {
+  id: string;
+  scope: 'public' | 'private';
+  can_edit: boolean;
+  token?: string | null;
+  share_url?: string | null;
+  target_account_id?: string | null;
+  target_email?: string | null;
+  target_username?: string | null;
+  target_name?: string | null;
+  created_at?: string | null;
 }
 
 interface OnlyOfficeFolder {
@@ -108,6 +135,11 @@ export default function DocumentsPage() {
   const [isMoving, setIsMoving] = useState(false);
   const [selectedWorkspaceForMove, setSelectedWorkspaceForMove] = useState<string | null>(null);
   
+  const [isRenameDialogOpen, setIsRenameDialogOpen] = useState(false);
+  const [itemToRename, setItemToRename] = useState<{id: string, name: string, type: 'doc' | 'folder'} | null>(null);
+  const [newName, setNewName] = useState('');
+  const [isRenaming, setIsRenaming] = useState(false);
+  
   const [isCreateFolderOpen, setIsCreateFolderOpen] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
   const [draggingItem, setDraggingItem] = useState<{id: string, type: 'doc' | 'folder'} | null>(null);
@@ -116,6 +148,18 @@ export default function DocumentsPage() {
   const [newDocType, setNewDocType] = useState<'word' | 'excel' | 'powerpoint'>('word');
   const [newDocName, setNewDocName] = useState('Nuevo documento');
   const [isCreatingDoc, setIsCreatingDoc] = useState(false);
+
+  const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
+  const [shareTargetDoc, setShareTargetDoc] = useState<OnlyOfficeDoc | null>(null);
+  const [shareLinks, setShareLinks] = useState<DocumentShareLink[]>([]);
+  const [isLoadingShareLinks, setIsLoadingShareLinks] = useState(false);
+  const [isCreatingShare, setIsCreatingShare] = useState(false);
+  const [isPreparingDocChat, setIsPreparingDocChat] = useState(false);
+  const [privateSearch, setPrivateSearch] = useState('');
+  const [privateSuggestions, setPrivateSuggestions] = useState<ShareUserSuggestion[]>([]);
+  const [selectedPrivateUser, setSelectedPrivateUser] = useState<ShareUserSuggestion | null>(null);
+  const [isChatSidebarOpen, setIsChatSidebarOpen] = useState(false);
+  const [currentChatUrl, setCurrentChatUrl] = useState<string | null>(null);
   
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -128,9 +172,31 @@ export default function DocumentsPage() {
 
   const fetchWorkspaces = async () => {
     try {
-      const response = await apiClient.get('/api/workspaces');
-      // The backend returns a PaginatedWorkspacesResponse object with a 'workspaces' array
-      setWorkspaces(Array.isArray(response.data) ? response.data : response.data.workspaces || []);
+      const pageSize = 100;
+      let skip = 0;
+      let total = Infinity;
+      const allWorkspaces: Workspace[] = [];
+
+      while (skip < total) {
+        const response = await apiClient.get('/api/workspaces', {
+          params: { skip, limit: pageSize },
+        });
+
+        const payload = response.data;
+        const pageItems: Workspace[] = Array.isArray(payload) ? payload : payload.workspaces || [];
+        const payloadTotal = Array.isArray(payload) ? pageItems.length : Number(payload.total ?? pageItems.length);
+
+        allWorkspaces.push(...pageItems);
+        total = payloadTotal;
+
+        if (pageItems.length < pageSize) {
+          break;
+        }
+
+        skip += pageSize;
+      }
+
+      setWorkspaces(allWorkspaces);
     } catch (error) {
       console.error('Error fetching workspaces:', error);
       setWorkspaces([]);
@@ -263,6 +329,38 @@ export default function DocumentsPage() {
     }
   };
 
+  const handleRename = async () => {
+    if (!itemToRename || !newName.trim()) return;
+    
+    setIsRenaming(true);
+    try {
+      const formData = new FormData();
+      if (itemToRename.type === 'doc') {
+        formData.append('filename', newName);
+      } else {
+        formData.append('name', newName);
+      }
+      
+      const endpoint = itemToRename.type === 'doc' 
+        ? `/api/onlyoffice/${itemToRename.id}/meta` 
+        : `/api/onlyoffice/folders/${itemToRename.id}/meta`;
+      
+      await apiClient.post(endpoint, formData);
+      toast.success('Nombre actualizado correctamente');
+      setIsRenameDialogOpen(false);
+      setItemToRename(null);
+      
+      setTimeout(() => {
+        fetchDocuments();
+        fetchFolders();
+      }, 500);
+    } catch (error) {
+      toast.error('Error al renombrar');
+    } finally {
+      setIsRenaming(false);
+    }
+  };
+
   const handleMoveToWorkspace = async () => {
     if (!itemToMove || !selectedWorkspaceForMove) return;
     
@@ -344,6 +442,172 @@ export default function DocumentsPage() {
     }
   };
 
+  const handleDuplicate = async (doc: OnlyOfficeDoc) => {
+    try {
+      const response = await apiClient.post(`/api/onlyoffice/${doc.id}/duplicate`);
+      toast.success(`Documento "${doc.filename}" duplicado correctamente`);
+      fetchDocuments();
+    } catch (error) {
+      toast.error('Error al duplicar el documento');
+    }
+  };
+
+  const fetchDocumentShareLinks = async (docId: string) => {
+    setIsLoadingShareLinks(true);
+    try {
+      const response = await apiClient.get(`/api/onlyoffice/${docId}/share-links`);
+      setShareLinks(Array.isArray(response.data) ? response.data : []);
+    } catch (error) {
+      console.error('Error fetching document share links:', error);
+      toast.error('No se pudieron cargar los enlaces de comparticion');
+      setShareLinks([]);
+    } finally {
+      setIsLoadingShareLinks(false);
+    }
+  };
+
+  const openShareDialog = async (doc: OnlyOfficeDoc) => {
+    setShareTargetDoc(doc);
+    setPrivateSearch('');
+    setPrivateSuggestions([]);
+    setSelectedPrivateUser(null);
+    setIsShareDialogOpen(true);
+    await fetchDocumentShareLinks(doc.id);
+  };
+
+  const handleCreatePublicShare = async () => {
+    if (!shareTargetDoc) return;
+    setIsCreatingShare(true);
+    try {
+      const response = await apiClient.post(`/api/onlyoffice/${shareTargetDoc.id}/share-links`, {
+        scope: 'public',
+        can_edit: true,
+      });
+      const shareUrl = response.data?.share_url
+        ? `${window.location.origin}${response.data.share_url}`
+        : null;
+
+      if (shareUrl) {
+        await navigator.clipboard.writeText(shareUrl);
+        toast.success('Enlace publico creado y copiado al portapapeles');
+      } else {
+        toast.success('Enlace publico creado');
+      }
+      await fetchDocumentShareLinks(shareTargetDoc.id);
+    } catch (error) {
+      console.error('Error creating public share:', error);
+      toast.error('No se pudo crear el enlace publico');
+    } finally {
+      setIsCreatingShare(false);
+    }
+  };
+
+  const handleCreatePrivateShare = async () => {
+    if (!shareTargetDoc || !selectedPrivateUser?.account_id) return;
+    setIsCreatingShare(true);
+    try {
+      await apiClient.post(`/api/onlyoffice/${shareTargetDoc.id}/share-links`, {
+        scope: 'private',
+        target_account_id: selectedPrivateUser.account_id,
+        can_edit: true,
+      });
+      toast.success('Documento compartido con la cuenta seleccionada');
+      setPrivateSearch('');
+      setPrivateSuggestions([]);
+      setSelectedPrivateUser(null);
+      await fetchDocumentShareLinks(shareTargetDoc.id);
+    } catch (error) {
+      console.error('Error creating private share:', error);
+      toast.error('No se pudo compartir el documento de forma privada');
+    } finally {
+      setIsCreatingShare(false);
+    }
+  };
+
+  const handleDeleteShareLink = async (shareId: string) => {
+    if (!shareTargetDoc) return;
+    try {
+      await apiClient.delete(`/api/onlyoffice/share-links/${shareId}`);
+      toast.success('Comparticion eliminada');
+      await fetchDocumentShareLinks(shareTargetDoc.id);
+    } catch (error) {
+      console.error('Error deleting share link:', error);
+      toast.error('No se pudo eliminar la comparticion');
+    }
+  };
+
+  const searchPrivateUsers = async (value: string) => {
+    setPrivateSearch(value);
+    setSelectedPrivateUser(null);
+
+    if (value.trim().length < 2) {
+      setPrivateSuggestions([]);
+      return;
+    }
+
+    try {
+      const response = await apiClient.get('/api/users/autocomplete', {
+        params: { q: value.trim(), limit: 8 },
+      });
+      setPrivateSuggestions(Array.isArray(response.data) ? response.data : []);
+    } catch (error) {
+      console.error('Error searching users:', error);
+      setPrivateSuggestions([]);
+    }
+  };
+
+  const handleOpenDocumentChat = async (doc: OnlyOfficeDoc) => {
+    // If it's already open, just toggle it
+    if (isChatSidebarOpen && currentChatUrl) {
+      setIsChatSidebarOpen(false);
+      return;
+    }
+
+    setIsPreparingDocChat(true);
+    try {
+      const response = await apiClient.get(`/api/onlyoffice/${doc.id}/chat-link`);
+      const sharePath = response.data?.share_url;
+      if (!sharePath) {
+        toast.error('No se pudo generar el enlace del chat del documento');
+        return;
+      }
+      
+      const chatUrl = `${window.location.origin}${sharePath}?embed=true`;
+      setCurrentChatUrl(chatUrl);
+      setIsChatSidebarOpen(true);
+    } catch (error) {
+      console.error('Error opening document chat:', error);
+      toast.error('No se pudo abrir el chat del documento');
+    } finally {
+      setIsPreparingDocChat(false);
+    }
+  };
+
+  const handleResetDocumentChat = async (doc: OnlyOfficeDoc) => {
+    if (!confirm('¿Estás seguro de que deseas iniciar una nueva sesión de chat? Se creará un hilo limpio para este documento.')) return;
+    
+    setIsPreparingDocChat(true);
+    try {
+      const response = await apiClient.get(`/api/onlyoffice/${doc.id}/chat-link?force_new=true`);
+      const sharePath = response.data?.share_url;
+      if (!sharePath) {
+        toast.error('No se pudo reiniciar el chat');
+        return;
+      }
+      
+      // Añadir timestamp para forzar recarga del iframe
+      const chatUrl = `${window.location.origin}${sharePath}?embed=true&t=${Date.now()}`;
+      setCurrentChatUrl(chatUrl);
+      setIsChatSidebarOpen(true);
+      toast.success('Nueva sesión de chat iniciada');
+    } catch (error) {
+      console.error('Error resetting document chat:', error);
+      toast.error('No se pudo reiniciar el chat');
+    } finally {
+      setIsPreparingDocChat(false);
+    }
+  };
+
   const handleDelete = async (id: string, filename: string) => {
     if (!confirm(`¿Estás seguro de que deseas eliminar "${filename}"?`)) return;
     
@@ -415,6 +679,8 @@ export default function DocumentsPage() {
       editorRef.current = null;
     }
     setEditingDoc(null);
+    setIsChatSidebarOpen(false);
+    setCurrentChatUrl(null);
     fetchDocuments(); // Refresh to show updated time
   };
 
@@ -456,31 +722,103 @@ export default function DocumentsPage() {
 
   if (!hasMounted) return null;
 
-  if (editingDoc) {
-    return (
-      <div className="fixed inset-0 z-[100] bg-background flex flex-col animate-in fade-in duration-300">
-        <header className="h-12 border-b flex items-center px-4 bg-background">
-          <Button variant="ghost" size="sm" onClick={closeEditor} className="gap-2 text-muted-foreground hover:text-foreground hover:bg-muted">
-            <ArrowLeft className="h-4 w-4" />
-            <span className="font-medium">Volver</span>
-          </Button>
-        </header>
-        <div id="onlyoffice-placeholder" className="flex-1 bg-muted/30">
-          {isOpeningEditor && (
-            <div className="h-full w-full flex flex-col items-center justify-center gap-4">
-              <Loader2 className="h-10 w-10 text-primary animate-spin" />
-              <p className="text-muted-foreground font-medium animate-pulse">Iniciando Editor OnlyOffice...</p>
+  const editorOverlay = hasMounted && editingDoc
+    ? createPortal(
+        <div key="onlyoffice-editor-view" className="fixed inset-0 z-[200] bg-background flex flex-col animate-in fade-in duration-300">
+          <header className="h-14 border-b flex items-center justify-between px-4 bg-background/95 backdrop-blur-sm gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={closeEditor}
+                className="rounded-xl text-muted-foreground hover:text-foreground hover:bg-muted"
+                title="Volver"
+              >
+                <ArrowLeft className="h-4 w-4" />
+              </Button>
+              <p className="text-sm font-semibold truncate max-w-[42vw]" title={editingDoc.filename}>
+                {editingDoc.filename}
+              </p>
             </div>
-          )}
-        </div>
-      </div>
-    );
-  }
+
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="rounded-xl"
+                onClick={() => openShareDialog(editingDoc)}
+              >
+                <Share2 className="h-4 w-4 mr-2" />
+                Compartir
+              </Button>
+              
+              {isChatSidebarOpen && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="rounded-xl border-dashed hover:border-primary hover:text-primary transition-colors"
+                  onClick={() => handleResetDocumentChat(editingDoc)}
+                  disabled={isPreparingDocChat}
+                  title="Iniciar una nueva sesión de chat limpia"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Nuevo Chat
+                </Button>
+              )}
+
+              <Button
+                size="sm"
+                variant={isChatSidebarOpen ? "secondary" : "default"}
+                className="rounded-xl"
+                onClick={() => handleOpenDocumentChat(editingDoc)}
+                disabled={isPreparingDocChat}
+              >
+                {isPreparingDocChat ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <MessageSquare className="h-4 w-4 mr-2" />
+                )}
+                {isChatSidebarOpen ? 'Cerrar Chat IA' : 'Chat IA'}
+              </Button>
+            </div>
+          </header>
+          <div className="flex-1 flex overflow-hidden">
+            <div id="onlyoffice-placeholder" className="flex-1 bg-muted/30">
+              {isOpeningEditor && (
+                <div className="h-full w-full flex flex-col items-center justify-center gap-4">
+                  <Loader2 className="h-10 w-10 text-primary animate-spin" />
+                  <p className="text-muted-foreground font-medium animate-pulse">Iniciando Editor OnlyOffice...</p>
+                </div>
+              )}
+            </div>
+            {isChatSidebarOpen && currentChatUrl && (
+              <motion.div 
+                initial={{ width: 0, opacity: 0 }}
+                animate={{ width: 450, opacity: 1 }}
+                exit={{ width: 0, opacity: 0 }}
+                transition={{ type: "spring", damping: 20, stiffness: 150 }}
+                className="border-l bg-background flex flex-col shadow-[-10px_0_15px_-3px_rgba(0,0,0,0.1)] z-10 relative"
+              >
+                <div className="absolute left-0 top-0 bottom-0 w-px bg-border/50" />
+                <iframe 
+                  key={currentChatUrl}
+                  src={currentChatUrl}
+                  className="flex-1 border-none w-full h-full"
+                  title="Chat IA del documento"
+                />
+              </motion.div>
+            )}
+          </div>
+        </div>,
+        document.body
+      )
+    : null;
 
   return (
-    <div className="p-4 sm:p-8 max-w-7xl mx-auto space-y-8 h-full flex flex-col">
-      {/* Hero Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+    <>
+    {editorOverlay}
+    <div key="documents-main-container" className="p-4 sm:p-8 max-w-7xl mx-auto space-y-8 h-full flex flex-col">
+      <div key="hero-header" className="flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div className="space-y-2">
           <div className="flex items-center gap-3">
             <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center">
@@ -638,8 +976,7 @@ export default function DocumentsPage() {
         </div>
       </div>
 
-      {/* Breadcrumbs / Navigation */}
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+      <div key="breadcrumbs-navigation" className="flex items-center gap-2 text-sm text-muted-foreground">
         <Button 
           variant="ghost" 
           size="sm" 
@@ -682,18 +1019,19 @@ export default function DocumentsPage() {
         ))}
       </div>
 
-      {isLoading ? (
-        <div className="flex-1 flex flex-col items-center justify-center gap-4 py-20">
-          <Loader2 className="h-12 w-12 text-primary animate-spin" />
-          <p className="text-muted-foreground font-medium animate-pulse">Cargando...</p>
-        </div>
-      ) : (filteredDocs.length > 0 || filteredFolders.length > 0) ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-          <AnimatePresence mode="popLayout">
+      <div key="main-content-area" className="flex-1 flex flex-col">
+        {isLoading ? (
+          <div className="flex-1 flex flex-col items-center justify-center gap-4 py-20">
+            <Loader2 className="h-12 w-12 text-primary animate-spin" />
+            <p className="text-muted-foreground font-medium animate-pulse">Cargando...</p>
+          </div>
+        ) : (filteredDocs.length > 0 || filteredFolders.length > 0) ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            <AnimatePresence>
             {/* Folders first */}
             {filteredFolders.map((folder) => (
               <motion.div 
-                key={folder.id}
+                key={`folder-${folder.id}`}
                 layout
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -759,6 +1097,18 @@ export default function DocumentsPage() {
                         <DropdownMenuItem 
                           onClick={(e) => { 
                             e.stopPropagation(); 
+                            setItemToRename({id: folder.id, name: folder.name, type: 'folder'});
+                            setNewName(folder.name);
+                            setIsRenameDialogOpen(true);
+                          }} 
+                          className="gap-2 cursor-pointer"
+                        >
+                          <Edit3 className="h-4 w-4" />
+                          <span>Renombrar</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem 
+                          onClick={(e) => { 
+                            e.stopPropagation(); 
                             setItemToMove({id: folder.id, name: folder.name, type: 'folder'});
                             setSelectedWorkspaceForMove(folder.workspace_id || "none");
                             setIsMoveDialogOpen(true);
@@ -811,7 +1161,7 @@ export default function DocumentsPage() {
             {/* Documents */}
             {filteredDocs.map((doc) => (
               <motion.div 
-                key={doc.id}
+                key={`doc-${doc.id}`}
                 layout
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -851,11 +1201,22 @@ export default function DocumentsPage() {
                             <Edit3 className="h-4 w-4 text-primary" />
                             <span className="font-medium">Editar Ahora</span>
                           </DropdownMenuItem>
+                          <DropdownMenuItem 
+                            onClick={() => {
+                              setItemToRename({id: doc.id, name: doc.filename, type: 'doc'});
+                              setNewName(doc.filename);
+                              setIsRenameDialogOpen(true);
+                            }} 
+                            className="gap-2 cursor-pointer py-2 px-3"
+                          >
+                            <Edit3 className="h-4 w-4" />
+                            <span className="font-medium">Renombrar</span>
+                          </DropdownMenuItem>
                           <DropdownMenuItem className="gap-2 cursor-pointer py-2 px-3">
                             <Download className="h-4 w-4" />
                             <span className="font-medium">Descargar</span>
                           </DropdownMenuItem>
-                          <DropdownMenuItem 
+                           <DropdownMenuItem 
                             onClick={() => {
                               setItemToMove({id: doc.id, name: doc.filename, type: 'doc'});
                               setSelectedWorkspaceForMove(doc.workspace_id || "none");
@@ -865,6 +1226,13 @@ export default function DocumentsPage() {
                           >
                             <Briefcase className="h-4 w-4" />
                             <span className="font-medium">Asociar Workspace</span>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem 
+                            onClick={() => handleDuplicate(doc)}
+                            className="gap-2 cursor-pointer py-2 px-3"
+                          >
+                            <Copy className="h-4 w-4" />
+                            <span className="font-medium">Duplicar Documento</span>
                           </DropdownMenuItem>
                           <div className="h-px bg-border/40 my-1" />
                           <DropdownMenuItem 
@@ -887,25 +1255,25 @@ export default function DocumentsPage() {
                         <span>Actualizado {new Date(doc.updated_at).toLocaleDateString()}</span>
                       </div>
                       
-                      {doc.workspace_name && (
-                        <div className="pt-2">
-                          <div
-                            className="inline-flex items-center gap-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-wider w-fit"
-                            style={{
-                              backgroundColor: doc.workspace_color ? `${doc.workspace_color}15` : '#f3f4f620',
-                              borderColor: doc.workspace_color ? `${doc.workspace_color}40` : '#88888840',
-                            }}
-                          >
-                            <span
-                              className="h-1.5 w-1.5 rounded-full"
-                              style={{ backgroundColor: doc.workspace_color || '#888888' }}
-                            ></span>
-                            <span style={{ color: doc.workspace_color || '#374151' }}>
-                              {doc.workspace_name}
-                            </span>
-                          </div>
-                        </div>
-                      )}
+                       {doc.workspace_id && (
+                         <div className="pt-2">
+                           <div
+                             className="inline-flex items-center gap-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-wider w-fit"
+                             style={{
+                               backgroundColor: doc.workspace_color ? `${doc.workspace_color}15` : '#f3f4f620',
+                               borderColor: doc.workspace_color ? `${doc.workspace_color}40` : '#88888840',
+                             }}
+                           >
+                             <span
+                               className="h-1.5 w-1.5 rounded-full"
+                               style={{ backgroundColor: doc.workspace_color || '#888888' }}
+                             ></span>
+                             <span style={{ color: doc.workspace_color || '#374151' }}>
+                               {doc.workspace_name || 'Workspace'}
+                             </span>
+                           </div>
+                         </div>
+                       )}
                     </div>
 
                     <div className="pt-2">
@@ -921,26 +1289,27 @@ export default function DocumentsPage() {
                 </Card>
               </motion.div>
           ))}
-          </AnimatePresence>
-        </div>
-      ) : (
-        <div className="flex-1 flex flex-col items-center justify-center p-12 text-center bg-card/20 backdrop-blur-sm rounded-[3rem] border border-dashed border-border/60 animate-in fade-in zoom-in duration-500">
-          <div className="h-24 w-24 bg-muted/50 rounded-full flex items-center justify-center mb-6">
-            <FileText className="h-12 w-12 text-muted-foreground/30" />
+            </AnimatePresence>
           </div>
-          <h3 className="text-2xl font-bold text-foreground">Sin resultados</h3>
-          <p className="text-muted-foreground mt-2 max-w-sm">
-            {searchQuery 
-              ? `No se encontró nada que coincida con "${searchQuery}"`
-              : "Esta carpeta está vacía."}
-          </p>
-          {searchQuery && (
-             <Button variant="link" onClick={() => setSearchQuery('')} className="mt-4 text-primary font-bold">
-               Limpiar búsqueda
-             </Button>
-          )}
-        </div>
-      )}
+        ) : (
+          <div className="flex-1 flex flex-col items-center justify-center p-12 text-center bg-card/20 backdrop-blur-sm rounded-[3rem] border border-dashed border-border/60 animate-in fade-in zoom-in duration-500">
+            <div className="h-24 w-24 bg-muted/50 rounded-full flex items-center justify-center mb-6">
+              <FileText className="h-12 w-12 text-muted-foreground/30" />
+            </div>
+            <h3 className="text-2xl font-bold text-foreground">Sin resultados</h3>
+            <p className="text-muted-foreground mt-2 max-w-sm">
+              {searchQuery 
+                ? `No se encontró nada que coincida con "${searchQuery}"`
+                : "Esta carpeta está vacía."}
+            </p>
+            {searchQuery && (
+               <Button variant="link" onClick={() => setSearchQuery('')} className="mt-4 text-primary font-bold">
+                 Limpiar búsqueda
+               </Button>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Create Folder Dialog */}
       <Dialog open={isCreateFolderOpen} onOpenChange={setIsCreateFolderOpen}>
@@ -1042,6 +1411,45 @@ export default function DocumentsPage() {
         </DialogContent>
       </Dialog>
 
+      {/* Rename Dialog */}
+      <Dialog open={isRenameDialogOpen} onOpenChange={setIsRenameDialogOpen}>
+        <DialogContent className="sm:max-w-md rounded-[2rem] border-primary/10 shadow-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold flex items-center gap-3">
+              <div className="p-2 rounded-xl bg-primary/10 text-primary">
+                <Edit3 className="h-6 w-6" />
+              </div>
+              Renombrar {itemToRename?.type === 'doc' ? 'Archivo' : 'Carpeta'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-6 space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Nuevo nombre</label>
+              <Input
+                placeholder="Nombre"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleRename()}
+                autoFocus
+              />
+            </div>
+          </div>
+          <DialogFooter className="sm:justify-end gap-3">
+            <Button variant="ghost" onClick={() => setIsRenameDialogOpen(false)} className="rounded-xl h-12 px-6">
+              Cancelar
+            </Button>
+            <Button 
+              onClick={handleRename} 
+              disabled={isRenaming || !newName.trim()}
+              className="rounded-xl h-12 px-8 bg-primary shadow-lg shadow-primary/20 font-bold"
+            >
+              {isRenaming ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+              Guardar Cambios
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Move to Workspace Dialog */}
       <Dialog open={isMoveDialogOpen} onOpenChange={setIsMoveDialogOpen}>
         <DialogContent className="sm:max-w-md rounded-[2rem] border-primary/10 shadow-2xl">
@@ -1087,6 +1495,135 @@ export default function DocumentsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={isShareDialogOpen} onOpenChange={setIsShareDialogOpen}>
+        <DialogContent className="sm:max-w-2xl rounded-[2rem] border-primary/10 shadow-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold flex items-center gap-3">
+              <div className="p-2 rounded-xl bg-primary/10 text-primary">
+                <Share2 className="h-6 w-6" />
+              </div>
+              Compartir Documento
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-6 py-2">
+            <div className="rounded-2xl border p-4 space-y-3">
+              <p className="text-sm font-semibold">Enlace publico</p>
+              <p className="text-xs text-muted-foreground">
+                Crea un enlace para abrir el documento sin seleccionar una cuenta especifica.
+              </p>
+              <Button onClick={handleCreatePublicShare} disabled={isCreatingShare} className="rounded-xl">
+                {isCreatingShare ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Link2 className="h-4 w-4 mr-2" />}
+                Crear Enlace Publico
+              </Button>
+            </div>
+
+            <div className="rounded-2xl border p-4 space-y-3">
+              <p className="text-sm font-semibold">Comparticion privada</p>
+              <p className="text-xs text-muted-foreground">
+                Invita una cuenta de KognitoAI por nombre, usuario o email.
+              </p>
+              <Input
+                placeholder="Escribe nombre, usuario o email"
+                value={privateSearch}
+                onChange={(e) => searchPrivateUsers(e.target.value)}
+              />
+
+              {privateSuggestions.length > 0 && (
+                <div className="max-h-40 overflow-auto rounded-xl border">
+                  {privateSuggestions.map((candidate) => {
+                    const label = candidate.name || candidate.username || candidate.email || 'Cuenta';
+                    const meta = [candidate.username ? `@${candidate.username}` : null, candidate.email]
+                      .filter(Boolean)
+                      .join(' • ');
+                    return (
+                      <button
+                        key={candidate.account_id}
+                        type="button"
+                        onClick={() => setSelectedPrivateUser(candidate)}
+                        className={`w-full text-left px-3 py-2 text-sm hover:bg-muted transition-colors ${selectedPrivateUser?.account_id === candidate.account_id ? 'bg-primary/10' : ''}`}
+                      >
+                        <div className="font-medium">{label}</div>
+                        {meta && <div className="text-xs text-muted-foreground">{meta}</div>}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              <Button
+                onClick={handleCreatePrivateShare}
+                disabled={isCreatingShare || !selectedPrivateUser}
+                className="rounded-xl"
+              >
+                {isCreatingShare ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <UserPlus className="h-4 w-4 mr-2" />}
+                Compartir con Cuenta
+              </Button>
+            </div>
+
+            <div className="rounded-2xl border p-4 space-y-3">
+              <p className="text-sm font-semibold">Accesos actuales</p>
+              {isLoadingShareLinks ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Cargando accesos...
+                </div>
+              ) : shareLinks.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No hay accesos compartidos todavia.</p>
+              ) : (
+                <div className="space-y-2 max-h-56 overflow-auto">
+                  {shareLinks.map((link) => {
+                    const privateLabel = link.target_name || link.target_username || link.target_email || 'Cuenta privada';
+                    const shareUrl = link.share_url ? `${window.location.origin}${link.share_url}` : null;
+                    return (
+                      <div key={link.id} className="rounded-xl border p-3 flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium truncate">
+                            {link.scope === 'public' ? 'Enlace publico' : `Privado: ${privateLabel}`}
+                          </p>
+                          {shareUrl && (
+                            <p className="text-xs text-muted-foreground truncate">{shareUrl}</p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {shareUrl && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={async () => {
+                                await navigator.clipboard.writeText(shareUrl);
+                                toast.success('Enlace copiado');
+                              }}
+                            >
+                              Copiar
+                            </Button>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-destructive"
+                            onClick={() => handleDeleteShareLink(link.id)}
+                          >
+                            Quitar
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsShareDialogOpen(false)}>
+              Cerrar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
+    </>
   );
 }

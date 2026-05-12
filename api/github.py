@@ -14,6 +14,7 @@ from utils.db_session import DBSession
 from skills.developer_tools_skill.scripts.github_repo_tool import GitHubRepoTool
 from utils.security import get_current_account_id
 from core.database import Account
+from core.memory_manager import delete_document_chunks
 
 router = APIRouter()
 
@@ -24,7 +25,45 @@ class GitHubCollectionRequest(BaseModel):
     workspace_id: Optional[str] = None  # Para asociar el repositorio a un workspace específico
     account_id: Optional[str] = None # Se obtendría del usuario autenticado si no se proporciona
     github_token: Optional[str] = None
-    vectorize: Optional[bool] = True
+    vectorize: Optional[bool] = False
+
+@router.get("/tree_flat")
+async def get_github_tree_flat(
+    repo_url: str,
+    account_id: str = Depends(get_current_account_id)
+):
+    """
+    Returns a flat list of all files in a GitHub repository for autocompletion.
+    """
+    github_tool = GitHubRepoTool(account_id=account_id)
+    try:
+        # _run returns a ToolOutputWithSources object
+        tool_output = github_tool._run(repo_url=repo_url, action="list_tree")
+        
+        # Get the string content
+        result_str = ""
+        if hasattr(tool_output, 'context_for_llm'):
+            result_str = tool_output.context_for_llm
+        elif isinstance(tool_output, str):
+            result_str = tool_output
+            
+        if result_str:
+            # The tool returns: "Árbol de archivos:\n- path (type)\n- path (type)..."
+            lines = result_str.split('\n')
+            files = []
+            for line in lines:
+                line = line.strip()
+                if line.startswith('- '):
+                    # Extract path from "- path (type)"
+                    # Remove "- " and then split by " (" to get the path
+                    path_part = line[2:].split(' (')[0]
+                    files.append(path_part)
+            return {"options": files}
+        
+        return {"options": []}
+    except Exception as e:
+        logger.error(f"Error getting github tree: {e}")
+        return {"options": []}
 
 @router.post("/collections")
 async def manage_github_collection(
@@ -58,15 +97,8 @@ async def manage_github_collection(
     logger.info(f"Gestionando colección de GitHub para account_id: {account_id_to_use}, repo_url: {request.repo_url}, action: {request.action}")
     
     try:
-        # Import and invoke create_empty_collection to ensure the repository is visible in the frontend list
-        from core.memory_manager import create_empty_collection
-        topic_to_create = request.collection_topic if request.collection_topic else "repositorio"
-        await create_empty_collection(
-            account_id=account_id_to_use,
-            topic_name=topic_to_create,
-            workspace_id=request.workspace_id
-        )
-
+        # Los repositorios de GitHub se almacenan directamente en la tabla GitHubDocument
+        # (base de datos relacional), no como colecciones RAG/vectoriales.
         result = await github_tool._arun(
             repo_url=request.repo_url,
             action=request.action,
@@ -75,8 +107,6 @@ async def manage_github_collection(
             vectorize=request.vectorize
         )
         logger.info(f"Resultado de la operación: {result}")
-        
-        # La vectorización ya se maneja dentro de github_tool._arun(), no necesitamos duplicarla aquí
         return {"message": f"{result}"}
     except Exception as e:
         logger.error(f"Error al gestionar la colección de GitHub para account_id: {account_id_to_use}, repo_url: {request.repo_url}: {str(e)}", exc_info=True)
@@ -138,10 +168,35 @@ async def list_github_repositories(
             for repo in repos
         ]
     except Exception as e:
-        logger.error(f"Error al listar repositorios de GitHub para account_id: {account_id}: {str(e)}", exc_info=True)
+        logger.error(f"Error al listar repositorios de GitHub: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error al listar repositorios de GitHub: {str(e)}"
+        )
+
+class GitHubDeleteRequest(BaseModel):
+    repo_url: str
+
+@router.delete("/delete-repository")
+async def delete_repository_endpoint(
+    req: GitHubDeleteRequest,
+    current_account_id: str = Depends(get_current_account_id)
+):
+    """
+    Elimina un repositorio completo (documentos y embeddings) para el usuario actual.
+    """
+    try:
+        deleted_count = await delete_document_chunks(
+            account_id=current_account_id,
+            repo_url=req.repo_url
+        )
+        logger.info(f"Repositorio {req.repo_url} eliminado para account_id: {current_account_id}. Chunks/Docs eliminados: {deleted_count}")
+        return {"message": f"Repositorio eliminado correctamente. Se eliminaron {deleted_count} elementos.", "deleted_count": deleted_count}
+    except Exception as e:
+        logger.error(f"Error al eliminar repositorio {req.repo_url} para account_id: {current_account_id}: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error al eliminar el repositorio: {str(e)}"
         )
 
 class GitHubVectorizationRequest(BaseModel):

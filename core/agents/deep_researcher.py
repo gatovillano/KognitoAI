@@ -6,7 +6,7 @@ import json
 import logging
 import os
 import re
-from typing import Any, Literal, Sequence, cast
+from typing import Any, Dict, Literal, Sequence, cast
 
 from langchain_core.messages import (
     AIMessage,
@@ -23,12 +23,16 @@ from langgraph.pregel import Pregel
 from langchain_core.language_models import BaseChatModel # Import BaseChatModel
 
 from core.llm_manager import get_main_llm, initialize_llms, get_fast_llm, get_fallback_llm # Import initialize_llms and get_fast_llm
+from core.utils.llm_utils import safe_bind_tools, is_openrouter_model  # OpenRouter compatibility
 from core.utils.date_utils import get_today_str
 from core.agents.deep_researcher_config import Configuration
 from core.agents.deep_researcher_prompts import (
     clarify_with_user_instructions,
     compress_research_simple_human_message,
     compress_research_system_prompt,
+    compress_expert_research_system_prompt,
+    compress_expert_research_human_message,
+    expert_agent_system_prompt,
     final_report_generation_prompt,
     lead_researcher_prompt,
     research_system_prompt,
@@ -39,6 +43,9 @@ from core.agents.deep_researcher_state import (
     AgentState,
     ClarifyWithUser,
     ConductResearch,
+    CreateExpertAgent,
+    ExpertAgentResult,
+    ExpertAgentState,
     ResearchComplete,
     ResearcherOutputState,
     ResearcherState,
@@ -311,6 +318,14 @@ async def final_report_generation(state: AgentState, config: RunnableConfig) -> 
 
     # Retrieve findings from the state
     findings = "\n\n".join(state.get("notes", []))
+    logger.info(f"🔍 [DeepResearcher Diagnostics] Total notes: {len(state.get('notes', []))}, Findings length: {len(findings)} chars. Preview: {findings[:200]}")
+    
+    # LIMITAR FUENTES CONFIGURABLE
+    sources = state.get("sources", [])
+    max_sources = cfg.max_sources_for_report
+    if len(sources) > max_sources:
+        logger.info(f"⚖️ [DeepResearcher] Limiting sources from {len(sources)} to {max_sources} for final report.")
+        sources = sources[:max_sources]
 
     # Truncate findings if they are excessively large (approx 100k chars ~ 25k tokens)
     max_findings_chars = 100000
@@ -410,37 +425,51 @@ async def final_report_generation(state: AgentState, config: RunnableConfig) -> 
     
     # Parse the final report into sections
     report_content = final_report.content
+    
+    # DETECCIÓN DE TRUNCAMIENTO
+    # Bajamos el umbral a 0.95 para capturar mejor los casos donde el LLM se queda sin tokens al final
+    if len(report_content) >= cfg.max_input_tokens * 0.95 or (not report_content.strip().endswith(('.', '!', '?', '>', '\"')) and len(report_content) > 3000):
+        logger.warning("⚠️ [DeepResearcher] Reporte parece truncado. Solicitando continuación...")
+        continuation_prompt = HumanMessage(content="El reporte anterior quedó incompleto. Por favor, continúa exactamente donde te quedaste, manteniendo el tono académico y la densidad técnica.")
+        continuation_response = await writer_model.ainvoke([HumanMessage(content=final_report_prompt), final_report, continuation_prompt])
+        report_content += "\n" + continuation_response.content
+
+    logger.info(f"🔍 [DeepResearcher Diagnostics] Final report content preview (first 500 chars): {report_content[:500]}")
+    
     # Mark which sources are cited in the report text
     citation_numbers = set()
     for match in re.findall(r'\[(\d+)\]', report_content):
-        try:
-            num = int(match)
-            citation_numbers.add(num)
-        except ValueError:
-            continue
+        citation_numbers.add(match) # Mantenemos como string para comparar con el id
     
-    for idx, source in enumerate(sources):
-        source['is_cited'] = (idx + 1) in citation_numbers
+    for source in sources:
+        # source['id'] es el ID estable que el LLM debería estar usando en [N]
+        source['is_cited'] = str(source.get('id')) in citation_numbers
     summary = ""
     findings = ""
     recommendations_section = ""
 
     # Extract Summary (Resumen Ejecutivo)
-    summary_match = re.search(r"Resumen Ejecutivo.*?(?=Introducción|Introducción, Metodología y Marco Teórico|$)", report_content, re.DOTALL | re.IGNORECASE)
+    summary_match = re.search(r"(?:Resumen Ejecutivo|Executive Summary).*?(?=Introducción|Introducción, Metodología|Marco Teórico|Findings|Introducción|$)", report_content, re.DOTALL | re.IGNORECASE)
     if summary_match:
         summary = summary_match.group(0).strip()
-        # Remove the section title to clean it up
-        summary = re.sub(r"^.*?Resumen Ejecutivo", "", summary, flags=re.DOTALL | re.IGNORECASE).strip()
-    
-    # Extract Findings (Introducción, Metodología, Análisis Temático, Integración, Conclusión)
-    findings_match = re.search(r"(Introducción|Introducción, Metodología y Marco Teórico).*?(?=Implicaciones Estratégicas|Recomendaciones|Bibliografía|$)", report_content, re.DOTALL | re.IGNORECASE)
+        summary = re.sub(r"^.*?(?:Resumen Ejecutivo|Executive Summary)", "", summary, flags=re.DOTALL | re.IGNORECASE).strip()
+    else:
+        summary = report_content[:1500].strip() + "..." if len(report_content) > 1500 else report_content.strip()
+
+    # Extract Findings
+    findings_match = re.search(r"(?:Introducción|Introducción, Metodología y Marco Teórico|Findings|Análisis|Desarrollo).*?(?=Implicaciones Estratégicas|Recomendaciones|Bibliografía|Conclusión|$)", report_content, re.DOTALL | re.IGNORECASE)
     if findings_match:
         findings = findings_match.group(0).strip()
-    
-    # Extract Recommendations (Implicaciones Estratégicas, Proyecciones y Recomendaciones)
-    recommendations_match = re.search(r"(Implicaciones Estratégicas|Recomendaciones).*?(?=Conclusión|Bibliografía|$)", report_content, re.DOTALL | re.IGNORECASE)
+    else:
+        # Fallback: Usar todo el contenido si no se encuentran secciones, evitando que esté vacío
+        findings = report_content.strip()
+
+    # Extract Recommendations
+    recommendations_match = re.search(r"(?:Implicaciones Estratégicas|Recomendaciones|Strategic Recommendations).*?(?=Conclusión|Bibliografía|$)", report_content, re.DOTALL | re.IGNORECASE)
     if recommendations_match:
         recommendations_section = recommendations_match.group(0).strip()
+    else:
+        recommendations_section = "No se generaron recomendaciones específicas en esta iteración."
     
     # Extract Visual Schema
     visual_schema = ""
@@ -449,6 +478,12 @@ async def final_report_generation(state: AgentState, config: RunnableConfig) -> 
         visual_schema = schema_match.group(1).strip()
         # Clean up the report content by removing the schema tag
         report_content = re.sub(r"<visual_schema>.*?</visual_schema>", "", report_content, flags=re.DOTALL | re.IGNORECASE).strip()
+    else:
+        # Fallback: buscar un bloque div estilizado si las etiquetas faltan
+        fallback_match = re.search(r"(<div style=.*?>.*?</div>)", report_content, re.DOTALL | re.IGNORECASE)
+        if fallback_match:
+            visual_schema = fallback_match.group(1).strip()
+            logger.info("🔍 [DeepResearcher] Visual schema extraído mediante fallback (bloque div).")
 
     logger.info(f"📄 [DeepResearcher] Final report generated with sections: Summary ({len(summary)} chars), Findings ({len(findings)} chars), Recommendations ({len(recommendations_section)} chars), Visual Schema ({len(visual_schema)} chars), {len(sources)} sources, {len(recommendations)} think-tool recommendations")
     
@@ -510,7 +545,7 @@ async def supervisor(state: SupervisorState, config: RunnableConfig) -> dict:
 
     # Check if think_tool was used in the last AI message
     # If so, remove it from available tools to force action
-    lead_researcher_tools = [ConductResearch, ResearchComplete, deep_research_think_tool]
+    lead_researcher_tools = [ConductResearch, CreateExpertAgent, ResearchComplete, deep_research_think_tool]
     
     if state.get("supervisor_messages"):
         last_ai_msg = next((m for m in reversed(state["supervisor_messages"]) if isinstance(m, AIMessage)), None)
@@ -518,7 +553,7 @@ async def supervisor(state: SupervisorState, config: RunnableConfig) -> dict:
             # Check if the last tool call was think_tool
             if any(tc["name"] == "deep_research_think_tool" for tc in last_ai_msg.tool_calls):
                 # Remove think_tool to force the LLM to take action
-                lead_researcher_tools = [ConductResearch, ResearchComplete]
+                lead_researcher_tools = [ConductResearch, CreateExpertAgent, ResearchComplete]
                 logger.info("🚫 [Supervisor] Removing think_tool from available tools to force action execution.")
 
     supervisor_system_prompt = lead_researcher_prompt.format(
@@ -529,14 +564,14 @@ async def supervisor(state: SupervisorState, config: RunnableConfig) -> dict:
 
     try:
         research_model = cast(Runnable[Sequence[BaseMessage], AIMessage],
-                              chat_llm.bind_tools(
+                              safe_bind_tools(chat_llm, 
                                   lead_researcher_tools
                               ).with_retry(
                                   stop_after_attempt=cfg.max_structured_output_retries
                               ))
     except Exception as e:
         logger.warning(f"⚠️ [Supervisor] Error binding tools: {e}. Trying simple bind.")
-        research_model = cast(Runnable[Sequence[BaseMessage], AIMessage], chat_llm.bind_tools(lead_researcher_tools))
+        research_model = cast(Runnable[Sequence[BaseMessage], AIMessage], safe_bind_tools(chat_llm, lead_researcher_tools))
 
     messages: list[BaseMessage] = [SystemMessage(content=supervisor_system_prompt)]
     initial_human_message_content = f"Plan research for: {state.get('research_brief', '')}"
@@ -580,7 +615,7 @@ async def supervisor(state: SupervisorState, config: RunnableConfig) -> dict:
             logger.warning(f"⚠️ [Supervisor] OpenRouter tool_choice error detected: {e}. Retrying without strict tool binding...")
             # Try once more with a simpler bind or without tools if necessary, 
             # but for supervisor tools are essential. Let's try to bind without extras.
-            simple_model = chat_llm.bind_tools(lead_researcher_tools)
+            simple_model = safe_bind_tools(chat_llm, lead_researcher_tools)
             response = await simple_model.ainvoke(pruned_messages_for_supervisor)
         elif is_token_limit_exceeded(e):
             logger.warning("⚠️ [Supervisor] Token limit exceeded. Pruning history and retrying...")
@@ -605,7 +640,7 @@ async def supervisor(state: SupervisorState, config: RunnableConfig) -> dict:
         "research_iterations": state.get("research_iterations", 0) + 1,
     }
 
-async def supervisor_tools(state: SupervisorState, config: RunnableConfig, researcher_subgraph: Pregel) -> dict:
+async def supervisor_tools(state: SupervisorState, config: RunnableConfig, researcher_subgraph: Pregel, expert_agent_subgraph: Pregel) -> dict:
     """Executes tools called by the supervisor."""
     logger.debug("--- [DeepResearcher] Node: supervisor_tools ---")
     cfg = Configuration.from_runnable_config(config)
@@ -648,8 +683,10 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig, resea
     tool_results_map = {}
     conduct_research_tasks = []
     conduct_research_indices = []
+    expert_agent_tasks = []
+    expert_agent_indices = []
 
-    # 1. Identify and initiate ConductResearch tasks
+    # 1. Identify and initiate ConductResearch and CreateExpertAgent tasks
     for i, tc in enumerate(tool_calls):
         if tc["name"] == "ConductResearch":
             conduct_research_indices.append(i)
@@ -681,6 +718,49 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig, resea
                 "account_id": state["account_id"],
             }, subgraph_config)
             conduct_research_tasks.append(task)
+        
+        elif tc["name"] == "CreateExpertAgent":
+            expert_agent_indices.append(i)
+            
+            # Setup progress and config for expert agent task
+            total_supervisor_iterations = cfg.max_researcher_iterations or 1
+            progress_for_researchers_in_supervisor_range = effective_supervisor_range * 0.95
+            current_supervisor_iteration_share = progress_for_researchers_in_supervisor_range / total_supervisor_iterations
+            iteration_base_progress = supervisor_range_start + (state.get("research_iterations", 0) - 1) * current_supervisor_iteration_share
+            
+            num_concurrent_experts = sum(1 for t in tool_calls if t["name"] == "CreateExpertAgent")
+            single_expert_progress_range = current_supervisor_iteration_share / num_concurrent_experts if num_concurrent_experts > 0 else 0
+            
+            subgraph_config = config.copy()
+            task_idx = len(expert_agent_tasks)
+            subgraph_base_progress = iteration_base_progress + task_idx * single_expert_progress_range
+            subgraph_max_sub_progress = single_expert_progress_range
+
+            if "configurable" not in subgraph_config:
+                subgraph_config["configurable"] = {}
+            subgraph_config.get("configurable", {})["progress_callback"] = progress_callback
+            subgraph_config.get("configurable", {})["base_progress"] = subgraph_base_progress
+            subgraph_config.get("configurable", {})["max_sub_progress"] = subgraph_max_sub_progress
+            
+            expert_name = tc["args"].get("expert_name", "Specialist")
+            research_topic = tc["args"].get("research_topic", "")
+            expert_specialty = tc["args"].get("expert_specialty", "general research")
+            custom_instructions = tc["args"].get("custom_prompt_instructions", "")
+            research_depth = tc["args"].get("research_depth", "standard")
+            
+            logger.info(f"🎨 [Supervisor Tools] Creating expert agent '{expert_name}' for topic: {research_topic}")
+            
+            task = expert_agent_subgraph.ainvoke({
+                "expert_messages": [HumanMessage(content=f"Conduct expert research on: {research_topic}")],
+                "expert_name": expert_name,
+                "expert_specialty": expert_specialty,
+                "custom_prompt_instructions": custom_instructions,
+                "research_topic": research_topic,
+                "research_depth": research_depth,
+                "account_id": state["account_id"],
+            }, subgraph_config)
+            expert_agent_tasks.append(task)
+        
         else:
             # For non-research tools, we can determine the result immediately
             content = "Acknowledged."
@@ -727,9 +807,48 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig, resea
             if "raw_notes" in result:
                 if "raw_notes" not in update_payload: update_payload["raw_notes"] = []
                 update_payload["raw_notes"].extend(result["raw_notes"])
+            if "notes" in result:
+                if "notes" not in update_payload: update_payload["notes"] = []
+                update_payload["notes"].extend(result["notes"])
             if "sources" in result:
                 if "sources" not in update_payload: update_payload["sources"] = []
                 update_payload["sources"].extend(result["sources"])
+
+    # 2.5 Execute parallel expert agent tasks if any
+    if expert_agent_tasks:
+        logger.debug(f"🚀 [Supervisor Tools] Starting {len(expert_agent_tasks)} parallel expert agent tasks.")
+        expert_results = await asyncio.gather(*expert_agent_tasks)
+        logger.debug("✅ [Supervisor Tools] All expert agent tasks completed.")
+        
+        for idx, result in zip(expert_agent_indices, expert_results):
+            expert_compressed = result.get("compressed_research", "Error: No expert research found.")
+            expert_name = result.get("expert_name", "Expert")
+            
+            # Ensure tool_call_id is never None
+            tool_call_id = tool_calls[idx].get("id")
+            if tool_call_id is None:
+                tool_call_id = str(uuid.uuid4())
+                logger.warning(f"⚠️ [Supervisor Tools] Missing tool_call_id for CreateExpertAgent. Generated UUID: {tool_call_id}")
+
+            tool_results_map[idx] = ToolMessage(
+                content=f"[Expert Agent: {expert_name}]\n\n{expert_compressed}",
+                name="CreateExpertAgent",
+                tool_call_id=tool_call_id,
+            )
+            
+            # Collect notes, sources, and recommendations from expert agents
+            if "raw_notes" in result:
+                if "raw_notes" not in update_payload: update_payload["raw_notes"] = []
+                update_payload["raw_notes"].extend(result["raw_notes"])
+            if "notes" in result:
+                if "notes" not in update_payload: update_payload["notes"] = []
+                update_payload["notes"].extend(result["notes"])
+            if "sources" in result:
+                if "sources" not in update_payload: update_payload["sources"] = []
+                update_payload["sources"].extend(result["sources"])
+            if "recommendations" in result:
+                if "recommendations" not in update_payload: update_payload["recommendations"] = []
+                update_payload["recommendations"].extend(result["recommendations"])
 
     # 3. Construct the final list of ToolMessages in the ORIGINAL order
     for i in range(len(tool_calls)):
@@ -752,7 +871,9 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig, resea
     if "sources" not in update_payload:
         update_payload["sources"] = []
     
+    logger.info(f"🔍 [Supervisor Tools] Final payload keys before returning: {list(update_payload.keys())}")
     logger.debug(f"🎨 [Supervisor Tools] Total sources being returned: {len(update_payload['sources'])}")
+    logger.debug(f"📝 [Supervisor Tools] Total notes being returned: {len(update_payload.get('notes', []))}")
     return update_payload
 
 # --- Researcher Sub-Graph Nodes ---
@@ -801,7 +922,7 @@ async def researcher(state: ResearcherState, config: RunnableConfig) -> dict:
 
     researcher_prompt = research_system_prompt.format(mcp_prompt=cfg.mcp_prompt or "", date=get_today_str())
     research_model = cast(Runnable[Sequence[BaseMessage], AIMessage],
-                          chat_llm.bind_tools(tools).with_retry(
+                          safe_bind_tools(chat_llm, tools).with_retry(
                               stop_after_attempt=cfg.max_structured_output_retries
                           ))
     
@@ -844,7 +965,7 @@ async def researcher(state: ResearcherState, config: RunnableConfig) -> dict:
         if "tool_choice" in error_str or "404" in error_str and "Openrouter" in error_str:
             logger.warning(f"⚠️ [Researcher] OpenRouter tool_choice error detected: {e}. Retrying with simpler binding...")
             # Try again with a simpler bind
-            simple_research_model = chat_llm.bind_tools(tools)
+            simple_research_model = safe_bind_tools(chat_llm, tools)
             response = await simple_research_model.ainvoke(pruned_messages_for_researcher)
         elif is_token_limit_exceeded(e):
             logger.warning(f"⚠️ [Researcher] Token limit exceeded for topic '{state['research_topic']}'. Pruning history and retrying...")
@@ -1039,39 +1160,39 @@ async def researcher_tools(state: ResearcherState, config: RunnableConfig) -> di
 
 
 
-    def _normalize_source_dict(source_dict: dict, tool_name: str, tool_call_id: str | None, message_index: int) -> dict:
-        """Normaliza un dict de fuente: asegura id, metadata y tipo."""
-        # Asegurar que el dict tenga los campos mínimos
-        if "url" not in source_dict or not source_dict["url"]:
-            # Fallback: generar ID único sin URL
-            source_id = generate_stable_id("", prefix="unknown")
-        else:
-            url = source_dict["url"]
-            source_type = source_dict.get("type", "web").lower()
-            source_id = generate_stable_id(url, prefix=source_type)
-        
-        # Inicializar metadata si no existe
-        metadata = source_dict.get("metadata", {})
-        # Añadir información del origen
-        if "tool_names" not in metadata:
-            metadata["tool_names"] = []
-        if tool_name and tool_name not in metadata["tool_names"]:
-            metadata["tool_names"].append(tool_name)
-        if tool_call_id and "tool_call_id" not in metadata:
-            metadata["tool_call_id"] = tool_call_id
-        if "message_index" not in metadata:
-            metadata["message_index"] = message_index
-        
-        # Construir dict normalizado
-        normalized = {
-            "title": source_dict.get("title", ""),
-            "url": source_dict.get("url", ""),
-            "snippet": source_dict.get("snippet", ""),
-            "type": source_dict.get("type", "web").lower(),
-            "id": source_id,
-            "metadata": metadata
-        }
-        return normalized
+def _normalize_source_dict(source_dict: dict, tool_name: str, tool_call_id: str | None, message_index: int) -> dict:
+    """Normaliza un dict de fuente: asegura id, metadata y tipo."""
+    # Asegurar que el dict tenga los campos mínimos
+    if "url" not in source_dict or not source_dict["url"]:
+        # Fallback: generar ID único sin URL
+        source_id = generate_stable_id("", prefix="unknown")
+    else:
+        url = source_dict["url"]
+        source_type = source_dict.get("type", "web").lower()
+        source_id = generate_stable_id(url, prefix=source_type)
+    
+    # Inicializar metadata si no existe
+    metadata = source_dict.get("metadata", {})
+    # Añadir información del origen
+    if "tool_names" not in metadata:
+        metadata["tool_names"] = []
+    if tool_name and tool_name not in metadata["tool_names"]:
+        metadata["tool_names"].append(tool_name)
+    if tool_call_id and "tool_call_id" not in metadata:
+        metadata["tool_call_id"] = tool_call_id
+    if "message_index" not in metadata:
+        metadata["message_index"] = message_index
+    
+    # Construir dict normalizado
+    normalized = {
+        "title": source_dict.get("title", ""),
+        "url": source_dict.get("url", ""),
+        "snippet": source_dict.get("snippet", ""),
+        "type": source_dict.get("type", "web").lower(),
+        "id": source_id,
+        "metadata": metadata
+    }
+    return normalized
 
 async def compress_research(state: ResearcherState, config: RunnableConfig) -> dict:
     """Compresses and synthesizes research findings."""
@@ -1332,6 +1453,22 @@ async def compress_research(state: ResearcherState, config: RunnableConfig) -> d
             except Exception as e:
                 logger.error(f"❌ [Compress Research] Error processing sources from tool {msg.name}: {e}")
 
+    # 4. Fallback final: Buscar URLs en todo el texto comprimido como último recurso
+    # Esto asegura que si una fuente fue mencionada en el texto pero no capturada, se registre.
+    raw_text_content = str(response.content)
+    all_urls_in_report = re.findall(r'https?://[^\s\]"\'\)]+', raw_text_content)
+    
+    for url in all_urls_in_report:
+        if not any(s['url'] == url for s in sources):
+            source_raw = {
+                "title": "Fuente detectada en reporte",
+                "url": url,
+                "snippet": "Fuente extraída automáticamente del texto final del reporte.",
+                "type": "web"
+            }
+            sources.append(_normalize_source_dict(source_raw, "auto_extraction", None, -1))
+            logger.info(f"✅ [Compress Research] Added source via final report extraction: {url[:50]}...")
+
     # Deduplicate sources at researcher level (fusion metadata on duplicates)
     unique_researcher_sources = []
     seen_urls: Dict[str, dict] = {}
@@ -1359,10 +1496,465 @@ async def compress_research(state: ResearcherState, config: RunnableConfig) -> d
             unique_researcher_sources.append(s)
 
     return {
-        "compressed_research": str(response.content),
+        "compressed_research": raw_text_content,
         "raw_notes": [raw_notes_content],
         "sources": unique_researcher_sources
     }
+
+# --- Expert Agent Sub-Graph Nodes ---
+
+async def expert_agent(state: ExpertAgentState, config: RunnableConfig) -> dict:
+    """Conducts specialized research using a dynamically created expert persona."""
+    logger.debug(f"--- [DeepResearcher] Node: expert_agent ---")
+    logger.debug(f"🔍 [Expert Agent] '{state['expert_name']}' researching topic: '{state['research_topic']}'")
+    cfg = Configuration.from_runnable_config(config)
+    progress_callback = config.get("configurable", {}).get("progress_callback")
+    base_progress = config.get("configurable", {}).get("base_progress", 0)
+    max_sub_progress = config.get("configurable", {}).get("max_sub_progress", 100)
+
+    if progress_callback:
+        current_tool_iteration = state.get("tool_call_iterations", 0)
+        total_tool_calls = cfg.max_react_tool_calls or 1
+        
+        effective_expert_range = max_sub_progress * 0.90
+        progress_per_iteration = effective_expert_range / total_tool_calls
+        current_progress_within_expert_range = current_tool_iteration * progress_per_iteration
+        
+        current_global_progress = int(base_progress + current_progress_within_expert_range)
+        
+        logger.debug(f"Calling progress_callback in expert_agent: {current_global_progress}% for topic {state['research_topic']}")
+        await progress_callback(
+            current_global_progress, 
+            f"Experto {state['expert_name']}: {state['research_topic']} (Paso {current_tool_iteration + 1}/{total_tool_calls})", 
+            f"expert_agent_{state['research_topic']}"
+        )
+    
+    tools = await get_all_tools(config)
+    if not tools:
+        logger.error("[Expert Agent] No tools found for research. Aborting.")
+        raise ValueError("No tools found for research.")
+
+    account_id = state.get("account_id")
+    from core.llm_manager import get_llm_for_user
+    
+    if account_id:
+        llm_instance = await get_llm_for_user(account_id, purpose="main")
+    else:
+        llm_instance = get_main_llm()
+
+    if not llm_instance:
+        raise ValueError("Main LLM not initialized.")
+    chat_llm = cast(BaseChatModel, llm_instance)
+
+    expert_prompt = expert_agent_system_prompt.format(
+        expert_name=state["expert_name"],
+        expert_specialty=state["expert_specialty"],
+        custom_prompt_instructions=state.get("custom_prompt_instructions", ""),
+        research_topic=state["research_topic"],
+        research_depth=state.get("research_depth", "standard"),
+        date=get_today_str()
+    )
+    
+    research_model = cast(Runnable[Sequence[BaseMessage], AIMessage],
+                          safe_bind_tools(chat_llm, tools).with_retry(
+                              stop_after_attempt=cfg.max_structured_output_retries
+                          ))
+    
+    messages = [cast(BaseMessage, msg) for msg in state["expert_messages"]]
+    
+    if messages and isinstance(messages[0], HumanMessage):
+        messages[0].content = f"{expert_prompt}\n\n{messages[0].content}"
+    elif messages and isinstance(messages[0], (AIMessage, ToolMessage)):
+        messages.insert(0, HumanMessage(content=expert_prompt))
+    else:
+        messages.insert(0, HumanMessage(content=expert_prompt))
+    
+    last_msg = messages[-1] if messages else None
+    is_tool_call_pending = isinstance(last_msg, AIMessage) and bool(last_msg.tool_calls)
+
+    if not is_tool_call_pending and (not messages or not isinstance(messages[-1], HumanMessage)):
+        if messages and messages[-1].type == "ai":
+            messages.append(HumanMessage(content=f"Continue research on {state['research_topic']} from your {state['expert_specialty']} perspective."))
+        elif messages and messages[-1].type == "tool":
+            messages.append(HumanMessage(content=f"Process the tool output and continue your expert analysis on {state['research_topic']}."))
+        else:
+            messages.append(HumanMessage(content=f"Conduct expert research on {state['research_topic']}."))
+
+    pruned_messages_for_expert = await prune_messages_to_fit_token_limit(
+        messages, chat_llm, cfg.max_input_tokens
+    )
+
+    logger.info(f"PRUNED MESSAGES FOR EXPERT AGENT '{state['expert_name']}': {len(pruned_messages_for_expert)} messages")
+
+    try:
+        response: AIMessage = await research_model.ainvoke(pruned_messages_for_expert)
+    except Exception as e:
+        error_str = str(e)
+        if "tool_choice" in error_str or "404" in error_str and "Openrouter" in error_str:
+            logger.warning(f"⚠️ [Expert Agent] OpenRouter tool_choice error: {e}. Retrying with simpler binding...")
+            simple_expert_model = safe_bind_tools(chat_llm, tools)
+            response = await simple_expert_model.ainvoke(pruned_messages_for_expert)
+        elif is_token_limit_exceeded(e):
+            logger.warning(f"⚠️ [Expert Agent] Token limit exceeded. Pruning history and retrying...")
+            pruned_messages = remove_up_to_last_ai_message([cast(BaseMessage, msg) for msg in messages])
+            if len(pruned_messages) < len(messages):
+                response = await research_model.ainvoke([cast(BaseMessage, msg) for msg in pruned_messages])
+            else:
+                logger.error(f"❌ [Expert Agent] Token limit exceeded and cannot prune further.")
+                raise e
+        else:
+            raise e
+    
+    if response.tool_calls:
+        for tool_call in response.tool_calls:
+            logger.info(f"🛠️ [Expert Agent '{state['expert_name']}'] LLM decided to call tool: {tool_call['name']}")
+    else:
+        logger.warning(f"[Expert Agent '{state['expert_name']}'] LLM did not generate any tool calls.")
+    
+    return {
+        "expert_messages": [response],
+        "tool_call_iterations": state.get("tool_call_iterations", 0) + 1,
+    }
+
+
+async def expert_agent_tools(state: ExpertAgentState, config: RunnableConfig) -> dict:
+    """Executes tools called by the expert agent."""
+    logger.info(f"--- [DeepResearcher] Node: expert_agent_tools for '{state['expert_name']}' ---")
+    progress_callback = config.get("configurable", {}).get("progress_callback")
+    base_progress = config.get("configurable", {}).get("base_progress", 0)
+    max_sub_progress = config.get("configurable", {}).get("max_sub_progress", 100)
+    most_recent_message: AIMessage = cast(AIMessage, state["expert_messages"][-1])
+
+    if progress_callback:
+        progress_at_start_of_tools = base_progress + max_sub_progress * 0.70
+        progress_at_end_of_tools = base_progress + max_sub_progress * 0.90
+        
+        logger.info(f"Calling progress_callback in expert_agent_tools: {int(progress_at_start_of_tools)}% for {state['expert_name']}")
+        await progress_callback(
+            int(progress_at_start_of_tools), 
+            f"Ejecutando herramientas para experto {state['expert_name']}: {state['research_topic']}", 
+            f"expert_agent_tools_start_{state['expert_name']}"
+        )
+
+    if not most_recent_message.tool_calls:
+        logger.warning("[Expert Agent Tools] No tool calls in the last message. Skipping tool execution.")
+        return {}
+
+    tools = await get_all_tools(config)
+    tools_by_name = {tool.name: tool for tool in tools if hasattr(tool, 'name')}
+    
+    tool_execution_tasks = [
+        execute_tool_safely(tools_by_name[tc["name"]], tc["args"], config)
+        for tc in most_recent_message.tool_calls if tc["name"] in tools_by_name
+    ]
+    logger.info(f"🚀 [Expert Agent Tools '{state['expert_name']}'] Executing {len(tool_execution_tasks)} tool(s) in parallel.")
+    observations = await asyncio.gather(*tool_execution_tasks)
+    logger.info(f"✅ [Expert Agent Tools '{state['expert_name']}'] All tools executed.")
+
+    if progress_callback:
+        found_sources = []
+        for obs in observations:
+            try:
+                if hasattr(obs, 'sources') or (isinstance(obs, dict) and "sources" in obs):
+                    obs_sources = obs.sources if hasattr(obs, 'sources') else obs["sources"]
+                    if isinstance(obs_sources, list):
+                        for s in obs_sources:
+                            s_dict = s.model_dump() if hasattr(s, 'model_dump') else (s if isinstance(s, dict) else {})
+                            if s_dict.get("url"):
+                                found_sources.append({
+                                    "title": s_dict.get("title", s_dict.get("url")),
+                                    "url": s_dict.get("url"),
+                                    "snippet": str(s_dict.get("snippet", "")),
+                                    "type": s_dict.get("type", "web")
+                                })
+                else:
+                    content_str = str(obs)
+                    md_matches = list(re.finditer(r"\[([^\]]+)\]\((https?://[^\s\)]+)\)", content_str))
+                    for match in md_matches:
+                        found_sources.append({
+                            "title": match.group(1).strip(),
+                            "url": match.group(2).strip(),
+                            "snippet": "",
+                            "type": "web"
+                        })
+            except Exception as e:
+                logger.error(f"⚠️ [Expert Agent Tools] Error extracting real-time sources: {e}")
+
+        if found_sources:
+            unique_found = []
+            seen_urls = set()
+            for s in found_sources:
+                if s["url"] not in seen_urls:
+                    unique_found.append(s)
+                    seen_urls.add(s["url"])
+            
+            logger.info(f"📡 [Expert Agent Tools '{state['expert_name']}'] Reporting {len(unique_found)} real-time findings.")
+            
+            findings_md = f"\n\n#### ✨ Hallazgos del Experto: {state['expert_name']}\n"
+            for s in unique_found:
+                title = s.get("title", s.get("url", "Fuente")).strip()
+                url = s.get("url")
+                snippet = s.get("snippet", "").strip()
+                
+                findings_md += f"- **[{title}]({url})**"
+                if snippet:
+                    clean_snippet = " ".join(snippet.split())
+                    if len(clean_snippet) > 200:
+                        clean_snippet = clean_snippet[:197] + "..."
+                    findings_md += f": _{clean_snippet}_"
+                findings_md += "\n"
+            
+            await progress_callback(
+                int(progress_at_end_of_tools), 
+                f"Hallazgos del experto: {state['expert_name']}", 
+                data={"stream_chunk": findings_md}
+            )
+
+    if progress_callback:
+        logger.info(f"Calling progress_callback in expert_agent_tools END: {int(progress_at_end_of_tools)}% for {state['expert_name']}")
+        await progress_callback(int(progress_at_end_of_tools), f"Herramientas ejecutadas para: {state['expert_name']}", f"expert_agent_tools_end_{state['expert_name']}")
+
+    tool_outputs = []
+    for obs, tc in zip(observations, most_recent_message.tool_calls):
+        logger.info(f"🔧 [Expert Agent Tools] Result for '{tc['name']}' received.")
+        
+        is_tool_output = False
+        if hasattr(obs, 'context_for_llm') and hasattr(obs, 'sources'):
+            is_tool_output = True
+        elif isinstance(obs, dict) and "context_for_llm" in obs and "sources" in obs:
+            is_tool_output = True
+            
+        if is_tool_output:
+            if isinstance(obs, dict):
+                obs_sources = obs.get("sources", [])
+                obs_context = obs.get("context_for_llm", "")
+                obs_summary = obs.get("summary")
+            else:
+                obs_sources = obs.sources
+                obs_context = obs.context_for_llm
+                obs_summary = getattr(obs, "summary", None)
+            
+            logger.info(f"✅ [Expert Agent Tools] Tool '{tc['name']}' returned ToolOutputWithSources format.")
+            
+            sources_dicts = []
+            for source in obs_sources:
+                if hasattr(source, 'model_dump'):
+                    sources_dicts.append(source.model_dump())
+                elif isinstance(source, dict):
+                    sources_dicts.append(source)
+            
+            structured_content = {
+                "context_for_llm": obs_context,
+                "sources": sources_dicts,
+                "summary": obs_summary
+            }
+            
+            import json
+            content_str = json.dumps(structured_content, ensure_ascii=False)
+            tool_outputs.append(ToolMessage(content=content_str, name=tc["name"], tool_call_id=tc["id"]))
+        else:
+            if isinstance(obs, (dict, list)):
+                try:
+                    content_str = json.dumps(obs, ensure_ascii=False)
+                except Exception:
+                    content_str = str(obs)
+            else:
+                content_str = str(obs)
+                
+            tool_outputs.append(ToolMessage(content=content_str, name=tc["name"], tool_call_id=tc["id"]))
+
+    return {"expert_messages": tool_outputs}
+
+
+async def compress_expert_research(state: ExpertAgentState, config: RunnableConfig) -> dict:
+    """Compresses and synthesizes research findings from an expert agent."""
+    logger.info(f"--- [DeepResearcher] Node: compress_expert_research for '{state['expert_name']}' ---")
+    cfg = Configuration.from_runnable_config(config)
+    progress_callback = config.get("configurable", {}).get("progress_callback")
+    base_progress = config.get("configurable", {}).get("base_progress", 0)
+    max_sub_progress = config.get("configurable", {}).get("max_sub_progress", 100)
+
+    if progress_callback:
+        final_expert_progress = int(base_progress + max_sub_progress * 0.98)
+        logger.info(f"Calling progress_callback in compress_expert_research: {final_expert_progress}% for {state['expert_name']}")
+        await progress_callback(
+            final_expert_progress, 
+            f"Sintetizando hallazgos del experto {state['expert_name']}: {state['research_topic']}", 
+            f"compress_expert_research_{state['expert_name']}"
+        )
+
+    account_id = state.get("account_id")
+    from core.llm_manager import get_llm_for_user
+    
+    if account_id:
+        synthesizer_model = await get_llm_for_user(account_id, purpose="fast")
+    else:
+        synthesizer_model = get_fast_llm()
+
+    if not synthesizer_model:
+        raise ValueError("Fast LLM not initialized.")
+
+    expert_messages = [cast(BaseMessage, msg) for msg in state["expert_messages"]] + [
+        HumanMessage(content=compress_expert_research_human_message.format(
+            expert_name=state["expert_name"],
+            expert_specialty=state["expert_specialty"]
+        ))
+    ]
+    
+    compression_prompt = compress_expert_research_system_prompt.format(
+        expert_name=state["expert_name"],
+        expert_specialty=state["expert_specialty"],
+        date=get_today_str()
+    )
+    compression_prompt += "\n\nIMPORTANTE: Al citar fuentes, cada número de fuente debe estar entre sus propios corchetes. Por ejemplo, en lugar de [1, 2, 3], formatee como [1][2][3]."
+    messages = [SystemMessage(content=compression_prompt)] + expert_messages
+
+    logger.info(f"📚 [Compress Expert Research '{state['expert_name']}'] Compressing {len(expert_messages)} messages.")
+    response = await synthesizer_model.ainvoke(messages)
+
+    raw_notes_content = "\n".join([str(m.content) for m in filter_messages(expert_messages, include_types=["tool", "ai"])])
+
+    logger.info(f"📦 [Compress Expert Research '{state['expert_name']}'] Compressed research output received.")
+    
+    sources = []
+    
+    search_tool_names = [
+        "tavily_search_tool", "web_search", "ddg_search_tool", "multi_query_search",
+        "tavily_search", "brave_search_tool", "brave_search", "google_search",
+        "google_search_tool", "bing_search", "arxiv_search", "knowledge_graph_search",
+        "comprehensive_web_analyzer", "knowledge_graph", "knowledge_graph_tool",
+        "KnowledgeGraphTool", "knowledge_search", "KnowledgeSearchTool", "web_scraper",
+        "WebScraperTool", "graph_cypher", "GraphCypherGeneratorTool", "rag_search",
+        "rag_tool", "document_search",
+    ]
+
+    tool_names_found = set()
+    for msg_idx, msg in enumerate(expert_messages):
+        if isinstance(msg, ToolMessage):
+            tool_names_found.add(msg.name)
+    logger.info(f"🔍 [Compress Expert Research '{state['expert_name']}'] Tool names found: {tool_names_found}")
+    
+    for msg_idx, msg in enumerate(expert_messages):
+        if isinstance(msg, ToolMessage):
+            is_search_tool = msg.name in search_tool_names
+            try:
+                content = msg.content
+                
+                if isinstance(content, str):
+                    try:
+                        content = json.loads(content)
+                    except json.JSONDecodeError:
+                        continue
+                
+                if isinstance(content, dict) and "context_for_llm" in content and "sources" in content:
+                    sources_list = content["sources"]
+                    if isinstance(sources_list, list):
+                        for source_dict in sources_list:
+                            if isinstance(source_dict, dict):
+                                url = source_dict.get("url")
+                                title = source_dict.get("title")
+                                snippet = source_dict.get("snippet", "")
+                                source_type = source_dict.get("type", "web")
+                                
+                                if url and title:
+                                    source_raw = {
+                                        "title": title,
+                                        "url": url,
+                                        "snippet": str(snippet),
+                                        "type": source_type
+                                    }
+                                    sources.append(_normalize_source_dict(source_raw, msg.name, msg.tool_call_id, msg_idx))
+                    continue
+
+                if isinstance(content, dict) and "sources" in content:
+                    content = content["sources"]
+
+                if isinstance(content, list):
+                    for item in content:
+                        if isinstance(item, dict):
+                            url = item.get("url") or item.get("link") or item.get("href")
+                            title = item.get("title") or item.get("name")
+                            snippet = item.get("snippet") or item.get("summary")
+                            
+                            if url and (title or is_search_tool):
+                                if not title:
+                                    title = url.split('/')[-1] or url
+                                
+                                source_raw = {
+                                    "title": title,
+                                    "url": url,
+                                    "snippet": str(snippet) if snippet else "",
+                                    "type": "web"
+                                }
+                                sources.append(_normalize_source_dict(source_raw, msg.name, msg.tool_call_id, msg_idx))
+                elif isinstance(content, dict) and is_search_tool:
+                    url = content.get("url") or content.get("link")
+                    title = content.get("title") or content.get("name")
+                    if url and title:
+                        source_raw = {
+                            "title": title,
+                            "url": url,
+                            "snippet": str(content.get("snippet", "")),
+                            "type": "web"
+                        }
+                        sources.append(_normalize_source_dict(source_raw, msg.name, msg.tool_call_id, msg_idx))
+
+            except Exception as e:
+                logger.error(f"❌ [Compress Expert Research] Error processing sources from tool {msg.name}: {e}")
+
+    unique_expert_sources = []
+    seen_urls: Dict[str, dict] = {}
+    for s in sources:
+        url = s["url"]
+        if url not in seen_urls:
+            unique_expert_sources.append(s)
+            seen_urls[url] = s
+        else:
+            existing = seen_urls[url]
+            s["id"] = existing["id"]
+            unique_expert_sources.append(s)
+
+    recommendations = []
+    for msg in expert_messages:
+        if isinstance(msg, AIMessage) and msg.tool_calls:
+            for tc in msg.tool_calls:
+                if tc["name"] == "think_tool" or tc["name"] == "deep_research_think_tool":
+                    reflection = tc["args"].get("reflection", "")
+                    if reflection and "Acción:" in reflection:
+                        action = reflection.split("Acción:")[1].strip()
+                        if action not in recommendations:
+                            recommendations.append(action)
+
+    return {
+        "compressed_research": str(response.content),
+        "raw_notes": [raw_notes_content],
+        "sources": unique_expert_sources,
+        "recommendations": recommendations
+    }
+
+
+def create_expert_agent_graph() -> Pregel:
+    """Creates the expert agent sub-graph."""
+    expert_builder = StateGraph(ExpertAgentState)
+    expert_builder.add_node("expert_agent", expert_agent)
+    expert_builder.add_node("expert_agent_tools", expert_agent_tools)
+    expert_builder.add_node("compress_expert_research", compress_expert_research)
+    
+    expert_builder.add_edge(START, "expert_agent")
+    expert_builder.add_edge("expert_agent", "expert_agent_tools")
+    
+    def should_continue_expert_research(state: ExpertAgentState, config: RunnableConfig) -> Literal["expert_agent", "compress_expert_research"]:
+        cfg = Configuration.from_runnable_config(config)
+        if state["tool_call_iterations"] >= cfg.max_react_tool_calls:
+            logger.info(f"[Expert Agent Edge '{state['expert_name']}'] Max tool calls reached. Compressing research.")
+            return "compress_expert_research"
+        logger.info(f"[Expert Agent Edge '{state['expert_name']}'] Continuing research.")
+        return "expert_agent"
+        
+    expert_builder.add_conditional_edges("expert_agent_tools", should_continue_expert_research)
+    expert_builder.add_edge("compress_expert_research", END)
+    
+    return expert_builder.compile()
 
 # --- Graph Compilation ---
 
@@ -1389,13 +1981,13 @@ def create_researcher_graph() -> Pregel:
     
     return researcher_builder.compile()
 
-def create_supervisor_graph(researcher_subgraph: Pregel) -> Pregel:
+def create_supervisor_graph(researcher_subgraph: Pregel, expert_agent_subgraph: Pregel) -> Pregel:
     """Creates the supervisor sub-graph."""
     supervisor_builder = StateGraph(SupervisorState)
     supervisor_builder.add_node("supervisor", supervisor)
 
     async def supervisor_tools_node(state: SupervisorState, config: RunnableConfig) -> dict:
-        return await supervisor_tools(state, config, researcher_subgraph)
+        return await supervisor_tools(state, config, researcher_subgraph, expert_agent_subgraph)
 
     supervisor_builder.add_node("supervisor_tools", supervisor_tools_node)
 
@@ -1420,7 +2012,8 @@ def create_supervisor_graph(researcher_subgraph: Pregel) -> Pregel:
 def compile_deep_researcher_graph() -> Pregel:
     """Compiles and returns the full Deep Researcher graph."""
     researcher_subgraph = create_researcher_graph()
-    supervisor_subgraph = create_supervisor_graph(researcher_subgraph)
+    expert_agent_subgraph = create_expert_agent_graph()
+    supervisor_subgraph = create_supervisor_graph(researcher_subgraph, expert_agent_subgraph)
 
     deep_researcher_builder = StateGraph(AgentState)
     

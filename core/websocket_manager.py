@@ -7,6 +7,9 @@ from core.config import settings
 
 logger = logging.getLogger(__name__)
 
+partial_task_messages: Dict[str, str] = {}
+partial_task_reasoning: Dict[str, str] = {}
+
 class WebSocketManager:
     def __init__(self):
         self.active_connections: Dict[str, Dict[str, List[WebSocket]]] = {}
@@ -52,7 +55,8 @@ class WebSocketManager:
             async with httpx.AsyncClient() as client:
                 response = await client.post(f"{telegram_bot_url}/internal/send-message", json=payload, headers=headers, timeout=10)
                 response.raise_for_status()
-                logger.info(f"Mensaje enviado a Telegram via HTTP para chat_id {telegram_chat_id}: {message_text[:50]}...")
+                if message_type not in {"stream_chunk", "reasoning_chunk"}:
+                    logger.info(f"Mensaje enviado a Telegram via HTTP para chat_id {telegram_chat_id} (tipo: {message_type}).")
         except httpx.HTTPStatusError as e:
             logger.error(f"Error HTTP al enviar mensaje a Telegram para chat_id {telegram_chat_id}: {e.response.status_code} - {e.response.text}", exc_info=True)
         except Exception as e:
@@ -122,10 +126,16 @@ class WebSocketManager:
                 for conn_list in self.active_connections[account_id].values():
                     connections_to_send.extend(conn_list)
 
-            logger.info(f"DEBUG: Intentando enviar mensaje a {account_id} (tipo: {connection_type or 'todos'}). Conexiones activas: {len(connections_to_send)}")
+            message_type = message.get("type")
+            is_stream_event = message_type in {"stream_chunk", "reasoning_chunk"}
+
+            if not is_stream_event:
+                logger.info(
+                    f"Enviando mensaje WS a {account_id} (tipo conexión: {connection_type or 'todos'}, "
+                    f"tipo mensaje: {message_type}, conexiones: {len(connections_to_send)})."
+                )
             for connection in connections_to_send:
                 try:
-                    logger.info(f"DEBUG: Enviando mensaje a {account_id} via WebSocket (conexión {id(connection)}): {message}")
                     await connection.send_json(message)
                 except WebSocketDisconnect:
                     logger.warning(f"WebSocketDisconnect al enviar mensaje a {account_id} (conexión {id(connection)}). Desconectando.")

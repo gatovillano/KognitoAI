@@ -25,8 +25,11 @@ import {
   Folder,
   FileType,
   Edit3,
-  Trash2
+  Trash2,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { InlineMarkdownRenderer } from '@/components/InlineMarkdownRenderer';
 import { Analysis } from '@/lib/models';
 import { AnalysisDetailDialog } from '../../analysis/analysis-detail-dialog';
@@ -125,6 +128,7 @@ export default function WorkspaceDashboard({ params }: PageProps) {
   const [selectedTask, setSelectedTask] = useState<TaskResponse | null>(null); // New state for selected task
   const [analysisResult, setAnalysisResult] = useState<Analysis | null>(null); // New state for analysis result
   const [isAnalysisResultDialogOpen, setIsAnalysisResultDialogOpen] = useState(false); // New state for AnalysisDetailDialog
+  const [isAgendaExpanded, setIsAgendaExpanded] = useState(false);
 
   const handleAnalyzeAllNotes = async () => {
     if (notes.length === 0) {
@@ -547,7 +551,7 @@ export default function WorkspaceDashboard({ params }: PageProps) {
   const loadAvailableWorkspaces = async () => {
     setLoadingWorkspaces(true);
     try {
-      const response = await apiClient.get('/api/workspaces');
+      const response = await apiClient.get('/api/workspaces', { params: { limit: 100 } });
       setAvailableWorkspaces(response.data);
     } catch (error) {
       console.error('Error al cargar los workspaces disponibles:', error);
@@ -886,7 +890,7 @@ export default function WorkspaceDashboard({ params }: PageProps) {
               <p className="text-xs text-muted-foreground">Nuevo tema de documentos</p>
             </Card>
             {filteredCollections.map((collection) => (
-              <Card key={collection.topic || collection.id} className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20" onClick={() => handleCollectionClick(collection.topic || collection.id)}>
+              <Card key={collection.id || collection.name || collection.topic} className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20" onClick={() => handleCollectionClick(collection.name || collection.topic || collection.id)}>
                 <CardHeader className="pb-3">
                   <CardTitle className="flex items-start justify-between gap-3">
                     <div className="flex items-start gap-3 min-w-0 flex-1">
@@ -895,7 +899,7 @@ export default function WorkspaceDashboard({ params }: PageProps) {
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="font-semibold text-sm line-clamp-2">
-                          <InlineMarkdownRenderer content={collection.topic || ''} />
+                          <InlineMarkdownRenderer content={collection.name || collection.topic || ''} />
                         </div>
                       </div>
                     </div>
@@ -936,12 +940,31 @@ export default function WorkspaceDashboard({ params }: PageProps) {
                   <p className="text-xs text-muted-foreground line-clamp-2 mb-3">
                     {collection.description || 'Colección de documentos especializados'}
                   </p>
-                  <div className="flex items-center justify-between pt-2 border-t border-border/50">
-                    <span className="text-xs text-muted-foreground">
-                      {collection.document_count !== undefined
-                        ? `${collection.document_count} documento(s)`
-                        : 'Calculando...'}
-                    </span>
+                  <div className="flex items-center justify-between pt-3 border-t border-border/50">
+                    <div className="flex items-center gap-3">
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger className="flex items-center gap-1.5">
+                            <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                            <span className="text-xs text-muted-foreground">
+                              {collection.document_count || 0}
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent>Documentos</TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger className="flex items-center gap-1.5">
+                            <Folder className="h-3.5 w-3.5 text-muted-foreground" />
+                            <span className="text-xs text-muted-foreground">
+                              {collection.subcollection_count || 0}
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent>Subcolecciones</TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </div>
                     <div className="flex items-center gap-1">
                       <div className="h-2 w-2 rounded-full bg-blue-500"></div>
                       <span className="text-xs text-muted-foreground">Disponible</span>
@@ -1041,56 +1064,68 @@ export default function WorkspaceDashboard({ params }: PageProps) {
 
       {/* Agenda Section (NEW) */}
       <div className="mb-12">
-        <div className="mb-6">
-          <div>
-            <h2 className="text-xl sm:text-2xl font-semibold flex items-center">
-              <Calendar className="mr-2 sm:mr-3 h-5 w-5 sm:h-6 sm:w-6 text-primary" />
-              Agenda del Workspace
-            </h2>
-            <p className="text-xs sm:text-sm text-muted-foreground mt-1">Eventos y tareas programadas</p>
-          </div>
-        </div>
-        <div className="flex flex-col gap-4 mb-6">
-          <div className="flex bg-muted/50 p-1 rounded-lg w-fit">
-            <Button variant={viewMode === 'list' ? 'default' : 'ghost'} size="sm" onClick={() => setViewMode('list')} className="text-xs px-3">Lista</Button>
-            <Button variant={viewMode === 'kanban' ? 'default' : 'ghost'} size="sm" onClick={() => setViewMode('kanban')} className="text-xs px-3">Kanban</Button>
-            <Button variant={viewMode === 'gantt' ? 'default' : 'ghost'} size="sm" onClick={() => setViewMode('gantt')} className="text-xs px-3">Gantt</Button>
-          </div>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={() => {
-              setSelectedEvent(null);
-              setIsEventDialogOpen(true);
-            }} className="flex-1 sm:flex-none text-xs">
-              <Plus className="mr-1 h-3.5 w-3.5" />
-              Evento
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => {
-              setSelectedTask(null);
-              setIsTaskDialogOpen(true);
-            }} className="flex-1 sm:flex-none text-xs">
-              <Plus className="mr-1 h-3.5 w-3.5" />
-              Tarea
+        <div
+          className="mb-6 cursor-pointer select-none"
+          onClick={() => setIsAgendaExpanded(prev => !prev)}
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-xl sm:text-2xl font-semibold flex items-center">
+                <Calendar className="mr-2 sm:mr-3 h-5 w-5 sm:h-6 sm:w-6 text-primary" />
+                Agenda del Workspace
+              </h2>
+              <p className="text-xs sm:text-sm text-muted-foreground mt-1">Eventos y tareas programadas</p>
+            </div>
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0 flex-shrink-0" onClick={(e) => { e.stopPropagation(); setIsAgendaExpanded(prev => !prev); }}>
+              {isAgendaExpanded ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
             </Button>
           </div>
         </div>
-        {viewMode === 'list' && (
-          <WeeklyScheduleView
-            currentDate={currentDate}
-            events={agendaEvents}
-            tasks={tasks}
-            onDateChange={setCurrentDate}
-            onEditEvent={handleEditEvent}
-            onDeleteEvent={handleDeleteEvent}
-            onEditTask={handleEditTask}
-            onDeleteTask={handleDeleteTask}
-            onToggleTaskCompleted={handleToggleTaskCompleted}
-          />
+        {isAgendaExpanded && (
+          <>
+            <div className="flex flex-col gap-4 mb-6">
+              <div className="flex bg-muted/50 p-1 rounded-lg w-fit">
+                <Button variant={viewMode === 'list' ? 'default' : 'ghost'} size="sm" onClick={() => setViewMode('list')} className="text-xs px-3">Lista</Button>
+                <Button variant={viewMode === 'kanban' ? 'default' : 'ghost'} size="sm" onClick={() => setViewMode('kanban')} className="text-xs px-3">Kanban</Button>
+                <Button variant={viewMode === 'gantt' ? 'default' : 'ghost'} size="sm" onClick={() => setViewMode('gantt')} className="text-xs px-3">Gantt</Button>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={() => {
+                  setSelectedEvent(null);
+                  setIsEventDialogOpen(true);
+                }} className="flex-1 sm:flex-none text-xs">
+                  <Plus className="mr-1 h-3.5 w-3.5" />
+                  Evento
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => {
+                  setSelectedTask(null);
+                  setIsTaskDialogOpen(true);
+                }} className="flex-1 sm:flex-none text-xs">
+                  <Plus className="mr-1 h-3.5 w-3.5" />
+                  Tarea
+                </Button>
+              </div>
+            </div>
+            {viewMode === 'list' && (
+              <WeeklyScheduleView
+                currentDate={currentDate}
+                events={agendaEvents}
+                tasks={tasks}
+                onDateChange={setCurrentDate}
+                onEditEvent={handleEditEvent}
+                onDeleteEvent={handleDeleteEvent}
+                onEditTask={handleEditTask}
+                onDeleteTask={handleDeleteTask}
+                onToggleTaskCompleted={handleToggleTaskCompleted}
+              />
+            )}
+            {viewMode === 'kanban' && <KanbanBoardWrapper workspaceId={workspaceId} />}
+            {viewMode === 'gantt' && <GanttChart items={[
+              ...agendaEvents.map(event => ({ ...event, type: 'event' as const })),
+              ...tasks.map(task => ({ ...task, type: 'task' as const }))
+            ]} />}
+          </>
         )}
-        {viewMode === 'kanban' && <KanbanBoardWrapper workspaceId={workspaceId} />}
-        {viewMode === 'gantt' && <GanttChart items={[
-          ...agendaEvents.map(event => ({ ...event, type: 'event' as const })),
-          ...tasks.map(task => ({ ...task, type: 'task' as const }))
-        ]} />}
       </div>
 
       {/* Notes Section (NEW) */}

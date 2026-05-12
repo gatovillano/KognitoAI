@@ -4,7 +4,6 @@ import { useState, useEffect } from 'react';
 import Image from 'next/image';
 import { motion, Variants, Transition } from 'framer-motion';
 import ChatInputBar from '@/components/ChatInputBar';
-import { ContextSelectorButton } from '@/components/ContextSelectorButton';
 import { Send } from 'lucide-react';
 
 interface SelectedContextItem {
@@ -12,6 +11,8 @@ interface SelectedContextItem {
   type: 'document' | 'collection';
   name: string;
   title?: string;
+  topic?: string;
+  file_name?: string;
 }
 
 interface EmptyChatProps {
@@ -169,13 +170,8 @@ export function EmptyChat({
             currentContext={selectedContext}
             isFixedPosition={false}
             workspaceId={workspaceId}
-          >
-            <ContextSelectorButton
-              onContextSelected={onContextSelected}
-              currentContext={selectedContext}
-              workspaceId={workspaceId}
-            />
-          </ChatInputBar>
+            onContextSelected={onContextSelected}
+          />
         </div>
 
         <motion.div

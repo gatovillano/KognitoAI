@@ -53,6 +53,7 @@ from core.database import (
     LangchainPgCollection,
     UserDocumentTopic,
     GitHubDocument,
+    Document,
     ContactProfile, # <--- NUEVA IMPORTACIÓN
     Nota # <--- AÑADIDO PARA LA BÚSQUEDA DE NOTAS
 )
@@ -74,6 +75,55 @@ USER_DOCUMENTS_PREFIX = "user_documents_"
 PGVECTOR_SYNC_ENGINE = create_engine(settings.database_url or "postgresql://postgres:postgres@localhost:5432/postgres")
 
 
+def _normalize_document_id_value(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    if not normalized or normalized.lower() in {"none", "null", "undefined"}:
+        return None
+    return normalized
+
+
+async def _attach_physical_document_ids(
+    db: AsyncSession,
+    account_id: str,
+    documents: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    filenames = sorted({doc.get("file_name") for doc in documents if doc.get("file_name")})
+    if not filenames:
+        return documents
+
+    physical_docs_query = (
+        select(Document)
+        .where(
+            Document.account_id == uuid.UUID(account_id),
+            Document.filename.in_(filenames)
+        )
+        .order_by(Document.updated_at.desc(), Document.created_at.desc())
+    )
+    physical_docs = (await db.execute(physical_docs_query)).scalars().all()
+
+    physical_doc_map: Dict[Tuple[str, Optional[str]], str] = {}
+    for physical_doc in physical_docs:
+        key = (physical_doc.filename, str(physical_doc.workspace_id) if physical_doc.workspace_id else None)
+        physical_doc_map.setdefault(key, str(physical_doc.id))
+
+    enriched_documents: List[Dict[str, Any]] = []
+    for document in documents:
+        normalized_document_id = _normalize_document_id_value(document.get("document_id"))
+        workspace_key = str(document.get("workspace_id")) if document.get("workspace_id") else None
+
+        if not normalized_document_id:
+            normalized_document_id = physical_doc_map.get((document.get("file_name"), workspace_key))
+
+        enriched_documents.append({
+            **document,
+            "document_id": normalized_document_id,
+        })
+
+    return enriched_documents
+
+
 async def _run_semantic_search(
     query_embedding: List[float],
     account_id: str,
@@ -91,6 +141,15 @@ async def _run_semantic_search(
     Realiza una búsqueda semántica en la base de datos vectorial, filtrando por account_id y content_types.
     """
     processed_results: List[Tuple[LCDocument, float]] = []
+
+    # Asegurar que el embedding sea 1D (psycopg.errors.DataException: array must be 1-D)
+    if query_embedding and isinstance(query_embedding[0], list):
+        if len(query_embedding) == 1:
+            query_embedding = query_embedding[0]
+        else:
+            # Si hay múltiples embeddings, esto es un error para esta función
+            logger.warning(f"Se recibieron múltiples embeddings ({len(query_embedding)}) en _run_semantic_search. Usando el primero.")
+            query_embedding = query_embedding[0]
     
     try:
         # Búsqueda en langchain_pg_embedding
@@ -415,8 +474,14 @@ async def get_all_user_memories(
                     category,
                     workspace_id
                 FROM langchain_pg_embedding
-                WHERE account_id = :account_id
-                AND content_type = ANY(:content_types)
+                WHERE (
+                    account_id = :account_id
+                    OR cmetadata->>'account_id' = CAST(:account_id AS TEXT)
+                )
+                AND (
+                    content_type = ANY(:content_types)
+                    OR (content_type IS NULL AND cmetadata->>'type' = ANY(:content_types))
+                )
                 ORDER BY (cmetadata->>'created_at') DESC NULLS LAST
                 LIMIT :limit
             """
@@ -458,7 +523,8 @@ async def get_all_user_memories(
 async def get_document_chunks(
     account_id: str,
     document_ids: List[str],
-    limit: int = 20
+    limit: int = 20,
+    workspace_id: Optional[str] = None
 ) -> List[LCDocument]:
     """
     Recupera fragmentos de documentos específicos por sus IDs, ordenados por índice de fragmento.
@@ -466,6 +532,10 @@ async def get_document_chunks(
     """
     if not document_ids:
         return []
+        
+    # Asegurar que todos los IDs sean strings para evitar errores de tipo (text vs smallint/int)
+    # en la comparación ANY(:document_ids)
+    str_document_ids = [str(did) for did in document_ids]
         
     try:
         async with DBSession(SessionLocal) as session:
@@ -479,15 +549,21 @@ async def get_document_chunks(
                 FROM langchain_pg_embedding
                 WHERE account_id = :account_id
                 AND cmetadata->>'document_id' = ANY(:document_ids)
-                ORDER BY (cmetadata->>'chunk_index')::int ASC NULLS LAST
-                LIMIT :limit
             """
 
             params = {
                 "account_id": account_id,
-                "document_ids": document_ids,
+                "document_ids": str_document_ids,
                 "limit": limit
             }
+
+            if workspace_id is not None and workspace_id != "":
+                sql_query += " AND workspace_id = :workspace_id"
+                params["workspace_id"] = workspace_id
+            elif workspace_id == "":
+                sql_query += " AND workspace_id IS NULL"
+
+            sql_query += " ORDER BY (cmetadata->>'chunk_index')::int ASC NULLS LAST LIMIT :limit"
             
             result = await session.execute(text(sql_query), params)
             rows = result.fetchall()
@@ -536,6 +612,12 @@ async def get_relevant_memories(
     Recupera memorias, documentos y/o notas relevantes, los formatea para citación
     y devuelve un objeto ToolOutputWithSources.
     """
+    # Asegurar que query sea un string
+    if isinstance(query, list):
+        query = " ".join(str(q) for q in query)
+    elif not isinstance(query, str):
+        query = str(query)
+
     logger.info(
         f"🔍 Buscando memorias/documentos relevantes para la cuenta {account_id} con la consulta: '{query[:50]}...'"
     )
@@ -772,7 +854,7 @@ async def _update_embedding_columns_after_insert(
         
         if document_id and str(document_id).lower() not in ("none", ""):
             # Si hay document_id válido, asegurarse de que esté en cmetadata de forma persistente
-            update_clauses.append("cmetadata = cmetadata || jsonb_build_object('document_id', :document_id::text)")
+            update_clauses.append("cmetadata = cmetadata || jsonb_build_object('document_id', CAST(:document_id AS TEXT))")
 
         # Construir la consulta de actualización final
         update_query = f"""
@@ -780,10 +862,8 @@ async def _update_embedding_columns_after_insert(
             SET {", ".join(update_clauses)}
             WHERE
                 collection_id = :collection_uuid
-                AND (
-                    (cmetadata->>'file_name' = :file_name AND cmetadata->>'type' = 'document_chunk') OR
-                    (cmetadata->>'type' = 'user_memory_proactive_llm' OR cmetadata->>'type' = 'thread_summary' OR cmetadata->>'type' = 'enhanced_episodic' OR cmetadata->>'type' = 'general_memory')
-                )
+                AND cmetadata->>'file_name' = :file_name
+                AND cmetadata->>'type' = 'document_chunk'
         """
 
         # Procesar FieldInfo para workspace_id, telegram_id, thread_id
@@ -947,12 +1027,15 @@ async def add_memory_to_vector_db(
             use_jsonb=True
         )
 
+        final_topic = topic.strip() if isinstance(topic, str) and topic.strip() else "general"
+        final_category = category.strip() if isinstance(category, str) and category.strip() else "general"
+
         metadata = {
             "account_id": str(account_id),
             "type": type,
             "scope": "personal",
-            "topic": topic if topic else "general",
-            "category": category if category else "general"
+            "topic": final_topic,
+            "category": final_category,
         }
         if workspace_id:
             metadata["workspace_id"] = str(workspace_id)
@@ -977,8 +1060,8 @@ async def add_memory_to_vector_db(
                     file_name="memory",  # Identificador para memorias
                     account_id=account_id,
                     content_type=type,
-                    topic=topic,
-                    category=category,
+                    topic=final_topic,
+                    category=final_category,
                     workspace_id=workspace_id,
                     telegram_id=telegram_id, # Nuevo
                     thread_id=thread_id # Nuevo
@@ -1093,7 +1176,13 @@ async def process_document_for_rag(
             base_metadata["workspace_id"] = str(workspace_id) # Añadir workspace_id a los metadatos
 
         # Generar documento único ID para agrupar chunks (o usar uno existente en metadata)
-        document_id = str(base_metadata.get("document_id") or uuid.uuid4())
+        # Robustez: Verificar que no sea None o el string "None"
+        doc_id_val = base_metadata.get("document_id")
+        if not doc_id_val or str(doc_id_val).lower() == "none":
+            document_id = str(uuid.uuid4())
+        else:
+            document_id = str(doc_id_val)
+            
         base_metadata["document_id"] = document_id
 
         ids, lc_documents = [], []
@@ -1316,13 +1405,14 @@ async def delete_document_chunks(
 
     OPTIMIZADO: Usa filtros directos en langchain_pg_embedding sin necesidad de JOINs.
     """
-    if not file_name and not topic and not file_name_prefix: # Actualizado para incluir file_name_prefix
-        logger.warning("Se llamó a delete_document_chunks sin file_name, topic ni file_name_prefix.")
+    if not file_name and not topic and not file_name_prefix and not repo_url: # Actualizado para incluir repo_url
+        logger.warning("Se llamó a delete_document_chunks sin file_name, topic, file_name_prefix ni repo_url.")
         return 0
 
     logger.info(f"🗑️ Eliminando chunks optimizado para account_id: {account_id}")
     logger.info(f"📄 File name: {file_name}")
-    logger.info(f"📁 File name prefix: {file_name_prefix}") # Log del nuevo parámetro
+    logger.info(f"📁 File name prefix: {file_name_prefix}")
+    logger.info(f"🔗 Repo URL: {repo_url}") # Log del nuevo parámetro
     logger.info(f"🏷️ Topic: {topic}")
     logger.info(f"🏢 Workspace ID: {workspace_id}")
 
@@ -1338,9 +1428,13 @@ async def delete_document_chunks(
             if file_name:
                 clauses.append("cmetadata->>'file_name' = :fname")
                 params["fname"] = file_name
-            elif file_name_prefix: # Nueva lógica para el prefijo
+            elif file_name_prefix:
                 clauses.append("cmetadata->>'file_name' LIKE :fname_prefix")
                 params["fname_prefix"] = f"{file_name_prefix}%"
+            
+            if repo_url:
+                clauses.append("cmetadata->>'repo_url' = :repo_url")
+                params["repo_url"] = repo_url
 
             if topic:
                 clauses.append("topic = :topic")
@@ -1387,7 +1481,7 @@ async def delete_document_chunks(
             return github_deleted_count if github_deleted_count > 0 else deleted_count
     except Exception as e:
         logger.error(f"❌ Error eliminando chunks optimizado: {e}", exc_info=True)
-        await db.rollback()
+        # No intentamos hacer rollback si no tenemos la sesión
         return 0
 
 
@@ -1427,7 +1521,7 @@ async def get_full_document_content(
             # Construir consulta optimizada usando las nuevas columnas directamente
             clauses = [
                 "account_id = :account_id",
-                "cmetadata->>'type' = 'document_chunk'"
+                "cmetadata->>'type' IN ('document_chunk', 'document')"
             ]
             params: Dict[str, Any] = {
                 "account_id": account_id,
@@ -1490,11 +1584,12 @@ async def get_full_document_content(
             # Si processed_workspace_id es None (el valor por defecto), no se añade ninguna cláusula de filtro para workspace_id.
 
             # Consulta para obtener todos los chunks del documento
+            # NULLS LAST evita errores de cast cuando chunk_index es NULL en registros legacy
             select_sql = text(f"""
                 SELECT document, cmetadata
                 FROM langchain_pg_embedding
                 WHERE {" AND ".join(clauses)}
-                ORDER BY (cmetadata->>'chunk_index')::int
+                ORDER BY (cmetadata->>'chunk_index')::int NULLS LAST
             """)
 
             logger.info(f"🔧 Query SQL optimizada: {select_sql}")
@@ -1572,7 +1667,8 @@ async def list_user_documents(
                     # Si no se proporciona, buscar en TODOS los workspaces del usuario
                     if isinstance(workspace_id, str) and workspace_id:
                         # Si se especifica workspace, mostrar documentos del workspace
-                        base_clauses.append("workspace_id = :workspace_id")
+                        # Robustez: Comparar como texto para evitar errores de UUID casting
+                        base_clauses.append("workspace_id::text = :workspace_id")
                         params["workspace_id"] = workspace_id
 
                     if topic: # Filtro de compatibilidad
@@ -1580,17 +1676,22 @@ async def list_user_documents(
                         params["topic"] = str(topic.description) if isinstance(topic, FieldInfo) else str(topic)
 
 
+            # CORREGIDO: Normalizar document_id inválidos para no propagar el literal "None"
+            # y seguir distinguiendo correctamente documentos sin archivo físico asociado.
+            normalized_document_id_expr = "NULLIF(NULLIF(cmetadata->>'document_id', 'None'), '')"
+            distinct_expr = f"COALESCE({normalized_document_id_expr}, cmetadata->>'file_name')"
+            
             query_str = f"""
-                SELECT DISTINCT ON (cmetadata->>'document_id')
+                SELECT DISTINCT ON ({distinct_expr})
                        cmetadata->>'file_name' AS file_name,
                        topic AS topic,
                        cmetadata->>'title' AS title,
                        cmetadata->>'author' AS author,
-                       cmetadata->>'document_id' AS document_id,
+                       {normalized_document_id_expr} AS document_id,
                        workspace_id::text AS workspace_id
                 FROM langchain_pg_embedding
                 WHERE {" AND ".join(base_clauses)}
-                ORDER BY cmetadata->>'document_id', id;
+                ORDER BY {distinct_expr}, id;
             """
  
             logger.info(f"DEBUG: Final SQL query for list_user_documents: {query_str}")
@@ -1599,6 +1700,7 @@ async def list_user_documents(
             document_list_query = text(query_str)
             document_list_result = await db.execute(document_list_query, params)
             documents = [dict(row) for row in document_list_result.mappings()]
+            documents = await _attach_physical_document_ids(db, account_id, documents)
  
             logger.info(f"✅ Listados {len(documents)} documentos usando consulta optimizada.")
             return documents
@@ -1633,7 +1735,7 @@ async def list_user_documents_all_teams(
             params: Dict[str, Any] = {"account_id": account_id}
 
             if workspace_id:
-                clauses.append("workspace_id = :workspace_id")
+                clauses.append("workspace_id::text = :workspace_id")
                 params["workspace_id"] = workspace_id
 
             if topic:
@@ -1641,18 +1743,21 @@ async def list_user_documents_all_teams(
                 params["topic"] = topic.description if isinstance(topic, FieldInfo) else topic
 
             # Consulta optimizada para obtener documentos únicos por document_id
-            # CORREGIDO: Usar document_id en lugar de file_name para evitar pérdida de documentos
+            # CORREGIDO: Normalizar document_id inválidos para no propagar el literal "None".
+            normalized_document_id_expr = "NULLIF(NULLIF(cmetadata->>'document_id', 'None'), '')"
+            distinct_expr = f"COALESCE({normalized_document_id_expr}, cmetadata->>'file_name')"
+            
             query_str = f"""
-                SELECT DISTINCT ON (cmetadata->>'document_id')
+                SELECT DISTINCT ON ({distinct_expr})
                        cmetadata->>'file_name' AS file_name,
                        topic AS topic,
                        cmetadata->>'title' AS title,
                        cmetadata->>'author' AS author,
-                       cmetadata->>'document_id' AS document_id,
+                       {normalized_document_id_expr} AS document_id,
                        workspace_id::text AS workspace_id
                 FROM langchain_pg_embedding
                 WHERE {" AND ".join(clauses)}
-                ORDER BY cmetadata->>'document_id', id;
+                ORDER BY {distinct_expr}, id;
             """
  
             logger.info(f" Query SQL para todos los documentos: {query_str}")
@@ -1661,6 +1766,7 @@ async def list_user_documents_all_teams(
             document_list_query = text(query_str)
             document_list_result = await db.execute(document_list_query, params)
             documents = [dict(row) for row in document_list_result.mappings()]
+            documents = await _attach_physical_document_ids(db, account_id, documents)
  
             logger.info(f"✅ Listados {len(documents)} documentos totales del usuario.")
             return documents

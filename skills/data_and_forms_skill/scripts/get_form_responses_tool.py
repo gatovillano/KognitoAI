@@ -98,7 +98,7 @@ class GetFormResponsesTool(BaseTool):
                 responses_stmt = select(FormResponse).where(
                     FormResponse.form_id == target_form.id,
                     FormResponse.account_id == account_uuid
-                ).order_by(FormResponse.created_at.desc()).limit(limit)
+                ).order_by(FormResponse.submitted_at.desc()).limit(limit)
                 
                 responses_result = await db.execute(responses_stmt)
                 responses = responses_result.scalars().all()
@@ -126,7 +126,7 @@ class GetFormResponsesTool(BaseTool):
                         responses_stmt = select(FormResponse).where(
                             FormResponse.form_id == form.id,
                             FormResponse.account_id == account_uuid
-                        ).order_by(FormResponse.created_at.desc()).limit(2) # Mostrar 2 respuestas por formulario
+                        ).order_by(FormResponse.submitted_at.desc()).limit(2) # Mostrar 2 respuestas por formulario
                         
                         responses_result = await db.execute(responses_stmt)
                         responses = responses_result.scalars().all()
@@ -136,8 +136,8 @@ class GetFormResponsesTool(BaseTool):
                             response_message += f"  Descripción: {form.description}\n"
                         if responses:
                             for res in responses:
-                                response_message += f"  - Respuesta (ID: {res.id}, Fecha: {res.created_at.strftime('%Y-%m-%d %H:%M')}):\n"
-                                for field_name, field_value in res.response_data.items():
+                                response_message += f"  - Respuesta (ID: {res.id}, Fecha: {res.submitted_at.strftime('%Y-%m-%d %H:%M')}):\n"
+                                for field_name, field_value in res.answers.items():
                                     response_message += f"    • {field_name}: {field_value}\n"
                         else:
                             response_message += "  No hay respuestas para este formulario.\n"
@@ -147,9 +147,9 @@ class GetFormResponsesTool(BaseTool):
                     return "No tienes ningún formulario creado en tu base de conocimiento."
 
     def _format_single_response(self, response: FormResponse) -> str:
-        formatted_data = "\n".join([f"    • {field_name}: {field_value}" for field_name, field_value in response.response_data.items()])
+        formatted_data = "\n".join([f"    • {field_name}: {field_value}" for field_name, field_value in response.answers.items()])
         return (
-            f"Respuesta (ID: {response.id}, Fecha: {response.created_at.strftime('%Y-%m-%d %H:%M')}):\n"
+            f"Respuesta (ID: {response.id}, Fecha: {response.submitted_at.strftime('%Y-%m-%d %H:%M')}):\n"
             f"{formatted_data}"
         )
 
