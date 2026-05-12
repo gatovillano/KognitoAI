@@ -139,6 +139,10 @@ class Account(Base):
     notifications_push = Column(Boolean, default=True, nullable=False, comment="Indica si las notificaciones push están habilitadas.")
     language = Column(String(10), nullable=False, default="en", comment="Idioma preferido de la interfaz de usuario (e.g., 'en', 'es').")
     privacy_data_sharing = Column(Boolean, default=False, nullable=False, comment="Indica si el usuario permite compartir datos para mejoras del servicio.")
+    custom_heartbeat_instructions = Column(Text, nullable=True, comment="Instrucciones personalizadas para el heartbeat autónomo de este usuario.")
+    custom_heartbeat_interval_minutes = Column(Integer, nullable=True, default=60, comment="Frecuencia en minutos para el heartbeat personalizado.")
+    custom_heartbeat_allowed_tools = Column(JSONB, nullable=True, server_default=text("'[]'::jsonb"), comment="Lista de IDs/nombres de herramientas permitidas para el heartbeat personalizado.")
+
     
     # Configuraciones de LLM Personalizadas
     llm_provider = Column(String(50), nullable=True, comment="Proveedor de LLM preferido (openai, google, anthropic, etc.).")
@@ -270,6 +274,7 @@ class Workspace(Base):
     user_document_topics = relationship("UserDocumentTopic", back_populates="workspace", cascade="all, delete-orphan")
     tasks = relationship("Task", back_populates="workspace", cascade="all, delete-orphan")
     agenda_events = relationship("AgendaEvent", back_populates="workspace", cascade="all, delete-orphan")
+    recordatorios = relationship("Recordatorio", back_populates="workspace", cascade="all, delete-orphan")
     permissions = relationship("WorkspacePermission", back_populates="workspace", cascade="all, delete-orphan") # NUEVA RELACIÓN
 
     def __repr__(self):
@@ -383,6 +388,9 @@ class UserDocumentTopic(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
     workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete='CASCADE'), nullable=True, index=True)
+    parent_id = Column(UUID(as_uuid=True), ForeignKey("user_document_topics.id", ondelete='CASCADE'), nullable=True, index=True)
+    position = Column(Integer, nullable=True, default=0)
+    item_type = Column(String(50), nullable=False, default='collection')  # 'collection' or 'folder'
 
     name = Column(String(255), nullable=False, comment="El nombre del tema/colección (corresponde al 'topic' en cmetadata).")
     description = Column(Text, nullable=True, comment="Descripción opcional de la colección.")
@@ -401,8 +409,8 @@ class UserDocumentTopic(Base):
 
     # Restricciones para asegurar que un usuario/workspace no tenga dos colecciones con el mismo nombre
     __table_args__ = (
-        Index('ix_account_workspace_topic', 'account_id', 'workspace_id', 'name', unique=True, postgresql_where=text("workspace_id IS NOT NULL")),
-        Index('ix_account_personal_topic', 'account_id', 'name', unique=True, postgresql_where=text("workspace_id IS NULL")),
+        Index('ix_account_workspace_parent_name', 'account_id', 'workspace_id', 'parent_id', 'name', unique=True, postgresql_where=text("workspace_id IS NOT NULL")),
+        Index('ix_account_personal_parent_name', 'account_id', 'parent_id', 'name', unique=True, postgresql_where=text("workspace_id IS NULL")),
     )
 
     def __repr__(self):
@@ -518,11 +526,14 @@ class Form(Base):
     schema = Column(JSONB, nullable=False, comment="Esquema JSON del formulario.")
     is_public = Column(Boolean, default=False, nullable=False, comment="Indica si el formulario es accesible públicamente.")
 
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete='CASCADE'), nullable=True, index=True)
+
     created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
     updated_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
 
     # Relación con Account
     account = relationship("Account", back_populates="forms")
+    workspace = relationship("Workspace", backref="forms")
 
     contact_profiles = relationship(
         "ContactProfile",
@@ -558,6 +569,8 @@ class FormResponse(Base):
     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=True, index=True) # Quien envió la respuesta
     contact_profile_id = Column(UUID(as_uuid=True), ForeignKey("contact_profiles.id"), nullable=True, index=True) # Si la respuesta está asociada a un perfil de contacto
 
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete='CASCADE'), nullable=True, index=True)
+
     answers = Column(JSONB, nullable=False, comment="Respuestas en formato JSONB (campo_id: valor).")
 
     submitted_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
@@ -565,6 +578,7 @@ class FormResponse(Base):
     # Relaciones
     form = relationship("Form", backref="responses")
     account = relationship("Account", backref="form_responses")
+    workspace = relationship("Workspace", backref="form_responses")
     contact_profile = relationship("ContactProfile", backref="form_responses", uselist=False)
 
     def __repr__(self):
@@ -772,6 +786,8 @@ class Recordatorio(Base):
     id = Column(Integer, primary_key=True, index=True)
     # Refactorizado: Se vincula a account_id
     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=True, index=True)
+    thread_id = Column(UUID(as_uuid=True), nullable=True, index=True)
     
     message = Column(Text, nullable=False)
     due_datetime = Column(DateTime(timezone=True), nullable=False)
@@ -780,6 +796,7 @@ class Recordatorio(Base):
     created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
 
     account = relationship("Account", back_populates="recordatorios")
+    workspace = relationship("Workspace", back_populates="recordatorios")
 
 class ChatThread(Base):
     __tablename__ = "chat_threads"
@@ -804,14 +821,18 @@ class ProactiveInsight(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey("workspaces.id", ondelete='CASCADE'), nullable=True, index=True)
     type = Column(String(50), nullable=False)
+    title = Column(String(255), nullable=True)  # Título del insight para referencia rápida
     insight_message = Column(Text, nullable=False)
     confidence_score = Column(Float, nullable=False)
     action_suggestion = Column(Text, nullable=True)
+    innovation_potential = Column(Text, nullable=True)  # Potencial de innovación o mejora transformadora
     related_items = Column(JSONB, nullable=True)  # Se almacena la lista de ítems como JSON (incluye tool_used en metadata)
     created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"), nullable=False)
 
     account = relationship("Account", back_populates="proactive_insights")
+    workspace = relationship("Workspace")
 
 
 class VerificationCode(Base):
@@ -1180,6 +1201,47 @@ class SharedConversationLink(Base):
         return f"<SharedConversationLink(id={self.id}, thread_id={self.thread_id}, token='{self.token[:16]}...' )>"
 
 
+class OnlyOfficeDocumentShare(Base):
+    """
+    Permite compartir documentos de OnlyOffice con enlaces publicos o con cuentas especificas.
+    """
+    __tablename__ = "onlyoffice_document_shares"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("onlyoffice_documents.id", ondelete='CASCADE'), nullable=False, index=True)
+    owner_account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id", ondelete='CASCADE'), nullable=False, index=True)
+    shared_with_account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id", ondelete='CASCADE'), nullable=True, index=True)
+
+    is_public = Column(Boolean, default=False, nullable=False, index=True)
+    can_edit = Column(Boolean, default=True, nullable=False)
+    token = Column(String(64), unique=True, nullable=True, index=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"), nullable=False)
+
+    document = relationship("Document", backref="share_entries")
+    owner_account = relationship("Account", foreign_keys=[owner_account_id])
+    shared_with_account = relationship("Account", foreign_keys=[shared_with_account_id])
+
+    __table_args__ = (
+        UniqueConstraint('document_id', 'shared_with_account_id', name='_onlyoffice_document_private_share_uc'),
+    )
+
+
+class OnlyOfficeDocumentChat(Base):
+    """
+    Mapea un documento de OnlyOffice a un hilo persistente para chat colaborativo.
+    """
+    __tablename__ = "onlyoffice_document_chats"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("onlyoffice_documents.id", ondelete='CASCADE'), nullable=False, unique=True, index=True)
+    thread_id = Column(UUID(as_uuid=True), ForeignKey("chat_threads.id", ondelete='CASCADE'), nullable=False, unique=True, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"), nullable=False)
+
+    document = relationship("Document", backref=backref("document_chat", passive_deletes=True))
+    thread = relationship("ChatThread")
+
+
 # ==============================================================================
 # SECCIÓN 2: FUNCIONES AUXILIARES DE LA BASE DE DATOS
 # ==============================================================================
@@ -1453,5 +1515,27 @@ class Document(Base):
 
     def __repr__(self):
         return f"<Document(id={self.id}, filename='{self.filename}')>"
+
+
+class SystemSettings(Base):
+    """
+    Tabla de configuraciones persistentes del sistema.
+    Almacena pares clave-valor para configuraciones de administración que
+    deben sobrevivir reinicios del servidor.
+    """
+    __tablename__ = "system_settings"
+
+    key = Column(String(255), primary_key=True, comment="Clave de la configuración")
+    value = Column(Text, nullable=True, comment="Valor de la configuración (serializado como texto/JSON)")
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=text("CURRENT_TIMESTAMP"),
+        onupdate=text("CURRENT_TIMESTAMP"),
+        comment="Última actualización"
+    )
+
+    def __repr__(self):
+        return f"<SystemSettings(key='{self.key}', value='{self.value}')>"
+
 
 # --- Al final del archivo, asegúrate de que todos los modelos estén definidos antes de exportar ---

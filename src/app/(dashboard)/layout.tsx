@@ -12,6 +12,7 @@ import { Toaster } from '@/components/ui/sonner';
 import Image from 'next/image';
 
 import { WebSocketProvider } from '@/contexts/WebSocketContext';
+import { TaskProvider } from '@/contexts/TaskContext';
 import { ProactiveInsightNotifier } from '@/components/ProactiveInsightNotifier';
 
 export default function DashboardLayout({
@@ -42,14 +43,16 @@ export default function DashboardLayout({
   return (
     <WorkspaceProvider>
       <WebSocketProvider>
-        <ProactiveInsightNotifier />
-        <DndProvider backend={HTML5Backend}>
-          <WorkspaceTitleProvider>
-            <AppShell>
-              {React.isValidElement(children) ? children : null}
-            </AppShell>
-          </WorkspaceTitleProvider>
-        </DndProvider>
+        <TaskProvider>
+          <ProactiveInsightNotifier />
+          <DndProvider backend={HTML5Backend}>
+            <WorkspaceTitleProvider>
+              <AppShell>
+                {React.isValidElement(children) ? children : null}
+              </AppShell>
+            </WorkspaceTitleProvider>
+          </DndProvider>
+        </TaskProvider>
       </WebSocketProvider>
     </WorkspaceProvider>
   );

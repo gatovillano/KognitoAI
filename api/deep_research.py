@@ -6,11 +6,13 @@ from langchain_core.messages import HumanMessage, AIMessage
 from typing import List, Union 
 
 from core.agents.deep_researcher import compile_deep_researcher_graph
-from core.llm_manager import get_main_llm
+from core.llm_manager import get_main_llm, get_llm_for_user
+from core.utils.llm_utils import safe_bind_tools  # OpenRouter compatibility
 from langchain_core.language_models.base import BaseLanguageModel
 from langchain_core.messages import BaseMessage 
 from langchain_core.prompts import ChatPromptTemplate
 from skills.document_management_skill.scripts.create_pdf_tool import CreatePDFTool 
+from utils.security import get_current_account_id
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +40,7 @@ class DeepResearchPDFExportRequest(BaseModel):
     final_report: str
     sources: List[dict] = []
     recommendations: List[str] = []
-    account_id: str = "api_user"
+    # account_id se obtiene del token, no del body
 
 async def get_llm_instance() -> BaseLanguageModel:
     llm = get_main_llm()
@@ -188,21 +190,31 @@ async def clarify_deep_research(
 @router.post("/deep_research/export_pdf")
 async def export_deep_research_pdf(
     request: DeepResearchPDFExportRequest,
-    llm_instance: BaseLanguageModel = Depends(get_llm_instance)
+    current_account_id: str = Depends(get_current_account_id)
 ):
     """
     Genera un PDF profesional a partir de los resultados de una investigación profunda
     utilizando un LLM para formatear el contenido y la herramienta CreatePDFTool.
     """
     try:
-        # 1. Preparar las herramientas
+        # 1. Obtener el LLM configurado para el usuario específico
+        llm_instance = await get_llm_for_user(current_account_id, purpose="main")
+        if not llm_instance:
+            logger.error(f"❌ No se pudo obtener LLM para account_id: {current_account_id}")
+            raise HTTPException(status_code=500, detail="Could not initialize LLM for your account. Please check your LLM configuration.")
+
+        # Log del modelo en uso
+        model_name = getattr(llm_instance, "model_name", getattr(llm_instance, "model", "unknown"))
+        logger.info(f"🤖 Export PDF: Using LLM model '{model_name}' for account {current_account_id}")
+
+        # 2. Preparar las herramientas
         pdf_tool = CreatePDFTool()
         
-        # 2. Configurar el LLM con la herramienta
+        # 3. Configurar el LLM con la herramienta
         # Usamos bind_tools para que el LLM sepa que puede usar esta herramienta
-        llm_with_tools = llm_instance.bind_tools([pdf_tool])
+        llm_with_tools = safe_bind_tools(llm_instance, [pdf_tool])
         
-        # 3. Construir el prompt para el LLM
+        # 4. Construir el prompt para el LLM
         prompt = ChatPromptTemplate.from_messages([
             ("system", """Eres un experto en diseño y maquetación de documentos profesionales.
 Tu tarea es tomar la información de una investigación profunda y formatearla en un documento HTML elegante y bien estructurado.

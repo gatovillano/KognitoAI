@@ -85,7 +85,7 @@ export function NoteDialog({ note, isOpen, onOpenChange, onSaveSuccess, workspac
     const fetchWorkspaces = async () => {
       setLoadingWorkspaces(true);
       try {
-        const response = await apiClient.get('/api/workspaces');
+        const response = await apiClient.get('/api/workspaces', { params: { limit: 100 } });
         // Asegurarse de que response.data sea un array antes de asignarlo
         if (Array.isArray(response.data)) {
           setWorkspaces(response.data);

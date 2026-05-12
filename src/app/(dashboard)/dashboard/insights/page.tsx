@@ -4,10 +4,11 @@
 
 import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
 import { InsightDetailDialog } from '@/components/InsightDetailDialog';
-import { Bot, Library, FileText, FolderKanban } from 'lucide-react';
+import { Bot, Library, FileText, FolderKanban, CheckCircle, XCircle } from 'lucide-react';
 import Link from 'next/link';
 
 // Tipos
@@ -82,18 +83,54 @@ export default function AllInsightsPage() {
                 </CardHeader>
                 <CardContent className="flex-grow flex flex-col justify-between">
                   <p className="text-sm text-muted-foreground line-clamp-4 mb-3">{insight.summary}</p>
-                  <div className="text-xs space-y-1 mt-auto">
-                    <p className="font-semibold">Ítems Relacionados:</p>
-                    {insight.related_items.slice(0, 3).map((item, idx) => (
-                      <p key={idx} className="flex items-center gap-1.5 text-muted-foreground truncate">
-                        <FileText className="h-3 w-3" />
-                        {item.title || item.reference}
-                      </p>
-                    ))}
-                     {insight.related_items.length > 3 && (
-                      <p className="text-muted-foreground text-xs">y {insight.related_items.length - 3} más...</p>
-                    )}
-                  </div>
+                    <div className="flex items-center justify-between mt-auto">
+                      <div className="text-xs space-y-1">
+                        <p className="font-semibold">Ítems Relacionados:</p>
+                        {insight.related_items.slice(0, 3).map((item, idx) => (
+                          <p key={idx} className="flex items-center gap-1.5 text-muted-foreground truncate">
+                            <FileText className="h-3 w-3" />
+                            {item.title || item.reference}
+                          </p>
+                        ))}
+                        {insight.related_items.length > 3 && (
+                          <p className="text-muted-foreground text-xs">y {insight.related_items.length - 3} más...</p>
+                        )}
+                      </div>
+                      <div className="flex gap-1 ml-4">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-green-500 hover:text-green-600 hover:bg-green-50"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toast.success('Insight aceptado');
+                          }}
+                        >
+                          <CheckCircle className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-red-500 hover:text-red-600 hover:bg-red-50"
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            if (confirm('¿Eliminar insight?')) {
+                              try {
+                                await apiClient.delete('/api/delete-proactive-insight', { 
+                                  data: { insight_id: insight.id } 
+                                });
+                                toast.success('Insight eliminado');
+                                setInsights(prev => prev.filter(i => i.id !== insight.id));
+                              } catch (err) {
+                                toast.error('Error al eliminar');
+                              }
+                            }
+                          }}
+                        >
+                          <XCircle className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
                 </CardContent>
               </Card>
             ))}

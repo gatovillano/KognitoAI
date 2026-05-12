@@ -39,6 +39,7 @@ import { KeyTopicSlider } from '@/components/KeyTopicSlider';
 import { KeyTopicDetailDialog } from '@/components/KeyTopicDetailDialog';
 import { AnalysisDetailDialog } from '@/app/(dashboard)/analysis/analysis-detail-dialog';
 import { DeepResearchDetailDialog } from '@/app/(dashboard)/analysis/deep-research-detail-dialog';
+import { DraftDetailDialog } from '@/app/(dashboard)/analysis/draft-detail-dialog'; // NUEVO
 import { InlineMarkdownRenderer } from '@/components/InlineMarkdownRenderer';
 
 const getAnalysisIcon = (type: string) => {
@@ -60,7 +61,7 @@ const getAnalysisIcon = (type: string) => {
         case 'note_collection_analysis':
             return <FolderKanban className="h-5 w-5 text-orange-500" />;
         case 'gap_development':
-            return <Zap className="h-5 w-5 text-fuchsia-500" />;
+            return <FileText className="h-5 w-5 text-fuchsia-500" />;
         case 'deep_research':
             return <Search className="h-5 w-5 text-blue-500" />;
         case 'comprehensive_web_analysis':
@@ -70,7 +71,7 @@ const getAnalysisIcon = (type: string) => {
     }
 };
 
-const getAnalysisTypeLabel = (type: string) => {
+const getAnalysisTypeLabel = (type: string, mode?: string) => {
     switch (type) {
         case 'document': return 'Documento';
         case 'collection': return 'Colección';
@@ -83,14 +84,14 @@ const getAnalysisTypeLabel = (type: string) => {
         case 'knowledge_graph': return 'Grafo de Conocimiento';
         case 'note_analysis': return 'Nota';
         case 'note_collection_analysis': return 'Colección de Notas';
-        case 'gap_development': return 'Desarrollo de Brecha';
+        case 'gap_development': return mode === 'draft' ? 'Borrador' : 'Investigación';
         case 'deep_research': return 'Investigación Profunda';
         case 'comprehensive_web_analysis': return 'Análisis Web Integral';
         default: return 'Análisis';
     }
 };
 
-const getAnalysisTypeBadgeColor = (type: string) => {
+const getAnalysisTypeBadgeColor = (type: string, mode?: string) => {
     switch (type) {
         case 'document': return 'bg-blue-100 text-blue-800 border-blue-200';
         case 'collection': return 'bg-green-100 text-green-800 border-green-200';
@@ -101,7 +102,7 @@ const getAnalysisTypeBadgeColor = (type: string) => {
         case 'semantic_summary': return 'bg-indigo-100 text-indigo-800 border-indigo-200';
         case 'note_analysis': return 'bg-amber-100 text-amber-800 border-amber-200';
         case 'note_collection_analysis': return 'bg-orange-100 text-orange-800 border-orange-200';
-        case 'gap_development': return 'bg-fuchsia-100 text-fuchsia-800 border-fuchsia-200';
+        case 'gap_development': return mode === 'draft' ? 'bg-fuchsia-100 text-fuchsia-800 border-fuchsia-200' : 'bg-purple-100 text-purple-800 border-purple-200';
         case 'deep_research': return 'bg-blue-100 text-blue-800 border-blue-200';
         case 'comprehensive_web_analysis': return 'bg-cyan-100 text-cyan-800 border-cyan-200';
         default: return 'bg-gray-100 text-gray-800 border-gray-200';
@@ -334,9 +335,10 @@ export function AnalysisView() {
         { value: 'code', label: 'Código' },
         { value: 'semantic', label: 'Semántico' },
         { value: 'semantic_summary', label: 'Resumen Semántico' },
-        { value: 'gap_development', label: 'Desarrollo de Brecha' },
+        { value: 'gap_development', label: 'Borradores y Desarrollo' },
         { value: 'deep_research', label: 'Investigación Profunda' },
         { value: 'comprehensive_web_analysis', label: 'Análisis Web Integral' }
+
     ];
 
     const chartData = useMemo(() => {
@@ -586,9 +588,24 @@ export function AnalysisView() {
                                                 <div className="p-3 rounded-2xl bg-background/50 border border-border/40 shadow-inner group-hover:scale-110 transition-transform duration-500">
                                                     {getAnalysisIcon(analysis.type)}
                                                 </div>
-                                                <Badge variant="outline" className={`text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-full border-none ${getAnalysisTypeBadgeColor(analysis.type)}`}>
-                                                    {getAnalysisTypeLabel(analysis.type)}
-                                                </Badge>
+                                                <div className="flex gap-2 items-center">
+                                                    {analysis.workspace_name && (
+                                                        <Badge 
+                                                            variant="outline" 
+                                                            className="text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-full border-border/40" 
+                                                            style={{ 
+                                                                color: analysis.workspace_color || 'inherit', 
+                                                                borderColor: analysis.workspace_color ? `${analysis.workspace_color}40` : undefined, 
+                                                                backgroundColor: analysis.workspace_color ? `${analysis.workspace_color}10` : undefined 
+                                                            }}
+                                                        >
+                                                            {analysis.workspace_name}
+                                                        </Badge>
+                                                    )}
+                                                    <Badge variant="outline" className={`text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-full border-none ${getAnalysisTypeBadgeColor(analysis.type, analysis.result_payload?.mode || (analysis as any).report?.mode)}`}>
+                                                        {getAnalysisTypeLabel(analysis.type, analysis.result_payload?.mode || (analysis as any).report?.mode)}
+                                                    </Badge>
+                                                </div>
                                             </div>
                                             <CardTitle className="text-lg font-bold line-clamp-2 group-hover:text-primary transition-colors leading-tight tracking-tight">
                                                 {analysis.title}
@@ -604,8 +621,44 @@ export function AnalysisView() {
                                                     {formatDate(analysis.created_at || new Date().toISOString())}
                                                 </div>
                                                 <div className="flex items-center gap-1 group-hover:text-primary transition-colors">
-                                                    <span>Detalles</span>
-                                                    <Eye className="h-3.5 w-3.5" />
+                                                    {(analysis.type === 'neural_insight' || analysis.type === 'insight' || analysis.type === 'proactive_insight') ? (
+                                                        <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                className="h-6 w-6 text-green-500 hover:text-green-600 hover:bg-green-50"
+                                                                onClick={() => {
+                                                                    toast.success('Insight aceptado');
+                                                                }}
+                                                            >
+                                                                <CheckCircle className="h-4 w-4" />
+                                                            </Button>
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                className="h-6 w-6 text-red-500 hover:text-red-600 hover:bg-red-50"
+                                                                onClick={async () => {
+                                                                    if (confirm('¿Eliminar insight?')) {
+                                                                        try {
+                                                                            await apiClient.delete('/api/delete-analysis', { 
+                                                                                data: { task_id: analysis.id } 
+                                                                            });
+                                                                            handleAnalysisDeleted(analysis.id);
+                                                                        } catch (err) {
+                                                                            toast.error('Error al eliminar');
+                                                                        }
+                                                                    }
+                                                                }}
+                                                            >
+                                                                <XCircle className="h-4 w-4" />
+                                                            </Button>
+                                                        </div>
+                                                    ) : (
+                                                        <>
+                                                            <span>Detalles</span>
+                                                            <Eye className="h-3.5 w-3.5" />
+                                                        </>
+                                                    )}
                                                 </div>
                                             </div>
                                         </CardContent>
@@ -627,22 +680,56 @@ export function AnalysisView() {
             </div>
 
             {/* Diálogos y Modales */}
-            {selectedAnalysis && selectedAnalysis.type !== 'deep_research' && (
-                <AnalysisDetailDialog
-                    analysis={selectedAnalysis}
-                    isOpen={!!selectedAnalysis}
-                    onOpenChange={(open) => !open && setSelectedAnalysis(null)}
-                    onAnalysisDeleted={handleAnalysisDeleted}
-                />
-            )}
+            {selectedAnalysis && (() => {
+                let payload = (selectedAnalysis as any).result_payload || (selectedAnalysis as any).result || {};
+                if (typeof payload === 'string') {
+                    try { payload = JSON.parse(payload); } catch (e) {}
+                }
+                const metadata = (selectedAnalysis as any).metadata || {};
+                let result = (selectedAnalysis as any).result || {};
+                if (typeof result === 'string') {
+                    try { result = JSON.parse(result); } catch (e) {}
+                }
+                const report = payload.report || result.report || (selectedAnalysis as any).report || payload || {};
 
-            {selectedAnalysis && selectedAnalysis.type === 'deep_research' && (
-                <DeepResearchDetailDialog
-                    analysis={selectedAnalysis}
-                    isOpen={!!selectedAnalysis}
-                    onOpenChange={(open) => !open && setSelectedAnalysis(null)}
-                />
-            )}
+                // Búsqueda robusta del modo 'draft'
+                const isDraft = selectedAnalysis.type === 'gap_development' && (
+                    payload.mode === 'draft' || 
+                    metadata.mode === 'draft' || 
+                    report.mode === 'draft' ||
+                    result.mode === 'draft' ||
+                    (selectedAnalysis as any).mode === 'draft' ||
+                    selectedAnalysis.title.toLowerCase().includes('borrador') ||
+                    selectedAnalysis.title.toLowerCase().includes('draft')
+                );
+
+                if (isDraft) {
+                    return (
+                        <DraftDetailDialog
+                            analysis={selectedAnalysis}
+                            isOpen={!!selectedAnalysis}
+                            onOpenChange={(open) => !open && setSelectedAnalysis(null)}
+                        />
+                    );
+                } else if (selectedAnalysis.type === 'gap_development' || selectedAnalysis.type === 'deep_research') {
+                    return (
+                        <DeepResearchDetailDialog
+                            analysis={selectedAnalysis}
+                            isOpen={!!selectedAnalysis}
+                            onOpenChange={(open) => !open && setSelectedAnalysis(null)}
+                        />
+                    );
+                } else {
+                    return (
+                        <AnalysisDetailDialog
+                            analysis={selectedAnalysis}
+                            isOpen={!!selectedAnalysis}
+                            onOpenChange={(open) => !open && setSelectedAnalysis(null)}
+                            onAnalysisDeleted={handleAnalysisDeleted}
+                        />
+                    );
+                }
+            })()}
 
             <Dialog open={showInsightFormModal} onOpenChange={setShowInsightFormModal}>
                 <DialogContent className="sm:max-w-[425px]">

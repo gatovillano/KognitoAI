@@ -11,10 +11,12 @@ import { Textarea } from '@/components/ui/textarea';
 import { Loader2 } from 'lucide-react';
 
 interface Collection {
-  topic: string;
+  id?: string;
+  name: string;
+  topic?: string;
   description?: string;
   document_count: number;
-  workspace_id?: string; // Add workspace_id
+  workspace_id?: string;
 }
 
 interface EditCollectionDialogProps {
@@ -22,8 +24,8 @@ interface EditCollectionDialogProps {
   onOpenChange: (open: boolean) => void;
   onEditSuccess: () => void;
   collection: Collection | null;
-  workspaceId?: string; // Pass workspaceId from parent
-  teamId?: string;     // Pass teamId from parent
+  workspaceId?: string;
+  teamId?: string;
 }
 
 export function EditCollectionDialog({ isOpen, onOpenChange, onEditSuccess, collection, workspaceId, teamId }: EditCollectionDialogProps) {
@@ -36,7 +38,7 @@ export function EditCollectionDialog({ isOpen, onOpenChange, onEditSuccess, coll
 
   useEffect(() => {
     if (isOpen && collection) {
-      setTopicName(collection.topic);
+      setTopicName(collection.name || collection.topic || '');
       setDescription(collection.description || '');
       setSelectedWorkspaceId(collection.workspace_id || '');
     }
@@ -46,7 +48,7 @@ export function EditCollectionDialog({ isOpen, onOpenChange, onEditSuccess, coll
     const fetchWorkspaces = async () => {
       setLoadingWorkspaces(true);
       try {
-        const response = await apiClient.get('/api/workspaces');
+        const response = await apiClient.get('/api/workspaces', { params: { limit: 100 } });
         if (Array.isArray(response.data)) {
           setWorkspaces(response.data);
         } else if (response.data && Array.isArray(response.data.workspaces)) {
@@ -70,17 +72,24 @@ export function EditCollectionDialog({ isOpen, onOpenChange, onEditSuccess, coll
   const handleEdit = async () => {
     if (!collection) return;
 
-    if (!topicName.trim() || topicName.trim().length < 3) {
+    const currentTopicName = topicName || '';
+    if (!currentTopicName.trim() || currentTopicName.trim().length < 3) {
       toast.error("El nombre de la colección debe tener al menos 3 caracteres.");
+      return;
+    }
+
+    const oldTopic = collection.name || collection.topic;
+    if (!oldTopic) {
+      toast.error("Error: No se pudo identificar la colección original.");
       return;
     }
 
     setIsLoading(true);
     try {
       await apiClient.post('/api/update-collection', {
-        old_topic: collection.topic,
-        new_topic: topicName.trim() !== collection.topic ? topicName.trim() : undefined,
-        new_description: description.trim() !== (collection.description || '') ? description.trim() : undefined,
+        old_topic: oldTopic,
+        new_topic: currentTopicName.trim() !== oldTopic ? currentTopicName.trim() : undefined,
+        new_description: (description || '').trim() !== (collection.description || '') ? (description || '').trim() : undefined,
         workspace_id: selectedWorkspaceId || undefined, // Send selected workspace
       });
 
@@ -153,7 +162,7 @@ export function EditCollectionDialog({ isOpen, onOpenChange, onEditSuccess, coll
           <Button variant="outline" onClick={handleClose} disabled={isLoading} className="w-full sm:w-auto">
             Cancelar
           </Button>
-          <Button onClick={handleEdit} disabled={isLoading || !topicName.trim()} className="w-full sm:w-auto">
+          <Button onClick={handleEdit} disabled={isLoading || !(topicName || '').trim()} className="w-full sm:w-auto">
             {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
             Guardar Cambios
           </Button>

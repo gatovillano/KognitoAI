@@ -3,7 +3,7 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Upload, History, Loader2, ScanSearch, FileText, FolderKanban, Text, Sparkles, ChevronDown, MoreHorizontal, Network, Brain, ArrowLeft, Info } from 'lucide-react';
+import { Upload, History, Loader2, ScanSearch, FileText, FolderKanban, Text, Sparkles, ChevronDown, MoreHorizontal, Network, Brain, ArrowLeft, Info, FolderPlus, Zap } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { useWebSocketContext } from '@/contexts/WebSocketContext';
@@ -13,8 +13,10 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { DocumentCard } from '@/app/(dashboard)/rag/document-card';
 import { useAuth } from '@/contexts/AuthContext'; // Importar useAuth
+import { useTaskContext } from '@/contexts/TaskContext';
 
 import { DataTable } from '@/app/(dashboard)/rag/data-table';
+import CollectionCreateDialog from './CollectionCreateDialog';
 import { getColumns, type Document } from '@/app/(dashboard)/rag/columns';
 import apiClient from '@/lib/api';
 import { UploadDocumentDialog } from '@/app/(dashboard)/rag/upload-document-dialog';
@@ -22,13 +24,15 @@ import { PreviewDocumentDialog } from '@/app/(dashboard)/rag/preview-document-di
 import { EditDocumentDialog } from '@/app/(dashboard)/rag/edit-document-dialog';
 import { DeleteConfirmationDialog } from '@/app/(dashboard)/rag/delete-confirmation-dialog';
 import { AnalysisDetailDialog } from '@/app/(dashboard)/analysis/analysis-detail-dialog';
+import { DeepResearchDetailDialog } from '@/app/(dashboard)/analysis/deep-research-detail-dialog';
+import { DraftDetailDialog } from '@/app/(dashboard)/analysis/draft-detail-dialog';
 import UploadProgressIndicator, { UploadTask } from '@/components/UploadProgressIndicator';
-import AnalysisProgressIndicator from '@/components/AnalysisProgressIndicator';
 import { ShareDocumentDialog } from '@/app/(dashboard)/rag/share-document-dialog';
 import { CustomAnalysisDialog } from '@/app/(dashboard)/rag/custom-analysis-dialog';
 import { DatasetNameDialog } from '@/app/(dashboard)/rag/dataset-name-dialog';
 import { MoveToCollectionDialog } from '@/app/(dashboard)/rag/move-to-collection-dialog';
 import { CollectionSearch } from '@/components/CollectionSearch';
+import { CollectionDisplay, Collection } from '@/components/CollectionDisplay';
 import { ContextualChat } from '@/components/ContextualChat';
 
 import { Analysis, AnalysisType } from '@/lib/models';
@@ -44,10 +48,14 @@ interface DocumentCollectionDisplayProps {
 export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, backButtonText = "Volver a Colecciones", backButtonHref = "/rag/all" }: DocumentCollectionDisplayProps) {
 
   const { user } = useAuth(); // Obtener el usuario del contexto de autenticación
+  const { addAnalysisTask, updateAnalysisTask } = useTaskContext();
   const [documents, setDocuments] = useState<Document[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [uploadTasks, setUploadTasks] = useState<UploadTask[]>([]);
   const [collectionDescription, setCollectionDescription] = useState<string | null>(null);
+  const [collectionDataState, setCollectionDataState] = useState<any | null>(null);
+  const [subcollections, setSubcollections] = useState<Collection[]>([]);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const isMobile = useMediaQuery('(max-width: 768px)'); // md breakpoint
   const { registerMessageHandler } = useWebSocketContext();
 
@@ -125,6 +133,7 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
 
       const savedAnalysesData = analysesRes.data;
       const collectionData = collectionRes.data;
+      setCollectionDataState(collectionData);
 
       setDocuments(prevDocs => {
         // Filtramos los placeholders que aún están pendientes o procesando
@@ -137,6 +146,17 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
 
       setSavedAnalyses(savedAnalysesData);
       setCollectionDescription(collectionData.description || null);
+      // Cargar subcolecciones directas (hijos) para mostrar como "carpetas"
+      try {
+        const parentId = collectionData.id;
+        const params: any = { parent_id: parentId };
+        if (workspaceId) params.workspace_id = workspaceId;
+        const childrenRes = await apiClient.get('/api/collections/children', { params });
+        const topChildren = childrenRes.data || [];
+        setSubcollections(topChildren);
+      } catch (e) {
+        console.error('No se pudieron cargar subcolecciones', e);
+      }
 
     } catch (error) {
       toast.error('Error al cargar los datos de la colección.');
@@ -357,7 +377,18 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
     setCurrentAnalysisType('document');
     try {
       const response = await apiClient.post('/api/start-document-analysis', { file_name: doc.file_name, ...(workspaceId && { workspace_id: workspaceId }) });
-      setDocPollingId(response.data.task_id);
+      const taskId = response.data.task_id;
+      setDocPollingId(taskId);
+      addAnalysisTask({
+        task_id: taskId,
+        phase: 'initializing',
+        message: `Iniciando análisis de "${doc.file_name}"...`,
+        progress_percent: 0,
+        is_complete: false,
+        has_error: false,
+        topic: topic,
+        type: 'document'
+      });
       toast.info(`Análisis para "${doc.file_name}" iniciado.`);
     } catch (error) { toast.error("No se pudo iniciar el análisis del documento."); }
   }, [docPollingId, collectionPollingId, workspaceId]);
@@ -367,7 +398,18 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
     setCurrentAnalysisType('collection');
     try {
       const response = await apiClient.post('/api/start-collection-analysis', { topic, ...(workspaceId && { workspace_id: workspaceId }) });
-      setCollectionPollingId(response.data.task_id);
+      const taskId = response.data.task_id;
+      setCollectionPollingId(taskId);
+      addAnalysisTask({
+        task_id: taskId,
+        phase: 'initializing',
+        message: `Iniciando análisis de la colección "${collectionName || topic}"...`,
+        progress_percent: 0,
+        is_complete: false,
+        has_error: false,
+        topic: topic,
+        type: 'collection'
+      });
       toast.info(`Análisis de la colección "${collectionName || topic}" iniciado.`);
     } catch (error) { toast.error("No se pudo iniciar el análisis de la colección."); }
   };
@@ -495,7 +537,18 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
     setCurrentAnalysisType('semantic_summary');
     try {
       const response = await apiClient.post('/api/start-semantic-summary', { topic, ...(workspaceId && { workspace_id: workspaceId }) });
-      setCollectionPollingId(response.data.task_id);
+      const taskId = response.data.task_id;
+      setCollectionPollingId(taskId);
+      addAnalysisTask({
+        task_id: taskId,
+        phase: 'initializing',
+        message: `Generando resumen semántico de "${collectionName || topic}"...`,
+        progress_percent: 0,
+        is_complete: false,
+        has_error: false,
+        topic: topic,
+        type: 'analysis'
+      });
       toast.info(`Resumen semántico de la colección "${collectionName || topic}" iniciado.`);
     } catch (error) { toast.error("No se pudo iniciar el resumen semántico de la colección."); }
   };
@@ -521,25 +574,51 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
     );
 
     try {
+      // Inicializar tarea localmente para feedback inmediato
+      const tempTaskId = `temp-${Date.now()}`;
+      addAnalysisTask({
+        task_id: tempTaskId,
+        phase: 'initializing',
+        message: 'Iniciando procesamiento...',
+        progress_percent: 0,
+        is_complete: false,
+        has_error: false,
+        processing_mode: mode,
+        topic: processingTopic || undefined,
+        type: 'graph'
+      });
+
       // Determinar qué endpoint usar basado en el modo
       if (mode === 'conceptual') {
         // Modo Conceptual: Usar la herramienta de Procesamiento Conceptual
-        await apiClient.post('/api/tools/run', {
+        const payload = {
           tool_name: "conceptual_processing",
           action: "process_documents",
           dataset_name: datasetName,  // Nombre para organizar el grafo
           topic: processingTopic || undefined,  // Nombre de la colección para filtrar documentos
           document_titles: documents.map(doc => doc.file_name), // Pasa los títulos de los documentos
-          workspace_id: processingWorkspaceId || undefined  // Workspace de la colección específica
-        });
+          workspace_id: processingWorkspaceId || undefined,  // Workspace de la colección específica
+          task_id: tempTaskId, // Pasar el ID temporal para seguimiento
+          background: true     // Forzar ejecución en background
+        };
+        const response = await apiClient.post('/api/skills/run', payload);
+        
+        // Actualizar el ID de la tarea temporal con el real si viene en la respuesta
+        if (response.data?.task_id) {
+          updateAnalysisTask(tempTaskId, { task_id: response.data.task_id });
+        }
       } else {
         // Modo Híbrido (Estándar): Llamar al endpoint optimizado
-        await apiClient.post('/api/knowledge-graph/process-knowledge-graph-optimized', {
+        const response = await apiClient.post('/api/knowledge-graph/process-knowledge-graph-optimized', {
           workspace_id: processingWorkspaceId || undefined,
           dataset_name: datasetName,
           topic: processingTopic || undefined,  // Filtrar por colección específica
           force_reprocess: true
         });
+        
+        if (response.data?.task_id) {
+          updateAnalysisTask(tempTaskId, { task_id: response.data.task_id });
+        }
       }
 
       toast.success(
@@ -561,7 +640,18 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
     setCurrentAnalysisType('knowledge_graph_analysis');
     try {
       const response = await apiClient.post('/api/documents/start-knowledge-graph-analysis', { topic, ...(workspaceId && { workspace_id: workspaceId }) });
-      setCollectionPollingId(response.data.task_id);
+      const taskId = response.data.task_id;
+      setCollectionPollingId(taskId);
+      addAnalysisTask({
+        task_id: taskId,
+        phase: 'initializing',
+        message: `Iniciando análisis de grafo para "${collectionName || topic}"...`,
+        progress_percent: 0,
+        is_complete: false,
+        has_error: false,
+        topic: topic,
+        type: 'graph'
+      });
       toast.info(`Análisis de Grafo de Conocimiento para la colección "${collectionName || topic}" iniciado.`);
     } catch (error) { toast.error("No se pudo iniciar el análisis de grafo de conocimiento."); }
   };
@@ -634,8 +724,12 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
                 <ChevronDown className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuContent align="end" className="w-56">              
+              <DropdownMenuItem onClick={() => setCreateDialogOpen(true)}>
+                Crear subcolección
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setIsChatOpen(true)}>
+
                 <Brain className="mr-2 h-4 w-4 text-primary" />
                 <span className="font-medium text-primary">Chatear con Colección</span>
               </DropdownMenuItem>
@@ -676,9 +770,7 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
         </div>
       </div>
 
-      {(docPollingId || collectionPollingId || isProcessingKnowledgeGraph) && (
-        <AnalysisProgressIndicator progress={analysisProgress} text={analysisText} />
-      )}
+
 
       {uploadTasks.length > 0 && (
         <div className="fixed bottom-6 right-6 z-50 w-80"><UploadProgressIndicator tasks={uploadTasks} /></div>
@@ -739,6 +831,72 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
           </CardContent>
         </Card>
 
+        {/* ── Subcolecciones ── */}
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <FolderKanban className="h-6 w-6 text-primary" />
+              <h2 className="text-2xl font-bold tracking-tight">Subcolecciones</h2>
+              {subcollections.length > 0 && (
+                <span className="text-sm font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+                  {subcollections.length}
+                </span>
+              )}
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={() => setCreateDialogOpen(true)}
+            >
+              <FolderPlus className="h-4 w-4" />
+              Nueva Subcolección
+            </Button>
+          </div>
+
+          {subcollections.length > 0 ? (
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
+              {subcollections.map((sc) => (
+                <CollectionDisplay
+                  key={sc.id}
+                  type="list"
+                  workspaceId={workspaceId}
+                  collection={{
+                    topic: sc.topic || '',
+                    name: sc.name || sc.topic || 'Sin nombre',
+                    document_count: sc.document_count ?? 0,
+                    subcollection_count: sc.subcollection_count ?? 0,
+                    description: sc.description,
+                    workspace_id: sc.workspace_id,
+                    workspace_name: sc.workspace_name,
+                    workspace_color: sc.workspace_color,
+                    has_knowledge_graph: sc.has_knowledge_graph,
+                  }}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-16 border-2 border-dashed border-border/40 rounded-[2rem] bg-card/20 backdrop-blur-sm">
+              <div className="bg-primary/10 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+                <FolderKanban className="h-8 w-8 text-primary/40" />
+              </div>
+              <h3 className="text-lg font-bold tracking-tight">Sin subcolecciones</h3>
+              <p className="text-muted-foreground max-w-xs mx-auto mt-2 text-sm">
+                Organiza los documentos creando subcolecciones dentro de esta colección.
+              </p>
+              <Button
+                variant="outline"
+                className="mt-4 gap-2"
+                onClick={() => setCreateDialogOpen(true)}
+              >
+                <FolderPlus className="h-4 w-4" />
+                Crear primera subcolección
+              </Button>
+            </div>
+          )}
+        </div>
+
+        {/* ── Historial de Análisis ── */}
         <div className="space-y-4">
           <div className="flex items-center gap-3">
             <History className="h-6 w-6 text-primary" />
@@ -775,6 +933,11 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
                   icon = <Network className="h-5 w-5 text-cyan-500" />;
                   badgeColor = 'bg-cyan-100 text-cyan-800 border-cyan-200';
                   typeLabel = 'Grafo de Conocimiento';
+                } else if (fileName.includes('Investigación') || fileName.includes('Desarrollo de Brecha') || analysis.analysis_type === 'gap_development' || analysis.analysis_type === 'deep_research') {
+                  analysisType = 'gap_development';
+                  icon = <Zap className="h-5 w-5 text-fuchsia-500" />;
+                  badgeColor = 'bg-fuchsia-100 text-fuchsia-800 border-fuchsia-200';
+                  typeLabel = 'Investigación Profunda';
                 }
 
                 // Obtener el resumen según el tipo
@@ -791,6 +954,10 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
                   summary = typeof analysis.result_payload.analysis_result === 'string'
                     ? analysis.result_payload.analysis_result
                     : JSON.stringify(analysis.result_payload.analysis_result).substring(0, 200) + '...';
+                } else if (analysis.result_payload?.report?.summary || analysis.result_payload?.summary) {
+                  summary = analysis.result_payload?.report?.summary || analysis.result_payload?.summary;
+                } else if (analysis.result_payload?.final_report) {
+                  summary = analysis.result_payload.final_report.substring(0, 200) + '...';
                 }
 
                 return (
@@ -798,13 +965,19 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
                     key={analysis.id}
                     className="group relative cursor-pointer overflow-hidden border-border/40 bg-card/40 backdrop-blur-xl hover:bg-card/60 transition-all duration-500 rounded-[2rem] flex flex-col h-full shadow-sm hover:shadow-2xl hover:shadow-primary/5 hover:-translate-y-1"
                     onClick={() => {
+                      let payload = analysis.result_payload || analysis.result || {};
+                      if (typeof payload === 'string') {
+                        try { payload = JSON.parse(payload); } catch (e) {}
+                      }
+
                       const newAnalysis: Analysis = {
                         id: analysis.id,
-                        type: analysisType,
+                        type: analysis.analysis_type || analysisType,
                         title: fileName,
                         created_at: analysis.created_at,
-                        result: analysis.result_payload,
-                        full_data: analysis.result_payload,
+                        result: payload,
+                        result_payload: payload,
+                        full_data: payload,
                         file_name: fileName,
                       };
                       setSelectedAnalysis(newAnalysis);
@@ -883,15 +1056,48 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
       />
       <EditDocumentDialog isOpen={!!documentToEdit} onOpenChange={(open) => !open && setDocumentToEdit(null)} onUpdateSuccess={fetchPageData} document={documentToEdit} />
       <DeleteConfirmationDialog isOpen={!!documentToDelete} onOpenChange={(open) => !open && setDocumentToDelete(null)} onDeleteSuccess={fetchPageData} document={documentToDelete} />
-      <AnalysisDetailDialog
-        analysis={selectedAnalysis}
-        isOpen={!!selectedAnalysis}
-        onOpenChange={(open) => {
-          if (!open) {
-            setSelectedAnalysis(null);
-          }
-        }}
-      />
+      {selectedAnalysis && (() => {
+        let payload = (selectedAnalysis as any).result_payload || (selectedAnalysis as any).result || {};
+        if (typeof payload === 'string') {
+          try { payload = JSON.parse(payload); } catch (e) {}
+        }
+
+        const metadata = (selectedAnalysis as any).metadata || payload.analysis_metadata || {};
+        const report = payload.report || (selectedAnalysis as any).report || payload || {};
+
+        const isDraft = selectedAnalysis.type === 'gap_development' && (
+          payload.mode === 'draft' ||
+          metadata.mode === 'draft' ||
+          report.mode === 'draft' ||
+          (selectedAnalysis as any).mode === 'draft'
+        );
+
+        if (isDraft) {
+          return (
+            <DraftDetailDialog
+              analysis={selectedAnalysis}
+              isOpen={!!selectedAnalysis}
+              onOpenChange={(open) => !open && setSelectedAnalysis(null)}
+            />
+          );
+        } else if (selectedAnalysis.type === 'gap_development' || selectedAnalysis.type === 'deep_research') {
+          return (
+            <DeepResearchDetailDialog
+              analysis={selectedAnalysis}
+              isOpen={!!selectedAnalysis}
+              onOpenChange={(open) => !open && setSelectedAnalysis(null)}
+            />
+          );
+        } else {
+          return (
+            <AnalysisDetailDialog
+              analysis={selectedAnalysis}
+              isOpen={!!selectedAnalysis}
+              onOpenChange={(open) => !open && setSelectedAnalysis(null)}
+            />
+          );
+        }
+      })()}
       <ShareDocumentDialog isOpen={isShareOpen} onOpenChange={setIsShareOpen} onShareSuccess={fetchPageData} document={documentToShare} />
       <CustomAnalysisDialog
         isOpen={isCustomAnalysisOpen}
@@ -917,6 +1123,14 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
         document={documentToMove}
         onSuccess={fetchPageData}
         workspaceId={workspaceId}
+      />
+
+      <CollectionCreateDialog
+        open={createDialogOpen}
+        onOpenChange={setCreateDialogOpen}
+        parentId={collectionDataState?.id}
+        workspaceId={workspaceId}
+        onCreated={fetchPageData}
       />
 
       <ContextualChat

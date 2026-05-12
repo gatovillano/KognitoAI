@@ -10,6 +10,18 @@ from core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Categorías que siempre se cargan independientemente del filtro dinámico
+ALWAYS_ON_CATEGORIES = {"core_skills", "search_and_research_skill", "knowledge_and_memory_skill"}
+
+_skill_manager_instance = None
+
+def get_skill_manager(skills_dir: str = "skills") -> 'SkillManager':
+    """Retorna una instancia única (singleton) del SkillManager."""
+    global _skill_manager_instance
+    if _skill_manager_instance is None:
+        _skill_manager_instance = SkillManager(skills_dir)
+    return _skill_manager_instance
+
 class SkillManager:
     """
     Gestor dinámico de Skills para Kognito AI.
@@ -192,7 +204,8 @@ class SkillManager:
         workspace_id: Optional[str] = None,
         workspace_name: Optional[str] = None,
         progress_callback: Optional[Any] = None,
-        disabled_skills: Optional[List[str]] = None
+        disabled_skills: Optional[List[str]] = None,
+        relevant_categories: Optional[List[str]] = None,
     ) -> List[BaseTool]:
         """
         Escanea el directorio skills/ cargando skills nativas (categorias directas)
@@ -202,14 +215,14 @@ class SkillManager:
         
         # Invalidate import caches to ensure newly created skills are discoverable
         importlib.invalidate_caches()
-        logger.debug("Import caches invalidated before loading skills.")
+        logger.info(f"🔄 Scanning for skills. Account: {account_id}, Workspace: {workspace_name}")
         
         loaded_tools = []
         if not os.path.exists(self.skills_dir):
             logger.warning(f"Skills directory {self.skills_dir} does not exist.")
             return loaded_tools
 
-        # 1. Identificar categorías nativas (todos los subdirectorios excepto user_*)
+        # 1. Identificar categorías nativas
         native_categories = []
         for item in os.listdir(self.skills_dir):
             item_path = os.path.join(self.skills_dir, item)
@@ -218,20 +231,20 @@ class SkillManager:
 
         # 2. Identificar scopes de usuario
         user_scopes = ["user_global"]
-        
-        # Scope por cuenta (privado del usuario)
         if account_id:
             user_scopes.append(f"user_account_{account_id}")
-            
-        # Scope por espacio de trabajo (compartido en el workspace)
         if workspace_name:
             user_scopes.append(f"user_workspace_{workspace_name}")
 
         # --- CARGAR SKILLS NATIVAS ---
         for category in native_categories:
             if disabled_skills and category in disabled_skills:
-                logger.info(f"Habilidad nativa '{category}' está desactivada. Saltando.")
                 continue
+
+            if relevant_categories is not None:
+                allowed = set(relevant_categories) | ALWAYS_ON_CATEGORIES
+                if category not in allowed:
+                    continue
                 
             category_path = os.path.join(self.skills_dir, category)
             scripts_path = os.path.join(category_path, "scripts")
@@ -242,7 +255,6 @@ class SkillManager:
             for file in os.listdir(scripts_path):
                 if file.endswith(".py") and not file.startswith("__"):
                     module_name = file[:-3]
-                    # Path: skills.[category].scripts.[module_name]
                     module_path = f"skills.{category}.scripts.{module_name}"
                     await self._load_module_and_instantiate(
                         module_path, account_id, telegram_id, thread_id, 
@@ -257,7 +269,6 @@ class SkillManager:
 
             for skill_folder in os.listdir(scope_path):
                 if disabled_skills and skill_folder in disabled_skills:
-                    logger.info(f"Habilidad de usuario '{skill_folder}' está desactivada en scope {scope}. Saltando.")
                     continue
                     
                 skill_folder_path = os.path.join(scope_path, skill_folder)
@@ -266,20 +277,32 @@ class SkillManager:
 
                 skill_description = self._read_markdown_description(skill_folder_path, skill_folder)
                 scripts_path = os.path.join(skill_folder_path, "scripts")
-                if not os.path.exists(scripts_path): continue
+                if not os.path.exists(scripts_path):
+                    continue
 
                 for file in os.listdir(scripts_path):
                     if file.endswith(".py") and not file.startswith("__"):
                         module_name = file[:-3]
                         # Path: skills.[scope].[skill_folder].scripts.[module_name]
                         module_path = f"skills.{scope}.{skill_folder}.scripts.{module_name}"
+                        logger.info(f"🧪 Found user skill script: {file} in {scope}/{skill_folder}")
                         await self._load_module_and_instantiate(
                             module_path, account_id, telegram_id, thread_id, 
                             workspace_id, workspace_name, progress_callback, 
                             skill_description, loaded_tools
                         )
 
+        logger.info(f"✅ Total skills loaded in this session: {len(loaded_tools)}")
         return loaded_tools
+
+    async def reload_user_skills(self, account_id: str, workspace_name: Optional[str] = None):
+        """
+        Limpia caches y asegura que las habilidades del usuario sean re-escaneadas.
+        """
+        importlib.invalidate_caches()
+        # Limpiar el registro interno de herramientas para forzar re-instanciación
+        self._loaded_tools = {}
+        logger.info(f"🔄 Caches de importación y registro de herramientas invalidados para recarga de skills (account: {account_id})")
 
     async def _load_module_and_instantiate(
         self, module_path, account_id, telegram_id, thread_id, 
@@ -288,13 +311,30 @@ class SkillManager:
     ):
         try:
             import sys
+            
+            # --- Robustez para paquetes dinámicos ---
+            # Si el path tiene varios puntos (ej: skills.user_account_X.myskill...),
+            # nos aseguramos de que cada nivel intermedio esté en sys.modules si existe __init__.py
+            parts = module_path.split('.')
+            for i in range(1, len(parts)):
+                parent_path = '.'.join(parts[:i])
+                if parent_path not in sys.modules:
+                    try:
+                        importlib.import_module(parent_path)
+                    except Exception as e:
+                        logger.debug(f"Could not preemptively import parent package {parent_path}: {e}")
+
             is_reload = module_path in sys.modules
             
-            module = importlib.import_module(module_path)
+            # Forzar recarga del sistema de importación
+            importlib.invalidate_caches()
+            
             if is_reload:
+                module = sys.modules[module_path]
                 importlib.reload(module)
                 logger.debug(f"🔄 Module reloaded: {module_path}")
             else:
+                module = importlib.import_module(module_path)
                 logger.debug(f"🆕 Module imported for the first time: {module_path}")
                 
             tool_classes = self._get_tool_classes_from_module(module)
@@ -315,6 +355,16 @@ class SkillManager:
                     
                     loaded_tools.append(instance)
                     self._loaded_tools[instance.name] = instance
-                    logger.info(f"✅ Skill loaded: {instance.name} (from {module_path})")
+                    
+                    # Marcar si es una skill de usuario para priorización en el agente
+                    if ".user_" in module_path:
+                        try:
+                            setattr(instance, 'is_user_skill', True)
+                        except:
+                            if hasattr(instance, "__dict__"):
+                                instance.__dict__['is_user_skill'] = True
+                        logger.info(f"✅ User Skill loaded: {instance.name} (from {module_path})")
+                    else:
+                        logger.info(f"✅ Native Skill loaded: {instance.name} (from {module_path})")
         except Exception as e:
             logger.error(f"Failed to load module {module_path}: {e}")

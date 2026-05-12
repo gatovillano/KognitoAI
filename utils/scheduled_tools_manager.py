@@ -10,7 +10,8 @@ que deben ejecutarse automáticamente en el sistema.
 import logging
 from datetime import time
 from typing import Optional, List, Dict, Any
-from utils.tool_scheduler import tool_scheduler, schedule_daily_analysis, schedule_daily_insights
+from utils.tool_scheduler import tool_scheduler, schedule_daily_analysis, schedule_daily_insights, schedule_autonomous_agent_heartbeat, schedule_custom_user_heartbeat
+from core.config import settings
 from core.database import SessionLocal, Account
 from utils.db_session import DBSession
 from sqlalchemy import select
@@ -27,6 +28,7 @@ class ScheduledToolsManager:
         self.default_schedules = {
             "daily_analysis": {"hour": 2, "minute": 0},  # 2:00 AM
             "daily_insights": {"hour": 8, "minute": 0},  # 8:00 AM
+            "autonomous_heartbeat": {"interval_hours": settings.autonomous_heartbeat_interval_hours},
             "weekly_cleanup": {"day": 6, "hour": 3, "minute": 0},  # Domingo 3:00 AM
         }
     
@@ -81,19 +83,34 @@ class ScheduledToolsManager:
             
             for account in accounts:
                 account_id = str(account.id)
-                
-                # Programar insights diarios por cuenta
-                config = self.default_schedules["daily_insights"]
-                success = await schedule_daily_insights(
-                    account_id=account_id,
-                    hour=config["hour"],
-                    minute=config["minute"]
-                )
-                
-                if success:
-                    logger.info(f"✅ Insights diarios programados para cuenta {account_id}")
+
+                if settings.autonomous_heartbeat_enabled and settings.get_proactive_insights_enabled:
+                    heartbeat_config = self.default_schedules["autonomous_heartbeat"]
+                    success = await schedule_autonomous_agent_heartbeat(
+                        account_id=account_id,
+                        interval_hours=heartbeat_config["interval_hours"],
+                    )
+
+                    if success:
+                        logger.info(f"✅ Heartbeat autónomo programado para cuenta {account_id}")
+                    else:
+                        logger.warning(f"⚠️ Error al programar heartbeat autónomo para cuenta {account_id}")
                 else:
-                    logger.warning(f"⚠️ Error al programar insights para cuenta {account_id}")
+                    logger.info(f"Heartbeat autónomo deshabilitado para cuenta {account_id} por configuración")
+                    
+                # Programar heartbeat personalizado si está configurado
+                if account.custom_heartbeat_instructions:
+                    interval_minutes = account.custom_heartbeat_interval_minutes or 60
+                    tools = account.custom_heartbeat_allowed_tools or []
+                    success_custom = await schedule_custom_user_heartbeat(
+                        account_id=account_id,
+                        interval_minutes=interval_minutes,
+                        allowed_tools=tools,
+                    )
+                    if success_custom:
+                        logger.info(f"✅ Heartbeat personalizado programado para cuenta {account_id}")
+                    else:
+                        logger.warning(f"⚠️ Error al programar heartbeat personalizado para cuenta {account_id}")
     
     async def _schedule_maintenance_tools(self):
         """Programa herramientas de mantenimiento del sistema."""
@@ -147,19 +164,18 @@ class ScheduledToolsManager:
             account_id: ID de la cuenta nueva
         """
         logger.info(f"Agregando herramientas programadas para nueva cuenta: {account_id}")
-        
-        # Programar insights diarios para la nueva cuenta
-        config = self.default_schedules["daily_insights"]
-        success = await schedule_daily_insights(
-            account_id=account_id,
-            hour=config["hour"],
-            minute=config["minute"]
-        )
-        
-        if success:
-            logger.info(f"✅ Insights diarios programados para nueva cuenta {account_id}")
-        else:
-            logger.warning(f"⚠️ Error al programar insights para nueva cuenta {account_id}")
+
+        if settings.autonomous_heartbeat_enabled and settings.get_proactive_insights_enabled:
+            config = self.default_schedules["autonomous_heartbeat"]
+            success = await schedule_autonomous_agent_heartbeat(
+                account_id=account_id,
+                interval_hours=config["interval_hours"],
+            )
+
+            if success:
+                logger.info(f"✅ Heartbeat autónomo programado para nueva cuenta {account_id}")
+            else:
+                logger.warning(f"⚠️ Error al programar heartbeat autónomo para nueva cuenta {account_id}")
     
     async def remove_account_scheduled_tools(self, account_id: str):
         """
@@ -169,10 +185,13 @@ class ScheduledToolsManager:
             account_id: ID de la cuenta a eliminar
         """
         logger.info(f"Eliminando herramientas programadas para cuenta: {account_id}")
-        
-        # Cancelar insights diarios
-        job_name = f"daily_daily_insights_{account_id}"
-        success = tool_scheduler.cancel_scheduled_tool(job_name)
+
+        success = False
+        for job_name in (
+            f"interval_autonomous_heartbeat_{account_id}",
+            f"daily_daily_insights_{account_id}",
+        ):
+            success = tool_scheduler.cancel_scheduled_tool(job_name) or success
         
         if success:
             logger.info(f"✅ Herramientas programadas eliminadas para cuenta {account_id}")

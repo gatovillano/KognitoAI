@@ -4,10 +4,75 @@
 
 import { Source, ContentPart } from '@/components/SourceButton';
 
+const getNormalizedSourceId = (rawSource: any, fallbackIndex: number): string | number => {
+  if (rawSource.id !== undefined && rawSource.id !== null && rawSource.id !== '') {
+    return rawSource.id;
+  }
+
+  if (rawSource.metadata?.document_id) {
+    return rawSource.metadata.document_id;
+  }
+
+  return `source-${fallbackIndex}`;
+};
+
+export const getSourceIdentityKey = (source: Source): string => {
+  return [
+    source.type || 'document',
+    source.url || '',
+    source.title || source.name || '',
+    source.snippet || '',
+  ].join('::');
+};
+
+const normalizeSource = (rawSource: any, fallbackIndex: number): Source => {
+  const url = rawSource.url || rawSource.metadata?.document_id || '';
+  const metadata = rawSource.metadata || {};
+
+  let detectedType: Source['type'] = rawSource.type || metadata.type || 'document';
+
+  if (url.includes('github.com')) {
+    detectedType = 'github';
+  } else if (url.startsWith('graph://') || url.startsWith('analysis://')) {
+    detectedType = 'graph';
+  } else if (url.startsWith('note://')) {
+    detectedType = 'note';
+  }
+
+  const title = rawSource.name || rawSource.title || (detectedType === 'github' ? 'GitHub Repository' : 'Fuente');
+
+  return {
+    id: getNormalizedSourceId(rawSource, fallbackIndex),
+    title,
+    url,
+    snippet: rawSource.snippet || rawSource.content || rawSource.page_content || '',
+    type: detectedType,
+    metadata,
+    name: title,
+    is_cited: rawSource.is_cited,
+  };
+};
+
+const dedupeSources = (sources: Source[]): Source[] => {
+  const seenKeys = new Set<string>();
+  const uniqueSources: Source[] = [];
+
+  sources.forEach((source) => {
+    const key = getSourceIdentityKey(source);
+    if (!seenKeys.has(key)) {
+      seenKeys.add(key);
+      uniqueSources.push(source);
+    }
+  });
+
+  return uniqueSources;
+};
+
 export const processMessageWithCitations = (text: string | any[], allSources: Source[] | undefined): {
   contentParts: ContentPart[];
   citedSources: Source[];
-  uncitedSources: Source[]
+  uncitedSources: Source[];
+  resolvedSources: Source[];
 } => {
   // Normalizar el texto a string
   const textString = Array.isArray(text)
@@ -18,13 +83,22 @@ export const processMessageWithCitations = (text: string | any[], allSources: So
     return {
       contentParts: [{ type: 'text', content: textString }],
       citedSources: [],
-      uncitedSources: []
+      uncitedSources: [],
+      resolvedSources: [],
     };
   }
 
   const contentParts: ContentPart[] = [];
   let lastIndex = 0;
-  const citedSourceIds = new Set<string | number>();
+  const citedSourceIndexes = new Set<number>();
+  const numericIdToIndex = new Map<number, number>();
+
+  allSources.forEach((source, index) => {
+    const numericId = Number(source.id);
+    if (!Number.isNaN(numericId) && !numericIdToIndex.has(numericId)) {
+      numericIdToIndex.set(numericId, index);
+    }
+  });
 
   // Expresión regular para buscar citas individuales como [1], [2], etc.
   const citationRegex = /\[(\d+)\]/g;
@@ -35,9 +109,12 @@ export const processMessageWithCitations = (text: string | any[], allSources: So
     const fullMatch = match[0];
     const index = match.index!;
 
-    // Buscar la fuente por índice (citationNumber es 1-based, el array es 0-based)
-    // Opcionalmente también por ID si el ID coincide con el número
-    const source = allSources[citationNumber - 1] || allSources.find(s => s.id == citationNumber);
+    // El LLM cita usando el orden del contexto enviado: [1] apunta a la primera fuente.
+    // Solo si ese índice no existe hacemos fallback a un id numérico equivalente.
+    const sourceIndex = citationNumber - 1 < allSources.length
+      ? citationNumber - 1
+      : numericIdToIndex.get(citationNumber);
+    const source = sourceIndex !== undefined ? allSources[sourceIndex] : undefined;
 
     if (source) {
       // Añadir el texto antes de la cita
@@ -47,7 +124,7 @@ export const processMessageWithCitations = (text: string | any[], allSources: So
 
       // Añadir la cita como un componente
       contentParts.push({ type: 'citation', source: source, citationNumber: citationNumber });
-      citedSourceIds.add(String(source.id));
+      citedSourceIndexes.add(sourceIndex!);
 
       lastIndex = index + fullMatch.length;
     }
@@ -58,73 +135,44 @@ export const processMessageWithCitations = (text: string | any[], allSources: So
     contentParts.push({ type: 'text', content: textString.substring(lastIndex) });
   }
 
-  const citedSources = allSources.filter(s => citedSourceIds.has(String(s.id)));
-  const uncitedSources = allSources.filter(s => !citedSourceIds.has(String(s.id)));
+  const resolvedSources = allSources.map((source, index) => ({
+    ...source,
+    is_cited: citedSourceIndexes.has(index),
+  }));
 
-  return { contentParts, citedSources, uncitedSources };
+  const citedSources = resolvedSources.filter((source) => source.is_cited);
+  const uncitedSources = resolvedSources.filter((source) => !source.is_cited);
+
+  return { contentParts, citedSources, uncitedSources, resolvedSources };
 };
 
 // Helper function to collect and deduplicate sources from various message fields
 export const collectSourcesFromMessage = (
   sources?: Source[],
   ragContext?: any[]
-): { additionalSources: Source[], processedRagContext: any[] } => {
-  const additionalSourcesToDisplay: Source[] = [];
-  const seenSourceIdentifiers = new Set<string | number>();
+): { citationSources: Source[], additionalSources: Source[], processedRagContext: any[] } => {
+  const normalizedExplicitSources = Array.isArray(sources)
+    ? dedupeSources(sources.map((source, index) => normalizeSource(source, index + 1)))
+    : [];
 
-  // Debug log para ver qué llega
-  // console.log('collectSourcesFromMessage input:', { sources, ragContext });
+  const normalizedRagSources = Array.isArray(ragContext)
+    ? dedupeSources(ragContext.map((source, index) => normalizeSource(source, normalizedExplicitSources.length + index + 1)))
+    : [];
 
-  // Función interna para normalizar y detectar tipos de fuentes
-  const normalizeSource = (rawSource: any): Source => {
-    const url = rawSource.url || rawSource.metadata?.document_id || '';
-    const metadata = rawSource.metadata || {};
+  // Las citas deben resolverse contra una secuencia estable. Preferimos la lista explícita
+  // enviada por el backend y solo usamos ragContext como fallback si no existe.
+  const citationSources = normalizedExplicitSources.length > 0
+    ? normalizedExplicitSources
+    : normalizedRagSources;
 
-    // Identificar el tipo base
-    let detectedType: Source['type'] = rawSource.type || metadata.type || 'document';
-
-    // Refuerzo de detección por URL
-    if (url.includes('github.com')) {
-      detectedType = 'github';
-    } else if (url.startsWith('graph://') || url.startsWith('analysis://')) {
-      detectedType = 'graph';
-    } else if (url.startsWith('note://')) {
-      detectedType = 'note';
-    }
-
-    return {
-      id: rawSource.id || (rawSource.metadata?.document_id) || `src-${Math.random().toString(36).substr(2, 9)}`,
-      title: rawSource.name || rawSource.title || (detectedType === 'github' ? 'GitHub Repository' : 'Fuente'),
-      url: url,
-      snippet: rawSource.snippet || rawSource.content || rawSource.page_content || '',
-      type: detectedType,
-      metadata: metadata,
-      name: rawSource.name || rawSource.title || 'Fuente'
-    };
-  };
-
-  // Helper para añadir fuentes y evitar duplicados
-  const addSourceToDisplay = (source: Source) => {
-    // Usar tipo + URL/ID como identificador para evitar colisiones entre diferentes tipos de fuentes
-    const identifier = `${source.type}-${source.url || source.id}`;
-    if (!seenSourceIdentifiers.has(identifier)) {
-      additionalSourcesToDisplay.push(source);
-      seenSourceIdentifiers.add(identifier);
-    }
-  };
-
-  // 1. Process explicit sources
-  if (sources && Array.isArray(sources)) {
-    sources.forEach(s => addSourceToDisplay(normalizeSource(s)));
-  }
-
-  // 2. Process ragContext
-  if (ragContext && Array.isArray(ragContext)) {
-    ragContext.forEach(s => addSourceToDisplay(normalizeSource(s)));
-  }
+  const additionalSources = dedupeSources([
+    ...citationSources,
+    ...normalizedRagSources,
+  ]);
 
   return {
-    additionalSources: additionalSourcesToDisplay,
+    citationSources,
+    additionalSources,
     processedRagContext: ragContext || []
   };
 };

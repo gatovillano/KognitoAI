@@ -24,6 +24,7 @@ interface SelectedContextItem {
   name: string;
   title?: string;
   topic?: string;
+  file_name?: string;
 }
 
 interface ContextSelectorButtonProps {
@@ -68,6 +69,7 @@ export function ContextSelectorButton({ onContextSelected, currentContext, works
         name: doc.title || doc.file_name,
         title: doc.title || doc.file_name,
         topic: doc.topic, // Usar el topic del documento para agrupar
+        file_name: doc.file_name,
       }));
 
       // Agrupar documentos por topic y colecciones por su nombre

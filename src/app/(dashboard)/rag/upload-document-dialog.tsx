@@ -163,7 +163,7 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, on
         onUploadStart([values.web_url], topicForUpload);
         onOpenChange(false);
 
-        apiClient.post('/api/tools/run', {
+        apiClient.post('/api/skills/run', {
           tool_name: 'add_web_to_rag',
           url: values.web_url,
           topic: topicForUpload,

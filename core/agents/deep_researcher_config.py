@@ -43,8 +43,9 @@ class Configuration(BaseModel):
 
     # Research Configuration
     search_api: SearchAPI = Field(default=SearchAPI.TAVILY)
-    max_researcher_iterations: int = Field(default=10)
+    max_researcher_iterations: int = Field(default=5)
     max_react_tool_calls: int = Field(default=8)
+    max_sources_for_report: int = Field(default=30) # Límite configurable de fuentes para el reporte
 
     # Model Configuration
     # We can define different models for different tasks

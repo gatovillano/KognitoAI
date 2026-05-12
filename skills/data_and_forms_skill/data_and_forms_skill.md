@@ -1,1 +1,2 @@
-Nombre de la columna
+# Skill de Datos y Formularios
+Esta skill permite al agente gestionar datos estructurados, tablas personalizadas y formularios dinámicos. El agente puede crear tablas para organizar información, generar datos estructurados y diseñar formularios para la recolección de datos.

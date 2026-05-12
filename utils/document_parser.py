@@ -7,7 +7,7 @@ Módulo de Utilidad para el Parseo de Documentos.
 import logging
 import base64
 from io import BytesIO
-from typing import Tuple, Dict, Any
+from typing import Tuple, Dict, Any, List
 
 # Librerías específicas para cada tipo de archivo
 import fitz  # PyMuPDF
@@ -91,40 +91,55 @@ async def _extract_text_from_image_multimodal(file_bytes: bytes, is_pdf: bool = 
             logger.error("No hay modelo de visión disponible para OCR.")
             return ""
 
-        # Si es PDF, necesitamos convertir la primera página a imagen para el OCR simple
-        # O enviar el PDF si el modelo lo soporta (Mistral en OpenRouter suele preferir imágenes base64)
-        image_data = file_bytes
-        mime_type = "image/jpeg"
-        
-        if is_pdf:
-            logger.info("Convirtiendo primera página de PDF a imagen para OCR...")
-            with fitz.open(stream=file_bytes, filetype="pdf") as doc:
-                page = doc.load_page(0)
-                pix = page.get_pixmap()
-                image_data = pix.tobytes("jpg")
-        
-        base64_image = base64.b64encode(image_data).decode('utf-8')
-
         prompt = """Eres un experto en OCR y análisis de documentos. 
 Extrae TODO el texto de esta imagen de forma precisa. 
 Si es una factura, recibo o apunte, mantén la estructura lo mejor posible.
 Si hay escritura a mano, transcríbela con cuidado.
 Responde ÚNICAMENTE con el texto extraído, sin comentarios adicionales."""
 
-        message = HumanMessage(
-            content=[
-                {"type": "text", "text": prompt},
-                {
-                    "type": "image_url",
-                    "image_url": {"url": f"data:{mime_type};base64,{base64_image}"},
-                },
-            ]
-        )
+        async def _ocr_image_bytes(image_data: bytes) -> str:
+            base64_image = base64.b64encode(image_data).decode('utf-8')
+            message = HumanMessage(
+                content=[
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"},
+                    },
+                ]
+            )
 
-        response = await vision_llm.ainvoke([message])
-        extracted_text = response.content if hasattr(response, 'content') else str(response)
-        
-        return extracted_text.strip()
+            response = await vision_llm.ainvoke([message])
+            extracted_text = response.content if hasattr(response, 'content') else str(response)
+            return extracted_text.strip()
+
+        if not is_pdf:
+            return await _ocr_image_bytes(file_bytes)
+
+        logger.info("Convirtiendo todas las páginas del PDF a imágenes para OCR...")
+        extracted_pages: List[str] = []
+
+        with fitz.open(stream=file_bytes, filetype="pdf") as doc:
+            for page_index, page in enumerate(doc):
+                try:
+                    pix = page.get_pixmap()
+                    page_text = await _ocr_image_bytes(pix.tobytes("jpg"))
+                    if page_text:
+                        extracted_pages.append(page_text)
+                    logger.info(
+                        "OCR completado para página %s/%s del PDF.",
+                        page_index + 1,
+                        len(doc),
+                    )
+                except Exception as page_error:
+                    logger.error(
+                        "Error en OCR para página %s del PDF: %s",
+                        page_index + 1,
+                        page_error,
+                        exc_info=True,
+                    )
+
+        return "\n\n".join(extracted_pages).strip()
 
     except Exception as e:
         logger.error(f"Error en OCR multimodal: {e}", exc_info=True)

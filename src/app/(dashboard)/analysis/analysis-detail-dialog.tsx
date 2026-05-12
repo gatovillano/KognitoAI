@@ -32,6 +32,7 @@ import ProactiveInsightAnalysis from './ProactiveInsightAnalysis';
 import ComprehensiveWebAnalysis from './ComprehensiveWebAnalysis';
 import ScopedRagAnalysis from './ScopedRagAnalysis';
 import NeuralInsightAnalysis from './NeuralInsightAnalysis';
+import { DraftDetailDialog } from './draft-detail-dialog'; // NUEVO
 
 
 const cleanAsterisks = (text: string) => {
@@ -137,6 +138,11 @@ const getAnalysisColorScheme = (type: AnalysisType) => {
         hoverBorder: 'hover:border-indigo-200'
       };
     case 'code':
+    case 'code_security':
+    case 'code_performance':
+    case 'code_refactoring':
+    case 'code_documentation':
+    case 'code_structure':
       return {
         color: 'cyan',
         cardBg: 'bg-cyan-50/50 border-cyan-100 dark:bg-cyan-900/10 dark:border-cyan-900/50',
@@ -285,6 +291,11 @@ const getAnalysisTypeBadgeColor = (type: AnalysisType) => {
     case 'semantic_summary':
       return 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-100 border-indigo-200 dark:border-indigo-800';
     case 'code':
+    case 'code_security':
+    case 'code_performance':
+    case 'code_refactoring':
+    case 'code_documentation':
+    case 'code_structure':
       return 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900 dark:text-cyan-100 border-cyan-200 dark:border-cyan-800';
     case 'insight':
     case 'proactive_insight_manual':
@@ -406,7 +417,13 @@ const getAnalysisIcon = (type: AnalysisType) => {
     case 'error': return <XCircle className="text-red-600" />;
     case 'warning': return <FileWarning className="text-yellow-600" />;
     case 'question': return <HelpCircle className="text-purple-600" />;
-    case 'code': return <Brain className="text-cyan-600" />;
+    case 'code':
+    case 'code_security':
+    case 'code_performance':
+    case 'code_refactoring':
+    case 'code_documentation':
+    case 'code_structure':
+      return <Brain className="text-cyan-600" />;
     case 'topic_analysis': return <Network className="text-indigo-600" />;
     case 'proactive_insight_manual': return <Atom className="text-pink-500" />;
     case 'knowledge_graph_analysis': return <Network className="text-purple-500" />;
@@ -443,6 +460,11 @@ const getAnalysisTypeLabel = (type: AnalysisType) => {
     case 'warning': return 'Advertencia';
     case 'question': return 'Pregunta';
     case 'code': return 'Análisis de Código';
+    case 'code_security': return 'Análisis de Seguridad';
+    case 'code_performance': return 'Análisis de Rendimiento';
+    case 'code_refactoring': return 'Refactorización';
+    case 'code_documentation': return 'Documentación';
+    case 'code_structure': return 'Arquitectura';
     case 'topic_analysis': return 'Análisis por Tema';
     case 'proactive_insight_manual': return 'Insight Proactivo Manual';
     case 'proactive_insight': return 'Insight Proactivo';
@@ -457,7 +479,7 @@ const getAnalysisTypeLabel = (type: AnalysisType) => {
     case 'semantic_summary': return 'Resumen Semántico';
     case 'note_analysis': return 'Análisis de Nota';
     case 'note_collection_analysis': return 'Análisis de Colección de Notas';
-    case 'gap_development': return 'Desarrollo de Brecha';
+    case 'gap_development': return 'Investigación Profunda';
     default: return 'Análisis Desconocido';
   }
 };
@@ -942,6 +964,7 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
         gap_id: currentAnalysis.id, // Usamos el analysis.id como gap_id para vincularlo
         context: question,
         depth: 3, // Profundidad de investigación por defecto
+        parent_analysis_id: currentAnalysis.id // El análisis actual es el padre
       });
 
       if (response.status === 200) {
@@ -1094,10 +1117,16 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
             isLoading={isLoading}
             isPlaying={isPlaying}
             activeText={activeText || ""}
+            documentTitle={currentAnalysis.title}
           />
         );
 
       case 'code':
+      case 'code_security':
+      case 'code_performance':
+      case 'code_refactoring':
+      case 'code_documentation':
+      case 'code_structure':
         const codeColors = getAnalysisColorScheme(currentAnalysis.type);
         return (
           <CodeAnalysisComponent
@@ -1159,6 +1188,17 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
           ? gapData.report
           : gapData;
 
+        // NUEVO: Verificar el modo para decidir qué componente mostrar
+        if (actualGapData?.mode === 'draft') {
+          return (
+            <DraftDetailDialog
+              analysis={currentAnalysis}
+              isOpen={isOpen}
+              onOpenChange={onOpenChange}
+            />
+          );
+        }
+
         return (
           <DeepResearchAnalysis
             analysis={actualGapData as DeepResearchAnalysisResult}
@@ -1169,6 +1209,8 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
           />
         );
 
+      case 'insight':
+      case 'proactive_insight_manual':
       case 'proactive_insight':
         let insightData = currentAnalysis.full_data || currentAnalysis.result;
         let actualInsightResult: ProactiveInsightResult;
@@ -1414,7 +1456,41 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
                 {isPdfExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
                 Exportar PDF
               </Button>
-              <Button onClick={() => onOpenChange(false)}>Cerrar</Button>
+              {currentAnalysis && (currentAnalysis.type === 'neural_insight' || currentAnalysis.type === 'proactive_insight') ? (
+                <>
+                  <Button 
+                    variant="outline" 
+                    className="border-green-200 hover:bg-green-50 dark:border-green-900/30 dark:hover:bg-green-950/30 text-green-600 dark:text-green-400 gap-2"
+                    onClick={() => onOpenChange(false)}
+                  >
+                    <CircleCheck className="h-4 w-4" />
+                    Aceptar
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    className="border-red-200 hover:bg-red-50 dark:border-red-900/30 dark:hover:bg-red-950/30 text-red-600 dark:text-red-400 gap-2"
+                    onClick={async () => {
+                      if (confirm('¿Estás seguro de que deseas rechazar y eliminar este insight?')) {
+                        try {
+                          await apiClient.delete('/api/delete-analysis', { 
+                            data: { task_id: currentAnalysis.id } 
+                          });
+                          toast.success('Insight rechazado y eliminado.');
+                          onOpenChange(false);
+                          if (onAnalysisDeleted) onAnalysisDeleted(currentAnalysis.id);
+                        } catch (error) {
+                          toast.error('No se pudo eliminar el insight.');
+                        }
+                      }
+                    }}
+                  >
+                    <XCircle className="h-4 w-4" />
+                    Rechazar
+                  </Button>
+                </>
+              ) : (
+                <Button onClick={() => onOpenChange(false)}>Cerrar</Button>
+              )}
             </div>
           </div>
         </DialogFooter>

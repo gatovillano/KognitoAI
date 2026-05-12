@@ -39,6 +39,7 @@ import { KeyTopicSlider } from '@/components/KeyTopicSlider';
 import { KeyTopicDetailDialog } from '@/components/KeyTopicDetailDialog';
 import { AnalysisDetailDialog } from '@/app/(dashboard)/analysis/analysis-detail-dialog';
 import { DeepResearchDetailDialog } from '@/app/(dashboard)/analysis/deep-research-detail-dialog';
+import { DraftDetailDialog } from '@/app/(dashboard)/analysis/draft-detail-dialog'; // NUEVO
 
 const getAnalysisIcon = (type: string) => {
     switch (type) {
@@ -84,7 +85,7 @@ const getAnalysisTypeLabel = (type: string) => {
         case 'knowledge_graph': return 'Grafo de Conocimiento';
         case 'note_analysis': return 'Nota';
         case 'note_collection_analysis': return 'Colección de Notas';
-        case 'gap_development': return 'Desarrollo de Brecha';
+        case 'gap_development': return 'Investigación Profunda';
         case 'deep_research': return 'Investigación Profunda';
         case 'comprehensive_web_analysis': return 'Análisis Web Integral';
         default: return 'Análisis';
@@ -268,13 +269,14 @@ export function AnalysisResults() {
         { value: 'proactive_insight_manual', label: 'Insights Manuales' },
         { value: 'neural_insight', label: 'Neural Insights' },
         { value: 'note_analysis', label: 'Notas' },
-        { value: 'note_collection_analysis', label: 'Colecciones de Notas' },
+        { value: 'note_collection_analysis', label: 'Colección de Notas' },
         { value: 'code', label: 'Código' },
         { value: 'semantic', label: 'Semántico' },
         { value: 'semantic_summary', label: 'Resumen Semántico' },
-        { value: 'gap_development', label: 'Desarrollo de Brecha' },
+        { value: 'gap_development', label: 'Investigación Profunda' },
         { value: 'deep_research', label: 'Investigación Profunda' },
         { value: 'comprehensive_web_analysis', label: 'Análisis Web Integral' }
+
     ];
 
     const chartData = useMemo(() => {
@@ -521,7 +523,44 @@ export function AnalysisResults() {
                                                     <Clock className="h-3 w-3" />
                                                     {analysis.created_at ? formatDate(analysis.created_at) : 'N/A'}
                                                 </div>
-                                                <Eye className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                                {(analysis.type === 'neural_insight' || analysis.type === 'insight' || analysis.type === 'proactive_insight') ? (
+                                                    <div className="flex gap-1">
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            className="h-6 w-6 text-green-500 hover:text-green-600 hover:bg-green-50"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                toast.success('Insight aceptado');
+                                                            }}
+                                                        >
+                                                            <CheckCircle className="h-4 w-4" />
+                                                        </Button>
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            className="h-6 w-6 text-red-500 hover:text-red-600 hover:bg-red-50"
+                                                            onClick={async (e) => {
+                                                                e.stopPropagation();
+                                                                if (confirm('¿Eliminar insight?')) {
+                                                                    try {
+                                                                        await apiClient.delete('/api/delete-analysis', { 
+                                                                            data: { task_id: analysis.id } 
+                                                                        });
+                                                                        toast.success('Insight eliminado');
+                                                                        handleAnalysisDeleted(analysis.id);
+                                                                    } catch (err) {
+                                                                        toast.error('Error al eliminar');
+                                                                    }
+                                                                }
+                                                            }}
+                                                        >
+                                                            <XCircle className="h-4 w-4" />
+                                                        </Button>
+                                                    </div>
+                                                ) : (
+                                                    <Eye className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                                )}
                                             </div>
                                         </CardContent>
                                     </Card>
@@ -542,22 +581,53 @@ export function AnalysisResults() {
             </div>
 
             {/* Diálogos y Modales */}
-            {selectedAnalysis && selectedAnalysis.type !== 'deep_research' && (
-                <AnalysisDetailDialog
-                    analysis={selectedAnalysis}
-                    isOpen={!!selectedAnalysis}
-                    onOpenChange={(open) => !open && setSelectedAnalysis(null)}
-                    onAnalysisDeleted={handleAnalysisDeleted}
-                />
-            )}
+            {selectedAnalysis && (() => {
+                let payload = (selectedAnalysis as any).result_payload || (selectedAnalysis as any).result || {};
+                if (typeof payload === 'string') {
+                    try {
+                        payload = JSON.parse(payload);
+                    } catch (e) {
+                        console.error("Failed to parse result_payload in AnalysisResults:", e);
+                    }
+                }
 
-            {selectedAnalysis && selectedAnalysis.type === 'deep_research' && (
-                <DeepResearchDetailDialog
-                    analysis={selectedAnalysis}
-                    isOpen={!!selectedAnalysis}
-                    onOpenChange={(open) => !open && setSelectedAnalysis(null)}
-                />
-            )}
+                const metadata = (selectedAnalysis as any).metadata || payload.analysis_metadata || {};
+                const report = payload.report || (selectedAnalysis as any).report || payload || {};
+                
+                const isDraft = selectedAnalysis.type === 'gap_development' && (
+                    payload.mode === 'draft' || 
+                    metadata.mode === 'draft' || 
+                    report.mode === 'draft' ||
+                    (selectedAnalysis as any).mode === 'draft'
+                );
+
+                if (isDraft) {
+                    return (
+                        <DraftDetailDialog
+                            analysis={selectedAnalysis}
+                            isOpen={!!selectedAnalysis}
+                            onOpenChange={(open) => !open && setSelectedAnalysis(null)}
+                        />
+                    );
+                } else if (selectedAnalysis.type === 'gap_development' || selectedAnalysis.type === 'deep_research') {
+                    return (
+                        <DeepResearchDetailDialog
+                            analysis={selectedAnalysis}
+                            isOpen={!!selectedAnalysis}
+                            onOpenChange={(open) => !open && setSelectedAnalysis(null)}
+                        />
+                    );
+                } else {
+                    return (
+                        <AnalysisDetailDialog
+                            analysis={selectedAnalysis}
+                            isOpen={!!selectedAnalysis}
+                            onOpenChange={(open) => !open && setSelectedAnalysis(null)}
+                            onAnalysisDeleted={handleAnalysisDeleted}
+                        />
+                    );
+                }
+            })()}
 
             <Dialog open={showInsightFormModal} onOpenChange={setShowInsightFormModal}>
                 <DialogContent className="sm:max-w-[425px]">

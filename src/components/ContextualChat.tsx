@@ -10,7 +10,7 @@ import { useWebSocketContext } from '@/contexts/WebSocketContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 import { Source, SourceButton } from '@/components/SourceButton';
-import { processMessageWithCitations, collectSourcesFromMessage } from '@/lib/chatUtils';
+import { processMessageWithCitations, collectSourcesFromMessage, getSourceIdentityKey } from '@/lib/chatUtils';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
 
@@ -32,6 +32,7 @@ interface ContextualChatProps {
         type: 'table' | 'graph' | 'analysis' | 'collection';
         id: string;
         snapshot?: any;
+        full_text?: string;
     };
     title: string;
 }
@@ -51,7 +52,17 @@ export function ContextualChat({ isOpen, onClose, context, title }: ContextualCh
     useEffect(() => {
         const initChat = async () => {
             try {
-                const response = await apiClient.post('/api/threads', { title: `Chat: ${title}` });
+                const enrichedContext = { ...context };
+                if (enrichedContext.type === 'analysis' && enrichedContext.snapshot) {
+                    enrichedContext.full_text = typeof enrichedContext.snapshot === 'string'
+                        ? enrichedContext.snapshot
+                        : JSON.stringify(enrichedContext.snapshot, null, 2);
+                }
+
+                const response = await apiClient.post('/api/threads', {
+                    title: `Chat: ${title}`,
+                    context: enrichedContext // Enviar contexto enriquecido al crear el hilo
+                });
                 setThreadId(response.data.id);
             } catch (error) {
                 console.error('Error creating thread:', error);
@@ -60,7 +71,7 @@ export function ContextualChat({ isOpen, onClose, context, title }: ContextualCh
         if (isOpen && !threadId) {
             initChat();
         }
-    }, [isOpen, threadId, title]);
+    }, [isOpen, threadId, title, context]);
 
     // Manejar mensajes de WebSocket
     useEffect(() => {
@@ -103,18 +114,19 @@ export function ContextualChat({ isOpen, onClose, context, title }: ContextualCh
                     break;
 
                 case 'stream_end':
-                    // Actualizar el último mensaje con las fuentes recibidas
-                    if (message.sources) {
+                    // Actualizar el último mensaje con las fuentes y ragContext recibidos
+                    if (message.sources !== undefined || message.ragContext !== undefined) {
                         setMessages(prev => {
                             if (prev.length === 0) return prev;
                             const lastMessage = prev[prev.length - 1];
                             if (lastMessage.sender !== 'ai') return prev;
-                            
+
                             return [
                                 ...prev.slice(0, -1),
                                 {
                                     ...lastMessage,
-                                    sources: message.sources || []
+                                    sources: message.sources || [],
+                                    ragContext: message.ragContext || []
                                 }
                             ];
                         });
@@ -136,7 +148,7 @@ export function ContextualChat({ isOpen, onClose, context, title }: ContextualCh
                                     sender: 'ai',
                                     timestamp: new Date(),
                                     sources: message.sources || [],
-                                    ragContext: []
+                                    ragContext: message.ragContext || []
                                 }
                             ];
                         }
@@ -146,7 +158,7 @@ export function ContextualChat({ isOpen, onClose, context, title }: ContextualCh
                             sender: 'ai',
                             timestamp: new Date(),
                             sources: message.sources || [],
-                            ragContext: []
+                            ragContext: message.ragContext || []
                         }];
                     });
                     setIsSending(false);
@@ -178,10 +190,17 @@ export function ContextualChat({ isOpen, onClose, context, title }: ContextualCh
         setIsSending(true);
 
         try {
+            const enrichedContext = { ...context };
+            if (enrichedContext.type === 'analysis' && enrichedContext.snapshot) {
+                enrichedContext.full_text = typeof enrichedContext.snapshot === 'string'
+                    ? enrichedContext.snapshot
+                    : JSON.stringify(enrichedContext.snapshot, null, 2);
+            }
+
             await apiClient.post('/api/chat', {
                 thread_id: threadId,
                 user_message: userMsg,
-                context: context, // Enviar el contexto!
+                context: enrichedContext, // Enviar el contexto enriquecido!
                 account_id: user.id // Usar el ID real del usuario autenticado
             });
         } catch (error) {
@@ -241,17 +260,23 @@ export function ContextualChat({ isOpen, onClose, context, title }: ContextualCh
                                 )}
                                 {messages.map((msg, i) => {
                                     // Usar las funciones utilitarias para recolectar fuentes, igual que en ChatMessage.tsx
-                                    const { additionalSources } = collectSourcesFromMessage(msg.sources, msg.ragContext);
-                                    const allSources = [...(msg.sources || []), ...additionalSources];
-                                    const uniqueSources = allSources;
+                                    const { citationSources, additionalSources } = collectSourcesFromMessage(msg.sources, msg.ragContext);
 
                                     const fullText = msg.chunks?.join('') || msg.text;
-                                    const { contentParts, citedSources, uncitedSources } = processMessageWithCitations(
+                                    const { contentParts, citedSources, uncitedSources, resolvedSources } = processMessageWithCitations(
                                         fullText,
-                                        uniqueSources
+                                        citationSources
                                     );
 
-                                    const hasSources = msg.sender === 'ai' && uniqueSources.length > 0;
+                                    const citationNumberBySource = new Map(
+                                        resolvedSources.map((source, index) => [getSourceIdentityKey(source), index + 1])
+                                    );
+
+                                    const displaySources = citedSources.length > 0
+                                        ? citedSources
+                                        : (citationSources.length > 0 ? citationSources : additionalSources);
+
+                                    const hasSources = msg.sender === 'ai' && displaySources.length > 0;
                                     
                                     return (
                                         <motion.div
@@ -318,8 +343,12 @@ export function ContextualChat({ isOpen, onClose, context, title }: ContextualCh
                                                                     <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest">Fuentes</span>
                                                                 </div>
                                                                 <div className="flex flex-wrap gap-1.5">
-                                                                    {uniqueSources.map((source, idx) => (
-                                                                        <SourceButton key={idx} source={source} citationNumber={idx + 1} />
+                                                                    {displaySources.map((source, idx) => (
+                                                                        <SourceButton
+                                                                            key={idx}
+                                                                            source={source}
+                                                                            citationNumber={citationNumberBySource.get(getSourceIdentityKey(source)) || idx + 1}
+                                                                        />
                                                                     ))}
                                                                 </div>
                                                             </motion.div>

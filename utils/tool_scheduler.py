@@ -14,6 +14,7 @@ from typing import Dict, Any, Optional, Callable
 # from telegram_client.bot_manager import bot_manager # Ya no se usará JobQueue de Telegram
 from apscheduler.schedulers.asyncio import AsyncIOScheduler # Cambiar a AsyncIOScheduler
 from core.database import SessionLocal
+from core.config import settings
 from utils.db_session import DBSession
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,10 @@ class ToolScheduler:
     def __init__(self):
         self.scheduler = AsyncIOScheduler() # Usar AsyncIOScheduler
         self.scheduled_jobs = {} # Mantener esto para consistencia si es necesario
+
+    def _sync_scheduled_jobs(self):
+        """Sincroniza la caché en memoria con los jobs reales de APScheduler."""
+        self.scheduled_jobs = {job.id: job for job in self.scheduler.get_jobs()}
         
     def start(self):
         if not self.scheduler.running:
@@ -119,13 +124,18 @@ class ToolScheduler:
         self,
         tool_name: str,
         tool_function: Callable,
-        interval_hours: int,
+        interval_hours: int = 0,
+        interval_minutes: int = 0,
         account_id: Optional[str] = None,
         **tool_kwargs
     ):
         """
-        Programa una herramienta para ejecutarse cada X horas usando APScheduler.
+        Programa una herramienta para ejecutarse cada X horas o minutos usando APScheduler.
         """
+        if interval_hours == 0 and interval_minutes == 0:
+            logger.error(f"No se especificó un intervalo válido para {tool_name}")
+            return False
+
         job_id = f"interval_{tool_name}_{account_id or 'all'}"
 
         if self.scheduler.get_job(job_id):
@@ -135,26 +145,39 @@ class ToolScheduler:
             self._execute_tool_callback,
             'interval',
             hours=interval_hours,
+            minutes=interval_minutes,
             id=job_id,
             args=[tool_name, tool_function, account_id],
             kwargs=tool_kwargs
         )
         self.scheduled_jobs[job_id] = self.scheduler.get_job(job_id) # Mantener referencia
-        logger.info(f"Herramienta '{tool_name}' programada cada {interval_hours} horas")
+        logger.info(f"Herramienta '{tool_name}' programada cada {interval_hours} horas y {interval_minutes} minutos")
         return True
     
     def cancel_scheduled_tool(self, job_id: str):
         """Cancela una herramienta programada usando APScheduler."""
+        removed = False
+
         if self.scheduler.get_job(job_id):
             self.scheduler.remove_job(job_id)
-            if job_id in self.scheduled_jobs:
-                del self.scheduled_jobs[job_id] # Eliminar también de nuestra propia lista
+            removed = True
+
+        # Aunque no exista en APScheduler, limpiar caché evita "fantasmas" en listado.
+        if job_id in self.scheduled_jobs:
+            del self.scheduled_jobs[job_id]
+            removed = True
+
+        # Mantener caché siempre consistente tras intentos de cancelación.
+        self._sync_scheduled_jobs()
+
+        if removed:
             logger.info(f"Herramienta programada '{job_id}' cancelada")
             return True
         return False
     
     def list_scheduled_tools(self) -> Dict[str, Any]:
         """Lista todas las herramientas programadas gestionadas por APScheduler."""
+        self._sync_scheduled_jobs()
         jobs_info = {}
         for job in self.scheduler.get_jobs():
             # Extraer información del job_id
@@ -209,13 +232,17 @@ async def schedule_daily_analysis(account_id: Optional[str] = None, hour: int = 
 
 async def schedule_daily_insights(account_id: str, hour: int = 7, minute: int = 0):
     """Programa generación de insights diarios."""
-    # El módulo daily_insights_generator fue eliminado.
-    # Esta función se mantiene por compatibilidad pero no hace nada hasta que se reimplemente.
-    
     async def daily_insights_task(account_id: str, **kwargs):
-        """Tarea stub de generación de insights diarios."""
-        logger.info("Generación de insights diarios saltada (daily_insights_generator no disponible).")
-        return "Insights diarios saltados"
+        """Tarea diaria compatible que ejecuta el heartbeat autónomo."""
+        from core.autonomous_heartbeat import run_autonomous_agent_heartbeat
+
+        return await run_autonomous_agent_heartbeat(
+            account_id=account_id,
+            workspace_id=kwargs.get("workspace_id"),
+            heartbeat_instructions=kwargs.get("heartbeat_instructions"),
+            max_insights=kwargs.get("max_insights"),
+            lookback_days=kwargs.get("lookback_days"),
+        )
     
     if not account_id:
         logger.warning("Se requiere account_id para programar insights diarios")
@@ -225,5 +252,66 @@ async def schedule_daily_insights(account_id: str, hour: int = 7, minute: int = 
         tool_name="daily_insights",
         tool_function=daily_insights_task,
         execution_time=time(hour=hour, minute=minute),
-        account_id=account_id
+        account_id=account_id,
+        heartbeat_instructions=settings.autonomous_heartbeat_instructions,
+        max_insights=settings.autonomous_heartbeat_max_insights,
+        lookback_days=settings.autonomous_heartbeat_lookback_days,
+    )
+
+
+async def schedule_autonomous_agent_heartbeat(
+    account_id: str,
+    interval_hours: Optional[int] = None,
+    workspace_id: Optional[str] = None,
+    heartbeat_instructions: Optional[str] = None,
+    max_insights: Optional[int] = None,
+    lookback_days: Optional[int] = None,
+):
+    """Programa el heartbeat autónomo del agente cada cierto número de horas."""
+    if not account_id:
+        logger.warning("Se requiere account_id para programar heartbeat autónomo")
+        return False
+
+    async def autonomous_heartbeat_task(account_id: str, **kwargs):
+        from core.autonomous_heartbeat import run_autonomous_agent_heartbeat
+
+        return await run_autonomous_agent_heartbeat(
+            account_id=account_id,
+            workspace_id=kwargs.get("workspace_id"),
+            heartbeat_instructions=kwargs.get("heartbeat_instructions"),
+            max_insights=kwargs.get("max_insights"),
+            lookback_days=kwargs.get("lookback_days"),
+        )
+
+    return await tool_scheduler.schedule_interval_tool(
+        tool_name="autonomous_heartbeat",
+        tool_function=autonomous_heartbeat_task,
+        interval_hours=interval_hours or settings.autonomous_heartbeat_interval_hours,
+        account_id=account_id,
+        workspace_id=workspace_id,
+        heartbeat_instructions=heartbeat_instructions or settings.autonomous_heartbeat_instructions,
+        max_insights=max_insights or settings.autonomous_heartbeat_max_insights,
+        lookback_days=lookback_days or settings.autonomous_heartbeat_lookback_days,
+    )
+
+async def schedule_custom_user_heartbeat(account_id: str, interval_minutes: int, allowed_tools: Optional[list] = None, workspace_id: Optional[str] = None):
+    """Programa el heartbeat personalizado del usuario configurado individualmente."""
+    if not account_id:
+        return False
+
+    async def custom_heartbeat_task(account_id: str, **kwargs):
+        from core.agent import run_custom_user_heartbeat
+        # Pasamos allowed_tools a la función si está preparado para recibirlo
+        return await run_custom_user_heartbeat(
+            account_id=account_id, 
+            workspace_id=kwargs.get("workspace_id")
+        )
+
+    return await tool_scheduler.schedule_interval_tool(
+        tool_name="custom_user_heartbeat",
+        tool_function=custom_heartbeat_task,
+        interval_minutes=interval_minutes,
+        account_id=account_id,
+        workspace_id=workspace_id,
+        allowed_tools=allowed_tools
     )

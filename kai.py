@@ -208,7 +208,12 @@ def run(command_str):
     """Ejecuta un comando en la terminal local."""
     executor = CommandExecutor()
     console.print(Panel(f"[info]Ejecutando:[/info] [cmd]{command_str}[/cmd]", border_style="spring_green3"))
-    for _ in executor.execute(command_str): pass
+    try:
+        for output in executor.execute(command_str):
+            console.print(output)
+    except Exception as e:
+        console.print(f"[error]Error ejecutando comando: {e}[/error]")
+    console.print()
 
 @cli.command()
 def chat():
@@ -295,7 +300,15 @@ async def interactive_chat():
                     thread_id = resp.json()["threads"][0]["id"]
                 else:
                     resp = await client.post(f"{api_url}/api/threads", json={"title": "CLI Chat"}, headers={"Authorization": f"Bearer {token}"})
-                    thread_id = resp.json()["id"]
+                    if resp.status_code == 200:
+                        if resp.status_code == 200:
+                        thread_id = resp.json()["id"]
+                    else:
+                        console.print(f"[error]❌ Error creando hilo: {resp.text}[/error]")
+                        return
+                    else:
+                        console.print(f"[error]❌ Error creando hilo: {resp.text}[/error]")
+                        return
         except Exception as e: return console.print(f"[error]❌ Error: {e}[/error]")
 
     print_banner()
@@ -349,7 +362,11 @@ async def interactive_chat():
                 if is_dangerous_command(cmd) and not await confirm_action(session, cmd, "Comando destructivo."): continue
                 executor = CommandExecutor()
                 console.print(Panel(f"[info]Ejecutando local:[/info] [cmd]{cmd}[/cmd]", border_style="spring_green3"))
-                for _ in executor.execute(cmd): pass
+                try:
+                    for output in executor.execute(cmd):
+                        console.print(output)
+                except Exception as e:
+                    console.print(f"[error]Error: {e}[/error]")
                 console.print()
                 continue
 
@@ -371,8 +388,17 @@ async def process_message(api_url, token, account_id, thread_id, message, sessio
             with Live(Spinner("dots", text="[dim]KAI está pensando...[/dim]"), refresh_per_second=15, console=console) as live:
                 while True:
                     try:
-                        raw_data = await websocket.recv()
-                        if raw_data == "ping": continue
+                        # Timeout para evitar bloqueos
+                        try:
+                            raw_data = await asyncio.wait_for(websocket.recv(), timeout=60.0)
+                        except asyncio.TimeoutError:
+                            console.print("[warning]⚠️ Timeout esperando respuesta[/warning]")
+                            break
+                        
+                        # Manejo de ping
+                        if raw_data == "ping" or (isinstance(raw_data, str) and raw_data.strip() == "ping"):
+                            continue
+                        
                         data = json.loads(raw_data)
                         if data.get("taskId") != task_id: continue
                         msg_type = data.get("type")

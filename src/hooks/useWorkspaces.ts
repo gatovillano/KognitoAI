@@ -18,7 +18,7 @@ export const useWorkspaces = () => {
   const fetchWorkspaces = useCallback(async () => {
     setIsLoading(true);
     try {
-      const response = await apiClient.get('/api/workspaces');
+      const response = await apiClient.get('/api/workspaces', { params: { limit: 100 } });
       setWorkspaces(response.data);
       if (response.data.length > 0) {
         setCurrentWorkspace(response.data[0]);

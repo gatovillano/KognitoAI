@@ -2,6 +2,7 @@ import logging
 from langchain_core.messages import HumanMessage
 import uuid
 from typing import List, Optional, cast, Dict
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 from core.llm_manager import get_fast_llm
@@ -11,6 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, desc, or_, and_, update, func, String, text
 
 from core.database import SessionLocal, AnalysisTask, ProactiveInsight, MindmapTask, GapDevelopmentAnalysis
+from sqlalchemy.orm import joinedload
 from utils.security import get_current_account_id
 from sqlalchemy.ext.asyncio import AsyncSession
 from core.memory_manager import list_user_documents, get_full_document_content
@@ -110,12 +112,17 @@ async def get_saved_analyses_endpoint(
         #    O que sea el análisis de la propia colección, O que sea un análisis semántico.
         collection_reference_name = f"Colección: {req.topic}"
         semantic_reference_name = f"Resumen Semántico: {req.topic}"
+        custom_reference_name = f"Análisis Personalizado: Colección: {req.topic}"
+        graph_reference_name = f"Análisis de Grafo de Conocimiento: {req.topic}"
 
         # Usamos or_() para combinar las condiciones
         conditions = [
             AnalysisTask.file_name.in_(files_in_topic),
             AnalysisTask.file_name == collection_reference_name,
-            AnalysisTask.file_name == semantic_reference_name
+            AnalysisTask.file_name == semantic_reference_name,
+            AnalysisTask.file_name == custom_reference_name,
+            AnalysisTask.file_name == graph_reference_name,
+            AnalysisTask.file_name == req.topic  # Para compatibilidad con versiones anteriores o simplificadas
         ]
 
         final_stmt = base_stmt.where(or_(*conditions))
@@ -172,6 +179,9 @@ async def get_saved_analyses_endpoint(
 class DeleteAnalysisRequest(BaseModel):
     task_id: str
 
+class DeleteProactiveInsightRequest(BaseModel):
+    insight_id: int
+
 @router.delete("/delete-analysis", summary="Eliminar un análisis guardado")
 async def delete_analysis_endpoint(
     req: DeleteAnalysisRequest,
@@ -194,6 +204,28 @@ async def delete_analysis_endpoint(
     await db.delete(task)
     await db.commit()
     return {"message": f"Análisis con ID {req.task_id} eliminado correctamente."}
+
+@router.delete("/delete-proactive-insight", summary="Eliminar un insight proactivo")
+async def delete_proactive_insight_endpoint(
+    req: DeleteProactiveInsightRequest,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Elimina un insight proactivo por su ID, si pertenece al usuario autenticado.
+    """
+    account_uuid = uuid.UUID(current_account_id)
+    
+    insight = await db.get(ProactiveInsight, req.insight_id)
+    if insight is None:
+        raise HTTPException(status_code=404, detail="Insight no encontrado.")
+    
+    if str(insight.account_id) != str(account_uuid):
+        raise HTTPException(status_code=403, detail="Insight no pertenece al usuario.")
+    
+    await db.delete(insight)
+    await db.commit()
+    return {"message": f"Insight con ID {req.insight_id} eliminado correctamente."}
 
 class DashboardInsightsRequest(BaseModel):
     all: bool = False
@@ -297,7 +329,7 @@ async def get_dashboard_insights(
     logger.info(f"DEBUG: Processed analysis_stats (with proactive): {analysis_stats}")
 
     # 2. Obtener los últimos insights proactivos (sinergias, contradicciones, etc.)
-    proactive_stmt = select(ProactiveInsight).where(
+    proactive_stmt = select(ProactiveInsight).options(joinedload(ProactiveInsight.workspace)).where(
         ProactiveInsight.account_id == account_uuid
     ).order_by(desc(ProactiveInsight.created_at))
 
@@ -512,6 +544,9 @@ async def get_dashboard_insights(
                 "created_at": insight.created_at.isoformat(),
                 "related_items": insight.related_items,
                 "action_suggestion": insight.action_suggestion,
+                "workspace_id": str(insight.workspace_id) if getattr(insight, 'workspace_id', None) else None,
+                "workspace_name": insight.workspace.name if getattr(insight, 'workspace', None) else None,
+                "workspace_color": insight.workspace.color if getattr(insight, 'workspace', None) else None,
             } for insight in recent_proactive_insights
         ],
         "key_topics": top_topics_for_chart,
@@ -555,7 +590,7 @@ async def run_notes_collection_analysis_and_save(task_id: str, account_id: str, 
                 raise ValueError("No se encontraron notas con contenido para analizar.")
 
             # Realizar el análisis de la colección de notas
-            analysis_result = await text_analyzer.analyze_collection(documents_for_analysis)
+            analysis_result = await text_analyzer.analyze_collection(documents_for_analysis, account_id=str(account_id))
             logger.info(f"Notes collection analysis result generated: {analysis_result.model_dump()}")
 
             # Guardar el resultado y marcar como 'completed'
@@ -625,7 +660,7 @@ async def run_document_analysis_and_save(task_id: str, account_id: str, file_nam
             text_content = await get_full_document_content(account_id, file_name)
             if not text_content: raise ValueError("Contenido del documento no encontrado.")
             # 2. Realizar el análisis pesado
-            analysis_result = await text_analyzer.analyze_single_text(text_content, document_title=file_name)
+            analysis_result = await text_analyzer.analyze_single_text(text_content, document_title=file_name, account_id=str(account_id))
 
             # 3. Guardar el resultado y marcar como 'completed'
             # Asegurarse de que el resultado sea un diccionario
@@ -722,24 +757,72 @@ class AnalyzeCollectionRequest(BaseModel):
     topic: str
     workspace_id: Optional[str] = None
 
+async def _send_analysis_progress(
+    account_id: str,
+    task_id: str,
+    phase: str,
+    message: str,
+    progress_percent: int,
+    topic: Optional[str] = None,
+    is_complete: bool = False,
+    has_error: bool = False,
+    error: Optional[str] = None,
+):
+    """Emite un evento analysis_progress vía WebSocket al cliente."""
+    try:
+        from core.websocket_manager import send_personal_message
+        payload = {
+            "type": "analysis_progress",
+            "data": {
+                "task_id": task_id,
+                "phase": phase,
+                "message": message,
+                "progress_percent": progress_percent,
+                "is_complete": is_complete,
+                "has_error": has_error,
+                "error": error,
+                "processing_mode": "conceptual",
+                "topic": topic,
+            }
+        }
+        await send_personal_message(account_id, payload)
+    except Exception as ws_err:
+        logger.warning(f"No se pudo enviar progreso de análisis vía WebSocket: {ws_err}")
+
+
 async def run_collection_analysis_and_save(task_id: str, account_id: str, topic: str, workspace_id: Optional[str] = None):
     """
     Obtiene todos los documentos de una colección, los analiza y guarda el resultado.
+    Emite eventos WebSocket de progreso en cada etapa.
     """
     async with DBSession(SessionLocal) as db_session: # type: ignore
         try:
             # Marcar la tarea como 'processing'
             await db_session.execute(update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(status="processing"))
             await db_session.commit()
-            
+
             logger.info(f"Iniciando análisis de colección para tarea {task_id} (tema: {topic}, workspace: {workspace_id})")
 
-            # 1. Obtener todos los documentos de la colección
+            # ── FASE 1: Obteniendo documentos ──────────────────────────────
+            await _send_analysis_progress(
+                account_id, task_id,
+                phase="fetching_documents",
+                message="Buscando documentos en la colección...",
+                progress_percent=10,
+                topic=topic,
+            )
+
             all_docs_in_topic = []
-            # (Aquí usamos la función combinada que incluye documentos de GitHub,
-            # pasando el 'topic' y 'workspace_id' directamente para que filtre de forma eficiente)
             filtered_doc_list = await list_all_user_documents(account_id, topic=topic, workspace_id=workspace_id)
-            
+
+            await _send_analysis_progress(
+                account_id, task_id,
+                phase="fetching_documents",
+                message=f"Cargando contenido de {len(filtered_doc_list)} documentos...",
+                progress_percent=20,
+                topic=topic,
+            )
+
             for doc_meta in filtered_doc_list:
                 content = await get_full_document_content(account_id, doc_meta['file_name'])
                 if content:
@@ -751,14 +834,76 @@ async def run_collection_analysis_and_save(task_id: str, account_id: str, topic:
             if not all_docs_in_topic:
                 raise ValueError(f"No se encontraron documentos con contenido en la colección '{topic}'.")
 
-            # 2. Realizar el análisis de la colección
-            analysis_result = await text_analyzer.analyze_collection(all_docs_in_topic)
+            # ── FASE 2: Análisis semántico (con ticker de progreso) ────────
+            # Como el LLM es una única llamada larga sin checkpoints internos,
+            # lanzamos un ticker paralelo que envía incrementos de progreso cada
+            # pocos segundos mientras el análisis corre, hasta llegar a ~88%.
+            await _send_analysis_progress(
+                account_id, task_id,
+                phase="conceptual_extracting_quotes",
+                message=f"Analizando {len(all_docs_in_topic)} documentos con IA...",
+                progress_percent=40,
+                topic=topic,
+            )
+
+            import asyncio as _asyncio
+
+            _llm_done = _asyncio.Event()
+
+            async def _progress_ticker():
+                """Envía incrementos de progreso mientras el LLM trabaja."""
+                _steps = [
+                    (45, "Procesando estructura semántica..."),
+                    (50, "Extrayendo temas transversales..."),
+                    (55, "Identificando conceptos clave..."),
+                    (60, "Detectando conexiones entre documentos..."),
+                    (65, "Analizando relaciones temáticas..."),
+                    (70, "Identificando brechas de conocimiento..."),
+                    (75, "Generando síntesis de la colección..."),
+                    (80, "Construyendo análisis final..."),
+                    (85, "Revisando resultados con IA..."),
+                    (88, "Finalizando análisis..."),
+                ]
+                for pct, msg in _steps:
+                    # Esperar ~8 segundos entre cada tick, pero salir si el LLM terminó
+                    try:
+                        await _asyncio.wait_for(_llm_done.wait(), timeout=8.0)
+                        break  # LLM terminó antes del próximo tick
+                    except _asyncio.TimeoutError:
+                        pass
+                    if _llm_done.is_set():
+                        break
+                    await _send_analysis_progress(
+                        account_id, task_id,
+                        phase="conceptual_thematic_relationships",
+                        message=msg,
+                        progress_percent=pct,
+                        topic=topic,
+                    )
+
+            # Ejecutar el análisis LLM y el ticker en paralelo.
+            # _run_llm setea _llm_done al terminar para que el ticker pueda salir anticipadamente.
+            async def _run_llm():
+                result = await text_analyzer.analyze_collection(all_docs_in_topic, account_id=str(account_id))
+                _llm_done.set()
+                return result
+
+            analysis_result, _ = await _asyncio.gather(
+                _run_llm(),
+                _progress_ticker(),
+            )
             logger.info(f"Collection analysis result generated: {analysis_result.model_dump()}")
 
-            # 3. Guardar el resultado y marcar como 'completed'
-            result_payload = analysis_result.model_dump()
+            # ── FASE 3: Guardando resultados ───────────────────────────────
+            await _send_analysis_progress(
+                account_id, task_id,
+                phase="saving_to_neo4j",
+                message="Guardando resultados del análisis...",
+                progress_percent=90,
+                topic=topic,
+            )
 
-            # Agregar metadata de herramienta utilizada
+            result_payload = analysis_result.model_dump()
             result_payload["tool_used"] = "advanced_text_analyzer.py"
             result_payload["analysis_metadata"] = {
                 "tool_used": "advanced_text_analyzer.py",
@@ -774,12 +919,32 @@ async def run_collection_analysis_and_save(task_id: str, account_id: str, topic:
             await db_session.commit()
             logger.info(f"Análisis de colección para tarea {task_id} completado.")
 
+            # ── FASE FINAL: Completado ─────────────────────────────────────
+            await _send_analysis_progress(
+                account_id, task_id,
+                phase="completed",
+                message="¡Análisis completado con éxito!",
+                progress_percent=100,
+                topic=topic,
+                is_complete=True,
+            )
+
         except Exception as e:
             logger.error(f"Fallo en tarea de análisis de colección {task_id}: {e}", exc_info=True)
             stmt_failed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
                 status="failed", error_message=str(e))
             await db_session.execute(stmt_failed)
             await db_session.commit()
+            # Notificar error al cliente
+            await _send_analysis_progress(
+                account_id, task_id,
+                phase="error",
+                message="El análisis falló.",
+                progress_percent=0,
+                topic=topic,
+                has_error=True,
+                error=str(e),
+            )
 
 @router.post("/start-collection-analysis", status_code=202)
 async def start_collection_analysis_endpoint(
@@ -1177,7 +1342,7 @@ async def run_semantic_topic_analysis(task_id: str, account_id: str, max_terms: 
                 # 7. Generar títulos descriptivos con LLM (mejorado)
                 grouped_topics = []
                 detailed_clusters_data = []
-                llm_for_summarization = get_fast_llm()
+                llm_for_summarization = await get_llm_for_user(account_id, purpose="fast")
                 if not llm_for_summarization:
                     logger.error("No hay LLM generativo disponible para generar títulos descriptivos.")
                     raise ValueError("LLM generativo no disponible para generación de títulos descriptivos.")
@@ -1370,7 +1535,7 @@ async def run_semantic_summary_analysis(task_id: str, account_id: str, topic: st
             # Realizar análisis semántico de la colección
             from utils.advanced_text_analyzer import AdvancedTextAnalyzer
             analyzer = AdvancedTextAnalyzer()
-            semantic_analysis = await analyzer.analyze_collection(all_docs_content)
+            semantic_analysis = await analyzer.analyze_collection(all_docs_content, account_id=str(account_id))
 
             # Crear resultado estructurado
             result_payload = {
@@ -1439,7 +1604,7 @@ async def run_single_note_analysis_and_save(task_id: str, account_id: str, note_
             logger.info(f"Iniciando análisis de nota individual para tarea {task_id} (Nota: {note_title})")
 
             # Realizar el análisis de la nota
-            analysis_result = await text_analyzer.analyze_single_text(note_content, document_title=note_title)
+            analysis_result = await text_analyzer.analyze_single_text(note_content, document_title=note_title, account_id=str(account_id))
             logger.info(f"Single note analysis result generated: {analysis_result.model_dump()}")
 
             # Guardar el resultado y marcar como 'completed'
@@ -1507,7 +1672,7 @@ async def run_single_note_summary_and_save(task_id: str, account_id: str, note_t
             logger.info(f"Iniciando resumen de nota individual para tarea {task_id} (Nota: {note_title})")
 
             # Realizar el análisis de la nota para obtener el resumen ejecutivo
-            analysis_result = await text_analyzer.analyze_single_text(note_content, document_title=note_title)
+            analysis_result = await text_analyzer.analyze_single_text(note_content, document_title=note_title, account_id=str(account_id))
             executive_summary = analysis_result.executive_summary
 
             # Guardar el resultado y marcar como 'completed'
@@ -1559,6 +1724,7 @@ async def start_single_note_summary_endpoint(
 
 class AnalyzeCodeRequest(BaseModel):
     repo_name: str
+    analysis_type: Optional[str] = 'all'
 
 class CustomAnalysisRequest(BaseModel):
     file_name: str
@@ -1573,7 +1739,7 @@ class GetAllAnalysisRequest(BaseModel):
     analysis_type: Optional[str] = None  # 'document', 'collection', 'mindmap', 'insight', 'code'
     search_query: Optional[str] = None
 
-async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: str):
+async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: str, analysis_type: str = 'all'):
     """Función pesada que se ejecuta en segundo plano para análisis de código."""
     async with DBSession(SessionLocal) as db_session: # type: ignore
         try:
@@ -1714,25 +1880,31 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
                 "recommendations": []
             }
             
-            for i, chunk in enumerate(chunks):
-                logger.info(f"Analizando chunk {i+1}/{len(chunks)} ({len(chunk['files'])} archivos)")
+            # 4. Analizar cada chunk (MODO PARALELO para máxima velocidad)
+            logger.info(f"Analizando {len(chunks)} chunks en paralelo para optimizar tiempo...")
+            
+            async def analyze_single_chunk(index, chunk_data):
+                try:
+                    logger.info(f"Iniciando análisis de chunk {index+1}/{len(chunks)}...")
+                    res = await analyze_code_content(chunk_data["content"], account_id=account_id, analysis_type=analysis_type)
+                    return index, res
+                except Exception as e:
+                    logger.error(f"Error analizando chunk {index+1}: {e}")
+                    return index, None
+
+            analysis_tasks = [analyze_single_chunk(i, chunk) for i, chunk in enumerate(chunks)]
+            chunk_results_with_indices = await asyncio.gather(*analysis_tasks)
+            chunk_results_with_indices.sort(key=lambda x: x[0])
+            
+            for i, chunk_result in chunk_results_with_indices:
+                if chunk_result is None: continue
                 
-                # Actualizar progreso para cada chunk
-                chunk_progress = f"Analizando chunk {i+1}/{len(chunks)} ({len(chunk['files'])} archivos)"
-                progress_info["current_step"] = chunk_progress
-                progress_info["progress_percentage"] = 40 + int((i / len(chunks)) * 40)  # Progreso entre 40% y 80%
-                
-                stmt_progress = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
-                    result_payload=progress_info)
-                await db_session.execute(stmt_progress)
-                await db_session.commit()
-                
-                chunk_result = await analyze_code_content(chunk["content"])
                 all_chunk_results.append({
                     "chunk_index": i+1,
-                    "files": chunk["files"],
+                    "files": chunks[i]["files"],
                     "result": chunk_result
                 })
+
                 
                 # Manejar tanto objetos Pydantic como diccionarios
                 if hasattr(chunk_result, 'code_structure'):
@@ -1751,6 +1923,11 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
                     combined_categories["recommendations"].extend(chunk_result.get("recommendations", []))
                 else:
                     logger.warning(f"Resultado inesperado del análisis de chunk {i+1}: {type(chunk_result)}")
+            
+            # Actualizar progreso final de chunks
+            progress_info["current_step"] = "Todos los chunks analizados exitosamente."
+            progress_info["progress_percentage"] = 80
+
             
             # Actualizar progreso: chunks analizados
             progress_info["current_step"] = "Chunks analizados, generando resumen..."
@@ -1785,7 +1962,7 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
             combined_summary = "\n\n".join(summary_parts)
             
             # Generar análisis consolidado final
-            tool = AnalyzeCodeForInsightsTool()
+            tool = AnalyzeCodeForInsightsTool(account_id=account_id)
             final_summary = f"**Análisis Completo del Repositorio {repo_name}**\n\n"
             final_summary += f"Se analizaron {len(chunks)} partes del código con un total de {len(github_docs)} archivos.\n\n"
             final_summary += f"**Resumen por Partes:**\n{combined_summary}\n\n"
@@ -1798,7 +1975,8 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
                     code_content=sample_content + f"\n\nNOTA: Este es un análisis de {len(chunks)} partes del repositorio {repo_name}",
                     account_id=account_id,
                     file_name=f"Análisis de Repositorio: {repo_name}",
-                    save_to_database=False  # No guardar este análisis parcial
+                    save_to_database=False,  # No guardar este análisis parcial
+                    analysis_type=analysis_type
                 )
             except Exception as e:
                 logger.warning(f"Error generando resultado formateado: {e}")
@@ -1830,7 +2008,7 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
                 "tool_used": "advanced_code_analyzer.py",
                 "analysis_metadata": {
                     "tool_used": "advanced_code_analyzer.py",
-                    "analysis_type": "code",
+                    "analysis_type": f"code_{analysis_type}" if analysis_type != 'all' else "code",
                     "total_files": len(github_docs),
                     "total_chunks": len(chunks),
                     "repo_name": repo_name,
@@ -1893,7 +2071,7 @@ async def start_code_analysis_endpoint(
     await db.commit()
     await db.refresh(new_task)
     
-    background_tasks.add_task(run_code_analysis_and_save, str(new_task.id), current_account_id, req.repo_name)
+    background_tasks.add_task(run_code_analysis_and_save, str(new_task.id), current_account_id, req.repo_name, req.analysis_type or 'all')
     
     return {"task_id": str(new_task.id)}
 
@@ -1943,8 +2121,8 @@ async def get_all_analysis_endpoint(
     account_uuid = uuid.UUID(current_account_id)
     all_analysis = []
 
-    # 1. Obtener AnalysisTask (análisis de documentos, colecciones, código, semánticos)
-    if not req.analysis_type or req.analysis_type in ['document', 'collection', 'code', 'semantic_summary', 'semantic', 'custom']:
+    # 1. Obtener AnalysisTask (análisis de documentos, colecciones, código, semánticos, investigación)
+    if not req.analysis_type or req.analysis_type in ['document', 'collection', 'code', 'semantic_summary', 'semantic', 'custom', 'gap_development', 'deep_research', 'comprehensive_web_analysis']:
         analysis_stmt = select(AnalysisTask).where(
             AnalysisTask.account_id == account_uuid,
             AnalysisTask.status == "completed"
@@ -1995,6 +2173,9 @@ async def get_all_analysis_endpoint(
             elif task_analysis_type == "notes_collection":
                 analysis_type = "note_collection_analysis"
                 title = file_name if "Colección de Notas:" in file_name else f"Análisis de Colección de Notas: {file_name}"
+            elif task_analysis_type == "gap_development":
+                analysis_type = "gap_development"
+                title = file_name
             else:
                 # Fallback: inferir del contenido del resultado o default a "document"
                 analysis_type = "document"
@@ -2033,12 +2214,18 @@ async def get_all_analysis_endpoint(
                     summary = "Análisis personalizado sin contenido"
                 elif 'formatted_result' in payload_dict:
                     summary = str(payload_dict['formatted_result'])[:200] + "..."
-                elif (analysis_type == "gap_development" or task_analysis_type == "gap_development") and 'report' in payload_dict:
-                    report_obj = payload_dict['report']
-                    if isinstance(report_obj, dict) and 'summary' in report_obj:
-                        summary = report_obj['summary']
-                    else:
-                        report_content = str(report_obj)
+                elif (analysis_type == "gap_development" or task_analysis_type == "gap_development" or analysis_type == "deep_research") and ('report' in payload_dict or 'final_report' in payload_dict or 'summary' in payload_dict):
+                    if 'report' in payload_dict:
+                        report_obj = payload_dict['report']
+                        if isinstance(report_obj, dict) and 'summary' in report_obj:
+                            summary = report_obj['summary']
+                        else:
+                            report_content = str(report_obj)
+                            summary = report_content[:200] + "..." if len(report_content) > 200 else report_content
+                    elif 'summary' in payload_dict:
+                        summary = payload_dict['summary']
+                    elif 'final_report' in payload_dict:
+                        report_content = str(payload_dict['final_report'])
                         summary = report_content[:200] + "..." if len(report_content) > 200 else report_content
  
                 # Obtener herramienta usada desde los metadatos o inferir basándose en la estructura
@@ -2145,7 +2332,7 @@ async def get_all_analysis_endpoint(
 
     # 3. Obtener ProactiveInsight
     if not req.analysis_type or req.analysis_type == 'insight':
-        insight_stmt = select(ProactiveInsight).where(
+        insight_stmt = select(ProactiveInsight).options(joinedload(ProactiveInsight.workspace)).where(
             ProactiveInsight.account_id == account_uuid
         ).order_by(ProactiveInsight.created_at.desc())
 
@@ -2189,11 +2376,16 @@ async def get_all_analysis_endpoint(
                 "confidence_score": insight.confidence_score,
                 "action_suggestion": insight.action_suggestion,
                 "related_items": actual_items,
+                "workspace_id": str(insight.workspace_id) if getattr(insight, 'workspace_id', None) else None,
+                "workspace_name": insight.workspace.name if getattr(insight, 'workspace', None) else None,
+                "workspace_color": insight.workspace.color if getattr(insight, 'workspace', None) else None,
                 "full_data": {
                     "type": insight.type,
+                    "title": insight.title,
                     "insight_message": insight.insight_message,
                     "confidence_score": insight.confidence_score,
                     "action_suggestion": insight.action_suggestion,
+                    "innovation_potential": insight.innovation_potential,
                     "related_items": insight.related_items,
                     "tool_used": tool_used
                 }
@@ -2786,8 +2978,7 @@ Realiza un análisis personalizado del siguiente documento con estas especificac
  """
 
             # Obtener LLM para el análisis
-            from core.llm_manager import get_fast_llm
-            llm = get_fast_llm()
+            llm = await get_llm_for_user(account_id, purpose="fast")
             if not llm:
                 raise ValueError("LLM no disponible para análisis personalizado.")
 
@@ -2870,7 +3061,7 @@ async def analyze_note_endpoint(
         raise HTTPException(status_code=404, detail="Nota no encontrada")
     
     # Perform analysis
-    analysis_result = await analyze_single_note(note['content'], note.get('title', 'Sin título'))
+    analysis_result = await analyze_single_note(note['content'], note.get('title', 'Sin título'), account_id=current_account_id)
     
     # Save analysis task
     new_task = AnalysisTask(
@@ -2907,7 +3098,7 @@ async def analyze_note_collection_endpoint(
         raise HTTPException(status_code=404, detail="No se encontraron notas válidas")
 
     # Perform analysis
-    analysis_result = await analyze_note_collection(notes_data, req.collection_name)
+    analysis_result = await analyze_note_collection(notes_data, req.collection_name, account_id=current_account_id)
     
     # Save analysis task
     new_task = AnalysisTask(
@@ -2939,7 +3130,7 @@ async def summarize_note_endpoint(
         raise HTTPException(status_code=404, detail="Nota no encontrada")
     
     # Generate summary
-    summary_result = await summarize_note(note['content'], note.get('title', 'Sin título'))
+    summary_result = await summarize_note(note['content'], note.get('title', 'Sin título'), account_id=current_account_id)
     
     # Return summary directly (no need to save as task for quick summaries)
     return {

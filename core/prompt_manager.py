@@ -27,6 +27,28 @@ from core.citation_models import CITATION_SYSTEM_PROMPT # Importar CITATION_SYST
 
 logger = logging.getLogger(__name__)
 
+
+def _format_selected_context_items(items: List[Dict[str, Any]]) -> str:
+    manifest_lines = []
+
+    for item in items:
+        item_type = str(item.get("type") or "context").lower()
+        item_id = item.get("id")
+        exact_name = item.get("file_name") or item.get("name") or item.get("title") or item_id or "sin-nombre"
+        extras = []
+
+        if item.get("title") and item.get("title") != exact_name:
+            extras.append(f"titulo: {item['title']}")
+        if item.get("topic"):
+            extras.append(f"topic: {item['topic']}")
+        if item_id:
+            extras.append(f"id: {item_id}")
+
+        extra_text = f" ({'; '.join(extras)})" if extras else ""
+        manifest_lines.append(f"- {item_type}: {exact_name}{extra_text}")
+
+    return "\n".join(manifest_lines)
+
 class PromptManager:
     """
     Gestiona la carga, construcción y formato de los prompts del sistema.
@@ -80,26 +102,38 @@ class PromptManager:
         user_message: str = "",
         has_explicit_rag_context: bool = False,
         explicit_document_names: Optional[List[str]] = None,
-        context: Optional[Dict[str, Any]] = None
+        explicit_rag_context_items: Optional[List[Dict[str, Any]]] = None,
+        context: Optional[Dict[str, Any]] = None,
+        compact_mode: bool = False,
     ) -> str:
         """
         Construye el prompt del sistema dinámicamente, integrando todos los
         componentes de contexto.
+
+        Si ``compact_mode`` es True (ej. para modelos Ollama con contexto reducido)
+        se omiten secciones decorativas grandes (HTML_DESIGN_PROMPT, CITATION_SYSTEM_PROMPT)
+        y se truncan las memorias para mantener el prompt dentro del contexto del modelo.
         """
+        # Truncar memorias en modo compacto para no superar el contexto de modelos pequeños
+        MAX_MEMORIES_CHARS = 1500 if compact_mode else None
+        if MAX_MEMORIES_CHARS and relevant_memories and len(relevant_memories) > MAX_MEMORIES_CHARS:
+            relevant_memories = relevant_memories[:MAX_MEMORIES_CHARS] + "\n[...truncado para no exceder la ventana de contexto]"
+
         # 0. Construir instrucciones de contexto específico (VISIBILIDAD MÁXIMA)
         active_context_header = ""
-        if has_explicit_rag_context and explicit_document_names:
-            doc_list = "\n".join([f"- {name}" for name in explicit_document_names])
+        if has_explicit_rag_context and (explicit_rag_context_items or explicit_document_names):
+            doc_list = _format_selected_context_items(explicit_rag_context_items) if explicit_rag_context_items else "\n".join([f"- document: {name}" for name in explicit_document_names or []])
             active_context_header = f"""
 🚨 **CONTEXTO PRIORITARIO SELECCIONADO POR EL USUARIO** 🚨
-El usuario ha seleccionado EXPLICITAMENTE los siguientes documentos/temas para esta consulta:
+El usuario ha seleccionado EXPLICITAMENTE este contexto activo para esta consulta:
 {doc_list}
 
 **INSTRUCCIÓN OBLIGATORIA:**
-1. DEBES reconocer estos documentos en tu respuesta (ej: "Basado en los documentos seleccionados...").
-2. Prioriza ABSOLUTAMENTE la información de estos archivos sobre tu conocimiento general.
-3. Si no encuentras la respuesta en los fragmentos proporcionados abajo, usa la herramienta `document_rag_tool` filtrando por estos nombres o IDs.
-4. NUNCA digas que no tienes acceso si están en la lista de arriba; usa tus herramientas para profundizar.
+1. Trata los `file_name`, `name` e `id` listados arriba como los handles canónicos para herramientas.
+2. No asumas que el contenido completo de esos archivos ya está cargado en el prompt.
+3. Si necesitas leer o verificar contenido, usa primero las herramientas disponibles con esos nombres exactos o IDs exactos.
+4. Prioriza este contexto antes de recurrir a conocimiento general o a otros documentos.
+5. Si respondes usando este contexto, reconócelo explícitamente.
 ---------------------------------------------------------
 """
 
@@ -108,8 +142,15 @@ El usuario ha seleccionado EXPLICITAMENTE los siguientes documentos/temas para e
             ctx_type = context.get("type")
             ctx_id = context.get("id")
             ctx_snapshot = context.get("snapshot", {})
+            ctx_full_text = context.get("full_text")
             
-            if ctx_type == "table":
+            if ctx_full_text:
+                context_instructions = f"""
+--- CONTEXTO DETALLADO ACTIVO ({ctx_type.upper() if ctx_type else 'GENERAL'}) ---
+{ctx_full_text}
+-------------------------------
+"""
+            elif ctx_type == "table":
                 context_instructions = f"""
 --- CONTEXTO DE TABLA ACTIVA ---
 Estás asistiendo al usuario en la vista de la tabla '{ctx_snapshot.get('name', 'Sin nombre')}'.
@@ -128,13 +169,18 @@ Instrucción: Prioriza el uso de `knowledge_graph_tool` para realizar consultas 
 """
             elif ctx_type == "analysis":
                 # Extraer contenido detallado del análisis si está disponible en el snapshot
-                analysis_result = ctx_snapshot.get("result", {}) if isinstance(ctx_snapshot.get("result"), dict) else ctx_snapshot
-                
+                # Usar lógica robusta de extracción
+                analysis_result = ctx_snapshot.get("result", {}) 
+                if not isinstance(analysis_result, dict):
+                    analysis_result = ctx_snapshot.get("processed_data", {})
+                if not isinstance(analysis_result, dict):
+                    analysis_result = ctx_snapshot
+
                 content_parts = []
                 
                 # 1. Título y Resumen
                 title = ctx_snapshot.get('title') or analysis_result.get('title') or 'Sin título'
-                summary = analysis_result.get('summary') or ctx_snapshot.get('summary')
+                summary = analysis_result.get('summary') or analysis_result.get('executive_summary') or ctx_snapshot.get('summary')
                 if summary:
                     content_parts.append(f"RESUMEN EJECUTIVO:\n{summary}")
                 
@@ -148,7 +194,17 @@ Instrucción: Prioriza el uso de `knowledge_graph_tool` para realizar consultas 
                     content_parts.append(f"HALLAZGOS CLAVE:\n{findings_text}")
                 
                 # 3. Reporte Final (el más importante)
-                final_report = analysis_result.get('final_report') or ctx_snapshot.get('final_report')
+                final_report = analysis_result.get('final_report') or \
+                               analysis_result.get('report', {}).get('final_report') if isinstance(analysis_result.get('report'), dict) else None or \
+                               ctx_snapshot.get('final_report')
+                
+                if not final_report and isinstance(analysis_result, dict):
+                    # Fallback a buscar cualquier campo que parezca un reporte largo
+                    for key in ["final_report", "report_text", "full_report", "content"]:
+                        if analysis_result.get(key):
+                            final_report = analysis_result.get(key)
+                            break
+
                 if final_report:
                     content_parts.append(f"INFORME DETALLADO:\n{final_report}")
                 
@@ -160,6 +216,16 @@ Instrucción: Prioriza el uso de `knowledge_graph_tool` para realizar consultas 
                     else:
                         rec_text = str(recommendations)
                     content_parts.append(f"ACCIONES Y RECOMENDACIONES:\n{rec_text}")
+
+                # Si no hay partes pero hay datos, volcar JSON como último recurso
+                if not content_parts and analysis_result:
+                    import json
+                    try:
+                        json_str = json.dumps(analysis_result, ensure_ascii=False, indent=2)
+                        if len(json_str) > 20:
+                            content_parts.append(f"DATOS DEL ANÁLISIS (JSON):\n{json_str}")
+                    except:
+                        pass
 
                 analysis_content = "\n\n".join(content_parts) if content_parts else "No se pudo extraer el contenido detallado del informe."
 
@@ -203,9 +269,9 @@ Instrucción: El usuario está interesado en la información contenida en esta c
             
             if has_explicit_rag_context:
                 rag_instruction = (
-                    f"**Instrucción de Contexto RAG:** El usuario ha seleccionado EXPLICITAMENTE los siguientes documentos como contexto prioritario: {doc_names_str}. "
-                    "DEBES usar la información de estos documentos para responder. Si no encuentras información relevante en los fragmentos de abajo, "
-                    "usa la herramienta `document_rag_tool` (si está disponible) o simplemente indica que tienes el documento seleccionado pero no encontraste el dato específico."
+                    f"**Instrucción de Contexto RAG:** El usuario ha activado contexto explícito para esta consulta ({doc_names_str}). "
+                    "Usa esos nombres o IDs como referencia prioritaria para tus herramientas. Si los fragmentos de abajo no bastan, "
+                    "lee o consulta primero esos archivos exactos antes de expandirte a otras fuentes."
                 )
             else:
                 rag_instruction = (
@@ -320,7 +386,10 @@ Usa esta información para responder preguntas sobre el tiempo, programar evento
 """
 
         final_prompt_parts = []
-        if telegram_id:
+        if compact_mode:
+            # Modo compacto (ej: Ollama): omitir la sección de diseño HTML para ahorrar tokens
+            final_prompt_parts.append("Responde de forma clara y concisa. Usa Markdown estándar.")
+        elif telegram_id:
             final_prompt_parts.extend([TELEGRAM_FORMATTING_PROMPT, "<hr>"])
         else:
             final_prompt_parts.extend(["💎 **MODO DE DISEÑO PREMIUM ACTIVADO** 💎", HTML_DESIGN_PROMPT, "<hr>"])
@@ -343,9 +412,10 @@ Usa esta información para responder preguntas sobre el tiempo, programar evento
             "<hr>",
             system_prompt_content,
             "<hr>",
-            CITATION_SYSTEM_PROMPT,
         ])
-        final_prompt_parts.append("\n\nIMPORTANTE: Al citar fuentes, cada número de fuente debe estar entre sus propios corchetes. Por ejemplo, en lugar de [1, 2, 3], formatee como [1][2][3].")
+        if not compact_mode:
+            final_prompt_parts.append(CITATION_SYSTEM_PROMPT)
+            final_prompt_parts.append("\n\nIMPORTANTE: Al citar fuentes, cada número de fuente debe estar entre sus propios corchetes. Por ejemplo, en lugar de [1, 2, 3], formatee como [1][2][3].")
         
         final_prompt = "\n".join(final_prompt_parts)
         

@@ -10,8 +10,11 @@ import { useToast } from "@/hooks/use-toast";
 import apiClient from "@/lib/api";
 
 interface Collection {
-  topic: string;
+  id?: string;
+  name: string;
+  topic?: string;
   document_count: number;
+  parent_id?: string | null;
 }
 
 interface Workspace {
@@ -42,7 +45,7 @@ export function GitHubRepoDialog({ isOpen, onOpenChange, onSuccess }: GitHubRepo
         try {
           const [collectionsResponse, workspacesResponse] = await Promise.all([
             apiClient.get("/api/collections"),
-            apiClient.get("/api/workspaces")
+            apiClient.get("/api/workspaces", { params: { limit: 100 } })
           ]);
           setCollections(collectionsResponse.data);
           const wData = workspacesResponse.data;

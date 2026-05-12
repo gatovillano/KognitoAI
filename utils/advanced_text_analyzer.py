@@ -8,11 +8,14 @@ from typing import List, Dict, Optional, TypeVar, cast, Type
 # LangChain y Pydantic para robustez y estructura
 from langchain_core.messages import HumanMessage
 from langchain_core.output_parsers import PydanticOutputParser
-from core.llm_manager import get_llm_for_user, get_fast_llm
+from core.llm_manager import get_llm_for_user, get_fast_llm, get_fallback_llm
+from core.utils.llm_utils import safe_json_loads
 from pydantic import BaseModel, Field # Usamos pydantic v2
 from typing import List, Dict, Optional, TypeVar, cast, Type, Any
 
 logger = logging.getLogger(__name__)
+
+_PydanticType = TypeVar('_PydanticType', bound=BaseModel)
 
 # --- Modelos de Salida Pydantic para garantizar la estructura del LLM ---
 
@@ -73,6 +76,42 @@ class CollectionAnalysis(BaseModel):
     kai_synthesis: str = Field(description="Una síntesis de alto nivel desde la perspectiva de KAI (Kognito AI) como exocerebro del usuario. Debe ser una reflexión estratégica (150-200 palabras) que conecte el contenido de la colección con el contexto más amplio del conocimiento del usuario, identificando patrones emergentes, oportunidades de acción y valor estratégico único que surge del análisis conjunto.")
 
 
+# --- Helpers para resiliencia ante errores de proveedor LLM ---
+
+def _clone_without_streaming(llm: Any) -> Any:
+    """Clona un LLM desactivando streaming para evitar MidStreamFallbackError."""
+    llm_copy = llm
+    if hasattr(llm, "model_copy"):
+        try:
+            llm_copy = llm.model_copy(deep=True)
+        except TypeError:
+            llm_copy = llm.model_copy()
+    elif hasattr(llm, "copy"):
+        try:
+            llm_copy = llm.copy(deep=True)
+        except TypeError:
+            llm_copy = llm.copy()
+    if hasattr(llm_copy, "streaming"):
+        llm_copy.streaming = False
+    extra_body = getattr(llm_copy, "extra_body", None)
+    if isinstance(extra_body, dict):
+        extra_body.setdefault("include_reasoning", False)
+    return llm_copy
+
+
+def _is_retryable_llm_provider_error(exc: Exception) -> bool:
+    """Detecta errores transitorios de proveedor que ameritan reintento con fallback."""
+    error_text = str(exc).lower()
+    return any(marker in error_text for marker in [
+        "midstreamfallbackerror",
+        "openrouterexception",
+        "provider returned error",
+        "error_type': 'unmapped'",
+        'error_type": "unmapped"',
+        "serviceunavailableerror",
+    ])
+
+
 # --- Clase Principal del Analizador ---
 
 class AdvancedTextAnalyzer:
@@ -89,39 +128,50 @@ class AdvancedTextAnalyzer:
         logger.info("Usando modelo rápido global para análisis de texto avanzado...")
         return get_fast_llm()
 
-    _PydanticType = TypeVar('_PydanticType', bound=BaseModel)
-
     async def _run_analysis_with_parser(self, prompt: str, output_parser: PydanticOutputParser, pydantic_object: Type[_PydanticType], account_id: Optional[str] = None) -> _PydanticType:
         """
         Función centralizada y robusta para ejecutar una llamada al LLM y parsear la salida.
         """
+        import json
+
         llm = await self._get_model(account_id)
         full_prompt = f"{prompt}\n\n{output_parser.get_format_instructions()}"
 
-        try:
-            response = await llm.ainvoke([HumanMessage(content=full_prompt)])
-            # Ensure we have a string response content
+        async def _try_invoke_and_parse(candidate_llm: Any) -> _PydanticType:
+            response = await _clone_without_streaming(candidate_llm).ainvoke([HumanMessage(content=full_prompt)])
             response_content = response.content
             if isinstance(response_content, list):
-                # If content is a list, join it into a string
                 response_content = " ".join(str(item) for item in response_content)
             elif not isinstance(response_content, str):
                 response_content = str(response_content)
 
-            # Intentar extraer el JSON si está envuelto en un bloque de código Markdown
-            json_match = re.search(r"```json\n(.*?)```", response_content, re.DOTALL)
-            if json_match:
-                json_string = json_match.group(1)
-                logger.debug(f"JSON extraído de bloque Markdown: {json_string}")
-            else:
+            try:
+                obj = safe_json_loads(response_content)
+                json_string = json.dumps(obj)
+            except Exception as parse_err:
+                logger.error(f"Error en safe_json_loads: {parse_err}")
                 json_string = response_content
-                logger.debug(f"No se encontró bloque Markdown, intentando parsear directamente: {json_string}")
 
             parsed_output = await output_parser.aparse(json_string)
             return cast(pydantic_object, parsed_output)
-        except Exception as e:
-            logger.error(f"Fallo en el pipeline de análisis y parseo del LLM: {e}", exc_info=True)
-            raise ValueError(f"No se pudo obtener una respuesta JSON válida del LLM. Error: {e}")
+
+        try:
+            return await _try_invoke_and_parse(llm)
+        except Exception as primary_exc:
+            if _is_retryable_llm_provider_error(primary_exc):
+                logger.warning(
+                    "Analizador de texto: error retryable del proveedor LLM, intentando con fallback | error=%s",
+                    primary_exc,
+                )
+                fallback_llm = get_fallback_llm()
+                if fallback_llm:
+                    try:
+                        return await _try_invoke_and_parse(fallback_llm)
+                    except Exception as fallback_exc:
+                        logger.error(f"Fallo en el pipeline de análisis tras fallback: {fallback_exc}", exc_info=True)
+                        raise ValueError(f"No se pudo obtener una respuesta JSON válida del LLM. Error: {fallback_exc}")
+            logger.error(f"Fallo en el pipeline de análisis y parseo del LLM: {primary_exc}", exc_info=True)
+            raise ValueError(f"No se pudo obtener una respuesta JSON válida del LLM. Error: {primary_exc}")
 
     async def analyze_single_text(self, text: str, document_title: str = "Documento analizado", account_id: Optional[str] = None) -> SingleTextAnalysis:
         """

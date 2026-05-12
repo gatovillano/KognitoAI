@@ -9,9 +9,13 @@ import apiClient from '@/lib/api';
 import { toast } from 'sonner';
 
 interface Collection {
-  topic: string;
+  id?: string;
+  name: string;
+  topic?: string;
   description?: string;
   document_count: number;
+  workspace_id?: string;
+  parent_id?: string | null;
 }
 
 interface ShareCollectionDialogProps {
@@ -36,7 +40,7 @@ export function ShareCollectionDialog({ isOpen, onOpenChange, onShareSuccess, co
   const fetchWorkspaces = async () => {
     setIsLoadingWorkspaces(true);
     try {
-      const response = await apiClient.get('/api/workspaces');
+      const response = await apiClient.get('/api/workspaces', { params: { limit: 100 } });
       setWorkspaces(response.data.workspaces);
     } catch (error) {
       toast.error('Error al cargar los workspaces.');

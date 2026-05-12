@@ -260,6 +260,7 @@ async def get_search_tool(search_api: SearchAPI, config: Optional[RunnableConfig
 async def get_all_tools(config: Optional[RunnableConfig]): # Changed to Optional
     """Assemble complete toolkit including research and search tools."""
     from skills.search_and_research_skill.scripts.web_scraper_tool import WebScraperTool
+    from skills.search_and_research_skill.scripts.web_search_tool import WebSearchTool
     from skills.knowledge_and_memory_skill.scripts.knowledge_search_tool import KnowledgeSearchTool
     from skills.knowledge_and_memory_skill.scripts.knowledge_graph_tool import KnowledgeGraphTool
     from skills.knowledge_and_memory_skill.scripts.graph_cypher_generator_tool import GraphCypherGeneratorTool
@@ -272,6 +273,7 @@ async def get_all_tools(config: Optional[RunnableConfig]): # Changed to Optional
 
     # Initialize tools without account_id first
     web_scraper = WebScraperTool()
+    web_search = WebSearchTool()
     knowledge_graph = KnowledgeGraphTool()
     graph_cypher = GraphCypherGeneratorTool()
     knowledge_search = KnowledgeSearchTool()
@@ -279,6 +281,7 @@ async def get_all_tools(config: Optional[RunnableConfig]): # Changed to Optional
 
     # Inject dependencies if account_id is available
     if account_id:
+        web_search.account_id = account_id
         graph_cypher.account_id = account_id
         knowledge_search.account_id = account_id
         knowledge_search.workspace_id = workspace_id
@@ -288,6 +291,7 @@ async def get_all_tools(config: Optional[RunnableConfig]): # Changed to Optional
     tools = [
         deep_research_think_tool,
         web_scraper,
+        web_search,
         knowledge_search,
         knowledge_graph,
         graph_cypher,

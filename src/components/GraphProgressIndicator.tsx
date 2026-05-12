@@ -6,23 +6,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Network, Loader2, CheckCircle, XCircle, Clock, X, Brain, Sparkles, Database, Share2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
-export interface GraphTask {
-    task_id: string;
-    phase: string;
-    message: string;
-    progress_percent: number;
-    is_complete: boolean;
-    has_error: boolean;
-    error?: string;
-    metrics?: {
-        entities_count: number;
-        relationships_count: number;
-        documents_processed: number;
-        quotes_extracted: number;
-    };
-    processing_mode: 'hybrid' | 'conceptual';
-    topic?: string;
-}
+import { AnalysisTask } from '@/contexts/TaskContext';
+
+export type GraphTask = AnalysisTask;
 
 const getStatusIcon = (task: GraphTask) => {
     if (task.has_error) return <XCircle className="h-4 w-4 text-red-500" />;
@@ -44,6 +30,10 @@ const getPhaseLabel = (phase: string) => {
         'conceptual_extracting_quotes': 'Extrayendo citas clave',
         'conceptual_thematic_relationships': 'Vinculando temas',
         'conceptual_idea_profiles': 'Perfilando ideas',
+        'searching': 'Buscando información',
+        'reading': 'Leyendo contenido',
+        'analyzing': 'Analizando datos',
+        'summarizing': 'Sintetizando resultados',
         'saving_to_neo4j': 'Guardando en base de datos',
         'completed': 'Completado',
         'error': 'Error'
@@ -85,9 +75,11 @@ export default function GraphProgressIndicator({ tasks, onDismiss }: { tasks: Gr
                             </div>
                             <div>
                                 <div className="flex items-center gap-2">
-                                    {tasks.some(t => t.message.toLowerCase().includes('análisis')) 
-                                        ? 'Procesamiento de IA'
-                                        : 'Grafo de Conocimiento'}
+                                    {tasks.some(t => t.topic) 
+                                        ? 'Análisis de Colección'
+                                        : tasks.some(t => t.message.toLowerCase().includes('análisis') || t.message.toLowerCase().includes('analizando'))
+                                            ? 'Procesamiento de IA'
+                                            : 'Grafo de Conocimiento'}
                                     <Sparkles className="h-4 w-4 text-purple-500 animate-pulse" />
                                 </div>
                                 <p className="text-xs font-normal text-muted-foreground mt-0.5">

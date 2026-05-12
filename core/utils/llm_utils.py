@@ -11,19 +11,118 @@ logger = logging.getLogger("core.utils.llm_utils")
 # Forzar nivel WARNING para producción
 logger.setLevel(logging.WARNING)
 
+# --- Helper functions for OpenRouter compatibility ---
+
+def is_openrouter_model(llm):
+    """Check if the given LLM is an OpenRouter model."""
+    # Check model_name attribute
+    model_name = getattr(llm, 'model_name', '') or ''
+    if isinstance(model_name, str) and 'openrouter' in model_name.lower():
+        return True
+    # Check base_url or api_base
+    base_url = getattr(llm, 'base_url', '') or getattr(llm, 'api_base', '') or ''
+    if isinstance(base_url, str) and 'openrouter' in base_url.lower():
+        return True
+    # Check if it is a ChatLiteLLM and model string contains openrouter
+    if hasattr(llm, 'model') and 'openrouter' in str(llm.model).lower():
+        return True
+    return False
+
+
+def safe_bind_tools(llm, tools, **kwargs):
+    """Bind tools to LLM, handling OpenRouter lack of tool_choice support."""
+    if is_openrouter_model(llm):
+        # OpenRouter does not support tool_choice parameter. Remove it if present.
+        kwargs.pop("tool_choice", None)
+        # Also, we might need to avoid other parameters that cause issues.
+        # Just bind tools without extra args.
+        try:
+            return llm.bind_tools(tools)
+        except Exception as e:
+            logger.warning(f"⚠️ [LLM Utils] Error binding tools for OpenRouter: {e}. Trying without any args.")
+            # Fallback: try to bind tools with minimal arguments
+            return llm.bind_tools(tools)
+    else:
+        return llm.bind_tools(tools, **kwargs)
+
+
+def safe_json_loads(content: str) -> Any:
+    """
+    Intenta cargar JSON de forma robusta, manejando bloques markdown y texto extra.
+    """
+    if not content:
+        return None
+        
+    content = content.strip()
+    
+    # 1. Intentar extraer de bloques markdown
+    if "```json" in content:
+        content = content.split("```json")[1].split("```")[0].strip()
+    elif "```" in content:
+        content = content.split("```")[1].split("```")[0].strip()
+    
+    # 2. Buscar el inicio del JSON
+    start_idx = content.find('{')
+    start_arr = content.find('[')
+    
+    if start_idx == -1 and start_arr == -1:
+        return json.loads(content) # Dejar que falle normalmente si no hay inicio claro
+        
+    if start_idx == -1: start_idx = start_arr
+    elif start_arr != -1: start_idx = min(start_idx, start_arr)
+    
+    content_from_start = content[start_idx:]
+    
+    try:
+        # raw_decode permite ignorar texto extra después del JSON válido
+        decoder = json.JSONDecoder()
+        obj, _ = decoder.raw_decode(content_from_start)
+        return obj
+    except json.JSONDecodeError:
+        pass
+        
+    # 3. Fallback: Limpieza con regex para encontrar el bloque exterior
+    # Intentar encontrar el bloque más grande que parezca JSON
+    json_match = re.search(r'(\{.*\}|\[.*\])', content, re.DOTALL)
+    if json_match:
+        try:
+            return json.loads(json_match.group(1))
+        except:
+            pass
+            
+    # Último intento con el contenido original o procesado por markdown
+    return json.loads(content)
+
+
 async def invoke_structured_output(llm: BaseChatModel, schema: Any, prompt: str, retry_config: dict = None) -> Any:
     """Invokes an LLM with structured output, falling back to manual JSON parsing if needed."""
     try:
         # 1. Intentar con el método estándar (herramientas)
         # Deshabilitamos streaming para asegurar captura completa en logs y estabilidad JSON
-        model = llm.with_structured_output(schema)
+        
+        # FIX: OpenRouter compatibility for tool_choice
+        # Muchos modelos en OpenRouter fallan con métodos de herramientas automáticos.
+        is_openrouter = is_openrouter_model(llm)
+        
+        try:
+            if is_openrouter:
+                # Omitimos explícitamente cualquier tool_choice y usamos json_mode para OpenRouter
+                # para maximizar la compatibilidad con modelos especializados.
+                model = llm.with_structured_output(schema, method="json_mode")
+            else:
+                model = llm.with_structured_output(schema)
+        except Exception as e:
+            # Fallback a json_mode si el método estándar falla
+            logger.warning(f"⚠️ [Structured Output] Failed to create model with method='tool_calling': {e}. Retrying with 'json_mode'.")
+            model = llm.with_structured_output(schema, method="json_mode")
+            
         if hasattr(model, 'streaming'):
              model.streaming = False
         
         if retry_config:
             model = model.with_retry(**retry_config)
         
-        # Intentar invocar con un HumanMessage explícito para evitar confusiones de tipo
+        # Intentar invocar con un HumanMessage explícito
         result = await model.ainvoke([HumanMessage(content=prompt)])
         
         if result is None:
@@ -34,6 +133,9 @@ async def invoke_structured_output(llm: BaseChatModel, schema: Any, prompt: str,
         return result
     except Exception as e:
         error_str = str(e)
+        # Si es un error de límite de tokens, no es culpa del método estructurado, lo dejamos pasar
+        if is_token_limit_exceeded(e):
+            raise e
         logger.warning(f"⚠️ [Structured Output] Standard method failed: {e}. Body: {error_str[:500]}. Attempting manual fallback.")
 
         # Manual parsing logic
@@ -96,21 +198,16 @@ async def invoke_structured_output(llm: BaseChatModel, schema: Any, prompt: str,
         clean_content = clean_content.strip()
 
         # Intentar extraer JSON de la respuesta (ahora más flexible)
-        json_match = re.search(r'(\{.*\})', clean_content, re.DOTALL)
-        if json_match:
-            try:
-                data = json.loads(json_match.group(1))
-                # Usar parse_obj si está disponible (Pydantic V2), si no, usar el constructor
-                if hasattr(schema, 'parse_obj'):
-                    return schema.parse_obj(data)
-                # Pydantic V1/V2 __init__
-                return schema(**data)
-            except Exception as e3:
-                logger.error(f"❌ [Structured Output] Manual parsing/validation failed: {e3}. Data: {json_match.group(1)}")
-                raise e3
-        else:
-            logger.error(f"❌ [Structured Output] No JSON found in response after manual prompting. Content: {content[:200]}...")
-            raise ValueError("No valid JSON found in response after manual prompting")
+        try:
+            data = safe_json_loads(clean_content)
+            # Usar parse_obj si está disponible (Pydantic V2), si no, usar el constructor
+            if hasattr(schema, 'parse_obj'):
+                return schema.parse_obj(data)
+            # Pydantic V1/V2 __init__
+            return schema(**data)
+        except Exception as e3:
+            logger.error(f"❌ [Structured Output] Manual parsing/validation failed: {e3}. Content: {clean_content[:500]}...")
+            raise e3
 
 
 

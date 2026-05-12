@@ -27,35 +27,32 @@ async def reprocess_memories():
         
         logger.info(f"📋 Cuentas encontradas: {len(account_ids)}")
 
-        for account_id in account_ids:
+        for i, account_id in enumerate(account_ids):
             str_account_id = str(account_id)
-            logger.info(f"🔄 Procesando cuenta: {str_account_id}")
+            logger.info(f"🔄 [{i+1}/{len(account_ids)}] Procesando cuenta: {str_account_id}")
             
             # 2. Resetear el flag is_graph_processed para memorias
-            # Filtramos por tipos comunes de memoria para no reprocesar documentos grandes innecesariamente si no son memorias
             reset_query = text("""
                 UPDATE langchain_pg_embedding
                 SET is_graph_processed = false
                 WHERE account_id = :account_id 
                 AND (
-                    cmetadata->>'type' = 'user_memory' 
-                    OR cmetadata->>'type' = 'user_memory_proactive_llm'
-                    OR cmetadata->>'type' = 'agent_memory'
-                    OR cmetadata->>'type' = 'chat_summary'
+                    cmetadata->>'type' IN ('user_memory', 'user_memory_proactive_llm', 'agent_memory', 'chat_summary')
                 )
             """)
             
             result = await db.execute(reset_query, {"account_id": str_account_id})
-            logger.info(f"   ↪️  Memorias marcadas para reprocesar: {result.rowcount}")
+            count = result.rowcount
+            logger.info(f"   ↪️  Se marcaron {count} memorias para reprocesar en esta cuenta.")
             await db.commit()
             
             # 3. Ejecutar el procesamiento por lotes
-            if result.rowcount > 0:
-                logger.info(f"   ⚙️  Ejecutando process_memory_batches...")
+            if count > 0:
+                logger.info(f"   ⚙️  Iniciando process_memory_batches para account_id: {str_account_id}...")
                 await process_memory_batches(str_account_id)
-                logger.info(f"   ✅  Procesamiento finalizado para {str_account_id}")
+                logger.info(f"   ✅  Lote finalizado para la cuenta {str_account_id}")
             else:
-                logger.info(f"   ℹ️  No se encontraron memorias para reprocesar en esta cuenta.")
+                logger.info(f"   ℹ️  No hay memorias pendientes para la cuenta {str_account_id}.")
 
     logger.info("✨ Reprocesamiento global completado.")
 

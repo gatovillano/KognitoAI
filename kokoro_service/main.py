@@ -75,11 +75,14 @@ async def edge_stream_generator(text: str, voice: str, speed: float) -> AsyncGen
             yield chunk["data"]
 
 async def kokoro_stream_generator(text: str, voice: str, speed: float, lang: str) -> AsyncGenerator[bytes, None]:
-    """Generador para streaming desde Kokoro (procesa por frases)."""
+    """Generador para Kokoro (concatena frases en un solo WAV para evitar problemas de headers)."""
     if not kokoro:
         raise Exception("Modelo Kokoro no disponible")
     
     chunks = split_text(text)
+    all_samples = []
+    final_sample_rate = 24000
+    
     for chunk in chunks:
         # Generar audio de la frase
         samples, sample_rate = kokoro.create(
@@ -88,17 +91,26 @@ async def kokoro_stream_generator(text: str, voice: str, speed: float, lang: str
             speed=float(speed), 
             lang=lang
         )
-        
-        # Convertir a WAV en memoria para este fragmento
-        wav_buffer = io.BytesIO()
-        with wave.open(wav_buffer, "wb") as wav_file:
-            wav_file.setnchannels(1)
-            wav_file.setsampwidth(2)
-            wav_file.setframerate(sample_rate)
-            audio_int16 = (samples * 32767).astype(np.int16)
-            wav_file.writeframes(audio_int16.tobytes())
-        
-        yield wav_buffer.getvalue()
+        all_samples.append(samples)
+        final_sample_rate = sample_rate
+    
+    if not all_samples:
+        return
+
+    # Combinar todos los fragmentos
+    combined_samples = np.concatenate(all_samples)
+    
+    # Convertir a WAV en memoria (un solo archivo completo)
+    wav_buffer = io.BytesIO()
+    with wave.open(wav_buffer, "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(final_sample_rate)
+        # Normalizar y convertir a int16
+        audio_int16 = (combined_samples * 32767).astype(np.int16)
+        wav_file.writeframes(audio_int16.tobytes())
+    
+    yield wav_buffer.getvalue()
 
 @app.get("/")
 async def root():

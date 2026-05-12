@@ -10,16 +10,15 @@ export default function CollectionDetailPage() {
   const topic = params ? decodeURIComponent(params.topic as string) : '';
   const workspaceId = searchParams ? searchParams.get('workspace_id') : null;
 
-  console.log("[topic] page - workspaceId from URL:", workspaceId); // DEBUG
 
   return (
-    <div className="p-4 sm:p-8 mx-auto">
+    <div className="p-4 sm:p-8 max-w-7xl mx-auto">
       <DocumentCollectionDisplay
         topic={topic}
         collectionName={topic}
         workspaceId={workspaceId || undefined}
-        backButtonText="Volver a Colecciones"
-        backButtonHref="/rag"
+        backButtonText={workspaceId ? "Volver al Workspace" : "Volver a Colecciones"}
+        backButtonHref={workspaceId ? `/workspaces/${workspaceId}` : "/rag/all"}
       />
     </div>
   );

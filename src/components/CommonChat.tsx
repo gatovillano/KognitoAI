@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -16,13 +16,16 @@ import ChatInputBar from '@/components/ChatInputBar';
 import { stripMarkdown } from '@/lib/chatUtils';
 import { BackgroundTaskIndicator } from '@/components/BackgroundTaskIndicator';
 import { EmptyChat } from '@/components/EmptyChat';
-import { ContextSelectorButton } from '@/components/ContextSelectorButton';
 import { useWebSocketContext } from '@/contexts/WebSocketContext';
 import { WebSocketMessage } from '@/hooks/useWebSocket'; // Importar WebSocketMessage
 import DeepResearchVisualizer from '@/components/DeepResearchVisualizer';
 import { AnalysisDetailDialog } from '@/app/(dashboard)/analysis/analysis-detail-dialog';
 import { Analysis } from '@/lib/models';
 import { ShareChatDialog } from '@/components/ShareChatDialog';
+
+const INITIAL_RENDERED_MESSAGES = 40;
+const RENDER_BATCH_SIZE = 30;
+const STREAM_SCROLL_THROTTLE_MS = 120;
 
 // ... (interfaces remain the same) ...
 interface ToolStatusMessage {
@@ -54,10 +57,37 @@ interface MessageContentPart {
   tool_name?: string;
 }
 
+const hasPendingToolCall = (parts: MessageContentPart[], toolName?: string, content?: string): boolean => {
+  if (!toolName) return false;
+
+  return parts.some((part) =>
+    part.type === 'tool_call' &&
+    part.status === 'start' &&
+    part.tool_name === toolName &&
+    (content === undefined || part.content === content)
+  );
+};
+
+const findLatestToolCallIndex = (parts: MessageContentPart[], toolName?: string): number => {
+  for (let index = parts.length - 1; index >= 0; index--) {
+    const part = parts[index];
+    if (
+      part.type === 'tool_call' &&
+      part.status === 'start' &&
+      (!toolName || part.tool_name === toolName)
+    ) {
+      return index;
+    }
+  }
+
+  return parts.map((part) => part.type).lastIndexOf('tool_call');
+};
+
 interface ChatMessageType {
   text: string;
   sender: 'user' | 'ai';
   created_at: string;
+  model_name?: string;
   images_base64?: string[];
   document_url?: string;
   ragContext?: SelectedContextItem[];
@@ -70,11 +100,53 @@ interface ChatMessageType {
   taskId?: string;
 }
 
+interface IndexedResponse {
+  message: ChatMessageType;
+  index: number;
+}
+
+interface SingleRenderItem {
+  type: 'single';
+  key: string;
+  message: ChatMessageType;
+  index: number;
+}
+
+interface RetryGroupRenderItem {
+  type: 'retry_group';
+  key: string;
+  userMessage: ChatMessageType;
+  userIndex: number;
+  responses: IndexedResponse[];
+}
+
+type ChatRenderItem = SingleRenderItem | RetryGroupRenderItem;
+
+const normalizeRetryText = (text: string): string =>
+  text.trim().replace(/\s+/g, ' ').toLowerCase();
+
+const areImagesEqual = (first: string[] = [], second: string[] = []): boolean => {
+  if (first.length !== second.length) return false;
+  return first.every((img, idx) => img === second[idx]);
+};
+
+const areSameRetryPrompt = (first: ChatMessageType, second: ChatMessageType): boolean => {
+  if (first.sender !== 'user' || second.sender !== 'user') return false;
+
+  const sameText = normalizeRetryText(first.text) === normalizeRetryText(second.text);
+  const sameContext = JSON.stringify(first.ragContext || []) === JSON.stringify(second.ragContext || []);
+  const sameImages = areImagesEqual(first.images_base64 || [], second.images_base64 || []);
+
+  return sameText && sameContext && sameImages;
+};
+
 interface SelectedContextItem {
   id: string;
   type: 'document' | 'collection';
   name: string;
   title?: string;
+  topic?: string;
+  file_name?: string;
 }
 
 interface Artifact {
@@ -177,7 +249,6 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
   const { settings } = useUserSettings();
   const router = useRouter();
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
-  const [files, setFiles] = useState<File[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [isResponding, setIsResponding] = useState(false);
   const [isThinking, setIsThinking] = useState(false);
@@ -199,9 +270,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
   const [toolName, setToolName] = useState<string | undefined>(undefined);
   const [reactState, setReactState] = useState<string | undefined>(undefined);
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
-  const [recordingMimeType, setRecordingMimeType] = useState<string>('');
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
-  const [audioChunks, setAudioChunks] = useState<Blob[]>([]);
   const audioStreamRef = useRef<MediaStream | null>(null); // Para almacenar el stream del micrófono
   const currentAudioRef = useRef<HTMLAudioElement | null>(null); // Para almacenar la instancia del objeto Audio
   const [playingMessageIndex, setPlayingMessageIndex] = useState<number | null>(null);
@@ -214,26 +283,33 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
   const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true);
   const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
   const [threadTitle, setThreadTitle] = useState<string>('');
+  const [renderedMessageCount, setRenderedMessageCount] = useState(INITIAL_RENDERED_MESSAGES);
+  const [activeRetryResponseMap, setActiveRetryResponseMap] = useState<Record<string, number>>({});
 
-  // Refs to hold latest values for stable callbacks
-  const isRespondingRef = useRef(isResponding);
-  useEffect(() => { isRespondingRef.current = isResponding; }, [isResponding]);
+  const serializeSelectedContext = useCallback(
+    (items: SelectedContextItem[]) => items.map((item) => ({
+      type: item.type,
+      id: item.id,
+      name: item.name || item.title || item.file_name,
+      title: item.title,
+      topic: item.topic,
+      file_name: item.file_name,
+    })),
+    []
+  );
 
   const threadIdRef = useRef(threadId);
   useEffect(() => { threadIdRef.current = threadId; }, [threadId]);
-
-  const toolNameRef = useRef(toolName);
-  useEffect(() => { toolNameRef.current = toolName; }, [toolName]);
 
   const newMessageRef = useRef(newMessage);
   useEffect(() => { newMessageRef.current = newMessage; }, [newMessage]);
 
   // Other refs
   const scrollAreaRef = useRef<HTMLDivElement>(null);
-  const topSentinelRef = useRef(null);
-  const justRestoredScrollRef = useRef(false);
+  const topSentinelRef = useRef<HTMLDivElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const prevScrollHeightRef = useRef<number | null>(null); // Initialize with current value
+  const autoScrollRafRef = useRef<number | null>(null);
+  const lastStreamScrollRef = useRef<number>(0);
   const currentTaskIdRef = useRef<string | null>(null);
   useEffect(() => { currentTaskIdRef.current = currentTaskId; }, [currentTaskId]);
 
@@ -274,6 +350,27 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
     }
   }, [isAutoScrollEnabled]);
 
+  const scheduleStreamScroll = useCallback((force: boolean = false) => {
+    if (autoScrollRafRef.current !== null) return;
+
+    autoScrollRafRef.current = requestAnimationFrame(() => {
+      autoScrollRafRef.current = null;
+      const now = performance.now();
+      if (now - lastStreamScrollRef.current < STREAM_SCROLL_THROTTLE_MS) return;
+
+      lastStreamScrollRef.current = now;
+      scrollToBottom('auto', force);
+    });
+  }, [scrollToBottom]);
+
+  useEffect(() => {
+    return () => {
+      if (autoScrollRafRef.current !== null) {
+        cancelAnimationFrame(autoScrollRafRef.current);
+      }
+    };
+  }, []);
+
   // Force scroll to bottom when loading indicators appear
   useEffect(() => {
     if (isResponding || toolName || isDeepResearchActive || backgroundTasks.length > 0) {
@@ -293,14 +390,85 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
       // Filtrar mensajes por thread_id para evitar que aparezcan en ventanas equivocadas
       const messageThreadId = data.thread_id || (data as any).thread_id;
       if (messageThreadId && threadIdRef.current && messageThreadId !== threadIdRef.current) {
-        console.debug(`[WebSocket] Descartando mensaje tipo ${type} para hilo ${messageThreadId} (actual: ${threadIdRef.current})`);
         return;
       }
 
       // Filtrar por taskId para ignorar mensajes de tareas canceladas o anteriores
       if (taskId && currentTaskIdRef.current && taskId !== currentTaskIdRef.current) {
-        console.debug(`[WebSocket] Descartando mensaje de tarea obsoleta ${taskId} (actual: ${currentTaskIdRef.current})`);
         return;
+      }
+
+      // Mover los side-effects fuera del updater de setMessages
+      switch (type) {
+        case 'stream_start':
+          setIsResponding(true);
+          setIsThinking(true);
+          break;
+        case 'reasoning_chunk':
+        case 'stream_chunk':
+          setIsThinking(false);
+          break;
+        case 'stream_end':
+          setIsResponding(false);
+          setIsThinking(false);
+          setToolName(undefined);
+          setReactState(undefined);
+          setIsDeepResearchActive(false);
+          if (taskId && taskId === currentTaskIdRef.current) {
+            setCurrentTaskId(null);
+          }
+          break;
+        case 'tool_start': {
+          const toolStartMessage = data as ToolStatusMessage;
+          if (toolStartMessage.tool_name === 'deep_research') {
+            setIsDeepResearchActive(true);
+          }
+          setToolName(toolStartMessage.tool_name);
+          setReactState('ejecutando');
+          setIsThinking(true);
+
+          if (toolStartMessage.task_id) {
+            // Need to pass a messageIndex condition? No, just rely on task id.
+            // In the original, it was `if (toolStartMessage.task_id && messageIndex === -1)` but `messageIndex` is only evaluated later.
+            // It's fine to just add it here for now. Actually, if it's already running, it won't add it twice because of `.some` check.
+            setBackgroundTasks((prev) => {
+              const currentTaskId = toolStartMessage.task_id as string;
+              return prev.some((task) => task.taskId === currentTaskId) ? prev : [...prev, { taskId: currentTaskId, type: toolStartMessage.tool_name }];
+            });
+            toast.info(`Iniciando ${toolStartMessage.tool_name || 'una herramienta'}...`, {
+              description: toolStartMessage.message || "La tarea ha comenzado en segundo plano.",
+              duration: 3000,
+            });
+          }
+          break;
+        }
+        case 'tool_end':
+        case 'tool_error': {
+          const toolEndMessage = data as ToolStatusMessage;
+          if (toolEndMessage.tool_name === 'deep_research') {
+            setIsDeepResearchActive(false);
+          }
+          setToolName(undefined);
+          setReactState(undefined);
+          setIsThinking(false);
+          
+          if (toolEndMessage.task_id) {
+            setBackgroundTasks((prev) => prev.filter((t) => t.taskId !== toolEndMessage.task_id));
+          }
+          
+          if (toolEndMessage.tool_name !== 'deep_research') {
+            toast[type === 'tool_end' ? 'success' : 'error'](`Herramienta ${toolEndMessage.tool_name || 'una herramienta'} ${type === 'tool_end' ? 'completada' : 'falló'}.`);
+          }
+          break;
+        }
+        case 'progress':
+          if (data.progress !== undefined) {
+            setResearchProgress(data.progress);
+          }
+          if (data.message) {
+            setResearchStatus(data.message);
+          }
+          break;
       }
 
       setMessages(prevMessages => {
@@ -314,13 +482,12 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
 
         switch (type) {
           case 'stream_start':
-            setIsResponding(true);
-            setIsThinking(true);
             if (taskId && messageIndex === -1) {
               updatedMessages.push({
                 text: '',
                 sender: 'ai',
                 created_at: new Date().toISOString(),
+                model_name: settings?.llm_model,
                 sources: [],
                 chunks: [],
                 reasoning_chunks: [],
@@ -331,19 +498,19 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
             break;
 
           case 'reasoning_chunk': {
-            setIsThinking(false);
             let chunkMessageIndex = updatedMessages.findIndex(msg => msg.taskId === taskId);
 
-            if (chunkMessageIndex === -1 && taskId) {
-              updatedMessages.push({
-                text: '',
-                sender: 'ai',
-                created_at: new Date().toISOString(),
-                sources: [],
-                chunks: [],
-                reasoning_chunks: [],
-                content_parts: [],
-                taskId: taskId,
+              if (chunkMessageIndex === -1 && taskId) {
+                updatedMessages.push({
+                  text: '',
+                  sender: 'ai',
+                  created_at: new Date().toISOString(),
+                  model_name: settings?.llm_model,
+                  sources: [],
+                  chunks: [],
+                  reasoning_chunks: [],
+                  content_parts: [],
+                  taskId: taskId,
               });
               chunkMessageIndex = updatedMessages.length - 1;
             }
@@ -370,28 +537,27 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
               updatedMessages[chunkMessageIndex] = {
                 ...existingMessage,
                 reasoning: newReasoning,
-                reasoning_chunks: [...(existingMessage.reasoning_chunks || []), chunk],
                 content_parts: newParts,
               };
             }
-            requestAnimationFrame(() => scrollToBottom('auto'));
+            scheduleStreamScroll();
             break;
           }
 
           case 'stream_chunk': {
-            setIsThinking(false);
             let chunkMessageIndex = updatedMessages.findIndex(msg => msg.taskId === taskId);
 
-            if (chunkMessageIndex === -1 && taskId) {
-              updatedMessages.push({
-                text: '',
-                sender: 'ai',
-                created_at: new Date().toISOString(),
-                sources: [],
-                chunks: [],
-                content_parts: [],
-                taskId: taskId,
-              });
+              if (chunkMessageIndex === -1 && taskId) {
+                updatedMessages.push({
+                  text: '',
+                  sender: 'ai',
+                  created_at: new Date().toISOString(),
+                  model_name: settings?.llm_model,
+                  sources: [],
+                  chunks: [],
+                  content_parts: [],
+                  taskId: taskId,
+                });
               chunkMessageIndex = updatedMessages.length - 1;
             }
 
@@ -417,69 +583,50 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
               updatedMessages[chunkMessageIndex] = {
                 ...existingMessage,
                 text: newText,
-                chunks: [...(existingMessage.chunks || []), textChunk],
+                chunks: existingMessage.chunks || [],
                 content_parts: newParts,
               };
             }
-            requestAnimationFrame(() => scrollToBottom('auto'));
+            scheduleStreamScroll();
             break;
           }
 
           case 'stream_end':
-            setIsResponding(false);
-            setIsThinking(false);
-            setToolName(undefined);
-            setReactState(undefined);
-            setIsDeepResearchActive(false);
             if (taskId && messageIndex !== -1) {
               const finalMessage = updatedMessages[messageIndex];
               updatedMessages[messageIndex] = {
                 ...finalMessage,
                 text: (data as any).text || finalMessage.text,
+                model_name: (data as any).model_name || finalMessage.model_name,
                 chunks: undefined,
                 taskId: undefined,
                 sources: (data as any).sources || finalMessage.sources || [],
                 reasoning: (data as any).reasoning || finalMessage.reasoning,
               };
             }
-            // Si esta stream_end corresponde a la tarea actual, limpiar el currentTaskId
-            if (taskId && taskId === currentTaskIdRef.current) {
-              setCurrentTaskId(null);
-            }
             break;
 
           case 'tool_start': {
             const toolStartMessage = data as ToolStatusMessage;
-            if (toolStartMessage.tool_name === 'deep_research') {
-              setIsDeepResearchActive(true);
-            }
-            setToolName(toolStartMessage.tool_name);
-            setReactState('ejecutando');
-            setIsThinking(true);
+            const toolContent = toolStartMessage.message || `Usando ${toolStartMessage.tool_name}...`;
 
-            // Handle background tasks
-            if (toolStartMessage.task_id && messageIndex === -1) {
-              setBackgroundTasks((prev) => {
-                const currentTaskId = toolStartMessage.task_id as string;
-                return prev.some((task) => task.taskId === currentTaskId) ? prev : [...prev, { taskId: currentTaskId, type: toolStartMessage.tool_name }];
-              });
-              toast.info(`Iniciando ${toolStartMessage.tool_name || 'una herramienta'}...`, {
-                description: toolStartMessage.message || "La tarea ha comenzado en segundo plano.",
-                duration: 3000,
-              });
-            }
-
+            // Handle background tasks inside setMessages? No, we moved it, but let's check if we missed something.
+            // Wait, we need to setBackgroundTasks from inside setMessages? No, outside! Let's do it outside.
+            // But I forgot to copy the toast and setBackgroundTasks for tool_start. I will add it to the outside switch.
+            
             let chunkMessageIndex = updatedMessages.findIndex(msg => msg.taskId === taskId);
             if (chunkMessageIndex !== -1) {
               const existingMessage = updatedMessages[chunkMessageIndex];
               let newParts = [...(existingMessage.content_parts || [])];
-              newParts.push({
-                type: 'tool_call',
-                content: toolStartMessage.message || `Usando ${toolStartMessage.tool_name}...`,
-                tool_name: toolStartMessage.tool_name,
-                status: 'start'
-              });
-              updatedMessages[chunkMessageIndex] = { ...existingMessage, content_parts: newParts };
+              if (!hasPendingToolCall(newParts, toolStartMessage.tool_name, toolContent)) {
+                newParts.push({
+                  type: 'tool_call',
+                  content: toolContent,
+                  tool_name: toolStartMessage.tool_name,
+                  status: 'start'
+                });
+                updatedMessages[chunkMessageIndex] = { ...existingMessage, content_parts: newParts };
+              }
             }
 
             if (toolStartMessage.tool_name === 'deep_research') {
@@ -491,23 +638,13 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
           case 'tool_end':
           case 'tool_error': {
             const toolEndMessage = data as ToolStatusMessage;
-            if (toolEndMessage.tool_name === 'deep_research') {
-              setIsDeepResearchActive(false);
-            }
-            setToolName(undefined);
-            setReactState(undefined);
-            setIsThinking(false);
-
-            if (toolEndMessage.task_id) {
-              setBackgroundTasks((prev) => prev.filter((t) => t.taskId !== toolEndMessage.task_id));
-            }
-
+            
             let chunkMessageIndex = updatedMessages.findIndex(msg => msg.taskId === taskId);
             if (chunkMessageIndex !== -1) {
               const existingMessage = updatedMessages[chunkMessageIndex];
               let newParts = [...(existingMessage.content_parts || [])];
               
-              const lastPartIndex = newParts.map(p => p.type).lastIndexOf('tool_call');
+              const lastPartIndex = findLatestToolCallIndex(newParts, toolEndMessage.tool_name);
               if (lastPartIndex !== -1) {
                  newParts[lastPartIndex] = {
                    ...newParts[lastPartIndex],
@@ -522,11 +659,6 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                 sources: [...(existingMessage.sources || []), ...(toolEndMessage.sources || [])]
               };
             }
-
-            // Show toast
-            if (toolEndMessage.tool_name !== 'deep_research') {
-              toast[type === 'tool_end' ? 'success' : 'error'](`Herramienta ${toolEndMessage.tool_name || 'una herramienta'} ${type === 'tool_end' ? 'completada' : 'falló'}.`);
-            }
             break;
           }
 
@@ -539,18 +671,6 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
               };
             }
             break;
-
-          case 'progress':
-            if (data.progress !== undefined) {
-              setResearchProgress(data.progress);
-            }
-            if (data.message) {
-              setResearchStatus(data.message);
-            }
-            break;
-
-          default:
-            console.log('[CommonChat] Unhandled message type:', type);
         }
         return updatedMessages;
       });
@@ -559,7 +679,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
     const unregister = registerMessageHandler(handleMessage);
     return unregister; // Cleanup on component unmount
 
-  }, [registerMessageHandler, scrollToBottom, threadIdRef, toolNameRef]);
+  }, [registerMessageHandler, scheduleStreamScroll, settings?.llm_model]);
 
   const handleSendMessage = useCallback(
     async (e?: React.FormEvent, messageTextFromInput?: string) => {
@@ -584,11 +704,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
           formData.append('account_id', user.id);
           formData.append('user_message', messageToProcess || '');
           if (selectedContext.length > 0) {
-            formData.append('rag_context', JSON.stringify(selectedContext.map(item => ({ 
-              type: item.type, 
-              id: item.id,
-              name: item.name || item.title 
-            }))));
+            formData.append('rag_context', JSON.stringify(serializeSelectedContext(selectedContext)));
           }
           if (uploadedImages.length > 0) {
             uploadedImages.forEach(image => {
@@ -599,11 +715,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
 
           const newSearchParams = new URLSearchParams();
           if (selectedContext.length > 0) {
-            newSearchParams.set('rag_context', JSON.stringify(selectedContext.map(item => ({ 
-            type: item.type, 
-            id: item.id,
-            name: item.name || item.title 
-          }))));
+            newSearchParams.set('rag_context', JSON.stringify(serializeSelectedContext(selectedContext)));
           }
 
           if (workspaceId) {
@@ -632,7 +744,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         images_base64: uploadedImages.map(img => img.base64),
       };
       setMessages((prev) => [...prev, userMessage]);
-      requestAnimationFrame(() => scrollToBottom('smooth'));
+      scheduleStreamScroll(true);
       setNewMessage('');
       if (uploadedImages.length > 0) {
         uploadedImages.forEach(img => URL.revokeObjectURL(img.preview));
@@ -646,11 +758,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         formData.append('account_id', user.id);
         formData.append('user_message', messageToProcess || '');
         if (selectedContext.length > 0) {
-          formData.append('rag_context', JSON.stringify(selectedContext.map(item => ({ 
-            type: item.type, 
-            id: item.id,
-            name: item.name || item.title 
-          }))));
+          formData.append('rag_context', JSON.stringify(serializeSelectedContext(selectedContext)));
         }
         if (uploadedImages.length > 0) {
           uploadedImages.forEach(image => {
@@ -673,7 +781,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         setIsResponding(false);
       }
     },
-    [user, threadId, selectedContext, router, scrollToBottom, uploadedImages]
+    [user, threadId, selectedContext, router, uploadedImages, scheduleStreamScroll, serializeSelectedContext]
   );
 
   const handleImageUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -742,7 +850,6 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         return;
       }
 
-      setRecordingMimeType(supportedMimeType); // Guardar el mime type en el estado
       console.log(`DEBUG: Usando el tipo de MIME soportado: ${supportedMimeType}`);
       const recorder = new MediaRecorder(stream, { mimeType: supportedMimeType });
       let localAudioChunks: Blob[] = [];
@@ -803,7 +910,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
       toast.error('No se pudo acceder al micrófono. Asegúrate de dar permisos.');
       setIsRecording(false);
     }
-  }, [setRecordingMimeType, setMediaRecorder, setIsRecording, setIsProcessingAudio]); // setNewMessage removido - es estable
+  }, [setMediaRecorder, setIsRecording, setIsProcessingAudio]); // setNewMessage removido - es estable
 
   const handleStopRecording = useCallback(async () => {
     if (mediaRecorder && mediaRecorder.state === 'recording') {
@@ -832,11 +939,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
       formData.append('account_id', user?.id || '');
       formData.append('user_message', text || '');
       if (selectedContext.length > 0) {
-        formData.append('rag_context', JSON.stringify(selectedContext.map(item => ({ 
-            type: item.type, 
-            id: item.id,
-            name: item.name || item.title 
-          }))));
+        formData.append('rag_context', JSON.stringify(serializeSelectedContext(selectedContext)));
       }
 
       await apiClient.post('/api/chat-form', formData);
@@ -845,7 +948,41 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
       toast.error('Error al reenviar el mensaje');
       setIsResponding(false);
     }
-  }, [threadId, user?.id, selectedContext]);
+  }, [threadId, user?.id, selectedContext, serializeSelectedContext]);
+
+  const handleDeleteMessage = useCallback(async (message: ChatMessageType) => {
+    try {
+      await apiClient.delete(`/api/threads/${threadId}/messages`, {
+        data: {
+          sender: message.sender,
+          created_at: message.created_at,
+          text: message.text,
+        },
+      });
+
+      setMessages((prevMessages) => {
+        const targetIndex = prevMessages.findIndex(
+          (m) =>
+            m.sender === message.sender &&
+            m.created_at === message.created_at &&
+            m.text === message.text
+        );
+
+        if (targetIndex === -1) {
+          return prevMessages;
+        }
+
+        const nextMessages = [...prevMessages];
+        nextMessages.splice(targetIndex, 1);
+        return nextMessages;
+      });
+
+      toast.success('Mensaje eliminado');
+    } catch (error: any) {
+      console.error('Error deleting message:', error);
+      toast.error(error?.response?.data?.detail || 'No se pudo eliminar el mensaje');
+    }
+  }, [threadId]);
 
   const handlePlayAudio = useCallback(async (text: string, index: number) => {
     if (isAudioLoading) return;
@@ -1084,7 +1221,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         try {
           // Cargamos los últimos 100 mensajes por defecto.
           // La API ahora maneja la lógica de paginación de forma más robusta.
-          const limit = 100; // O el valor que consideremos adecuado para la carga inicial
+          const limit = 60;
           const [messagesRes, threadRes] = await Promise.all([
             apiClient.get(`/api/threads/${threadId}/messages`, { params: { skip: 0, limit: limit } }),
             apiClient.get(`/api/threads/${threadId}`).catch(() => null),
@@ -1093,6 +1230,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
           const { messages: newMessages, total } = messagesRes.data;
 
           setMessages(newMessages);
+          setRenderedMessageCount(Math.min(INITIAL_RENDERED_MESSAGES, newMessages.length || INITIAL_RENDERED_MESSAGES));
           if (threadRes?.data?.title) {
             setThreadTitle(threadRes.data.title);
           }
@@ -1139,9 +1277,164 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
   // ... (other effects and handlers remain the same) ...
 
   const { searchTerm } = useSearch();
-  const filteredMessages = searchTerm
-    ? messages.filter(msg => msg.text.toLowerCase().includes(searchTerm.toLowerCase()))
-    : messages;
+  const filteredMessages = useMemo(() => {
+    if (!searchTerm) return messages;
+    const normalizedTerm = searchTerm.toLowerCase();
+    return messages.filter(msg => msg.text.toLowerCase().includes(normalizedTerm));
+  }, [messages, searchTerm]);
+
+  useEffect(() => {
+    if (searchTerm) return;
+    setRenderedMessageCount(prev => Math.min(Math.max(prev, INITIAL_RENDERED_MESSAGES), messages.length));
+  }, [messages.length, searchTerm]);
+
+  const renderedStartIndex = useMemo(() => {
+    if (searchTerm) return 0;
+    return Math.max(0, filteredMessages.length - renderedMessageCount);
+  }, [filteredMessages.length, renderedMessageCount, searchTerm]);
+
+  const renderedMessages = useMemo(() => {
+    if (searchTerm) return filteredMessages;
+    return filteredMessages.slice(renderedStartIndex);
+  }, [filteredMessages, renderedStartIndex, searchTerm]);
+
+  const chatRenderItems = useMemo<ChatRenderItem[]>(() => {
+    const items: ChatRenderItem[] = [];
+
+    let i = 0;
+    while (i < renderedMessages.length) {
+      const currentMessage = renderedMessages[i];
+      const absoluteIndex = renderedStartIndex + i;
+
+      if (currentMessage.sender !== 'user') {
+        items.push({
+          type: 'single',
+          key: `single-${absoluteIndex}-${currentMessage.created_at || 'temp'}`,
+          message: currentMessage,
+          index: absoluteIndex,
+        });
+        i += 1;
+        continue;
+      }
+
+      const baseUserMessage = currentMessage;
+      let cursor = i + 1;
+      const firstResponseBlock: IndexedResponse[] = [];
+
+      while (cursor < renderedMessages.length && renderedMessages[cursor].sender === 'ai') {
+        firstResponseBlock.push({
+          message: renderedMessages[cursor],
+          index: renderedStartIndex + cursor,
+        });
+        cursor += 1;
+      }
+
+      const mergedResponses: IndexedResponse[] = [...firstResponseBlock];
+      let hasMergedRetry = false;
+
+      while (cursor < renderedMessages.length) {
+        const candidate = renderedMessages[cursor];
+        if (candidate.sender !== 'user' || !areSameRetryPrompt(baseUserMessage, candidate)) {
+          break;
+        }
+
+        hasMergedRetry = true;
+        cursor += 1;
+
+        while (cursor < renderedMessages.length && renderedMessages[cursor].sender === 'ai') {
+          mergedResponses.push({
+            message: renderedMessages[cursor],
+            index: renderedStartIndex + cursor,
+          });
+          cursor += 1;
+        }
+      }
+
+      if (hasMergedRetry) {
+        const retryKeyBase = normalizeRetryText(baseUserMessage.text).slice(0, 80) || 'retry';
+        items.push({
+          type: 'retry_group',
+          key: `retry-${absoluteIndex}-${retryKeyBase}`,
+          userMessage: baseUserMessage,
+          userIndex: absoluteIndex,
+          responses: mergedResponses,
+        });
+      } else {
+        items.push({
+          type: 'single',
+          key: `single-${absoluteIndex}-${baseUserMessage.created_at || 'temp'}`,
+          message: baseUserMessage,
+          index: absoluteIndex,
+        });
+
+        mergedResponses.forEach((response) => {
+          items.push({
+            type: 'single',
+            key: `single-${response.index}-${response.message.created_at || 'temp'}`,
+            message: response.message,
+            index: response.index,
+          });
+        });
+      }
+
+      i = cursor;
+    }
+
+    return items;
+  }, [renderedMessages, renderedStartIndex]);
+
+  useEffect(() => {
+    setActiveRetryResponseMap((prev) => {
+      const retryItems = chatRenderItems.filter((item): item is RetryGroupRenderItem => item.type === 'retry_group');
+      const validKeys = new Set(retryItems.map((item) => item.key));
+      const next: Record<string, number> = {};
+      let changed = false;
+
+      retryItems.forEach((item) => {
+        const previousIndex = prev[item.key];
+        const maxIndex = Math.max(0, item.responses.length - 1);
+        const nextIndex = previousIndex === undefined ? maxIndex : Math.min(previousIndex, maxIndex);
+        next[item.key] = nextIndex;
+        if (previousIndex !== nextIndex) {
+          changed = true;
+        }
+      });
+
+      Object.keys(prev).forEach((key) => {
+        if (!validKeys.has(key)) {
+          changed = true;
+        }
+      });
+
+      if (!changed && Object.keys(prev).length === Object.keys(next).length) {
+        return prev;
+      }
+
+      return next;
+    });
+  }, [chatRenderItems]);
+
+  const hasMoreRenderedMessages = !searchTerm && renderedStartIndex > 0;
+
+  useEffect(() => {
+    const sentinel = topSentinelRef.current;
+    const container = scrollAreaRef.current;
+    if (!sentinel || !container || searchTerm) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (!entry?.isIntersecting) return;
+        if (!hasMoreRenderedMessages) return;
+
+        setRenderedMessageCount(prev => Math.min(prev + RENDER_BATCH_SIZE, filteredMessages.length));
+      },
+      { root: container, threshold: 0.1 }
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [searchTerm, hasMoreRenderedMessages, filteredMessages.length]);
 
   if (isLoading) {
     return (
@@ -1205,28 +1498,90 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
           )}
           <div className="p-1 sm:p-4 md:p-6 space-y-3 sm:space-y-6 w-full md:max-w-6xl mx-auto">
             <div>
-              {hasMoreMessages && (
+              {(hasMoreMessages || hasMoreRenderedMessages) && (
                 <div ref={topSentinelRef} className="flex justify-center p-4">
+                  {hasMoreRenderedMessages && !isLoadingMore && <p>Mostrando mensajes recientes. Desplaza arriba para cargar más.</p>}
                   {isLoadingMore && <p>Cargando más mensajes...</p>}
                 </div>
               )}
-              {filteredMessages.map((msg, index) => (
-                <div key={`msg-${index}-${msg.created_at || 'temp'}`}>
-                  <ChatMessage
-                    key={index}
-                    index={index}
-                    msg={msg}
-                    handleCopyMessage={handleCopyMessage}
-                    handleRetry={handleRetry}
-                    handlePlayAudio={handlePlayAudio}
-                    isAudioLoading={isAudioLoading}
-                    playingMessageIndex={playingMessageIndex}
-                    isAudioPaused={isAudioPaused}
-                    onSourceClick={handleSourceClick as (source: Source) => void}
-                    scrollToBottom={scrollToBottom}
-                  />
-                </div>
-              ))}
+              {chatRenderItems.map((item) => {
+                if (item.type === 'single') {
+                  return (
+                    <div key={item.key}>
+                      <ChatMessage
+                        index={item.index}
+                        msg={item.message}
+                        handleCopyMessage={handleCopyMessage}
+                        handleRetry={handleRetry}
+                        handleDeleteMessage={handleDeleteMessage}
+                        handlePlayAudio={handlePlayAudio}
+                        isAudioLoading={isAudioLoading}
+                        playingMessageIndex={playingMessageIndex}
+                        isAudioPaused={isAudioPaused}
+                        onSourceClick={handleSourceClick as (source: Source) => void}
+                        scrollToBottom={scrollToBottom}
+                      />
+                    </div>
+                  );
+                }
+
+                const totalResponses = item.responses.length;
+                const activeResponseIndex = Math.min(
+                  activeRetryResponseMap[item.key] ?? Math.max(0, totalResponses - 1),
+                  Math.max(0, totalResponses - 1)
+                );
+                const activeResponse = totalResponses > 0 ? item.responses[activeResponseIndex] : null;
+
+                return (
+                  <div key={item.key}>
+                    <ChatMessage
+                      index={item.userIndex}
+                      msg={item.userMessage}
+                      handleCopyMessage={handleCopyMessage}
+                      handleRetry={handleRetry}
+                      handleDeleteMessage={handleDeleteMessage}
+                      handlePlayAudio={handlePlayAudio}
+                      isAudioLoading={isAudioLoading}
+                      playingMessageIndex={playingMessageIndex}
+                      isAudioPaused={isAudioPaused}
+                      onSourceClick={handleSourceClick as (source: Source) => void}
+                      scrollToBottom={scrollToBottom}
+                    />
+
+                    {activeResponse && (
+                      <ChatMessage
+                        index={activeResponse.index}
+                        msg={activeResponse.message}
+                        handleCopyMessage={handleCopyMessage}
+                        handleRetry={handleRetry}
+                        handleDeleteMessage={handleDeleteMessage}
+                        handlePlayAudio={handlePlayAudio}
+                        isAudioLoading={isAudioLoading}
+                        playingMessageIndex={playingMessageIndex}
+                        isAudioPaused={isAudioPaused}
+                        onSourceClick={handleSourceClick as (source: Source) => void}
+                        scrollToBottom={scrollToBottom}
+                        responsePosition={{
+                          current: activeResponseIndex + 1,
+                          total: totalResponses,
+                        }}
+                        onPrevResponse={() => {
+                          setActiveRetryResponseMap((prev) => ({
+                            ...prev,
+                            [item.key]: Math.max(0, activeResponseIndex - 1),
+                          }));
+                        }}
+                        onNextResponse={() => {
+                          setActiveRetryResponseMap((prev) => ({
+                            ...prev,
+                            [item.key]: Math.min(totalResponses - 1, activeResponseIndex + 1),
+                          }));
+                        }}
+                      />
+                    )}
+                  </div>
+                );
+              })}
               {(isResponding || toolName) && (
                 <div className="-mt-4">
                   {isDeepResearchActive ? (
@@ -1310,13 +1665,8 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
               onPaste={handlePaste}
               isFixedPosition={false}
               workspaceId={workspaceId}
-            >
-              <ContextSelectorButton
-                onContextSelected={setSelectedContext}
-                currentContext={selectedContext}
-                workspaceId={workspaceId}
-              />
-            </ChatInputBar>
+              onContextSelected={setSelectedContext}
+            />
           </div>
         </div>
       </div>

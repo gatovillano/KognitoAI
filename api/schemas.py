@@ -43,6 +43,15 @@ class UserSettingsResponse(BaseModel):
     embedding_api_key_name: Optional[str]
     embedding_api_base: Optional[str]
     disabled_skills: Optional[list] = []
+    # Campos de SSH
+    ssh_host: Optional[str] = None
+    ssh_port: Optional[str] = "22"
+    ssh_user: Optional[str] = None
+    local_base_path: Optional[str] = None
+    # Campos de Heartbeat
+    custom_heartbeat_instructions: Optional[str] = None
+    custom_heartbeat_interval_minutes: Optional[int] = 60
+    custom_heartbeat_allowed_tools: Optional[list] = []
 
     class Config:
         from_attributes = True
@@ -85,6 +94,15 @@ class UserSettingsUpdateRequest(BaseModel):
     embedding_api_key_name: Optional[str] = None
     embedding_api_base: Optional[str] = None
     disabled_skills: Optional[list] = None
+    # Campos de SSH
+    ssh_host: Optional[str] = None
+    ssh_port: Optional[str] = None
+    ssh_user: Optional[str] = None
+    local_base_path: Optional[str] = None
+    # Campos de Heartbeat
+    custom_heartbeat_instructions: Optional[str] = None
+    custom_heartbeat_interval_minutes: Optional[int] = None
+    custom_heartbeat_allowed_tools: Optional[list] = None
 
 class UserPasswordUpdateRequest(BaseModel):
     """Define la estructura de datos para actualizar la contraseña."""

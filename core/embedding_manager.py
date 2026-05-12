@@ -13,6 +13,7 @@ import litellm
 
 # Para la configuración y secretos
 from core.config import settings
+from core.ollama_direct import normalize_ollama_base_url, ollama_embeddings
 from core.repositories.secret_repository import SecretRepository
 from core.database import SessionLocal, Account # Necesario para obtener la configuración del usuario
 
@@ -55,13 +56,23 @@ class KognitoInternalEmbeddingService(EmbeddingService):
         if KognitoInternalEmbeddingService._model is None:
             logger.info(f"✨ Cargando modelo de embeddings interno: {self.model_name}...")
             try:
+                # Intentar cargar con dispositivo automático (normalmente GPU si está disponible)
                 KognitoInternalEmbeddingService._model = SentenceTransformer(self.model_name)
                 if self.use_fp16:
                     KognitoInternalEmbeddingService._model.half()
                 logger.info(f"✅ Modelo de embeddings interno cargado exitosamente.")
             except Exception as e:
-                logger.error(f"❌ Error al cargar el modelo de embeddings interno: {e}")
-                raise
+                if "CUDA out of memory" in str(e) or "out of memory" in str(e).lower():
+                    logger.warning(f"⚠️ GPU llena (OOM), reintentando carga en CPU...")
+                    try:
+                        KognitoInternalEmbeddingService._model = SentenceTransformer(self.model_name, device="cpu")
+                        logger.info(f"✅ Modelo de embeddings cargado exitosamente en CPU como fallback.")
+                    except Exception as cpu_e:
+                        logger.error(f"❌ Error crítico cargando modelo incluso en CPU: {cpu_e}")
+                        raise cpu_e
+                else:
+                    logger.error(f"❌ Error al cargar el modelo de embeddings interno: {e}")
+                    raise e
         self._model = KognitoInternalEmbeddingService._model
 
     async def aembed_query(self, text: str) -> List[float]:
@@ -114,6 +125,36 @@ class LiteLLMEmbeddingService(EmbeddingService):
              logger.error(f"Error en aembed_documents con LiteLLM: {e}")
              raise
 
+
+class OllamaDirectEmbeddingService(EmbeddingService):
+    """Cliente nativo para embeddings de Ollama local, sin pasar por LiteLLM."""
+
+    def __init__(self, model_name: str, api_base: Optional[str] = None):
+        self.model_name = model_name.split("/")[-1].strip()
+        self.api_base = normalize_ollama_base_url(api_base or settings.ollama_api_url)
+        logger.info(
+            f"✅ Servicio de Embeddings Ollama directo inicializado | model={self.model_name} | base={self.api_base}"
+        )
+
+    async def aembed_query(self, text: str) -> List[float]:
+        embeddings = await ollama_embeddings(
+            base_url=self.api_base,
+            model=self.model_name,
+            input_data=text,
+            timeout=settings.llm_request_timeout,
+            max_retries=settings.llm_max_retries,
+        )
+        return embeddings[0]
+
+    async def aembed_documents(self, texts: List[str]) -> List[List[float]]:
+        return await ollama_embeddings(
+            base_url=self.api_base,
+            model=self.model_name,
+            input_data=texts,
+            timeout=settings.llm_request_timeout,
+            max_retries=settings.llm_max_retries,
+        )
+
 # --- EmbeddingServiceFactory ---
 class EmbeddingServiceFactory:
     """
@@ -148,24 +189,32 @@ class EmbeddingServiceFactory:
                     model_name = KognitoInternalEmbeddingService.DEFAULT_MODEL_NAME
                 EmbeddingServiceFactory._instances[instance_key] = KognitoInternalEmbeddingService(model_name=model_name)
             
-            elif provider_lower in ["openai", "google", "ollama", "gemini", "vertex-ai", "litellm"]:
+            elif provider_lower == "ollama":
+                if not model_name:
+                    raise ValueError("model_name es requerido para el proveedor ollama.")
+
+                EmbeddingServiceFactory._instances[instance_key] = OllamaDirectEmbeddingService(
+                    model_name=model_name,
+                    api_base=api_base or settings.ollama_api_url,
+                )
+
+            elif provider_lower in ["openai", "google", "ollama-cloud", "gemini", "vertex-ai", "litellm"]:
                 # Caso Genérico: Todos estos ahora pasan por LiteLLM
                 if not model_name:
                     raise ValueError(f"model_name es requerido para el proveedor {provider}.")
-                
-                # FIX: Si es Ollama local, evitamos enviar API Key para prevenir errores 401 (unauthorized)
-                # LiteLLM a veces intenta usar llaves del entorno si se pasan como None, 
-                # pero si las pasamos vacías explícitamente suele ser más seguro para local.
+
                 effective_api_key = api_key
-                if provider_lower == "ollama" and not api_base:
-                    effective_api_key = None # Opcionalmente "" si None no funciona
-                
+
+                # Para Ollama Cloud, si no hay api_base, usamos el default
+                effective_api_base = api_base
+                if provider_lower == "ollama-cloud" and not api_base:
+                    effective_api_base = "https://ollama.com"                
                 # Para Google Vertex, a veces se requiere el project_id en el api_base o ENV
                 # Pero LiteLLM suele manejarlo automáticamente con las credenciales de entorno.
                 EmbeddingServiceFactory._instances[instance_key] = LiteLLMEmbeddingService(
                     model_name=model_name, 
                     api_key=effective_api_key, 
-                    api_base=api_base
+                    api_base=effective_api_base
                 )
             else:
                 # Si no es interno, intentamos usarlo como un string de modelo directo de LiteLLM

@@ -1,3 +1,4 @@
+import apiClient from '@/lib/api';
 import React, { useState, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
@@ -22,12 +23,21 @@ export function DeepResearchDetailDialog({ analysis, isOpen, onOpenChange }: Dee
 
   // El backend a veces envuelve el resultado en un objeto 'report'
   const deepResearchResult = useMemo(() => {
-    const rawResult = analysis.result as any;
+    let rawResult = analysis.full_data || (analysis as any).result_payload || analysis.result;
+
+    if (typeof rawResult === 'string') {
+      try {
+        rawResult = JSON.parse(rawResult);
+      } catch (e) {
+        console.error("Failed to parse rawResult JSON:", e);
+      }
+    }
+
     if (rawResult && typeof rawResult === 'object' && 'report' in rawResult) {
       return rawResult.report as DeepResearchAnalysisResult;
     }
     return rawResult as DeepResearchAnalysisResult;
-  }, [analysis.result]);
+  }, [analysis]);
 
   const { play, stop, isLoading, isPlaying, activeText } = useTextToSpeech();
 
@@ -35,37 +45,36 @@ export function DeepResearchDetailDialog({ analysis, isOpen, onOpenChange }: Dee
     if (!deepResearchResult) return;
     setIsExportingPDF(true);
     try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : '';
-      const response = await fetch('/api/deep_research/export_pdf', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          title: analysis.title || "Informe de Investigación",
-          final_report: deepResearchResult.final_report,
-          sources: deepResearchResult.sources,
-          recommendations: deepResearchResult.recommendations
-        })
+      const response = await apiClient.post('/api/deep_research/export_pdf', {
+        title: analysis.title || "Informe de Investigación",
+        final_report: deepResearchResult.final_report || deepResearchResult.summary || "Sin contenido",
+        sources: deepResearchResult.sources,
+        recommendations: deepResearchResult.recommendations
       });
 
-      if (!response.ok) {
-        throw new Error("Error al exportar PDF");
-      }
-
-      const data = await response.json();
+      const data = response.data;
       if (data.url) {
         window.open(data.url, '_blank');
+      } else {
+        // Mostrar error al usuario (puedes usar toast si está disponible)
+        console.error("No se pudo generar el PDF: URL no recibida");
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error exporting PDF:", error);
+      // Manejar error 401 específicamente
+      if (error.response?.status === 401) {
+        // Redirigir al login o mostrar mensaje
+        window.location.href = '/login';
+      } else {
+        // Mostrar error genérico
+        alert("Error al exportar PDF. Por favor, intenta de nuevo.");
+      }
     } finally {
       setIsExportingPDF(false);
     }
   };
 
-  if (!deepResearchResult || !deepResearchResult.final_report) {
+  if (!deepResearchResult || !(deepResearchResult.final_report || deepResearchResult.summary)) {
     return (
       <Dialog open={isOpen} onOpenChange={onOpenChange}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto rounded-3xl backdrop-blur-2xl bg-card/95 border-border/50 shadow-2xl">
@@ -107,9 +116,6 @@ export function DeepResearchDetailDialog({ analysis, isOpen, onOpenChange }: Dee
                 <DialogTitle className="text-3xl sm:text-4xl font-black tracking-tight leading-tight break-words">
                   {analysis.title || "Informe de Investigación Profunda"}
                 </DialogTitle>
-                <DialogDescription className="text-base mt-2">
-                  Resultados detallados de la investigación profundizada por IA.
-                </DialogDescription>
               </div>
               <div className="flex-shrink-0 flex gap-2">
                 <Button

@@ -185,6 +185,13 @@ class LocalFileNavigator(BaseTool):
         if not file_name:
             return "❌ Debes especificar 'file_name' para 'read'."
         full_path = os.path.join(base_path, file_name)
+        
+        # Extensiones binarias comunes para advertir antes de intentar leer
+        _, ext = os.path.splitext(file_name)
+        binary_extensions = {'.exe', '.dll', '.so', '.bin', '.pdf', '.docx', '.xlsx', '.pptx', '.jpg', '.png', '.gif', '.zip', '.tar', '.gz'}
+        if ext.lower() in binary_extensions:
+            return f"⚠️ El archivo remoto '{file_name}' ({ext}) parece ser binario. Por favor use herramientas especializadas para leer este tipo de archivos."
+
         try:
             with sftp.open(full_path, 'r') as f:
                 content = f.read(15000).decode('utf-8', errors='ignore')
@@ -277,7 +284,20 @@ class LocalFileNavigator(BaseTool):
             return f"❌ El archivo '{file_path}' no existe."
         if not file_path.is_file():
             return f"❌ '{file_path}' no es un archivo."
+        
+        # Extensiones binarias comunes para advertir antes de intentar leer
+        binary_extensions = {'.exe', '.dll', '.so', '.bin', '.pdf', '.docx', '.xlsx', '.pptx', '.jpg', '.png', '.gif', '.zip', '.tar', '.gz'}
+        if file_path.suffix.lower() in binary_extensions:
+            return f"⚠️ El archivo '{file_name}' ({file_path.suffix}) parece ser binario. Para leer documentos de OnlyOffice (.docx, .xlsx, .pptx), por favor usa 'read_onlyoffice_document'. Para PDFs, usa las herramientas de RAG."
+
         try:
+            # Primero leemos un pequeño trozo para detectar si es binario
+            with open(file_path, 'rb') as f_bin:
+                header = f_bin.read(1024)
+                # Heurística simple: buscar caracteres nulos o muchos bytes no imprimibles
+                if b'\x00' in header or sum(1 for b in header if b < 32 and b not in b'\n\r\t') > len(header) * 0.1:
+                    return f"⚠️ El archivo '{file_name}' parece ser binario y no se puede mostrar como texto plano."
+
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read(15000)
             if len(content) >= 15000:

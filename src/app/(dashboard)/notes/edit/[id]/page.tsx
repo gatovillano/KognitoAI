@@ -171,7 +171,7 @@ export default function EditNotePage() {
   const handleShare = async () => {
     if (noteId === 'new') return;
     try {
-      const response = await apiClient.get('/api/workspaces');
+      const response = await apiClient.get('/api/workspaces', { params: { limit: 100 } });
       const workspacesData = response.data.workspaces;
       if (workspacesData.length === 0) {
         toast.error("No tienes espacios de trabajo para compartir.");

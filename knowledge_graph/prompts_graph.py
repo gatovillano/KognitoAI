@@ -53,14 +53,12 @@ GRAPH_SUMMARY_PROMPT = """
 
 # Prompt para extraer relaciones ricas entre entidades basadas en su contexto.
 RELATIONSHIP_EXTRACTION_PROMPT = """
-**Tarea**: Eres un experto en análisis lingüístico y grafos de conocimiento. Tu objetivo es identificar la relación exacta y significativa entre pares de entidades basándote ESTRICTAMENTE en el contexto proporcionado.
+**Tarea**: Eres un experto en análisis lingüístico y grafos de conocimiento. Tu objetivo es identificar relaciones EXPLICITAS, SIGNIFICATIVAS y NO TRIVIALES entre entidades basándote en el contexto.
 
-**Instrucciones**:
-1.  **Análisis de Contexto**: Lee el fragmento de texto y determina cómo se relacionan las dos entidades mencionadas.
-2.  **Tipo de Relación**: Define un tipo de relación corto y en mayúsculas (ej. WORKS_AT, CREATED_BY, USES_TECHNOLOGY, LOCATED_IN, PART_OF, INFLUENCES). Sé específico.
-3.  **Descripción**: Escribe una breve oración que explique la relación (ej. "Elon Musk es el fundador de SpaceX").
-4.  **Confianza**: Asigna un valor de 0.0 a 1.0 según qué tan explícita es la relación en el texto.
-5.  **Dirección**: Identifica claramente cuál es la entidad origen (source) y cuál la destino (target).
+**CRITERIOS DE CALIDAD**:
+1. **No Trivialidad**: Evita relaciones obvias o de simple mención (ej. MENCIONA, APARECE_CON). Busca verbos de acción, pertenencia, causalidad o influencia.
+2. **Especificidad**: Prefiere tipos de relación específicos (ej. LIDERADO_POR) sobre genéricos (ej. RELACIONADO_CON).
+3. **Fidelidad**: La relación debe estar CLARAMENTE sustentada por el texto. Si es ambigua, asigna baja confianza o márcala como NO_RELATION.
 
 **Contexto**:
 "{context}"
@@ -68,22 +66,18 @@ RELATIONSHIP_EXTRACTION_PROMPT = """
 **Pares de Entidades a Analizar**:
 {pairs_info}
 
-**Instrucciones**:
-1. Para cada par, identifica si existe una relación explícita en el texto.
-2. Si existe, define:
-   - `type`: Un tipo de relación corto en MAYÚSCULAS (ej. WORKS_AT, USES, PART_OF, CREATED_BY, INFLUENCES).
-   - `description`: Una oración breve explicando la relación.
-   - `confidence`: Un valor entre 0.0 y 1.0.
-   - `direction`: Indica si la relación es de la primera entidad (a) hacia la segunda (b) ("a->b") o de la segunda (b) hacia la primera (a) ("b->a").
-3. Si no hay una relación clara para un par, puedes omitirlo o establecer `type` como "NO_RELATION".
-4. Considera los siguientes tipos de relaciones comunes para mejorar la consistencia: "WORKS_AT", "PART_OF", "USES", "CREATED_BY", "INFLUENCES", "LOCATED_IN", "IS_A", "HAS_PROPERTY", "PERFORMS", "ASSOCIATED_WITH".
-
-**Responde ÚNICAMENTE con un objeto JSON que contenga una lista "relationships"**. Cada elemento de la lista debe tener el siguiente formato:
+**Responde ÚNICAMENTE con un objeto JSON siguiendo este formato**:
 {{
-    "id": "ID original del par de entidades",
-    "type": "TIPO_DE_RELACION",
-    "description": "Descripción clara de la relación",
-    "confidence": 0.95,
-    "direction": "a->b" o "b->a"
+    "relationships": [
+        {{
+            "id": "ID original del par",
+            "type": "TIPO_EN_MAYUSCULAS",
+            "description": "Explicación breve de la conexión real",
+            "confidence": 0.0 a 1.0,
+            "direction": "a->b" o "b->a"
+        }}
+    ]
 }}
+
+**Nota**: Si un par no tiene una conexión sustancial en este fragmento de texto, usa "NO_RELATION" o simplemente omítelo en la lista.
 """

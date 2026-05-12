@@ -105,9 +105,9 @@ class ConversationHistoryAnalyzerTool(BaseTool):
                 )
 
                 # Utilizar el LLM para extraer intereses y temas clave
-                llm = get_fast_llm()
+                llm = await get_llm_for_user(account_id, purpose="fast")
                 if not llm:
-                    logger.error(f"No hay LLM disponible para analizar el historial de la cuenta '{self.account_id}'.")
+                    logger.error(f"No hay LLM disponible para analizar el historial de la cuenta '{account_id}'.")
 
                     return None
 

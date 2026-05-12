@@ -14,6 +14,33 @@ class ConductResearch(BaseModel):
         description="The topic to research. Should be a single topic, and should be described in high detail (at least a paragraph).",
     )
 
+class CreateExpertAgent(BaseModel):
+    """Call this tool to create a specialized expert agent with a custom persona and research focus."""
+    expert_name: str = Field(
+        description="The name/role of the expert agent (e.g., 'Financial Analyst', 'Legal Researcher').",
+    )
+    research_topic: str = Field(
+        description="The specific research topic to investigate.",
+    )
+    expert_specialty: str = Field(
+        description="The domain or specialty area for this expert (e.g., 'financial analysis', 'legal research', 'market intelligence').",
+    )
+    custom_prompt_instructions: str = Field(
+        description="Specific instructions that define this expert's unique perspective, methodology, and focus areas. These instructions will be appended to the system prompt.",
+    )
+    research_depth: str = Field(
+        description="Depth of research: 'superficial' (quick scan), 'standard' (balanced), 'exhaustive' (comprehensive deep dive).",
+        default="standard",
+    )
+
+class ExpertAgentResult(BaseModel):
+    """Result returned when an expert agent completes its research."""
+    expert_name: str
+    research_topic: str
+    findings: str
+    sources: list[dict] = Field(default_factory=list)
+    recommendations: list[str] = Field(default_factory=list)
+
 class ResearchComplete(BaseModel):
     """Call this tool to indicate that the research is complete and all necessary information has been gathered."""
     reason: str = Field(
@@ -98,6 +125,21 @@ class ResearcherState(TypedDict):
     compressed_research: str
     raw_notes: Annotated[List[str], override_reducer]
     sources: Annotated[List[dict], override_reducer]
+
+class ExpertAgentState(TypedDict):
+    """State for expert specialized agents with custom prompts."""
+    account_id: str
+    expert_messages: Annotated[List[MessageLikeRepresentation], operator.add]
+    tool_call_iterations: int
+    expert_name: str
+    expert_specialty: str
+    custom_prompt_instructions: str
+    research_topic: str
+    research_depth: str
+    compressed_research: str
+    raw_notes: Annotated[List[str], override_reducer]
+    sources: Annotated[List[dict], override_reducer]
+    recommendations: Annotated[List[str], override_reducer]
 
 class ResearcherOutputState(BaseModel):
     """Output state from individual researchers."""

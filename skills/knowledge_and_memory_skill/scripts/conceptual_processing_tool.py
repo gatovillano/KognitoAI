@@ -103,9 +103,10 @@ class ConceptualProcessingTool(BaseTool):
     async def _prepare_documents(self, account_id: str, document_info_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         prepared_documents = []
         for doc_info in document_info_list:
+            file_name = "Unknown"
             try:
-                file_name = doc_info.get("file_name") or doc_info.get("title")
-                if not file_name or not isinstance(file_name, str):
+                file_name = doc_info.get("file_name") or doc_info.get("title") or "Unknown"
+                if not file_name or not isinstance(file_name, str) or file_name == "Unknown":
                      continue 
 
                 content = doc_info.get("content")
@@ -138,98 +139,128 @@ class ConceptualProcessingTool(BaseTool):
         if not self.account_id:
             return {"error": "Se requiere account_id", "status": "error"}
 
+        background = kwargs.get("background", True)
+        task_id = kwargs.get("task_id") or str(uuid.uuid4())
+
+        if background:
+            # Si se solicita ejecución en background, iniciar la tarea asíncrona y retornar el task_id
+            logger.info(f"🚀 Iniciando procesamiento conceptual en background (vía _arun): {task_id}")
+            
+            # Registrar la tarea en BackgroundTaskManager
+            BackgroundTaskManager.create_task(
+                task_id=task_id,
+                account_id=self.account_id,
+                workspace_id=self.workspace_id,
+                task_type="conceptual_processing"
+            )
+            BackgroundTaskManager.update_task(task_id, status="running", message="Procesamiento iniciado")
+
+            # Limpiar kwargs para evitar "multiple values for argument"
+            clean_kwargs = {k: v for k, v in kwargs.items() if k not in ["task_id", "documents", "document_titles", "dataset_name", "background"]}
+
+            # Iniciar la tarea asíncrona en el loop actual de FastAPI
+            asyncio.create_task(
+                self._process_documents_background(
+                    task_id, documents, document_titles, dataset_name, **clean_kwargs
+                )
+            )
+
+            return {
+                "status": "started",
+                "task_id": task_id,
+                "background": True,
+                "message": "Procesamiento conceptual iniciado en background",
+                "account_id": self.account_id
+            }
+
+        # Ejecución síncrona (bloqueante para la API)
         dataset_name_with_account = f"{dataset_name}_{self.account_id.replace('-', '_')}"
 
-        # Si no se proporcionan documentos ni títulos, intentar inferirlos de la colección
-        if not documents and not document_titles:
-            # Usar topic explícitamente proporcionado o generar error si no está disponible
-            target_topic = kwargs.get("topic")
-            
-
-            
-            # Usar el KnowledgeGraphService para obtener y procesar documentos
-            if target_topic:
-                try:
-                    knowledge_graph_service = self._get_knowledge_graph_service()
-                    logger.info(f"🧠 Usando KnowledgeGraphService para procesar topic: {target_topic}")
-                    
-                    async with DBSession(SessionLocal) as db_session:
-                        result = await knowledge_graph_service.process_documents_flow(
-                            db_session=db_session,
-                            documents=None,  # Dejar que el servicio busque documentos
-                            dataset_name=dataset_name_with_account,
-                            account_id=self.account_id,
-                            processing_mode="conceptual",
-                            topic=target_topic,
-                            workspace_id=self.workspace_id,
-                            task_id=kwargs.get("task_id") # Pasar task_id si existe
-                        )
-                    
-                    return {
-                        "status": "completed",
-                        "processed_documents_count": result.get("conceptual_quotes", 0),
-                        "results": [result]
-                    }
-                except Exception as e:
-                    logger.error(f"❌ Error usando KnowledgeGraphService: {e}")
-                    return {"error": f"KnowledgeGraphService no está disponible: {e}", "status": "error"}
-            else:
-                return {"error": "Se requiere un 'topic' cuando no se proporcionan documentos", "status": "error"}
-
-
         try:
-            # Preparar documentos proporcionados explícitamente
+            # Preparar documentos
+            prepared_documents = []
             if documents or document_titles:
                 document_info_list = []
                 if documents:
-                     document_info_list.extend(documents)
+                    document_info_list.extend(documents)
                 if document_titles:
                     for title in document_titles:
-                         document_info_list.append({"file_name": title})
-
+                        document_info_list.append({"file_name": title})
+                
                 prepared_documents = await self._prepare_documents(self.account_id, document_info_list)
-                if not prepared_documents:
-                    return {"error": "No se pudieron preparar los documentos", "status": "error"}
+            
+            knowledge_graph_service = self._get_knowledge_graph_service()
+            if not knowledge_graph_service:
+                return {"error": "KnowledgeGraphService no está disponible", "status": "error"}
 
-                # Usar KnowledgeGraphService para procesar los documentos preparados
-                try:
-                    knowledge_graph_service = self._get_knowledge_graph_service()
-                    if not knowledge_graph_service:
-                        return {"error": "KnowledgeGraphService no está disponible", "status": "error"}
+            async with DBSession(SessionLocal) as db_session:
+                if not prepared_documents:
+                    # Usar topic si no hay documentos explícitos
+                    target_topic = kwargs.get("topic")
+                    if not target_topic:
+                        return {"error": "Se requiere 'documents', 'document_titles' o 'topic'", "status": "error"}
                     
-                    logger.info(f"🧠 Procesando {len(prepared_documents)} documentos con KnowledgeGraphService")
-                    
-                    async with DBSession(SessionLocal) as db_session:
-                        result = await knowledge_graph_service.process_documents_flow(
-                            db_session=db_session,
-                            documents=prepared_documents,
-                            dataset_name=dataset_name_with_account,
-                            account_id=self.account_id,
-                            processing_mode="conceptual",
-                            task_id=kwargs.get("task_id") # Pasar task_id si existe
-                        )
-                    
-                    return {
-                        "status": "completed",
-                        "processed_documents_count": len(prepared_documents),
-                        "results": [result]
-                    }
-                except Exception as e:
-                    logger.error(f"❌ Error usando KnowledgeGraphService: {e}")
-                    return {"error": f"KnowledgeGraphService no está disponible: {e}", "status": "error"}
-            else:
-                # Esta rama ya se manejó arriba, pero por consistencia
-                return {"error": "Se requiere 'documents', 'document_titles' o 'topic'", "status": "error"}
+                    logger.info(f"🧠 Procesando topic: {target_topic} (síncrono)")
+                    result = await knowledge_graph_service.process_documents_flow(
+                        db_session=db_session,
+                        documents=None,
+                        dataset_name=dataset_name_with_account,
+                        account_id=self.account_id,
+                        processing_mode="conceptual",
+                        topic=target_topic,
+                        workspace_id=self.workspace_id,
+                        task_id=task_id
+                    )
+                else:
+                    logger.info(f"🧠 Procesando {len(prepared_documents)} documentos (síncrono)")
+                    result = await knowledge_graph_service.process_documents_flow(
+                        db_session=db_session,
+                        documents=prepared_documents,
+                        dataset_name=dataset_name_with_account,
+                        account_id=self.account_id,
+                        processing_mode="conceptual",
+                        task_id=task_id
+                    )
+            
+            return {
+                "status": "completed",
+                "task_id": task_id,
+                "results": [result]
+            }
 
         except Exception as e:
-            logger.error(f"❌ Error en ConceptualProcessingTool: {e}", exc_info=True)
+            logger.error(f"❌ Error en ConceptualProcessingTool._arun: {e}", exc_info=True)
             return {"error": str(e), "status": "error"}
 
     def _run(self, documents: Optional[List[Dict[str, Any]]] = None, 
               document_titles: Optional[List[str]] = None, dataset_name: str = "default", 
               background: bool = True, **kwargs):
-        """Ejecuta el procesamiento conceptual con soporte para background processing."""
-        return self._run_background(documents, document_titles, dataset_name, background, **kwargs)
+        """Ejecuta el procesamiento conceptual. Si background=True, se inicia asíncronamente."""
+        if background:
+            # En un entorno FastAPI, preferimos que se llame a _arun directamente.
+            # Si se llama a _run, intentamos programar la tarea asíncrona.
+            task_id = kwargs.get("task_id") or str(uuid.uuid4())
+            try:
+                loop = asyncio.get_running_loop()
+                # Limpiar kwargs
+                clean_kwargs = {k: v for k, v in kwargs.items() if k not in ["task_id", "documents", "document_titles", "dataset_name", "background"]}
+                
+                loop.create_task(self._process_documents_background(task_id, documents, document_titles, dataset_name, **clean_kwargs))
+                
+                BackgroundTaskManager.create_task(
+                    task_id=task_id,
+                    account_id=self.account_id,
+                    workspace_id=self.workspace_id,
+                    task_type="conceptual_processing"
+                )
+                BackgroundTaskManager.update_task(task_id, status="running", message="Procesamiento iniciado")
+                
+                return {"status": "started", "task_id": task_id, "background": True}
+            except RuntimeError:
+                # No hay loop corriendo (ej: script CLI)
+                return asyncio.run(self._arun(documents, document_titles, dataset_name, background=False, **kwargs))
+        
+        return asyncio.run(self._arun(documents, document_titles, dataset_name, background=False, **kwargs))
 
     def get_task_status(self, task_id: str) -> Optional[Dict[str, Any]]:
         """Obtiene el estado de una tarea en background."""
@@ -243,8 +274,11 @@ class ConceptualProcessingTool(BaseTool):
                                           document_titles: Optional[List[str]] = None, dataset_name: str = "default", 
                                           **kwargs):
         """Procesa documentos en background y actualiza el estado."""
+        result = None
         try:
             logger.info(f"🚀 Iniciando procesamiento conceptual en background para tarea: {task_id}")
+            logger.info(f"📋 Parámetros: dataset={dataset_name}, account_id={self.account_id}, workspace_id={self.workspace_id}, topic={kwargs.get('topic')}")
+            logger.info(f"📄 Documentos recibidos: {len(documents) if documents else 0}, Títulos: {len(document_titles) if document_titles else 0}")
             
             # Preparar documentos
             document_info_list = []
@@ -260,50 +294,40 @@ class ConceptualProcessingTool(BaseTool):
             
             dataset_name_with_account = f"{dataset_name}_{self.account_id.replace('-', '_')}"
             
-            # Si no hay documentos explícitos, usar topic
-            if not prepared_documents and kwargs.get("topic"):
-                target_topic = kwargs.get("topic")
-                try:
-                    knowledge_graph_service = self._get_knowledge_graph_service()
-                    if not knowledge_graph_service:
-                        raise ValueError("KnowledgeGraphService no está disponible")
-                    
-                    logger.info(f"🧠 Procesando topic: {target_topic} en background")
-                    async with DBSession(SessionLocal) as db_session:
-                        result = await knowledge_graph_service.process_documents_flow(
-                            db_session=db_session,
-                            documents=None,
-                            dataset_name=dataset_name_with_account,
-                            account_id=self.account_id,
-                            processing_mode="conceptual",
-                            topic=target_topic,
-                            workspace_id=self.workspace_id,
-                            task_id=task_id # Usar el task_id de la tarea en background
-                        )
-                except Exception as e:
-                    raise ValueError(f"KnowledgeGraphService no está disponible: {e}")
+            # Determinar qué procesar
+            result = None
+            knowledge_graph_service = self._get_knowledge_graph_service()
+            if not knowledge_graph_service:
+                raise ValueError("KnowledgeGraphService no está disponible")
+
+            if prepared_documents:
+                # Caso A: Hay documentos preparados (usar flujo de documentos)
+                logger.info(f"🧠 Procesando {len(prepared_documents)} documentos en background")
+                async with DBSession(SessionLocal) as db_session:
+                    result = await knowledge_graph_service.process_documents_flow(
+                        db_session=db_session,
+                        documents=prepared_documents,
+                        dataset_name=dataset_name_with_account,
+                        account_id=self.account_id,
+                        processing_mode="conceptual",
+                        task_id=task_id
+                    )
             else:
-                # Procesar documentos preparados
-                if not prepared_documents:
-                    raise ValueError("No se pudieron preparar los documentos")
-                
-                try:
-                    knowledge_graph_service = self._get_knowledge_graph_service()
-                    if not knowledge_graph_service:
-                        raise ValueError("KnowledgeGraphService no está disponible")
-                    
-                    logger.info(f"🧠 Procesando {len(prepared_documents)} documentos en background")
-                    async with DBSession(SessionLocal) as db_session:
-                        result = await knowledge_graph_service.process_documents_flow(
-                            db_session=db_session,
-                            documents=prepared_documents,
-                            dataset_name=dataset_name_with_account,
-                            account_id=self.account_id,
-                            processing_mode="conceptual",
-                            task_id=task_id # Usar el task_id de la tarea en background
-                        )
-                except Exception as e:
-                    raise ValueError(f"KnowledgeGraphService no está disponible: {e}")
+                # Caso B: No hay documentos específicos, usar búsqueda por topic/workspace/account
+                # Esto permite el procesamiento global (topic=None)
+                target_topic = kwargs.get("topic")
+                logger.info(f"🧠 Procesando vía base de datos (topic={target_topic}, workspace={self.workspace_id}) en background")
+                async with DBSession(SessionLocal) as db_session:
+                    result = await knowledge_graph_service.process_documents_flow(
+                        db_session=db_session,
+                        documents=None,
+                        dataset_name=dataset_name_with_account,
+                        account_id=self.account_id,
+                        processing_mode="conceptual",
+                        topic=target_topic,
+                        workspace_id=self.workspace_id,
+                        task_id=task_id
+                    )
             
             # Actualizar estado como completado
             BackgroundTaskManager.update_task(task_id, status="completed", result=result, message="Procesamiento conceptual completado")

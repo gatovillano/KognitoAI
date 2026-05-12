@@ -28,6 +28,8 @@ import { Analysis, AnalysisType } from '@/lib/models';
 import { ShareDocumentDialog } from '../share-document-dialog';
 import { GitHubRepoDialog } from '../github-repo-dialog';
 import { UpdateRepositoryDialog } from '../update-repository-dialog';
+import { DeleteRepoConfirmationDialog } from '../delete-repo-confirmation-dialog';
+import { Trash2 } from 'lucide-react';
 
 export default function RepositoriesPage() {
   const [documents, setDocuments] = useState<GitHubDocument[]>([]);
@@ -39,6 +41,7 @@ export default function RepositoriesPage() {
   const [isGitHubRepoOpen, setIsGitHubRepoOpen] = useState(false);
   const [isUpdateRepoOpen, setIsUpdateRepoOpen] = useState(false);
   const [repoToUpdate, setRepoToUpdate] = useState<{name: string, url: string} | null>(null);
+  const [repoToDelete, setRepoToDelete] = useState<{name: string, url: string} | null>(null);
   const [documentToPreview, setDocumentToPreview] = useState<Document | null>(null);
   const [documentToEdit, setDocumentToEdit] = useState<Document | null>(null);
   const [documentToDelete, setDocumentToDelete] = useState<Document | null>(null);
@@ -245,6 +248,10 @@ export default function RepositoriesPage() {
     setIsUpdateRepoOpen(true);
   };
 
+  const handleDeleteRepository = (repoName: string, repoUrl: string) => {
+    setRepoToDelete({ name: repoName, url: repoUrl });
+  };
+
   const handleUploadStart = useCallback((fileNames: string[], topic: string) => {
     setUploadingFiles(fileNames);
     setUploadTopic(topic);
@@ -317,19 +324,33 @@ export default function RepositoriesPage() {
                       </CardContent>
                     </div>
                   </div>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="opacity-0 group-hover:opacity-100 transition-opacity z-30"
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      handleUpdateRepository(repo.name, repo.url);
-                    }}
-                    title="Actualizar repositorio"
-                  >
-                    <RefreshCw className="h-4 w-4" />
-                  </Button>
+                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-30">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleUpdateRepository(repo.name, repo.url);
+                      }}
+                      title="Actualizar repositorio"
+                    >
+                      <RefreshCw className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleDeleteRepository(repo.name, repo.url);
+                      }}
+                      title="Eliminar repositorio"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
               </Card>
             ))}
@@ -413,6 +434,13 @@ export default function RepositoriesPage() {
       <PreviewDocumentDialog isOpen={!!documentToPreview} onOpenChange={(open) => !open && setDocumentToPreview(null)} document={documentToPreview} />
       <EditDocumentDialog isOpen={!!documentToEdit} onOpenChange={(open) => !open && setDocumentToEdit(null)} onUpdateSuccess={fetchPageData} document={documentToEdit} />
       <DeleteConfirmationDialog isOpen={!!documentToDelete} onOpenChange={(open) => !open && setDocumentToDelete(null)} onDeleteSuccess={fetchPageData} document={documentToDelete} />
+      <DeleteRepoConfirmationDialog
+        isOpen={!!repoToDelete}
+        onOpenChange={(open) => !open && setRepoToDelete(null)}
+        onDeleteSuccess={fetchPageData}
+        repoName={repoToDelete?.name || null}
+        repoUrl={repoToDelete?.url || null}
+      />
       <AnalysisDetailDialog
         analysis={selectedAnalysis}
         isOpen={!!selectedAnalysis}
