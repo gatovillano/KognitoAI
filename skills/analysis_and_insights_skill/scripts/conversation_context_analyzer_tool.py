@@ -98,7 +98,7 @@ class ConversationContextAnalyzerTool(BaseTool):
         Analiza un historial de conversación proporcionado.
         """
         try:
-            analysis_result = await text_analyzer.analyze_single_text(conversation_history)
+            analysis_result = await text_analyzer.analyze_single_text(conversation_history, account_id=self.account_id)
             formatted_result = self._format_result(analysis_result)
             logger.info(f"Análisis de historial de conversación completado para la cuenta '{self.account_id}'.")
             return formatted_result

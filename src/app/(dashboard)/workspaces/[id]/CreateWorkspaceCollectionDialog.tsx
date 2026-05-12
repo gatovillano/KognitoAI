@@ -14,17 +14,13 @@ interface CreateWorkspaceCollectionDialogProps {
   onOpenChange: (open: boolean) => void;
   onCreateSuccess: (newTopic: string) => void;
   workspaceId: string;
+  parentId?: string | null; // Nuevo
 }
 
-export function CreateWorkspaceCollectionDialog({ isOpen, onOpenChange, onCreateSuccess, workspaceId }: CreateWorkspaceCollectionDialogProps) {
+export function CreateWorkspaceCollectionDialog({ isOpen, onOpenChange, onCreateSuccess, workspaceId, parentId }: CreateWorkspaceCollectionDialogProps) {
   const [topicName, setTopicName] = useState('');
   const [description, setDescription] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-
-  // No se necesita cargar equipos, ya que la compartición con equipo no está implementada en workspaces
-  useEffect(() => {
-    // No hay acciones adicionales al abrir el diálogo
-  }, [isOpen]);
 
   const handleCreate = async () => {
     if (!topicName.trim() || topicName.trim().length < 3) {
@@ -33,13 +29,13 @@ export function CreateWorkspaceCollectionDialog({ isOpen, onOpenChange, onCreate
     }
     setIsLoading(true);
     try {
-      console.log('DEBUG: Creating collection with workspaceId:', workspaceId, 'name:', topicName, 'description:', description);
+      console.log('DEBUG: Creating collection with workspaceId:', workspaceId, 'parentId:', parentId, 'name:', topicName);
       const response = await apiClient.post(`/api/collections`, {
         topic: topicName,
         description: description,
         workspaceId: workspaceId,
+        parent_id: parentId // Enviamos el parent_id al backend
       });
-      console.log('API response for collection creation:', response.data);
       toast.success(`Colección "${topicName}" creada.`);
       onCreateSuccess(topicName);
       onOpenChange(false);

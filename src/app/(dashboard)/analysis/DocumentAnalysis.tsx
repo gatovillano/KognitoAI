@@ -23,6 +23,7 @@ interface DocumentAnalysisProps {
   isLoading: boolean;
   isPlaying: boolean;
   activeText: string | null;
+  documentTitle?: string;
 }
 
 import { ActionableButton } from '@/components/analysis/ActionableButton';
@@ -37,7 +38,8 @@ const DocumentAnalysis: React.FC<DocumentAnalysisProps> = ({
   play,
   isLoading,
   isPlaying,
-  activeText
+  activeText,
+  documentTitle
 }) => {
   if (!analysis) return null;
 
@@ -45,7 +47,7 @@ const DocumentAnalysis: React.FC<DocumentAnalysisProps> = ({
     <div className="space-y-6">
       <div className="flex items-center gap-2 mb-2">
         <FileText className={`w-6 h-6 ${docColors.icon}`} />
-        <h3 className="text-2xl font-bold">Análisis Detallado del Documento</h3>
+        <h3 className="text-2xl font-bold">{documentTitle || 'Análisis Detallado del Documento'}</h3>
       </div>
 
       <Tabs defaultValue="summary" className="w-full">

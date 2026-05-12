@@ -16,6 +16,7 @@ import { DeleteConfirmationDialog } from '../../delete-confirmation-dialog';
 import { AnalysisDetailDialog } from '@/app/(dashboard)/analysis/analysis-detail-dialog';
 import { ShareDocumentDialog } from '../../share-document-dialog';
 import { UpdateRepositoryDialog } from '../../update-repository-dialog';
+import { StartCodeAnalysisDialog } from '@/app/(dashboard)/analysis/StartCodeAnalysisDialog';
 import type { Document } from '../../columns';
 
 // Definir un tipo extendido para documentos de GitHub que incluye repo_url
@@ -39,6 +40,8 @@ export default function RepositoryDetailPage() {
   const [documentToShare, setDocumentToShare] = useState<Document | null>(null);
   const [isShareOpen, setIsShareOpen] = useState(false);
   const [isUpdateRepoOpen, setIsUpdateRepoOpen] = useState(false);
+  const [isStartAnalysisDialogOpen, setIsStartAnalysisDialogOpen] = useState(false);
+  const [analysisTarget, setAnalysisTarget] = useState<{ type: 'repo' | 'doc'; data: any } | null>(null);
 
   // Estados para análisis
   const [documentToAnalyze, setDocumentToAnalyze] = useState<Document | null>(null);
@@ -150,25 +153,43 @@ export default function RepositoryDetailPage() {
     fetchData();
   }, [fetchData]);
 
-  const handleAnalyzeDocument = async (doc: Document) => {
+  const handleAnalyzeDocument = (doc: Document) => {
     if (docPollingId) { toast.info('Ya hay un análisis en progreso'); return; }
-    setDocumentToAnalyze(doc);
-    try {
-      const response = await apiClient.post('/api/start-document-analysis', { file_name: doc.file_name });
-      setDocPollingId(response.data.task_id);
-      toast.info(`Análisis para "${doc.file_name}" iniciado`);
-    } catch (error) { toast.error('No se pudo iniciar el análisis del documento'); }
+    setAnalysisTarget({ type: 'doc', data: doc });
+    setIsStartAnalysisDialogOpen(true);
   };
 
-  const handleAnalyzeRepository = async () => {
+  const handleAnalyzeRepository = () => {
     if (docPollingId || collectionPollingId) { toast.info('Ya hay un análisis en progreso'); return; }
-    try {
-      const response = await apiClient.post('/api/start-code-analysis', { repo_name: repoName });
-      setCollectionPollingId(response.data.task_id);
-      toast.info(`Análisis del repositorio "${repoName}" iniciado`);
-      // Deshabilitar el botón de análisis hasta que termine el proceso actual
-      // Esto se manejará mediante el estado `collectionPollingId`
-    } catch (error) { toast.error('No se pudo iniciar el análisis del repositorio'); }
+    setAnalysisTarget({ type: 'repo', data: repoName });
+    setIsStartAnalysisDialogOpen(true);
+  };
+
+  const onConfirmAnalysis = async (analysisType: string) => {
+    if (!analysisTarget) return;
+
+    if (analysisTarget.type === 'doc') {
+      const doc = analysisTarget.data;
+      setDocumentToAnalyze(doc);
+      try {
+        const response = await apiClient.post('/api/start-document-analysis', { 
+          file_name: doc.file_name,
+          analysis_type: analysisType 
+        });
+        setDocPollingId(response.data.task_id);
+        toast.info(`Análisis (${analysisType}) para "${doc.file_name}" iniciado`);
+      } catch (error) { toast.error('No se pudo iniciar el análisis del documento'); }
+    } else {
+      try {
+        const response = await apiClient.post('/api/start-code-analysis', { 
+          repo_name: repoName,
+          analysis_type: analysisType
+        });
+        setCollectionPollingId(response.data.task_id);
+        toast.info(`Análisis (${analysisType}) del repositorio "${repoName}" iniciado`);
+      } catch (error) { toast.error('No se pudo iniciar el análisis del repositorio'); }
+    }
+    setAnalysisTarget(null);
   };
 
   const handleVectorizeRepository = async () => {
@@ -552,6 +573,13 @@ export default function RepositoryDetailPage() {
           onSuccess={() => window.location.reload()}
           repositoryUrl={repoUrl}
           repositoryName={repoName}
+        />
+        <StartCodeAnalysisDialog 
+          isOpen={isStartAnalysisDialogOpen} 
+          onOpenChange={setIsStartAnalysisDialogOpen} 
+          onConfirm={onConfirmAnalysis}
+          title={analysisTarget?.type === 'repo' ? "Analizar Repositorio" : "Analizar Archivo"}
+          isRepo={analysisTarget?.type === 'repo'}
         />
       </div>
     </React.Fragment>

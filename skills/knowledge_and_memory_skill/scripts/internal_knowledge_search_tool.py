@@ -98,6 +98,9 @@ Responde SOLO en formato JSON válido.
             logger.info(f"🧠 Interpretación del LLM: {interpretation}") # Nuevo log
             
             search_terms = interpretation.get("search_terms", query)
+            if isinstance(search_terms, list):
+                search_terms = " ".join(str(s) for s in search_terms)
+            
             k = interpretation.get("k", 15)
             document_name = interpretation.get("document_name")
             document_id = interpretation.get("document_id")

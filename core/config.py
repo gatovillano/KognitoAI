@@ -79,15 +79,19 @@ class Config:
         self.llm_temperature: float = float(os.getenv("LLM_TEMPERATURE", 0.7))
         self.ollama_embedding_model: str = os.getenv("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text:q4_K_M") # Modelo de embedding de Ollama cuantizado
         self.ollama_api_url: str = os.getenv("OLLAMA_API_URL", "http://host.docker.internal:11434") # URL por defecto para acceder al host desde Docker
+        self.ollama_direct_api_url: Optional[str] = os.getenv("OLLAMA_DIRECT_API_URL") # URL directa sin proxy (recomendado para evitar 524 de Cloudflare)
         self.llm_request_timeout: int = int(os.getenv("LLM_REQUEST_TIMEOUT", 300)) # Nuevo: Tiempo de espera para las solicitudes al LLM en segundos
         self.llm_max_retries: int = int(os.getenv("LLM_MAX_RETRIES", 3)) # Nuevo: Número máximo de reintentos para llamadas al LLM
         self.max_agent_loops: int = int(os.getenv("MAX_AGENT_LOOPS", 20)) # Nuevo: Límite de iteraciones para el agente de herramientas
+        self.agent_history_limit_default: int = int(os.getenv("AGENT_HISTORY_LIMIT_DEFAULT", 24))
+        self.agent_history_limit_ollama: int = int(os.getenv("AGENT_HISTORY_LIMIT_OLLAMA", 24))
+        self.thread_title_update_concurrency: int = max(1, int(os.getenv("THREAD_TITLE_UPDATE_CONCURRENCY", 3)))
         
         # --- Configuración de Rate Limiting y Tokens ---
         self.rate_limit_enabled: bool = os.getenv("RATE_LIMIT_ENABLED", "True").lower() in ('true', '1', 't')
-        self.rate_limit_max_requests: int = int(os.getenv("RATE_LIMIT_MAX_REQUESTS", 20))
+        self.rate_limit_max_requests: int = int(os.getenv("RATE_LIMIT_MAX_REQUESTS", 50))
         self.rate_limit_per_seconds: int = int(os.getenv("RATE_LIMIT_PER_SECONDS", 60))
-        self.deep_research_max_tokens: int = int(os.getenv("DEEP_RESEARCH_MAX_TOKENS", 16384))
+        self.deep_research_max_tokens: int = int(os.getenv("DEEP_RESEARCH_MAX_TOKENS", 65536))
         
         # --- Configuración de Razonamiento (Thinking) ---
         # Permite forzar el razonamiento nativo en modelos OpenRouter incluso si no se detectan automáticamente
@@ -169,6 +173,7 @@ class Config:
         self.chunk_overlap: int = int(os.getenv("CHUNK_OVERLAP", 20))
         self.internal_api_key_for_bot: str = get_secret("internal_api_key_for_bot", "INTERNAL_API_KEY_FOR_BOT", "super-secret-internal-key")
         self.global_collection_name: str = os.getenv("GLOBAL_COLLECTION_NAME", "global_knowledge_base") # Nueva variable
+        self.cors_allowed_origins: Optional[str] = os.getenv("CORS_ALLOWED_ORIGINS")
 
         # RAG General
         self.embedding_model_name: str = os.getenv("EMBEDDING_MODEL_NAME", "text-embedding-ada-002") # O "ollama/nomic-embed-text"
@@ -195,6 +200,14 @@ class Config:
         
         # --- Configuración de Skills Globales ---
         self.get_proactive_insights_enabled: bool = os.getenv("GET_PROACTIVE_INSIGHTS_ENABLED", "True").lower() in ('true', '1', 't')
+        self.autonomous_heartbeat_enabled: bool = os.getenv("AUTONOMOUS_HEARTBEAT_ENABLED", "True").lower() in ('true', '1', 't')
+        self.autonomous_heartbeat_interval_hours: int = max(1, int(os.getenv("AUTONOMOUS_HEARTBEAT_INTERVAL_HOURS", "6")))
+        self.autonomous_heartbeat_lookback_days: int = max(1, int(os.getenv("AUTONOMOUS_HEARTBEAT_LOOKBACK_DAYS", "7")))
+        self.autonomous_heartbeat_max_insights: int = max(1, int(os.getenv("AUTONOMOUS_HEARTBEAT_MAX_INSIGHTS", "6")))
+        self.autonomous_heartbeat_instructions: str = os.getenv(
+            "AUTONOMOUS_HEARTBEAT_INSTRUCTIONS",
+            "Detecta riesgos, oportunidades, seguimientos pendientes, dependencias críticas y alertas tempranas con criterio ejecutivo y lenguaje profesional."
+        )
 
 
         # Loaders de Documentos Avanzados (APIs externas)

@@ -154,11 +154,11 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
     to_encode = data.copy()
     if expires_delta:
         expire = datetime.now(timezone.utc) + expires_delta
-    else:
-        # Expiración corta de seguridad (2 horas)
-        expire = datetime.now(timezone.utc) + timedelta(hours=2)
+        to_encode["exp"] = expire
+    elif settings.jwt_expiry_days > 0:
+        to_encode["exp"] = datetime.now(timezone.utc) + timedelta(days=settings.jwt_expiry_days)
 
-    to_encode.update({"exp": expire, "iat": datetime.now(timezone.utc)})
+    to_encode["iat"] = datetime.now(timezone.utc)
 
     encoded_jwt = jwt.encode(to_encode, settings.jwt_secret_key, algorithm="HS256")
     return encoded_jwt
@@ -172,13 +172,17 @@ def decode_access_token(token: str) -> Optional[dict]:
         El payload (dict) si el token es válido, o None si ha expirado o es inválido.
     """
     try:
-        payload = jwt.decode(token, settings.jwt_secret_key, algorithms=["HS256"])
+        payload = jwt.decode(token, settings.jwt_secret_key, algorithms=["HS256"], leeway=60)
         return payload
     except jwt.ExpiredSignatureError:
         logger.warning("❌ Token JWT expirado.")
         return None
+    except jwt.InvalidSignatureError:
+        # Puede ocurrir cuando un servicio externo (ej. OnlyOffice) usa su propio JWT.
+        logger.debug("Token JWT con firma invalida para JWT_SECRET_KEY local.")
+        return None
     except jwt.PyJWTError as e:
-        logger.error(f"❌ Error de decodificación de JWT: {e}", exc_info=True)
+        logger.warning(f"❌ Error de decodificación de JWT: {e}")
         return None
 
 
@@ -398,6 +402,9 @@ def verify_token_ws(token: str) -> str:
     account_id: str = payload.get("sub")
     if account_id is None:
         logger.warning("❌ account_id es None en el payload del token WebSocket.")
+        raise credentials_exception
+
+    return account_id
 
 
 async def get_websocket_token(websocket: WebSocket) -> str:

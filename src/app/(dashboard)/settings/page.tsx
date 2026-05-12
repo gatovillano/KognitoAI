@@ -52,7 +52,7 @@ const MODELS_BY_PROVIDER: Record<string, string[]> = {
     'openrouter/anthropic/claude-3.5-sonnet'
   ],
   ollama: ['ollama/llama3.1', 'ollama/mistral', 'ollama/phi3', 'ollama/gemma2'],
-  'ollama-cloud': ['ollama/llama3.1', 'ollama/mistral', 'ollama/phi3', 'ollama/gemma2', 'ollama/qwen2.5'],
+  'ollama-cloud': ['ollama_chat/llama3.1', 'ollama_chat/mistral', 'ollama_chat/phi3', 'ollama_chat/gemma2', 'ollama_chat/qwen2.5'],
   'openai-compatible': [],
   mistral: ['mistral/mistral-large-latest', 'mistral/mistral-small-latest'],
 };
@@ -853,11 +853,12 @@ const LLMSettingsForm: React.FC = () => {
                 </div>
               )}
 
-              {(localTTS.tts_provider === 'openai-compatible' || localTTS.tts_provider === 'openai' || localTTS.tts_provider === 'coquitts') && (
+              {(localTTS.tts_provider === 'openai-compatible' || localTTS.tts_provider === 'openai' || localTTS.tts_provider === 'kokoro' || localTTS.tts_provider === 'coquitts') && (
                 <div className="space-y-2">
                   <Label>API Base URL (Opcional)</Label>
                   <Input
                     placeholder={
+                      localTTS.tts_provider === 'kokoro' ? 'http://localhost:8011' :
                       localTTS.tts_provider === 'coquitts' ? 'http://localhost:8006' :
                       localTTS.tts_provider === 'openai-compatible' ? 'http://localhost:8080/v1' :
                       'https://api.openai.com/v1'
@@ -867,7 +868,9 @@ const LLMSettingsForm: React.FC = () => {
                     className="bg-background/50 backdrop-blur-sm border-primary/20 hover:border-primary/50 transition-colors font-mono text-sm"
                   />
                   <p className="text-[10px] text-muted-foreground italic mt-1 leading-relaxed">
-                    {localTTS.tts_provider === 'coquitts' ?
+                    {localTTS.tts_provider === 'kokoro' ?
+                      "Para Kokoro TTS local (ej. http://localhost:8011)" :
+                      localTTS.tts_provider === 'coquitts' ?
                       "Para Coqui TTS / XTTS v2 local (ej. http://localhost:8006)" :
                       "Para servicios TTS locales o compatibles con OpenAI."}
                   </p>
@@ -1211,12 +1214,15 @@ const SettingsPage: React.FC = () => {
   const [memories, setMemories] = useState<Memory[]>([]);
   const [memoryLoading, setMemoryLoading] = useState(false);
   const [showAddMemory, setShowAddMemory] = useState(false);
+  const [newKey, setNewKey] = useState({ provider: '', value: '' });
   const [newMemory, setNewMemory] = useState({
     title: '',
     content: '',
     type: 'general'
   });
   const [workspaces, setWorkspaces] = useState<any[]>([]);
+  const [availableTools, setAvailableTools] = useState<{name: string, description: string}[]>([]);
+  const [heartbeatTriggering, setHeartbeatTriggering] = useState(false);
 
   useEffect(() => {
     getSettings();
@@ -1233,14 +1239,26 @@ const SettingsPage: React.FC = () => {
     if (activeTab === 'sync' && !workspaces.length) {
       fetchWorkspaces();
     }
+    if (activeTab === 'heartbeat' && !availableTools.length) {
+      fetchAvailableTools();
+    }
   }, [activeTab]);
 
   const fetchWorkspaces = async () => {
     try {
-      const response = await apiClient.get('/api/workspaces');
+      const response = await apiClient.get('/api/workspaces', { params: { limit: 100 } });
       setWorkspaces(response.data.workspaces || response.data || []);
     } catch (error) {
       console.error('Error fetching workspaces:', error);
+    }
+  };
+
+  const fetchAvailableTools = async () => {
+    try {
+      const response = await apiClient.get('/api/scheduled-tools/available-tools');
+      setAvailableTools(response.data.tools || []);
+    } catch (error) {
+      console.error('Error fetching available tools:', error);
     }
   };
 
@@ -1312,7 +1330,7 @@ const SettingsPage: React.FC = () => {
     setLocalSettings(prev => prev ? { ...prev, [id]: checked } : null);
   };
 
-  const handleSelectChange = (id: string, value: string) => {
+  const handleSelectChange = (id: string, value: any) => {
     setLocalSettings(prev => prev ? { ...prev, [id]: value } : null);
   };
 
@@ -1328,6 +1346,9 @@ const SettingsPage: React.FC = () => {
         email: localSettings.email,
         phone: localSettings.phone,
         bio: localSettings.bio,
+        custom_heartbeat_instructions: localSettings.custom_heartbeat_instructions,
+        custom_heartbeat_interval_minutes: localSettings.custom_heartbeat_interval_minutes,
+        custom_heartbeat_allowed_tools: localSettings.custom_heartbeat_allowed_tools,
       });
       toast.success('Datos personales actualizados exitosamente.');
     } catch (err) {
@@ -1373,6 +1394,7 @@ const SettingsPage: React.FC = () => {
           <TabsTrigger value="modules-preferences">Módulos y Preferencias</TabsTrigger>
           <TabsTrigger value="memories">Memorias</TabsTrigger>
           <TabsTrigger value="skills">Skills</TabsTrigger>
+          <TabsTrigger value="heartbeat">Heartbeat Autónomo</TabsTrigger>
           <TabsTrigger value="security">Seguridad</TabsTrigger>
           <TabsTrigger value="remote">Acceso Remoto / SSH</TabsTrigger>
           <TabsTrigger value="sync">Sincronización</TabsTrigger>
@@ -1625,6 +1647,120 @@ const SettingsPage: React.FC = () => {
             <SkillsSettings />
           </div>
         </TabsContent>
+        <TabsContent value="heartbeat">
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-xl font-semibold mb-1">Heartbeat Autónomo Personalizado</h2>
+              <p className="text-sm text-muted-foreground mb-6">
+                Configura tareas que el agente realizará de forma proactiva cada cierto tiempo.
+              </p>
+            </div>
+
+            <Card className="border-none shadow-md bg-secondary/5">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Brain className="h-5 w-5 text-primary" />
+                  Configuración del Ciclo
+                </CardTitle>
+                <CardDescription>Define qué debe hacer el agente y con qué frecuencia.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid w-full gap-1.5">
+                  <Label htmlFor="custom_heartbeat_instructions">Instrucciones Ejecutivas</Label>
+                  <Textarea
+                    id="custom_heartbeat_instructions"
+                    placeholder="Ej: Revisa mis correos pendientes y resume los más importantes..."
+                    value={localSettings.custom_heartbeat_instructions || ''}
+                    onChange={handleChange}
+                    rows={4}
+                    className="bg-background/50 border-border/40 focus:border-primary/50 transition-colors"
+                  />
+                  <p className="text-[10px] text-muted-foreground italic">
+                    Estas instrucciones se inyectarán al agente cada vez que se active el heartbeat.
+                  </p>
+                </div>
+
+                <div className="grid w-full max-w-sm items-center gap-1.5">
+                  <Label htmlFor="custom_heartbeat_interval_minutes">Frecuencia (minutos)</Label>
+                  <Input
+                    type="number"
+                    id="custom_heartbeat_interval_minutes"
+                    value={localSettings.custom_heartbeat_interval_minutes || 60}
+                    onChange={(e) => handleSelectChange('custom_heartbeat_interval_minutes', parseInt(e.target.value))}
+                    min={5}
+                    className="bg-background/50 border-border/40"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="flex items-center gap-2">
+                    <Wrench className="h-4 w-4" />
+                    Herramientas Permitidas
+                  </Label>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-60 overflow-y-auto p-3 border rounded-xl bg-background/40 border-border/50">
+                    {availableTools.map((tool) => (
+                      <div key={tool.name} className="flex items-center space-x-2 p-1 hover:bg-primary/5 rounded-lg transition-colors">
+                        <Switch
+                          id={`tool-${tool.name}`}
+                          checked={(localSettings.custom_heartbeat_allowed_tools || []).includes(tool.name)}
+                          onCheckedChange={(checked) => {
+                            const currentTools = localSettings.custom_heartbeat_allowed_tools || [];
+                            const newTools = checked
+                              ? [...currentTools, tool.name]
+                              : currentTools.filter(t => t !== tool.name);
+                            handleSelectChange('custom_heartbeat_allowed_tools', newTools);
+                          }}
+                        />
+                        <Label htmlFor={`tool-${tool.name}`} className="text-xs cursor-pointer flex flex-col">
+                          <span className="font-bold">{tool.name}</span>
+                          <span className="text-[9px] text-muted-foreground line-clamp-1">{tool.description}</span>
+                        </Label>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-4 pt-4">
+                  <Button onClick={async () => {
+                    try {
+                      await updateSettings({
+                        custom_heartbeat_instructions: localSettings.custom_heartbeat_instructions,
+                        custom_heartbeat_interval_minutes: localSettings.custom_heartbeat_interval_minutes,
+                        custom_heartbeat_allowed_tools: localSettings.custom_heartbeat_allowed_tools,
+                      });
+                      toast.success('Configuración de Heartbeat guardada');
+                    } catch (err) {
+                      toast.error('Error al guardar configuración');
+                    }
+                  }} disabled={loading} className="flex-1">
+                    {loading ? 'Guardando...' : 'Guardar Configuración'}
+                  </Button>
+                  
+                  <Button 
+                    variant="secondary" 
+                    onClick={async () => {
+                      setHeartbeatTriggering(true);
+                      try {
+                        await apiClient.post('/api/scheduled-tools/custom-heartbeat/trigger');
+                        toast.success('Heartbeat manual lanzado con éxito');
+                      } catch (err: any) {
+                        toast.error(err.response?.data?.detail || 'Error al lanzar heartbeat');
+                      } finally {
+                        setHeartbeatTriggering(false);
+                      }
+                    }} 
+                    disabled={heartbeatTriggering || !localSettings.custom_heartbeat_instructions}
+                    className="flex-1"
+                  >
+                    <RefreshCw className={`mr-2 h-4 w-4 ${heartbeatTriggering ? 'animate-spin' : ''}`} />
+                    Lanzar Ahora Manualmente
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
         <TabsContent value="security">
           <Card>
             <CardHeader>
@@ -1671,10 +1807,29 @@ const SettingsPage: React.FC = () => {
                     <Label htmlFor="local_base_path">Directorio Raíz Permitido</Label>
                     <Input id="local_base_path" placeholder="/home/gato/Proyectos" value={settings?.local_base_path || ''} onChange={(e) => updateSettings({ local_base_path: e.target.value })} />
                   </div>
-                </div>
-                
-                <div className="mt-8 border-t border-border pt-4">
-                  <h4 className="text-sm font-bold mb-2">Credenciales (Guardado Seguro)</h4>
+                  </div>
+
+                  <div className="flex justify-end pt-2">
+                  <Button 
+                    onClick={async () => {
+                      try {
+                        await updateSettings({
+                          ssh_host: settings?.ssh_host,
+                          ssh_port: settings?.ssh_port,
+                          ssh_user: settings?.ssh_user,
+                          local_base_path: settings?.local_base_path
+                        });
+                        toast.success("Configuración SSH guardada correctamente");
+                      } catch (err) {
+                        toast.error("Error al guardar la configuración SSH");
+                      }
+                    }}
+                  >
+                    Guardar Configuración General
+                  </Button>
+                  </div>
+
+                  <div className="mt-8 border-t border-border pt-4">                  <h4 className="text-sm font-bold mb-2">Credenciales (Guardado Seguro)</h4>
                   <p className="text-xs text-muted-foreground mb-4">La contraseña o llave privada de SSH se guarda encriptada en la bóveda de secretos de tu cuenta.</p>
                   
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1685,14 +1840,16 @@ const SettingsPage: React.FC = () => {
                         <Button variant="secondary" onClick={async () => {
                           if(!newKey.value) return;
                           try {
-                            // Se asume import o función ya definida para guardar en api/users/me/secrets
-                            await fetch('/api/users/me/secrets', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` },
-                                body: JSON.stringify({ key_name: 'SSH_PASSWORD', value: newKey.value, description: 'Contraseña para File Navigator SSH' })
+                            await apiClient.post('/api/users/me/secrets', {
+                                key_name: 'SSH_PASSWORD',
+                                value: newKey.value,
+                                description: 'Contraseña para File Navigator SSH'
                             });
                             toast.success("Contraseña guardada segura");
-                          } catch(err) { toast.error("Error guardando") }
+                          } catch(err) { 
+                            console.error("Error saving secret:", err);
+                            toast.error("Error guardando contraseña");
+                          }
                         }}>Guardar</Button>
                       </div>
                     </div>
@@ -1703,13 +1860,16 @@ const SettingsPage: React.FC = () => {
                         <Button variant="secondary" onClick={async () => {
                           if(!newKey.value) return;
                           try {
-                            await fetch('/api/users/me/secrets', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` },
-                                body: JSON.stringify({ key_name: 'SSH_PRIVATE_KEY', value: newKey.value, description: 'Llave privada SSH' })
+                            await apiClient.post('/api/users/me/secrets', {
+                                key_name: 'SSH_PRIVATE_KEY',
+                                value: newKey.value,
+                                description: 'Llave privada SSH'
                             });
                             toast.success("Llave guardada segura");
-                          } catch(err) { toast.error("Error guardando llave") }
+                          } catch(err) {
+                            console.error("Error saving secret:", err);
+                            toast.error("Error guardando llave");
+                          }
                         }}>Guardar</Button>
                       </div>
                     </div>

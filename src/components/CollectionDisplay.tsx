@@ -7,13 +7,17 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { Plus, FolderKanban, MoreVertical, ScanSearch, Loader2, Library, BookMarked, Trash2, Github, Edit, Share2, Upload, CheckCircle, XCircle, Clock, Network, ChevronDown, Settings, Text, Brain } from 'lucide-react';
+import { Plus, FolderKanban, MoreVertical, ScanSearch, Loader2, Library, BookMarked, Trash2, Github, Edit, Share2, Upload, CheckCircle, XCircle, Clock, Network, ChevronDown, Settings, Text, Brain, FileText } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { toast } from 'sonner';
 import apiClient from '@/lib/api';
+import { useDraggable, useDroppable } from '@dnd-kit/core';
+import { CSS } from '@dnd-kit/utilities';
 
-interface Collection {
-  topic: string;
+export interface Collection {
+  id?: string;
+  name: string;
+  topic?: string;
   document_count: number;
   description?: string;
   team_shared?: boolean;
@@ -21,6 +25,8 @@ interface Collection {
   workspace_id?: string;
   workspace_name?: string;
   workspace_color?: string;
+  parent_id?: string | null;
+  subcollection_count?: number;
 }
 
 interface CollectionDisplayProps {
@@ -69,18 +75,23 @@ export const CollectionDisplay = ({
         (e.target as HTMLElement).closest('[data-dropdown-content]')) {
         return;
       }
-      const url = `/rag/${encodeURIComponent(collection.topic)}`;
+      const collectionIdentifier = collection.name || collection.topic || '';
+      const url = `/rag/${encodeURIComponent(collectionIdentifier)}`;
       // La API ahora provee workspace_id dentro del objeto collection
-      const workspaceId = collection.workspace_id;
-      const finalUrl = workspaceId ? `${url}?workspace_id=${workspaceId}` : url;
-      router.push(finalUrl);
+      const activeWorkspaceId = collection.workspace_id || workspaceId;
+      if (activeWorkspaceId) {
+        router.push(`/workspaces/${activeWorkspaceId}/collections/${encodeURIComponent(collectionIdentifier)}`);
+      } else {
+        router.push(url);
+      }
     }
   };
 
   const handleAction = (action: (topic: string, workspaceId?: string) => void) => {
     return (e: React.MouseEvent) => {
       e.stopPropagation(); // Evitar que el clic se propague al Card
-      action(collection.topic, collection.workspace_id);
+      const collectionIdentifier = collection.name || collection.topic || '';
+      action(collectionIdentifier, collection.workspace_id);
     };
   };
 
@@ -179,6 +190,28 @@ export const CollectionDisplay = ({
     </div>
   );
 
+  const {
+    attributes,
+    listeners,
+    setNodeRef: setDraggableRef,
+    transform,
+    isDragging,
+  } = useDraggable({
+    id: `draggable-${collection.id || collection.name || collection.topic}`,
+    data: { collection },
+  });
+
+  const { setNodeRef: setDroppableRef, isOver } = useDroppable({
+    id: `droppable-${collection.id || collection.name || collection.topic}`,
+    data: { collection },
+  });
+
+  const style = {
+    transform: CSS.Translate.toString(transform),
+    opacity: isDragging ? 0.4 : 1,
+    zIndex: isDragging ? 50 : undefined,
+  };
+
   return (
     <motion.div
       layout
@@ -186,19 +219,27 @@ export const CollectionDisplay = ({
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.8 }}
       transition={{ type: "spring", stiffness: 300, damping: 30 }}
-      className="h-full w-full"
+      className={`h-full w-full transition-all duration-200 ${isOver ? 'ring-2 ring-primary ring-offset-2 scale-[1.02]' : ''}`}
+      style={style}
+      ref={setDroppableRef}
     >
-      <Card
-        className={`cursor-pointer h-full hover:border-primary/20 ${className || ''}`}
-        onClick={handleCardClick}
+      <div 
+        ref={setDraggableRef} 
+        {...attributes} 
+        {...listeners}
+        className="h-full w-full"
       >
+        <Card
+          className={`cursor-pointer h-full transition-all hover:border-primary/20 ${isOver ? 'border-primary shadow-lg bg-primary/5' : ''} ${className || ''}`}
+          onClick={handleCardClick}
+        >
         <CardHeader className="pb-3">
           <CardTitle className="flex items-start gap-3 flex-wrap overflow-hidden">
             <div className="flex items-center gap-3 min-w-0 max-w-full">
               <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
                 <FolderKanban className="h-5 w-5 text-primary" />
               </div>
-              <span className="font-semibold text-lg whitespace-normal break-words flex-shrink min-w-0 text-wrap">{collection.topic}</span>
+              <span className="font-semibold text-lg whitespace-normal break-words flex-shrink min-w-0 text-wrap">{collection.name || collection.topic}</span>
               {collection.team_shared && (
                 <span className="text-blue-500" title="Compartido con equipo">👥</span>
               )}
@@ -228,24 +269,50 @@ export const CollectionDisplay = ({
           )}
         </CardContent>
         <div className="flex items-center justify-between p-3 border-t border-border/50">
-          <span className="text-xs text-muted-foreground">
-            {collection.document_count !== undefined
-              ? `${collection.document_count} documento(s)`
-              : 'Calculando...'}
-          </span>
+          <div className="flex items-center gap-3">
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-default">
+                    <FileText className="h-3.5 w-3.5" />
+                    <span>{collection.document_count ?? 0}</span>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>{collection.document_count ?? 0} documento(s)</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <div className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-default">
+                    <FolderKanban className="h-3.5 w-3.5" />
+                    <span>{collection.subcollection_count ?? 0}</span>
+                  </div>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>{collection.subcollection_count ?? 0} subcolección(es)</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          </div>
+
           <div className="flex items-center gap-2">
             {collection.workspace_name && (
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <div
-                      className="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full m-1"
+                      className="inline-flex items-center gap-1.5 text-[10px] font-medium px-1.5 py-0.5 rounded-full"
                       style={{
-                        backgroundColor: collection.workspace_color ? `${collection.workspace_color}20` : '#f3f4f6',
+                        backgroundColor: collection.workspace_color ? `${collection.workspace_color}15` : '#f3f4f6',
+                        border: `1px solid ${collection.workspace_color ? `${collection.workspace_color}30` : '#e5e7eb'}`
                       }}
                     >
                       <span
-                        className="h-2 w-2 rounded-full"
+                        className="h-1.5 w-1.5 rounded-full"
                         style={{ backgroundColor: collection.workspace_color || '#888888' }}
                       ></span>
                       <span style={{ color: collection.workspace_color || '#374151' }}>
@@ -254,15 +321,15 @@ export const CollectionDisplay = ({
                     </div>
                   </TooltipTrigger>
                   <TooltipContent>
-                    <p>Workspace</p>
+                    <p>Workspace: {collection.workspace_name}</p>
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>
             )}
-
           </div>
         </div>
       </Card>
+      </div>
     </motion.div>
   );
 };

@@ -8,12 +8,15 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Loader2, Info, RefreshCcw, Search, ExternalLink, Brain, Network, GitGraph, Database, ArrowLeft, ChevronLeft, ChevronRight, X, Bookmark, ChevronDown, Trash2 } from 'lucide-react';
+import { Loader2, Info, RefreshCcw, Search, ExternalLink, Brain, Network, GitGraph, Database, ArrowLeft, ChevronLeft, ChevronRight, X, Bookmark, ChevronDown, Trash2, AlertTriangle, Filter, Upload, AlertCircle, RefreshCw } from 'lucide-react';
+import { useTaskContext } from '@/contexts/TaskContext';
+import { DatasetNameDialog } from '@/app/(dashboard)/rag/dataset-name-dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import {
   AlertDialog,
@@ -146,7 +149,7 @@ const useKnowledgeGraph = (maxNodes: number, maxHops: number, selectedDataset: s
     } finally {
       setIsLoading(false);
     }
-  }, [maxNodes, maxHops, selectedDataset, filters, processingMode, originalGraphData, isInitialLoad, expandedNodeIds]);
+  }, [maxNodes, maxHops, selectedDataset, filters, processingMode, isInitialLoad, expandedNodeIds]);
 
   // Función para aplicar filtros en el cliente sin recargar datos
   const applyClientFilters = useCallback(() => {
@@ -329,7 +332,8 @@ const useKnowledgeGraph = (maxNodes: number, maxHops: number, selectedDataset: s
     loadGraphData(true); // Carga inicial con forceReload=true
     loadAvailableDatasets();
     loadMetadata();
-  }, [loadGraphData, loadAvailableDatasets, loadMetadata]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Solo al montar el componente
 
   // Aplicar filtros en cliente cuando cambien los filtros o el filtro por nodo
   useEffect(() => {
@@ -343,7 +347,8 @@ const useKnowledgeGraph = (maxNodes: number, maxHops: number, selectedDataset: s
     if (!isInitialLoad) {
       loadGraphData(true); // Recargar desde servidor
     }
-  }, [processingMode, maxNodes, maxHops, selectedDataset, loadGraphData, isInitialLoad]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [processingMode, maxNodes, maxHops, selectedDataset]);
 
 
   const resetGraphFilter = useCallback(() => {
@@ -372,6 +377,7 @@ const useKnowledgeGraph = (maxNodes: number, maxHops: number, selectedDataset: s
     isLoading,
     error,
     processingStatus,
+    setProcessingStatus,
     availableDatasets,
     loadGraphData,
     processKnowledgeGraph,
@@ -436,6 +442,14 @@ export function GraphView() {
   const [savedNodes, setSavedNodes] = useState<any[]>([]);
   const [isSavedNodesOpen, setIsSavedNodesOpen] = useState(false);
 
+  // Estados para procesamiento avanzado de grafos
+  const [isDatasetDialogOpen, setIsDatasetDialogOpen] = useState(false);
+  const [isProcessingMemories, setIsProcessingMemories] = useState(false);
+  const [processingTopic, setProcessingTopic] = useState<string | null>(null);
+  const [processingWorkspaceId, setProcessingWorkspaceId] = useState<string | null>(null);
+
+  const { analysisTasks, addAnalysisTask, updateAnalysisTask, removeAnalysisTask } = useTaskContext();
+
   const {
     graphData,
     metadata,
@@ -444,6 +458,8 @@ export function GraphView() {
     processingStatus,
     availableDatasets,
     processKnowledgeGraph: originalProcessKnowledgeGraph,
+    setProcessingStatus,
+    loadGraphData,
     refreshGraphData,
     searchGraph,
     clearError,
@@ -495,8 +511,226 @@ export function GraphView() {
   }, [graphQuery, searchGraph]);
 
   const handleProcessGraph = useCallback(async () => {
-    await originalProcessKnowledgeGraph(setProcessingProgress, setProcessingMessage);
-  }, [originalProcessKnowledgeGraph]);
+    setProcessingTopic(null);
+    setProcessingWorkspaceId(null);
+    setIsDatasetDialogOpen(true);
+  }, []);
+
+  const handleConfirmProcessGraph = async (datasetName: string, mode: 'hybrid' | 'conceptual') => {
+    const toastId = toast.loading(
+      processingTopic
+        ? `Procesando grafo de conocimiento para "${processingTopic}" (Modo: ${mode === 'hybrid' ? 'Estándar' : 'Conceptual'})...`
+        : `Procesando grafo global (Modo: ${mode === 'hybrid' ? 'Estándar' : 'Conceptual'})...`
+    );
+
+    try {
+      // Inicializar tarea localmente para feedback inmediato
+      const tempTaskId = `temp-${Date.now()}`;
+      addAnalysisTask({
+        task_id: tempTaskId,
+        phase: 'initializing',
+        message: 'Iniciando procesamiento...',
+        progress_percent: 0,
+        is_complete: false,
+        has_error: false,
+        processing_mode: mode,
+        topic: processingTopic || undefined,
+        type: 'graph'
+      });
+
+      // Determinar qué endpoint usar basado en el modo
+      if (mode === 'conceptual') {
+        // Modo Conceptual: Usar la herramienta de Procesamiento Conceptual
+        const payload = {
+          tool_name: "conceptual_processing",
+          action: "process_documents",
+          dataset_name: datasetName,
+          topic: processingTopic || undefined,
+          documents: [],
+          workspace_id: processingWorkspaceId || undefined,
+          task_id: tempTaskId,
+          background: true
+        };
+        const response = await apiClient.post('/api/skills/run', payload);
+
+        if (response.data?.task_id) {
+          updateAnalysisTask(tempTaskId, { task_id: response.data.task_id });
+        }
+      } else {
+        // Modo Híbrido (Estándar): Llamar al endpoint optimizado
+        const response = await apiClient.post('/api/knowledge-graph/process-knowledge-graph-optimized', {
+          workspace_id: processingWorkspaceId || undefined,
+          dataset_name: datasetName,
+          topic: processingTopic || undefined,
+          force_reprocess: true
+        });
+
+        if (response.data?.task_id) {
+          updateAnalysisTask(tempTaskId, { task_id: response.data.task_id });
+        }
+      }
+
+      toast.success(`¡Creación de grafo iniciada!`, { id: toastId });
+    } catch (error) {
+      console.error(error);
+      toast.error("Error al iniciar el procesamiento del grafo.", { id: toastId });
+      analysisTasks
+        .filter(task => task.task_id.startsWith('temp-'))
+        .forEach(task => removeAnalysisTask(task.task_id));
+    } finally {
+      setIsDatasetDialogOpen(false);
+      setProcessingTopic(null);
+      setProcessingWorkspaceId(null);
+    }
+  };
+
+  const handleClearKnowledgeGraph = async () => {
+    if (window.confirm('¿Estás seguro de que quieres borrar TODO el grafo de conocimiento de tu cuenta? Esta acción es irreversible y afectará a todos tus documentos procesados.')) {
+      const toastId = toast.loading("Limpiando el grafo de conocimiento...");
+      try {
+        await apiClient.post('/api/knowledge-graph/clear-neo4j', { confirm_delete_all: true });
+        toast.success("El grafo de conocimiento ha sido limpiado.", { id: toastId });
+        refreshGraphData();
+      } catch (error) {
+        toast.error("Error al limpiar el grafo de conocimiento.", { id: toastId });
+      }
+    }
+  };
+
+  const handleProcessMemories = async (force: boolean = false) => {
+    if (isProcessingMemories) return;
+
+    const confirmMsg = force
+      ? '¿Reprocesar TODAS las memorias desde cero? Esto ignorará las ya procesadas.'
+      : '¿Deseas procesar todas las memorias pendientes de KAI e integrarlas al grafo?';
+
+    if (!window.confirm(confirmMsg)) {
+      return;
+    }
+
+    setIsProcessingMemories(true);
+    setProcessingStatus('processing');
+    setProcessingProgress(5);
+    setProcessingMessage(force ? 'Reseteando y reprocesando todas las memorias...' : 'Iniciando procesamiento de memorias...');
+    const toastId = toast.loading(force ? "Reprocesando todas las memorias..." : "Procesando memorias de KAI...");
+
+    let pollInterval: ReturnType<typeof setInterval> | null = null;
+
+    try {
+      const url = force
+        ? '/api/knowledge-graph/process-memories?force=true'
+        : '/api/knowledge-graph/process-memories';
+      const response = await apiClient.post(url);
+      const taskId: string | undefined = response.data?.data?.task_id;
+
+      if (!taskId) {
+        // Sin task_id: fallback a toast simple
+        toast.success("Procesamiento de memorias iniciado.", { id: toastId });
+        setProcessingProgress(0);
+        setProcessingMessage('');
+        setProcessingStatus('idle');
+        setIsProcessingMemories(false);
+        return;
+      }
+
+      // Polling con backoff progresivo: rápido al inicio, más lento si tarda
+      let pollCount = 0;
+      const getNextInterval = () => {
+        if (pollCount < 5) return 1500;   // primeros 7.5s: rápido
+        if (pollCount < 15) return 3000;  // hasta ~37s: normal
+        return 5000;                      // después: lento (reduce noise en tareas largas)
+      };
+
+      const doPoll = async () => {
+        try {
+          const prog = await apiClient.get(`/api/knowledge-graph/progress/${taskId}`);
+          const data = prog.data?.data;
+          if (!data) { scheduleNext(); return; }
+
+          const percent: number = data.progress_percent ?? 0;
+          const msg: string = data.message ?? '';
+          const isComplete: boolean = data.is_complete ?? false;
+          const hasError: boolean = data.has_error ?? false;
+
+          setProcessingProgress(percent);
+          setProcessingMessage(msg);
+
+          if (isComplete) {
+            setProcessingStatus('completed');
+            toast.success(msg || "Memorias integradas al grafo.", { id: toastId });
+            setIsProcessingMemories(false);
+            await loadGraphData(true);
+            setTimeout(() => {
+              setProcessingProgress(0);
+              setProcessingMessage('');
+              setProcessingStatus('idle');
+            }, 4000);
+          } else if (hasError) {
+            setProcessingStatus('error');
+            toast.error(`Error: ${data.error || msg}`, { id: toastId });
+            setIsProcessingMemories(false);
+            setTimeout(() => {
+              setProcessingProgress(0);
+              setProcessingMessage('');
+              setProcessingStatus('idle');
+            }, 4000);
+          } else {
+            pollCount++;
+            scheduleNext();
+          }
+        } catch {
+          // Error de red: reintentar con intervalo normal
+          pollCount++;
+          scheduleNext();
+        }
+      };
+
+      const scheduleNext = () => {
+        pollInterval = setTimeout(doPoll, getNextInterval()) as unknown as ReturnType<typeof setInterval>;
+      };
+
+      scheduleNext();
+
+    } catch (error) {
+      if (pollInterval) clearTimeout(pollInterval as unknown as ReturnType<typeof setTimeout>);
+      console.error(error);
+      toast.error("Error al iniciar el procesamiento de memorias.", { id: toastId });
+      setProcessingProgress(0);
+      setProcessingMessage('');
+      setProcessingStatus('error');
+      setIsProcessingMemories(false);
+    }
+  };
+
+  const handleOptimizeKnowledgeGraph = async () => {
+    if (!window.confirm('¿Deseas analizar el grafo para fusionar duplicados y eliminar irrelevancias? Esta acción optimizará la memoria del agente.')) {
+      return;
+    }
+
+    const toastId = toast.loading("Analizando grafo en busca de optimizaciones...");
+    try {
+      const reviewRes = await apiClient.post('/api/knowledge-graph/review-entities', {});
+      const corrections = reviewRes.data?.corrections || [];
+      
+      if (corrections.length === 0) {
+        toast.success("El grafo ya está optimizado. No se encontraron duplicados ni problemas.", { id: toastId });
+        return;
+      }
+      
+      toast.loading(`Aplicando ${corrections.length} optimizaciones...`, { id: toastId });
+      
+      const applyRes = await apiClient.post('/api/knowledge-graph/apply-corrections', {
+        corrections: corrections,
+        auto_apply: true
+      });
+      
+      toast.success(`Grafo optimizado. Se aplicaron ${applyRes.data?.applied || 0} correcciones automáticamente.`, { id: toastId });
+      refreshGraphData();
+    } catch (error) {
+      console.error(error);
+      toast.error("Error al optimizar el grafo.", { id: toastId });
+    }
+  };
 
   const handleNodeClick = useCallback((node: any) => {
     console.log("🔍 handleNodeClick llamado con nodo:", node);
@@ -643,7 +877,7 @@ export function GraphView() {
   };
 
   return (
-    <div className="p-4 sm:p-8 max-w-7xl mx-auto flex flex-col h-screen overflow-hidden">
+    <div className="p-4 sm:p-6 w-full mx-auto flex flex-col h-screen overflow-hidden">
       <div className="flex items-center gap-2 mb-4">
         <h2 className="text-3xl font-bold tracking-tight">
           Grafos de Conocimiento
@@ -687,6 +921,41 @@ export function GraphView() {
                     graphVisualizationRef.current?.fitView();
                   }} className="cursor-pointer">
                     <GitGraph className="h-4 w-4 mr-2" /> Vista Completa
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={handleProcessGraph}
+                    disabled={processingStatus === 'processing'}
+                    className="cursor-pointer font-medium text-primary"
+                  >
+                    <Brain className="mr-2 h-4 w-4" />
+                    <span>{processingStatus === 'processing' ? "Procesando Grafos..." : "Crear Grafos de Conocimiento"}</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={handleClearKnowledgeGraph}
+                    className="text-red-600 focus:text-red-600 focus:bg-red-50 cursor-pointer"
+                  >
+                    <AlertTriangle className="mr-2 h-4 w-4" />
+                    <span>Limpiar Grafo Global</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={handleOptimizeKnowledgeGraph}
+                    className="cursor-pointer text-blue-600 focus:text-blue-600 focus:bg-blue-50"
+                  >
+                    <Filter className="mr-2 h-4 w-4" />
+                    <span>Optimizar y Limpiar Grafo</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => handleProcessMemories(true)}
+                    disabled={isProcessingMemories}
+                    className="cursor-pointer text-purple-600 focus:text-purple-600 focus:bg-purple-50"
+                  >
+                    {isProcessingMemories ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Brain className="mr-2 h-4 w-4" />
+                    )}
+                    <span>Procesar memorias de KAI</span>
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -1069,6 +1338,19 @@ export function GraphView() {
           )}
         </SheetContent>
       </Sheet>
+      {selectedDataset !== 'all' && (
+        <div className="hidden">
+           {/* Mock cleanup for dataset specific stuff if needed */}
+        </div>
+      )}
+
+      <DatasetNameDialog
+        isOpen={isDatasetDialogOpen}
+        onOpenChange={setIsDatasetDialogOpen}
+        onConfirm={handleConfirmProcessGraph}
+        defaultTopic={processingTopic}
+        workspaceId={availableDatasets.length > 0 ? undefined : undefined} // Workspace ID could be passed if known
+      />
     </div>
   );
 }

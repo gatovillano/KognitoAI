@@ -33,13 +33,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         setIsLoading(true);
         const response = await apiClient.get('/api/workspaces', {
           headers: { Authorization: `Bearer ${token}` },
+          params: { limit: 100 }
         });
         setWorkspaces(response.data);
 
         const storedWorkspaceId = localStorage.getItem('currentWorkspaceId');
         const workspacesData = Array.isArray(response.data) ? response.data : [];
         const workspaceToSet = workspacesData.find((ws: Workspace) => ws.id === storedWorkspaceId) || workspacesData[0] || null;
-        
+
         setCurrentWorkspaceState(workspaceToSet);
         if (workspaceToSet) {
           localStorage.setItem('currentWorkspaceId', workspaceToSet.id);

@@ -33,6 +33,10 @@ interface UserSettings {
   embedding_api_key_name: string;
   embedding_api_base: string;
   disabled_skills: string[];
+  // Campos de Heartbeat
+  custom_heartbeat_instructions: string | null;
+  custom_heartbeat_interval_minutes: number;
+  custom_heartbeat_allowed_tools: string[];
   [key: string]: any; // Allow for other settings
 }
 

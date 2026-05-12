@@ -9,7 +9,7 @@ import { SectionTTSButton } from './analysis-detail-dialog';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 import { Source, ContentPart, SourceButton } from '@/components/SourceButton';
 import { SourcesTab } from '@/components/SourcesTab';
-import { processMessageWithCitations, collectSourcesFromMessage } from '@/lib/chatUtils';
+import { processMessageWithCitations, collectSourcesFromMessage, getSourceIdentityKey } from '@/lib/chatUtils';
 
 interface DeepResearchAnalysisProps {
   analysis: DeepResearchAnalysisResult;
@@ -28,9 +28,9 @@ const DeepResearchAnalysis: React.FC<DeepResearchAnalysisProps> = ({
   activeText
 }) => {
   // Hooks must be called at the top level, before any early returns.
-  const { additionalSources: uniqueSources } = useMemo(() => {
+  const { citationSources, additionalSources } = useMemo(() => {
     if (!analysis) {
-      return { additionalSources: [] };
+      return { citationSources: [], additionalSources: [] };
     }
 
     // Las fuentes pueden venir de analysis.sources directamente.
@@ -39,9 +39,11 @@ const DeepResearchAnalysis: React.FC<DeepResearchAnalysisProps> = ({
 
     if (Array.isArray(analysis.sources) && analysis.sources.length > 0) {
       rawSources = analysis.sources;
+    } else if ((analysis as any).full_data && Array.isArray(((analysis as any).full_data).sources)) {
+      rawSources = ((analysis as any).full_data).sources;
     } else {
-      console.log('[DeepResearch] No se encontraron fuentes en analysis.sources:', analysis.sources);
-      return { additionalSources: [] };
+      console.log('[DeepResearch] No se encontraron fuentes en analysis.sources ni en full_data.sources');
+      return { citationSources: [], additionalSources: [] };
     }
 
     // Normalizar: asegurar estructura completa y IDs únicos para evitar colisiones en deduplicación
@@ -52,10 +54,11 @@ const DeepResearchAnalysis: React.FC<DeepResearchAnalysisProps> = ({
       return {
         ...s,
         id: stableId,
-        type: s.type || 'web',
-        snippet: s.snippet || s.content || s.page_content || '',
-        url: s.url || s.metadata?.document_id || '',
+        type: s.type || s.metadata?.type || 'web',
+        snippet: s.snippet || s.content || s.page_content || s.metadata?.snippet || '',
+        url: s.url || s.metadata?.document_id || s.link || '',
         title: s.title || s.name || s.metadata?.title || 'Fuente de investigación',
+        is_cited: s.is_cited !== undefined ? s.is_cited : true // Asumimos que si está en la lista de fuentes es porque se citó o se usó
       };
     });
 
@@ -74,12 +77,18 @@ const DeepResearchAnalysis: React.FC<DeepResearchAnalysisProps> = ({
   const reportContent = useMemo(() => {
     if (!analysis) return '';
     if (analysis.final_report) return analysis.final_report;
+    if (analysis.summary) return analysis.summary;
     return '';
   }, [analysis]);
 
-  const { contentParts } = useMemo(() => {
-    return processMessageWithCitations(reportContent, uniqueSources);
-  }, [reportContent, uniqueSources]);
+  const { contentParts, citedSources, resolvedSources } = useMemo(() => {
+    return processMessageWithCitations(reportContent, citationSources);
+  }, [reportContent, citationSources]);
+
+  const displaySources = resolvedSources.length > 0 ? resolvedSources : additionalSources;
+  const citationNumberBySource = useMemo(() => {
+    return new Map(displaySources.map((source, index) => [getSourceIdentityKey(source), index + 1]));
+  }, [displaySources]);
 
   if (!analysis) {
     return (
@@ -122,9 +131,9 @@ const DeepResearchAnalysis: React.FC<DeepResearchAnalysisProps> = ({
           <TabsTrigger value="sources" className="gap-2.5 rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-primary transition-all duration-300">
             <Link2 className="w-4.5 h-4.5" />
             <span className="font-bold">Fuentes</span>
-            {uniqueSources.length > 0 && (
+            {displaySources.length > 0 && (
               <Badge variant="secondary" className="ml-1 px-1.5 h-5 min-w-5 flex items-center justify-center rounded-full text-[10px] bg-primary/10 text-primary border-none text-xs">
-                {uniqueSources.length}
+                {displaySources.length}
               </Badge>
             )}
           </TabsTrigger>
@@ -153,7 +162,7 @@ const DeepResearchAnalysis: React.FC<DeepResearchAnalysisProps> = ({
                 </div>
 
                 {/* Sección de Fuentes al final del reporte */}
-                {uniqueSources.length > 0 && (
+                {citedSources.length > 0 && (
                   <div className="mt-12 pt-8 border-t border-border/10">
                     <div className="flex items-center gap-2 mb-6">
                       <div className="p-1.5 rounded-lg bg-primary/10">
@@ -162,8 +171,12 @@ const DeepResearchAnalysis: React.FC<DeepResearchAnalysisProps> = ({
                       <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">Referencias de Investigación</span>
                     </div>
                     <div className="flex flex-wrap gap-3">
-                      {uniqueSources.map((source, idx) => (
-                        <SourceButton key={idx} source={source} citationNumber={idx + 1} />
+                      {citedSources.map((source, idx) => (
+                        <SourceButton
+                          key={idx}
+                          source={source}
+                          citationNumber={citationNumberBySource.get(getSourceIdentityKey(source)) || idx + 1}
+                        />
                       ))}
                     </div>
                   </div>
@@ -320,7 +333,7 @@ const DeepResearchAnalysis: React.FC<DeepResearchAnalysisProps> = ({
 
         {/* TAB: FUENTES */}
         <TabsContent value="sources" className="space-y-6 animate-in fade-in-50 duration-500">
-          <SourcesTab sources={uniqueSources} />
+          <SourcesTab sources={displaySources} />
         </TabsContent>
       </Tabs>
     </div>

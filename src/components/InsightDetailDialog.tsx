@@ -2,6 +2,10 @@
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { CheckCircle, XCircle } from 'lucide-react';
+import { toast } from 'sonner';
+import apiClient from '@/lib/api';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface Insight {
@@ -121,6 +125,37 @@ export function InsightDetailDialog({ insight, isOpen, onOpenChange }: { insight
                   </div>
                 </motion.div>
               </motion.div>
+              <div className="flex gap-4 pt-4 border-t border-slate-200 dark:border-slate-700">
+                <Button 
+                  variant="outline" 
+                  className="flex-1 rounded-2xl py-6 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 transition-all gap-2"
+                  onClick={() => onOpenChange(false)}
+                >
+                  <CheckCircle className="h-5 w-5 text-green-500" />
+                  <span>Aceptar Insight</span>
+                </Button>
+                <Button 
+                  variant="outline" 
+                  className="flex-1 rounded-2xl py-6 border-red-100 dark:border-red-900/30 hover:bg-red-50 dark:hover:bg-red-950/30 transition-all gap-2 text-red-600 dark:text-red-400"
+                  onClick={async () => {
+                    try {
+                      await apiClient.delete('/api/delete-proactive-insight', { 
+                        data: { insight_id: insight.id } 
+                      });
+                      toast.success('Insight rechazado y eliminado.');
+                      onOpenChange(false);
+                      // Opcionalmente recargar datos del dashboard si es necesario
+                      window.location.reload(); 
+                    } catch (error) {
+                      toast.error('No se pudo eliminar el insight.');
+                      console.error("Delete insight error:", error);
+                    }
+                  }}
+                >
+                  <XCircle className="h-5 w-5" />
+                  <span>Rechazar</span>
+                </Button>
+              </div>
             </motion.div>
           </DialogContent>
         </Dialog>

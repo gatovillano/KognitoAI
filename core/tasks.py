@@ -1,10 +1,11 @@
 import logging
 import asyncio
+import os
 from typing import List, Dict, Any, Optional
 import uuid
 
 # Importaciones necesarias para las tareas
-from core.database import SessionLocal, UploadTask, DBSession, AnalysisTask
+from core.database import SessionLocal, UploadTask, DBSession, AnalysisTask, Document
 from sqlalchemy import update
 from utils.document_parser import extract_text_and_metadata_from_document
 from core.memory_manager import process_document_for_rag, process_multiple_documents_for_rag, list_user_documents, update_document_metadata
@@ -45,8 +46,14 @@ async def process_upload_task(task_id: str, account_id: str, file_data_list: Lis
             
             extracted_results = await asyncio.gather(*extraction_tasks, return_exceptions=True)
 
+            # Directorio base para documentos físicos
+            DOCUMENTS_ROOT = os.path.join("/app/media", "documents")
+            os.makedirs(DOCUMENTS_ROOT, exist_ok=True)
+
             for i, result in enumerate(extracted_results):
                 file_name_str = file_data_list[i].get('filename', 'unknown_file')
+                file_content = file_data_list[i].get('content')
+
                 if isinstance(result, Exception):
                     logger.error(f"Error al extraer texto del archivo '{file_name_str}': {result}", exc_info=True)
                     await send_personal_message(
@@ -61,15 +68,45 @@ async def process_upload_task(task_id: str, account_id: str, file_data_list: Lis
                     continue
                 
                 extracted_text, metadata = result
+                
+                # --- GUARDADO FÍSICO DEL ARCHIVO (Nuevo) ---
+                # Esto permite que herramientas como 'read_onlyoffice_document' encuentren el archivo físico
+                extension = file_name_str.split('.')[-1].lower() if '.' in file_name_str else ""
+                unique_filename = f"{uuid.uuid4()}.{extension}"
+                user_dir = os.path.join(DOCUMENTS_ROOT, account_id)
+                os.makedirs(user_dir, exist_ok=True)
+                
+                physical_file_path = os.path.join(user_dir, unique_filename)
+                try:
+                    with open(physical_file_path, "wb") as f:
+                        f.write(file_content)
+                    logger.info(f"Archivo físico guardado en: {physical_file_path}")
+                except Exception as save_err:
+                    logger.error(f"Error al guardar archivo físico {file_name_str}: {save_err}")
+                
+                # Registrar en la tabla Document para que sea visible en OnlyOffice y herramientas
+                new_doc = Document(
+                    account_id=uuid.UUID(account_id),
+                    workspace_id=uuid.UUID(workspace_id) if workspace_id else None,
+                    filename=file_name_str,
+                    extension=extension,
+                    file_path=os.path.join(account_id, unique_filename), # Ruta relativa al DOCUMENTS_ROOT
+                )
+                db_session.add(new_doc) # <--- AGREGADO: Necesario para que el flush() funcione
+                await db_session.flush() # Para obtener el ID del documento
+                
+                document_id = str(new_doc.id)
+                # ------------------------------------------
+
                 if not extracted_text:
-                    logger.warning(f"No se pudo extraer texto del archivo '{file_name_str}'. Omitiendo.")
+                    logger.warning(f"No se pudo extraer texto del archivo '{file_name_str}'. Omitiendo RAG.")
                     await send_personal_message(
                         account_id,
                         {
                             "type": "upload_progress",
                             "task_id": task_id,
                             "progress": 5 + int(((i + 1) / total_files) * 90),
-                            "message": f"Archivo {file_name_str} vacío o sin texto extraíble."
+                            "message": f"Archivo {file_name_str} guardado pero sin texto extraíble para RAG."
                         }
                     )
                     continue
@@ -79,7 +116,11 @@ async def process_upload_task(task_id: str, account_id: str, file_data_list: Lis
                     "extracted_text": extracted_text,
                     "topic": topic,
                     "account_id": account_id,
-                    "metadata": {"original_filename": file_name_str, "task_id": task_id}, # Pasar task_id para notificaciones individuales
+                    "metadata": {
+                        "original_filename": file_name_str, 
+                        "task_id": task_id,
+                        "document_id": document_id # Vincular con el documento físico
+                    },
                     "workspace_id": workspace_id
                 })
             
@@ -194,8 +235,8 @@ async def extract_titles_and_update_metadata(account_id: str, topic: Optional[st
                     # Usar el LLM para una extracción inteligente como método principal
                     logger.info(f"Iniciando extracción inteligente con LLM para '{file_name_doc}'...")
                     try:
-                        from core.llm_manager import get_fast_llm, _invoke_llm_cached
-                        llm = get_fast_llm()
+                        from core.llm_manager import get_llm_for_user, _invoke_llm_cached
+                        llm = await get_llm_for_user(account_id, purpose="fast")
                         if llm:
                             # Tomar una muestra significativa del inicio del documento (aprox 3000 caracteres para más contexto)
                             sample_text = full_content[:3000]

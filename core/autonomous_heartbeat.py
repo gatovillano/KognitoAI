@@ -146,7 +146,7 @@ def _is_retryable_heartbeat_llm_error(exc: Exception) -> bool:
         "openrouterexception",
         "provider returned error",
         "error_type': 'unmapped'",
-        'error_type": "unmapped"',
+        '"error_type": "unmapped"',
         "serviceunavailableerror",
         "maximum context length",
         "context_length_exceeded",
@@ -233,7 +233,7 @@ async def _build_kai_heartbeat_personality_preamble(
         if snippet:
             label = f"{title}: " if title else ""
             memory_lines.append(f"- {label}{snippet[:280]}")
-    relevant_memories_text = "\n".join(memory_lines) if memory_lines else "Sin memorias relevantes recientes."
+    relevant_memories_text = "\\n".join(memory_lines) if memory_lines else "Sin memorias relevantes recientes."
 
     custom_prompt = None
     if user_profile is not None:
@@ -566,7 +566,7 @@ async def _run_heartbeat_tool_phase(
         return []
 
     # Construir descripción de herramientas para el planning prompt
-    tools_description = "\n".join([
+    tools_description = "\\n".join([
         f"- **{t.name}**: {(t.description or '').strip()[:200]}"
         for t in selected_tools
     ])
@@ -721,12 +721,13 @@ Objetivo:
 - Priorizar señales humanas y estratégicas por sobre chequeos técnicos.
 - Solo reportar riesgos técnicos cuando tengan impacto claro en decisiones, plazos o valor.
 
-Importante - Reconocimiento de espacios de trabajo (workspaces):
-- Cada nota, análisis, evento, hilo y memoria tiene asociado un workspace_id.
-- SOLO relacionar elementos que pertenezcan al MISMO workspace_id.
-- Si observas información de diferentes workspaces, identificar claramente cuándo NO están relacionados.
-- Cuando la información es de workspaces distintos, menciona explícitamente que pertenece a diferentes contextos.
-- El workspace actual es: {workspace_id or 'no especificado'}.
+Importante - Reconocimiento de contexto de trabajo:
+- El contexto actual puede ser de un workspace específico o global.
+- Si el contexto es de un workspace específico (workspace_id presente), todo lo que analizas pertenece a ese mismo espacio de trabajo.
+- Si el contexto es global (workspace_id no especificado), los elementos pueden estar en diferentes workspaces o ser globales.
+- Relaciona SOLO elementos que pertenezan al MISMO contexto de trabajo.
+- Si notas elementos de diferentes workspaces en un contexto global, menciona explícitamente que pertenecen a contextos distintos.
+- El contexto actual es: workspace_id={workspace_id or 'global'}.
 
 Instrucciones personalizadas:
 {heartbeat_instructions}
@@ -819,5 +820,5 @@ Resultados de herramientas ejecutadas:
 
     return (
         f"Heartbeat autónomo completado para {account_id}: "
-        f"{len(created_insights)} insight(s) nuevos guardados"
+        f"{len(created_insights)} insight(s) nuevos guardado"
     )

@@ -49,16 +49,52 @@ class GraphIntegration:
             graph_db (GraphDB): Instancia configurada de GraphDB para Neo4j.
         """
         self.graph_db = graph_db
-        # Inicializar con LLMs para permitir enriquecimiento de relaciones
-        self.llm = get_main_llm()
-        self.fast_llm = get_fast_llm()
+        # Inicializar con None, se cargarán bajo demanda o en process_documents
+        self.llm = None
+        self.fast_llm = None
         self.hybrid_processor = HybridGraphProcessor(
-            llm=self.llm,
-            fast_llm=self.fast_llm
+            llm=None,
+            fast_llm=None
         )
         self.hybrid_adapter = Neo4jAdapter(graph_db)
         
-        logger.info("✅ GraphIntegration inicializada con Neo4jAdapter y HybridGraphProcessor (LLM enabled)")
+        logger.info("✅ GraphIntegration inicializada con Neo4jAdapter y HybridGraphProcessor")
+
+    async def _ensure_llms(self, account_id: Optional[str] = None):
+        """Asegura que los LLMs estén inicializados, preferiblemente para el usuario."""
+        from core.llm_manager import get_main_llm, get_fast_llm, get_llm_for_user
+        
+        logger.info(f"🔍 Asegurando LLMs para account_id: {account_id}")
+        
+        if account_id:
+            user_llm = await get_llm_for_user(account_id, purpose="main")
+            user_fast_llm = await get_llm_for_user(account_id, purpose="fast")
+            
+            if user_llm:
+                logger.info(f"✅ LLM de usuario obtenido para {account_id}")
+                self.llm = user_llm
+                self.fast_llm = user_fast_llm or user_llm
+            else:
+                logger.warning(f"⚠️ No se pudo obtener LLM de usuario para {account_id}, usando globales.")
+                self.llm = get_main_llm()
+                self.fast_llm = get_fast_llm()
+        else:
+            logger.info("ℹ️ No hay account_id, usando LLMs globales.")
+            self.llm = get_main_llm()
+            self.fast_llm = get_fast_llm()
+            
+        # Log del modelo final seleccionado
+        try:
+            main_model = getattr(self.llm, "model", "unknown") if self.llm else "None"
+            fast_model = getattr(self.fast_llm, "model", "unknown") if self.fast_llm else "None"
+            logger.info(f"🤖 Modelos finales seleccionados: Main={main_model}, Fast={fast_model}")
+        except Exception:
+            pass
+
+        # Actualizar hybrid_processor
+        if self.hybrid_processor:
+            self.hybrid_processor.llm = self.llm
+            self.hybrid_processor.fast_llm = self.fast_llm
 
     async def _create_fulltext_indexes(self):
         """
@@ -73,16 +109,16 @@ class GraphIntegration:
             # Índice para nodos (CONCEPTUAL_QUOTE y IDEA_PROFILE)
             node_index_query = """
             CREATE FULLTEXT INDEX node_fulltext_index IF NOT EXISTS
-            FOR (n:CONCEPTUAL_QUOTE | IDEA_PROFILE | DOCUMENT | PERSON | ORGANIZATION | EVENT | LOCATION | PRODUCT | TOPIC | CHAT_MESSAGE | USER_MEMORY)
+            FOR (n:CONCEPTUAL_QUOTE | IDEA_PROFILE | DOCUMENT | MEMORY | USER_MEMORY | USER_MEMORY_PROACTIVE_LLM | AGENT_MEMORY | CHAT_SUMMARY | GENERAL_MEMORY | PERSON | ORGANIZATION | EVENT | LOCATION | PRODUCT | TOPIC | CHAT_MESSAGE)
             ON EACH [n.name, n.title, n.description, n.concept, n.full_text, n.category, n.summary, n.content]
             """
             await self.graph_db.execute_query(node_index_query)
             logger.info("✅ Índice 'node_fulltext_index' para nodos asegurado.")
 
-            # Índice para relaciones (THEMATIC_RELATIONSHIP y CONTAINS_IDEA)
+            # Índice para relaciones de memorias y documentos
             relationship_index_query = """
             CREATE FULLTEXT INDEX relationship_fulltext_index IF NOT EXISTS
-            FOR ()-[r:THEMATIC_RELATIONSHIP | CONTAINS_IDEA]-()
+            FOR ()-[r:THEMATIC_RELATIONSHIP | CONTAINS_IDEA | MEMORY_RELATED | MEMORY_COMPLEMENTA | MEMORY_REFUERZA | MEMORY_CONTRADICE | MEMORY_CAUSA | MEMORY_CONSECUENCIA | MEMORY_SECUENCIA | MEMORY_CONTEXTO | MEMORY_PREGUNTA_RESPUESTA | MEMORY_MISMO_TEMA | MEMORY_MENTIONS]-()
             ON EACH [r.description, r.full_text]
             """
             await self.graph_db.execute_query(relationship_index_query)
@@ -167,6 +203,9 @@ class GraphIntegration:
             tracker.on_progress = on_progress_callback
         
         logger.info(f"📊 Tracker de progreso creado: {tracker.task_id}")
+        
+        # Asegurar LLMs correctos antes de procesar
+        await self._ensure_llms(account_id)
         
         await self._create_fulltext_indexes()
 
@@ -306,31 +345,14 @@ class GraphIntegration:
                 conceptual_result = await conceptual_processor.process_documents_conceptually(
                     processed_documents, 
                     dataset_name,
+                    account_id=account_id,
                     progress_tracker=tracker
                 )
 
-                # Guardar en Neo4j usando el adaptador
-                if self.hybrid_adapter:
-                    # Convertir formato conceptual a formato compatible con Neo4j
-                    neo4j_data = await self._convert_conceptual_to_neo4j_format(conceptual_result)
-
-                    # Guardar nodos conceptuales
-                    await self.hybrid_adapter.add_cognee_results_to_graph(neo4j_data["entities"], [])
-                    logger.info(f"✅ {len(neo4j_data['entities'])} citas conceptuales guardadas.")
-
-                    # Guardar relaciones temáticas
-                    await self.hybrid_adapter.add_cognee_results_to_graph([], neo4j_data["relationships"])
-                    logger.info(f"✅ {len(neo4j_data['relationships'])} relaciones temáticas guardadas.")
-
-                    # Guardar perfiles de ideas como nodos especiales
-                    if neo4j_data.get("profiles"):
-                        await self.hybrid_adapter.add_cognee_results_to_graph(neo4j_data["profiles"], [])
-                        logger.info(f"✅ {len(neo4j_data['profiles'])} perfiles de ideas guardados.")
-
-                    # Guardar relaciones de perfiles
-                    if neo4j_data.get("profile_relationships"):
-                        await self.hybrid_adapter.add_cognee_results_to_graph([], neo4j_data["profile_relationships"])
-                        logger.info(f"✅ {len(neo4j_data['profile_relationships'])} relaciones de perfiles guardadas.")
+                # NOTA: El guardado del grafo conceptual ahora se maneja directamente
+                # dentro de ConceptualGraphProcessor.process_documents_conceptually()
+                # para asegurar la correcta categorización de etiquetas (evitando Entity genérico).
+                logger.info("✅ Grafo conceptual persistido por ConceptualGraphProcessor.")
 
                 logger.info("🎉 Procesamiento conceptual LLM-driven completado exitosamente.")
                 
@@ -397,16 +419,12 @@ class GraphIntegration:
             logger.info(f"🔍 Buscando documentos con topic: '{topic}' (decodificado: '{decoded_topic}')")
             
             # Construir filtros dinámicamente
-            filters = ["account_id = :account_id", "cmetadata->>'type' = 'document_chunk'"]
+            filters = ["account_id = :account_id", "(cmetadata->>'type' = 'document_chunk' OR cmetadata->>'type' = 'document' OR cmetadata->>'type' IS NULL)"]
 
             if workspace_id:
                 filters.append("workspace_id::text = :workspace_id")
             # Si workspace_id es None, no filtramos por workspace_id para permitir
-            # encontrar documentos tanto globales como de cualquier workspace si es necesario,
-            # pero list_user_documents suele filtrar por IS NULL si se quiere el contexto personal.
-            # Aquí, para consistencia con memory_manager, si no hay workspace_id buscamos IS NULL.
-            else:
-                filters.append("workspace_id IS NULL")
+            # encontrar documentos de cualquier workspace perteneciente a la cuenta (Global Graph)
 
             if decoded_topic:
                 filters.append("topic = :topic")
@@ -481,10 +499,22 @@ class GraphIntegration:
             existing_content = doc.get("content")
             if existing_content and isinstance(existing_content, str) and len(existing_content.strip()) > 0:
                 logger.info(f"✅ Usando contenido existente para: {file_name}")
+                merged_metadata = {
+                    **doc.get("metadata", {}),
+                    "title": doc.get("title") or doc.get("metadata", {}).get("title") or file_name,
+                    "file_name": doc.get("file_name") or doc.get("metadata", {}).get("file_name") or file_name,
+                }
                 processed_documents.append({
-                    "title": file_name,
+                    "id": doc.get("id") or doc.get("document_id") or doc.get("metadata", {}).get("document_id"),
+                    "document_id": doc.get("document_id") or doc.get("id") or doc.get("metadata", {}).get("document_id"),
+                    "title": doc.get("title") or file_name,
+                    "name": doc.get("name") or doc.get("title") or file_name,
                     "content": existing_content.strip(),
-                    "metadata": doc.get("metadata", {})
+                    "source_type": doc.get("source_type") or doc.get("metadata", {}).get("source_type"),
+                    "type": doc.get("type") or doc.get("metadata", {}).get("graph_node_type") or "DOCUMENT",
+                    "topic": doc.get("topic") or doc.get("metadata", {}).get("topic") or topic or "general",
+                    "workspace_id": workspace_id,
+                    "metadata": merged_metadata
                 })
                 continue
 
@@ -498,10 +528,22 @@ class GraphIntegration:
                 )
 
                 if full_content and len(full_content.strip()) > 0:
+                    merged_metadata = {
+                        **doc.get("metadata", {}),
+                        "title": doc.get("title") or doc.get("metadata", {}).get("title") or file_name,
+                        "file_name": doc.get("file_name") or doc.get("metadata", {}).get("file_name") or file_name,
+                    }
                     processed_documents.append({
-                        "title": file_name,
+                        "id": doc.get("id") or doc.get("document_id") or doc.get("metadata", {}).get("document_id"),
+                        "document_id": doc.get("document_id") or doc.get("id") or doc.get("metadata", {}).get("document_id"),
+                        "title": doc.get("title") or file_name,
+                        "name": doc.get("name") or doc.get("title") or file_name,
                         "content": full_content.strip(),
-                        "metadata": doc.get("metadata", {})
+                        "source_type": doc.get("source_type") or doc.get("metadata", {}).get("source_type"),
+                        "type": doc.get("type") or doc.get("metadata", {}).get("graph_node_type") or "DOCUMENT",
+                        "topic": doc.get("topic") or doc.get("metadata", {}).get("topic") or topic or "general",
+                        "workspace_id": workspace_id,
+                        "metadata": merged_metadata
                     })
                     logger.info(f"✅ Contenido reconstruido para {file_name}: {len(full_content)} caracteres")
                 else:
@@ -545,7 +587,7 @@ class GraphIntegration:
                     params["target_concept"] = target_concept
 
                 if account_id:
-                    where_clauses.append("all(n IN nodes(path) WHERE n.account_id = $account_id OR n.account_id IS NULL)")
+                    where_clauses.append("all(n IN nodes(path) WHERE n.account_id = $account_id)")
                     params["account_id"] = account_id
                 
                 if workspace_id:
@@ -1263,10 +1305,13 @@ class GraphIntegration:
         dataset_name: str,
         focus_query: Optional[str] = None,
         max_nodes: int = 50,
-        max_hops: int = 1
+        max_hops: int = 1,
+        account_id: Optional[str] = None,
+        workspace_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """Obtiene datos para visualización del grafo."""
-        fast_llm = get_fast_llm()
+        await self._ensure_llms(account_id)
+        fast_llm = self.fast_llm
         nodes_data = []
         edges_data = []
         summary = ""
@@ -1308,15 +1353,25 @@ class GraphIntegration:
                 cypher_query = self._post_process_cypher_query(cypher_query, dataset_name)
             else:
                 logger.info(f"🔍 Usando Cypher por defecto para visualización en dataset: {dataset_name}")
+                
+                # Construir filtros de usuario/workspace
+                user_filter = "(n.account_id = $account_id OR n.account_id IS NULL)"
+                params["account_id"] = account_id
+                
+                if workspace_id and workspace_id != "global_context":
+                    user_filter += " AND n.workspace_id = $workspace_id"
+                    params["workspace_id"] = workspace_id
+                elif workspace_id == "global_context":
+                    user_filter += " AND (n.workspace_id IS NULL OR n.workspace_id = '')"
+                
                 cypher_query = f"""
                 MATCH (n)
-                WHERE n.dataset_name = $dataset_name
+                WHERE n.dataset_name = $dataset_name AND {user_filter}
                 OPTIONAL MATCH (n)-[r]-(m)
-                WHERE m.dataset_name = $dataset_name
+                WHERE m.dataset_name = $dataset_name AND (m.account_id = $account_id OR m.account_id IS NULL)
                 RETURN DISTINCT n, r, m, n.concept AS concept, n.category AS category
                 LIMIT {max_nodes}
                 """
-                params = {"dataset_name": dataset_name}
             
             raw_results = await self.graph_db.execute_query(cypher_query, parameters=params)
 

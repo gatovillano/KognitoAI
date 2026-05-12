@@ -91,6 +91,22 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
 
       console.log(`Node ID: ${node.id}, Type: ${nodeType}, Label: ${fullLabel}, Assigned Color: ${nodeColor}`);
 
+      let x: number | undefined;
+      let y: number | undefined;
+      // Recuperar posiciones guardadas si existen
+      try {
+        const savedPositionsStr = localStorage.getItem('kognito_graph_positions');
+        if (savedPositionsStr) {
+          const savedPositions = JSON.parse(savedPositionsStr);
+          if (savedPositions[node.id]) {
+            x = savedPositions[node.id].x;
+            y = savedPositions[node.id].y;
+          }
+        }
+      } catch (e) {
+        console.warn("No se pudieron cargar las posiciones del grafo desde localStorage", e);
+      }
+
       return {
         id: node.id,
         label: truncatedLabel,
@@ -109,7 +125,9 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
           color: '#000000',
           size: truncatedLabel.length > 20 ? 12 : 14,
           bold: isSaved
-        }
+        },
+        x: x,
+        y: y
       };
     });
   }, [savedNodeIds]);
@@ -187,25 +205,25 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
         },
         physics: {
           enabled: true,
-          barnesHut: {
-            gravitationalConstant: -2000,
-            centralGravity: 0.3,
-            springLength: 95,
-            springConstant: 0.04,
-            damping: 0.09,
-            avoidOverlap: 0.1
+          solver: 'forceAtlas2Based',
+          forceAtlas2Based: {
+            gravitationalConstant: -100,
+            centralGravity: 0.01,
+            springConstant: 0.08,
+            springLength: 100,
+            damping: 0.4,
+            avoidOverlap: 0.5
           },
           stabilization: {
             enabled: true,
-            iterations: 1000,
-            updateInterval: 100,
-            onlyDynamicEdges: false,
+            iterations: 150, // Pequeño número de iteraciones para que calcule la forma rápidamente antes de pintar
+            updateInterval: 150, // Previene emitir eventos intermedios, calculando en bloque (muy rápido)
             fit: true
           }
         },
         layout: {
           randomSeed: 2,
-          improvedLayout: true
+          improvedLayout: false // Desactivación para acelerar el inicio en grafos gigantes
         },
         interaction: { navigationButtons: true, keyboard: true, hover: true }
       };
@@ -256,10 +274,29 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
         }
       });
 
-      // Disable physics after stabilization to keep graph static (redundant when physics disabled,
-      // but kept for backward compatibility if physics is ever re-enabled)
+      // Guardar posiciones al terminar de arrastrar un nodo
+      networkRef.current.on("dragEnd", (params) => {
+        if (params.nodes && params.nodes.length > 0 && networkRef.current) {
+          const positions = networkRef.current.getPositions(params.nodes);
+          try {
+            const savedStr = localStorage.getItem('kognito_graph_positions');
+            const saved = savedStr ? JSON.parse(savedStr) : {};
+            
+            Object.keys(positions).forEach(id => {
+              saved[id] = positions[id];
+            });
+            
+            localStorage.setItem('kognito_graph_positions', JSON.stringify(saved));
+          } catch (e) {
+            console.warn("No se pudo guardar la posición en localStorage", e);
+          }
+        }
+      });
+
+      // Detener física después del cálculo estático bloqueante
       networkRef.current.on("stabilizationIterationsDone", () => {
         networkRef.current?.setOptions({ physics: { enabled: false } });
+        networkRef.current?.fit();
       });
     }
 
@@ -298,8 +335,11 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
       if (nodesToUpdate.length > 0) nodesDatasetRef.current.update(nodesToUpdate);
       if (edgesToUpdate.length > 0) edgesDatasetRef.current.update(edgesToUpdate);
 
-      // Re-habilitar la física al actualizar datos para permitir el re-layout
-      networkRef.current?.setOptions({ physics: { enabled: true } });
+      // Re-habilitar la física al actualizar datos para permitir el re-layout si hay nuevos nodos
+      if (nodesToAdd.length > 0) {
+        networkRef.current?.setOptions({ physics: { enabled: true } });
+        networkRef.current?.stabilize(150); // Fuerza la estabilización bloqueante de manera invisible
+      }
 
       // Para cambios significativos (como filtros), reorganización ultra-rápida
       // Eliminado: networkRef.current.fit(); // Ajustar la vista para que todos los nodos sean visibles

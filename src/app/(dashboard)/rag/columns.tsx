@@ -20,6 +20,7 @@ export type Document = {
   progress?: number;
   error?: string;
   document_type?: 'placeholder';
+  document_id?: string; // ID del documento físico si está disponible
 };
 
 // La función ahora recibe los handlers para cada acción

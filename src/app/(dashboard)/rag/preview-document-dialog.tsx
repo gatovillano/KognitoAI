@@ -1,9 +1,12 @@
 // En: src/app/(dashboard)/rag/preview-document-dialog.tsx
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
+import { Children, Fragment, cloneElement, isValidElement, type ComponentPropsWithoutRef, type MutableRefObject, type ReactNode, useEffect, useMemo, useState, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import ReactMarkdown from 'react-markdown';
+import type { Components } from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import apiClient from '@/lib/api';
 import type { Document } from './columns'; // Importamos el tipo
 
@@ -13,29 +16,258 @@ interface PreviewDocumentDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
+type HighlightCounter = { current: number };
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function normalizePhysicalDocumentId(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalizedValue = value.trim();
+
+  if (!normalizedValue) {
+    return null;
+  }
+
+  if (['none', 'null', 'undefined'].includes(normalizedValue.toLowerCase())) {
+    return null;
+  }
+
+  return UUID_PATTERN.test(normalizedValue) ? normalizedValue : null;
+}
+
+function highlightTextNodes(
+  node: ReactNode,
+  targetText: string | undefined,
+  highlightRef: MutableRefObject<HTMLElement | null>,
+  counter: HighlightCounter
+): ReactNode {
+  if (!targetText) {
+    return node;
+  }
+
+  if (typeof node === 'string') {
+    const parts = node.split(targetText);
+
+    if (parts.length === 1) {
+      return node;
+    }
+
+    return parts.flatMap((part, index) => {
+      if (index === parts.length - 1) {
+        return part;
+      }
+
+      counter.current += 1;
+      const shouldAttachRef = counter.current === 1;
+
+      return [
+        part,
+        <mark
+          key={`highlight-${counter.current}-${index}`}
+          ref={shouldAttachRef ? highlightRef : undefined}
+          className="rounded border border-yellow-400/50 bg-yellow-200 px-1 text-foreground dark:bg-yellow-900/50"
+        >
+          {targetText}
+        </mark>,
+      ];
+    });
+  }
+
+  if (Array.isArray(node)) {
+    return node.map((child, index) => (
+      <Fragment key={`highlight-fragment-${index}`}>
+        {highlightTextNodes(child, targetText, highlightRef, counter)}
+      </Fragment>
+    ));
+  }
+
+  if (isValidElement(node)) {
+    const childProps = node.props as { children?: ReactNode };
+
+    if (!childProps.children) {
+      return node;
+    }
+
+    return cloneElement(node, {
+      ...childProps,
+      children: Children.map(childProps.children, child => highlightTextNodes(child, targetText, highlightRef, counter)),
+    });
+  }
+
+  return node;
+}
+
+function createHighlightedTag<Tag extends keyof JSX.IntrinsicElements>(
+  tagName: Tag,
+  targetText: string | undefined,
+  highlightRef: MutableRefObject<HTMLElement | null>,
+  counter: HighlightCounter
+) {
+  return function HighlightedTag({ children, ...props }: ComponentPropsWithoutRef<Tag>) {
+    const TagName = tagName;
+
+    return (
+      <TagName {...props}>
+        {highlightTextNodes(children, targetText, highlightRef, counter)}
+      </TagName>
+    );
+  };
+}
+
+function normalizeDocumentContent(value: unknown): string {
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (value == null) {
+    return '';
+  }
+
+  if (Array.isArray(value)) {
+    return value
+      .map(item => normalizeDocumentContent(item))
+      .filter(Boolean)
+      .join('\n\n');
+  }
+
+  if (typeof value === 'object') {
+    const contentValue = (value as { content?: unknown }).content;
+    const textValue = (value as { text?: unknown }).text;
+
+    if (typeof contentValue === 'string') {
+      return contentValue;
+    }
+
+    if (typeof textValue === 'string') {
+      return textValue;
+    }
+
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch {
+      return String(value);
+    }
+  }
+
+  return String(value);
+}
+
 export function PreviewDocumentDialog({ document, isOpen, onOpenChange, highlightText }: PreviewDocumentDialogProps & { highlightText?: string }) {
   const [content, setContent] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
   const highlightRef = useRef<HTMLElement>(null);
 
+  const markdownComponents = useMemo<Components>(() => {
+    const counter = { current: 0 };
+
+    return {
+      p: createHighlightedTag('p', highlightText, highlightRef, counter),
+      h1: createHighlightedTag('h1', highlightText, highlightRef, counter),
+      h2: createHighlightedTag('h2', highlightText, highlightRef, counter),
+      h3: createHighlightedTag('h3', highlightText, highlightRef, counter),
+      h4: createHighlightedTag('h4', highlightText, highlightRef, counter),
+      h5: createHighlightedTag('h5', highlightText, highlightRef, counter),
+      h6: createHighlightedTag('h6', highlightText, highlightRef, counter),
+      ul: createHighlightedTag('ul', highlightText, highlightRef, counter),
+      ol: createHighlightedTag('ol', highlightText, highlightRef, counter),
+      li: createHighlightedTag('li', highlightText, highlightRef, counter),
+      blockquote: createHighlightedTag('blockquote', highlightText, highlightRef, counter),
+      a: createHighlightedTag('a', highlightText, highlightRef, counter),
+      strong: createHighlightedTag('strong', highlightText, highlightRef, counter),
+      em: createHighlightedTag('em', highlightText, highlightRef, counter),
+      del: createHighlightedTag('del', highlightText, highlightRef, counter),
+      code: createHighlightedTag('code', highlightText, highlightRef, counter),
+      pre: createHighlightedTag('pre', highlightText, highlightRef, counter),
+      table: createHighlightedTag('table', highlightText, highlightRef, counter),
+      thead: createHighlightedTag('thead', highlightText, highlightRef, counter),
+      tbody: createHighlightedTag('tbody', highlightText, highlightRef, counter),
+      tr: createHighlightedTag('tr', highlightText, highlightRef, counter),
+      th: createHighlightedTag('th', highlightText, highlightRef, counter),
+      td: createHighlightedTag('td', highlightText, highlightRef, counter),
+    };
+  }, [highlightText]);
+
+  const renderedContent = useMemo(() => {
+    if (!content) {
+      return null;
+    }
+
+    return (
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+        {content}
+      </ReactMarkdown>
+    );
+  }, [content, markdownComponents]);
+
+  const isPdf = document?.file_name?.toLowerCase().endsWith('.pdf');
+  const physicalDocumentId = normalizePhysicalDocumentId(document?.document_id);
+  const hasPhysicalFile = Boolean(physicalDocumentId);
+  const showNativePdfViewer = isPdf && hasPhysicalFile;
+
   useEffect(() => {
-    if (isOpen && document) {
-      const fetchContent = async () => {
-        setIsLoading(true);
-        setContent('');
-        try {
-          const response = await apiClient.get(`/api/documents/get-document-content?file_name=${encodeURIComponent(document.file_name)}`);
-          setContent(response.data.content);
-        } catch (error) {
-          setContent('No se pudo cargar el contenido de este documento.');
+    if (!isOpen || !document) {
+      setContent('');
+      setPdfPreviewUrl(null);
+      setIsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    let objectUrlToRevoke: string | null = null;
+
+    const fetchPreview = async () => {
+      setIsLoading(true);
+      setContent('');
+      setPdfPreviewUrl(null);
+
+      try {
+        if (showNativePdfViewer && physicalDocumentId) {
+          const response = await apiClient.get(`/api/onlyoffice/download/${physicalDocumentId}?inline=true`, {
+            responseType: 'blob',
+          });
+
+          if (cancelled) {
+            return;
+          }
+
+          objectUrlToRevoke = URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
+          setPdfPreviewUrl(objectUrlToRevoke);
+          return;
+        }
+
+        const response = await apiClient.get(`/api/documents/get-document-content?file_name=${encodeURIComponent(document.file_name)}`);
+        if (!cancelled) {
+          setContent(normalizeDocumentContent(response.data?.content));
+        }
+      } catch (error) {
+        if (!cancelled) {
+          if (showNativePdfViewer) {
+            setContent('No se pudo cargar la previsualización del PDF.');
+          } else {
+            setContent('No se pudo cargar el contenido de este documento.');
+          }
           console.error(error);
-        } finally {
+        }
+      } finally {
+        if (!cancelled) {
           setIsLoading(false);
         }
-      };
-      fetchContent();
-    }
-  }, [isOpen, document]);
+      }
+    };
+
+    fetchPreview();
+
+    return () => {
+      cancelled = true;
+      if (objectUrlToRevoke) {
+        URL.revokeObjectURL(objectUrlToRevoke);
+      }
+    };
+  }, [isOpen, document, showNativePdfViewer, physicalDocumentId]);
 
   // Efecto para hacer scroll al texto resaltado una vez que el contenido se ha cargado y renderizado
   useEffect(() => {
@@ -47,38 +279,6 @@ export function PreviewDocumentDialog({ document, isOpen, onOpenChange, highligh
     }
   }, [isLoading, content, highlightText]);
 
-  const renderContent = () => {
-    if (!content) return null;
-    if (!highlightText) return content;
-
-    // Normalizamos para buscar ignorando espacios extra si es necesario, 
-    // pero por ahora probamos búsqueda directa para mantener el formato.
-    const index = content.indexOf(highlightText);
-
-    if (index === -1) {
-      // Intento de búsqueda más flexible si la exacta falla (por diferencias de saltos de línea, etc)
-      // Esto es básico, se podría mejorar con lógica difusa si fuera necesario.
-      return content;
-    }
-
-    const before = content.substring(0, index);
-    const match = content.substring(index, index + highlightText.length);
-    const after = content.substring(index + highlightText.length);
-
-    return (
-      <>
-        {before}
-        <mark
-          ref={highlightRef}
-          className="bg-yellow-200 dark:bg-yellow-900/50 text-foreground px-1 rounded border border-yellow-400/50 animate-pulse"
-        >
-          {match}
-        </mark>
-        {after}
-      </>
-    );
-  };
-
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl w-full h-[90vh] sm:h-[80vh] flex flex-col p-4 sm:p-6">
@@ -88,17 +288,39 @@ export function PreviewDocumentDialog({ document, isOpen, onOpenChange, highligh
           </DialogTitle>
         </DialogHeader>
         <div className="flex-grow overflow-hidden">
-          <ScrollArea className="h-full pr-4">
-            {isLoading ? (
+          {showNativePdfViewer ? (
+            isLoading ? (
               <div className="flex items-center justify-center h-full">
-                <p className="text-muted-foreground">Cargando contenido...</p>
+                <p className="text-muted-foreground">Cargando PDF...</p>
+              </div>
+            ) : pdfPreviewUrl ? (
+              <div className="h-full w-full">
+                <iframe
+                  src={pdfPreviewUrl}
+                  className="w-full h-full border-0 rounded-md"
+                  title={`PDF Viewer - ${document.title || document.file_name}`}
+                />
               </div>
             ) : (
-              <pre className="text-sm whitespace-pre-wrap font-sans p-2">
-                {renderContent()}
-              </pre>
-            )}
-          </ScrollArea>
+              <ScrollArea className="h-full pr-4">
+                <div className="prose prose-sm max-w-none whitespace-pre-wrap break-words p-2 dark:prose-invert">
+                  {content || 'No se pudo cargar la previsualización del PDF.'}
+                </div>
+              </ScrollArea>
+            )
+          ) : (
+            <ScrollArea className="h-full pr-4">
+              {isLoading ? (
+                <div className="flex items-center justify-center h-full">
+                  <p className="text-muted-foreground">Cargando contenido...</p>
+                </div>
+              ) : (
+                <div className="prose prose-sm max-w-none whitespace-pre-wrap break-words p-2 dark:prose-invert">
+                  {renderedContent}
+                </div>
+              )}
+            </ScrollArea>
+          )}
         </div>
       </DialogContent>
     </Dialog>

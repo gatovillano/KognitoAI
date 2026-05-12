@@ -104,14 +104,16 @@ class MemoryAddTool(BaseTool):
 
         try:
             final_type = type if type else "user_memory"
+            final_category = category.strip() if category and category.strip() else None
             await add_memory_to_vector_db(
                 account_id=self.account_id,
                 content=content,
                 type=final_type,
                 workspace_id=self.workspace_id,
+                topic=final_category,
+                category=final_category,
                 telegram_id=self.telegram_id,
                 thread_id=self.thread_id,
-                # topic=category if category else "general" # Se elimina el topic para memorias
             )
             logger.info(f"Memoria añadida exitosamente para la cuenta '{self.account_id}'.")
             

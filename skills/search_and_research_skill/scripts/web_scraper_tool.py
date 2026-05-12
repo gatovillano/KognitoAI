@@ -89,18 +89,31 @@ class WebScraperTool(BaseTool):
                 from langchain_community.document_loaders import PyPDFLoader
                 loader = PyPDFLoader(url)
             else:
-                loader = WebBaseLoader(url)
+                # Usar cabeceras para simular un navegador real y evitar bloqueos
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+                }
+                loader = WebBaseLoader(url, header_template=headers)
 
             loop = asyncio.get_event_loop()
             
             # Ejecuta la función bloqueante en el pool de hilos por defecto con un timeout.
-            docs: List[Document] = await asyncio.wait_for(
-                loop.run_in_executor(
-                    None,  # None usa el ThreadPoolExecutor por defecto.
-                    loader.load
-                ),
-                timeout=25.0  # Aumentado ligeramente para PDFs pesados
-            )
+            try:
+                docs: List[Document] = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        None, 
+                        loader.load
+                    ),
+                    timeout=25.0
+                )
+            except Exception as e:
+                logger.warning(f"Primer intento de carga fallido para {url}: {e}. Intentando carga simple sin headers...")
+                # Intento de respaldo sin headers
+                loader_fallback = WebBaseLoader(url)
+                docs = await asyncio.wait_for(
+                    loop.run_in_executor(None, loader_fallback.load),
+                    timeout=25.0
+                )
 
             if not docs:
                 logger.warning(f"WebBaseLoader no devolvió documentos para la URL: {url}")

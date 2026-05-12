@@ -124,7 +124,14 @@ async def get_user_settings(current_account_id: str = Depends(get_current_accoun
         embedding_model=account.embedding_model, # Añadido campo embedding_model
         embedding_api_key_name=account.embedding_api_key_name, # Añadido campo embedding_api_key_name
         embedding_api_base=account.embedding_api_base,
-        disabled_skills=account.disabled_skills
+        disabled_skills=account.disabled_skills,
+        ssh_host=account.ssh_host,
+        ssh_port=account.ssh_port,
+        ssh_user=account.ssh_user,
+        local_base_path=account.local_base_path,
+        custom_heartbeat_instructions=account.custom_heartbeat_instructions,
+        custom_heartbeat_interval_minutes=account.custom_heartbeat_interval_minutes,
+        custom_heartbeat_allowed_tools=account.custom_heartbeat_allowed_tools
     )
 
 @router.put("/users/me/settings", response_model=UserSettingsResponse, summary="Actualizar configuración del usuario actual")
@@ -148,6 +155,20 @@ async def update_user_settings(
     
     await db.commit()
     await db.refresh(account)
+
+    # Si se actualizaron campos de heartbeat, reprogramar el job
+    heartbeat_fields = ['custom_heartbeat_instructions', 'custom_heartbeat_interval_minutes', 'custom_heartbeat_allowed_tools']
+    if any(field in settings_update.dict(exclude_unset=True) for field in heartbeat_fields):
+        try:
+            from utils.scheduled_tools_manager import schedule_custom_user_heartbeat
+            await schedule_custom_user_heartbeat(
+                account_id=str(account.id),
+                interval_minutes=account.custom_heartbeat_interval_minutes or 60,
+                allowed_tools=account.custom_heartbeat_allowed_tools
+            )
+            logger.info(f"Heartbeat personalizado reprogramado para la cuenta {current_account_id} tras actualización de configuración.")
+        except Exception as e:
+            logger.error(f"Error al reprogramar heartbeat tras actualización de configuración: {e}")
 
     return UserSettingsResponse(
         name=account.name,
@@ -181,7 +202,14 @@ async def update_user_settings(
         embedding_model=account.embedding_model, # Añadido campo embedding_model
         embedding_api_key_name=account.embedding_api_key_name, # Añadido campo embedding_api_key_name
         embedding_api_base=account.embedding_api_base,
-        disabled_skills=account.disabled_skills
+        disabled_skills=account.disabled_skills,
+        ssh_host=account.ssh_host,
+        ssh_port=account.ssh_port,
+        ssh_user=account.ssh_user,
+        local_base_path=account.local_base_path,
+        custom_heartbeat_instructions=account.custom_heartbeat_instructions,
+        custom_heartbeat_interval_minutes=account.custom_heartbeat_interval_minutes,
+        custom_heartbeat_allowed_tools=account.custom_heartbeat_allowed_tools
     )
 
 @router.put("/users/me/password", summary="Actualizar contraseña del usuario")
@@ -252,6 +280,7 @@ async def set_user_secret(
     """
     Guarda o actualiza un secreto (API Key) cifrado para el usuario.
     """
+    logger.info(f"Guardando secreto '{secret_req.key_name}' para la cuenta {current_account_id}")
     repo = SecretRepository(db)
     secret_obj = await repo.set_secret(
         account_id=uuid.UUID(current_account_id),
@@ -426,3 +455,44 @@ async def search_user(identifier: str = Query(...), current_account_id: str = De
         pass  # No es un ID numérico, ignorar esta búsqueda
     
     raise HTTPException(status_code=404, detail="Usuario no encontrado con el identificador proporcionado.")
+
+
+@router.get("/users/autocomplete", summary="Autocompletar usuarios por nombre, email o username")
+async def autocomplete_users(
+    q: str = Query(..., min_length=1),
+    limit: int = Query(8, ge=1, le=20),
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Devuelve sugerencias de cuentas para flujos de invitacion/comparticion."""
+    query = q.strip()
+    if not query:
+        return []
+
+    account_uuid = uuid.UUID(current_account_id)
+    like_value = f"%{query}%"
+
+    stmt = (
+        select(Account)
+        .where(
+            Account.id != account_uuid,
+            (
+                Account.email.ilike(like_value)
+                | Account.username.ilike(like_value)
+                | Account.name.ilike(like_value)
+            ),
+        )
+        .order_by(Account.name.asc().nullslast(), Account.email.asc().nullslast())
+        .limit(limit)
+    )
+    rows = (await db.execute(stmt)).scalars().all()
+
+    return [
+        {
+            "account_id": str(acc.id),
+            "name": acc.name,
+            "username": acc.username,
+            "email": acc.email,
+        }
+        for acc in rows
+    ]

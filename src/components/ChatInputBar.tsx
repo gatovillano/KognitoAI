@@ -5,10 +5,10 @@ import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
-import { Send, ArrowUp, X, Paperclip, Upload, Loader2, Mic, NotebookText, Image as ImageIcon, Square } from 'lucide-react';
-import { ContextSelectorButton } from '@/components/ContextSelectorButton';
+import { ArrowUp, X, Paperclip, Loader2, Mic, Square, BookMarked } from 'lucide-react';
 import { MoreActionsMenu } from './MoreActionsMenu';
-import NoteSelectorDialog from './NoteSelectorDialog';
+import ContextSelectorDialog from './ContextSelectorDialog';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface AutocompleteState {
   isVisible: boolean;
@@ -24,6 +24,8 @@ interface SelectedContextItem {
   type: 'document' | 'collection';
   name: string;
   title?: string;
+  topic?: string;
+  file_name?: string;
 }
 
 interface ChatMessage {
@@ -70,6 +72,7 @@ interface ChatInputBarProps {
   onOpenSearch?: () => void;
   children?: React.ReactNode;
   workspaceId?: string;
+  onContextSelected?: (items: SelectedContextItem[]) => void;
   inputPlaceholder?: string;
   activeRepositoryContext?: { type: 'github' | 'local', path: string, url?: string } | null;
   onClearRepositoryContext?: () => void;
@@ -111,10 +114,15 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
   workspaceId,
   inputPlaceholder,
   activeRepositoryContext,
-  onClearRepositoryContext = () => {}
+  onClearRepositoryContext = () => {},
+  onContextSelected = () => {},
 }) => {
+  const { token } = useAuth();
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
-  const [isNoteSelectorOpen, setIsNoteSelectorOpen] = useState(false);
+  const autocompleteAbortRef = useRef<AbortController | null>(null);
+  const autocompleteTimerRef = useRef<number | null>(null);
+  const repoTreeCacheRef = useRef<Map<string, string[]>>(new Map());
+  const [isContextSelectorOpen, setIsContextSelectorOpen] = useState(false);
   const [isKnowledgeAnalysisForcedState, setIsKnowledgeAnalysisForcedState] = useState(false);
   const [isWebSearchForcedState, setIsWebSearchForcedState] = useState(false);
   const [isComprehensiveAnalysisForcedState, setIsComprehensiveAnalysisForcedState] = useState(false);
@@ -145,35 +153,93 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
     setIsDeepResearchForcedState(prev => !prev);
   }, []);
 
-  const updateAutocompleteOptions = async (trigger: '#' | '@', query: string) => {
+  const updateAutocompleteOptions = useCallback(async (trigger: '#' | '@', query: string) => {
+    autocompleteAbortRef.current?.abort();
+    const controller = new AbortController();
+    autocompleteAbortRef.current = controller;
+
     try {
+      if (!token) {
+        console.warn('Autocomplete: No auth token available in context');
+        return;
+      }
+      
       if (trigger === '#') {
         const repoUrl = activeRepositoryContext?.type === 'github' ? activeRepositoryContext.url || activeRepositoryContext.path : null;
-        if (!repoUrl) return;
+        if (!repoUrl) {
+          setAutocomplete(prev => ({ ...prev, options: [], activeIndex: 0 }));
+          return;
+        }
 
-        const token = localStorage.getItem('token');
-        const res = await fetch(`/api/github/tree_flat?repo_url=${encodeURIComponent(repoUrl)}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const data = await res.json();
-        const fullOptions: string[] = data.options || [];
-        const filtered = fullOptions.filter(o => o.toLowerCase().includes(query.toLowerCase())).slice(0, 50); // limit 50
-        
+        const cachedOptions = repoTreeCacheRef.current.get(repoUrl);
+        let fullOptions: string[] = cachedOptions ?? [];
+        if (!cachedOptions) {
+          const res = await fetch(`/api/github/tree_flat?repo_url=${encodeURIComponent(repoUrl)}`, {
+            headers: { 'Authorization': `Bearer ${token}` },
+            signal: controller.signal,
+          });
+          const data = await res.json();
+          fullOptions = Array.isArray(data.options) ? data.options : [];
+          repoTreeCacheRef.current.set(repoUrl, fullOptions);
+        }
+
+        const filtered = fullOptions
+          .filter(o => o.toLowerCase().includes(query.toLowerCase()))
+          .slice(0, 50);
+
         setAutocomplete(prev => ({
           ...prev,
           options: filtered,
           activeIndex: 0,
         }));
-      } else {
-        // TBD Local SSH options
-        const mockLocal = [".env", "config.py", "/home/gato/Proyectos", "/var/www/html"];
-        const filtered = mockLocal.filter(o => o.toLowerCase().includes(query.toLowerCase()));
-        setAutocomplete(prev => ({ ...prev, options: filtered, activeIndex: 0 }));
+        return;
       }
-    } catch (err) {
-      console.error("Autocomplete fetch error", err);
+
+      // Local SSH options from new API
+      const res = await fetch(`/api/files/tree_flat?query=${encodeURIComponent(query)}`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+        signal: controller.signal,
+      });
+      const data = await res.json();
+      const options = Array.isArray(data.options) ? data.options : [];
+      
+      setAutocomplete(prev => ({ 
+        ...prev, 
+        options, 
+        activeIndex: 0 
+      }));
+    } catch (err: any) {
+      if (err?.name !== 'AbortError') {
+        console.error('Autocomplete fetch error', err);
+      }
     }
-  };
+  }, [activeRepositoryContext]);
+
+  const scheduleAutocompleteUpdate = useCallback((trigger: '#' | '@', query: string) => {
+    if (autocompleteTimerRef.current) {
+      window.clearTimeout(autocompleteTimerRef.current);
+    }
+
+    autocompleteTimerRef.current = window.setTimeout(() => {
+      void updateAutocompleteOptions(trigger, query);
+    }, 150);
+  }, [updateAutocompleteOptions]);
+
+  const adjustTextareaHeight = useCallback(() => {
+    const textArea = textAreaRef.current;
+    if (!textArea) return;
+
+    textArea.style.height = 'auto';
+    const newHeight = textArea.scrollHeight;
+    const maxHeight = 60;
+    if (newHeight > maxHeight) {
+      textArea.style.height = `${maxHeight}px`;
+      textArea.style.overflowY = 'auto';
+    } else {
+      textArea.style.height = `${newHeight}px`;
+      textArea.style.overflowY = 'hidden';
+    }
+  }, []);
 
   const handleMessageChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
@@ -195,11 +261,15 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
         query,
         wordStartIndex,
       }));
-      updateAutocompleteOptions(trigger, query);
+      scheduleAutocompleteUpdate(trigger, query);
     } else {
+      autocompleteAbortRef.current?.abort();
+      if (autocompleteTimerRef.current) {
+        window.clearTimeout(autocompleteTimerRef.current);
+      }
       setAutocomplete(prev => ({ ...prev, isVisible: false }));
     }
-  }, [setNewMessage]);
+  }, [setNewMessage, scheduleAutocompleteUpdate]);
 
   const handleSubmit = useCallback((e: React.FormEvent) => {
     e.preventDefault();
@@ -233,8 +303,12 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
   const handleAttachNote = useCallback((note: { title?: string; content: string }) => {
     const noteText = note.title ? `Nota: ${note.title}\n${note.content}` : `Nota: ${note.content}`;
     setNewMessage(newMessage + '\n' + noteText);
-    setIsNoteSelectorOpen(false);
+    setIsContextSelectorOpen(false);
   }, [setNewMessage, newMessage]);
+
+  const openContextDialog = useCallback(() => {
+    setIsContextSelectorOpen(true);
+  }, []);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (autocomplete.isVisible && autocomplete.options.length > 0) {
@@ -288,28 +362,18 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
     onRemoveContextItem(item);
   }, [onRemoveContextItem]);
 
-  // Ajuste de altura del textarea - optimizado
   useEffect(() => {
-    const textArea = textAreaRef.current;
-    if (!textArea) return;
+    adjustTextareaHeight();
+  }, [newMessage, adjustTextareaHeight]);
 
-    const adjustHeight = () => {
-      textArea.style.height = 'auto';
-      const newHeight = textArea.scrollHeight;
-      const maxHeight = 60;
-      if (newHeight > maxHeight) {
-        textArea.style.height = `${maxHeight}px`;
-        textArea.style.overflowY = 'auto';
-      } else {
-        textArea.style.height = `${newHeight}px`;
-        textArea.style.overflowY = 'hidden';
+  useEffect(() => {
+    return () => {
+      autocompleteAbortRef.current?.abort();
+      if (autocompleteTimerRef.current) {
+        window.clearTimeout(autocompleteTimerRef.current);
       }
     };
-
-    adjustHeight(); // Ajustar al montar y cuando cambia el mensaje
-    textArea.addEventListener('input', adjustHeight);
-    return () => textArea.removeEventListener('input', adjustHeight);
-  }, [newMessage]); // Solo cuando cambia el mensaje
+  }, []);
 
   // Manejo de paste - optimizado
   useEffect(() => {
@@ -354,8 +418,8 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
         <Image
           src={preview}
           alt={`Previsualización de imagen ${index + 1}`}
-          layout="fill"
-          objectFit="cover"
+          fill
+          style={{ objectFit: 'cover' }}
           className="rounded-md"
         />
         <button
@@ -443,6 +507,7 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
               className="w-full resize-none bg-transparent border-0 focus:ring-0 p-0 text-base sm:text-lg placeholder:text-muted-foreground/70"
               rows={1}
               onChange={handleMessageChange}
+              onInput={adjustTextareaHeight}
             />
             <div className="flex items-center justify-between mt-2 pt-2 border-t border-border/50">
               <div className="flex items-center gap-2">
@@ -466,15 +531,15 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
                   onFileUpload={onFileUpload}
                   onImageUpload={onImageUpload}
                 />
-                {children}
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
                   className="rounded-full text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-                  onClick={() => setIsNoteSelectorOpen(true)}
+                  onClick={openContextDialog}
+                  title="Añadir contexto"
                 >
-                  <NotebookText className="h-5 w-5" />
+                  <BookMarked className="h-5 w-5" />
                 </Button>
               </div>
               <div className="flex items-center gap-2">
@@ -483,7 +548,6 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
                   variant="ghost"
                   size="icon"
                   onClick={() => {
-                    console.log('Mic button clicked. isRecording:', isRecording);
                     const action = isRecording ? onStopRecording : onStartRecording;
                     action?.();
                   }}
@@ -516,10 +580,12 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
             </div>
           </div>
 
-          <NoteSelectorDialog
-            isOpen={isNoteSelectorOpen}
-            onClose={() => setIsNoteSelectorOpen(false)}
+          <ContextSelectorDialog
+            isOpen={isContextSelectorOpen}
+            onClose={() => setIsContextSelectorOpen(false)}
+            onSelectContext={onContextSelected}
             onSelectNote={handleAttachNote}
+            currentContext={currentContext}
             workspaceId={workspaceId}
           />
 
@@ -530,6 +596,5 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
 };
 
 export default memo(ChatInputBarComponent);
-
 
 

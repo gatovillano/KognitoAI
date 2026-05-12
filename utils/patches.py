@@ -2,6 +2,7 @@
 
 import logging
 from langchain_community.chat_message_histories import PostgresChatMessageHistory
+from utils.postgres_chat_history import close_postgres_chat_message_history
 
 logger = logging.getLogger(__name__)
 
@@ -25,22 +26,15 @@ def patch_postgres_chat_history_del():
     original_del = PostgresChatMessageHistory.__del__
 
     def safe_del(self):
-        # Solo intentamos cerrar si el atributo 'cursor' existe
         if hasattr(self, 'cursor') and self.cursor:
             try:
                 original_del(self)
-            except Exception as e:
-                # Ignoramos errores en el destructor para evitar ruido en logs de sistema
-                pass
-        else:
-            # Si no tiene cursor, simplemente cerramos la conexión si existe
-            if hasattr(self, 'connection') and self.connection:
-                try:
-                    self.connection.close()
-                except:
-                    pass
+                return
+            except Exception:
+                logger.debug("Fallo el __del__ original de PostgresChatMessageHistory; usando cierre seguro.")
+
+        close_postgres_chat_message_history(self, logger=logger)
 
     PostgresChatMessageHistory.__del__ = safe_del
     print("✅ Patched PostgresChatMessageHistory.__del__ for safety.")
     logger.info("✅ Patched PostgresChatMessageHistory.__del__ for safety.")
-

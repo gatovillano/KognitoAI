@@ -6,7 +6,7 @@ import { Separator } from '@/components/ui/separator';
 import { ProactiveInsightResult } from '@/lib/models';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Lightbulb, Zap, Link2, Info, MessageSquare, TrendingUp, AlertCircle } from 'lucide-react';
+import { Lightbulb, Zap, Link2, Info, MessageSquare, TrendingUp, AlertCircle, Atom } from 'lucide-react';
 
 import { SectionTTSButton } from './analysis-detail-dialog';
 

@@ -2,15 +2,19 @@ import logging
 import json
 from typing import List, Dict, Any, Optional
 from langchain_core.messages import HumanMessage, SystemMessage
-from core.llm_manager import get_fast_llm
+from core.llm_manager import get_fast_llm, get_llm_for_user
+from core.utils.llm_utils import safe_json_loads
 
 logger = logging.getLogger(__name__)
 
-async def analyze_single_note(note_content: str, note_title: str = "Sin título") -> Dict[str, Any]:
+async def analyze_single_note(note_content: str, note_title: str = "Sin título", account_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Analiza una nota individual usando el LLM con la personalidad de KAI (Exocerebro).
     """
-    llm = get_fast_llm()
+    if account_id:
+        llm = await get_llm_for_user(account_id, purpose="fast")
+    else:
+        llm = get_fast_llm()
     if not llm:
         logger.error("LLM not initialized in analyze_single_note")
         raise ValueError("LLM not initialized")
@@ -33,15 +37,7 @@ Responde SOLO con el JSON válido, sin bloques de código markdown adicionales s
 
     try:
         response = await llm.ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)])
-        content = response.content
-        
-        # Limpieza básica de markdown json
-        if "```json" in content:
-            content = content.split("```json")[1].split("```")[0].strip()
-        elif "```" in content:
-            content = content.split("```")[1].split("```")[0].strip()
-        
-        return json.loads(content)
+        return safe_json_loads(response.content)
     except Exception as e:
         logger.error(f"Error analyzing note: {e}")
         # Retornar estructura de error o parcial
@@ -50,11 +46,14 @@ Responde SOLO con el JSON válido, sin bloques de código markdown adicionales s
             "error": str(e)
         }
 
-async def analyze_note_collection(notes: List[Dict[str, str]], collection_name: str) -> Dict[str, Any]:
+async def analyze_note_collection(notes: List[Dict[str, str]], collection_name: str, account_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Analiza una colección de notas para encontrar patrones y síntesis.
     """
-    llm = get_fast_llm()
+    if account_id:
+        llm = await get_llm_for_user(account_id, purpose="fast")
+    else:
+        llm = get_fast_llm()
     if not llm:
         logger.error("LLM not initialized in analyze_note_collection")
         raise ValueError("LLM not initialized")
@@ -77,14 +76,7 @@ Responde SOLO con el JSON válido."""
 
     try:
         response = await llm.ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=notes_text)])
-        content = response.content
-        
-        if "```json" in content:
-            content = content.split("```json")[1].split("```")[0].strip()
-        elif "```" in content:
-            content = content.split("```")[1].split("```")[0].strip()
-            
-        return json.loads(content)
+        return safe_json_loads(response.content)
     except Exception as e:
         logger.error(f"Error analyzing note collection: {e}")
         return {
@@ -92,11 +84,14 @@ Responde SOLO con el JSON válido."""
             "error": str(e)
         }
 
-async def summarize_note(note_content: str, note_title: str = "Sin título") -> Dict[str, Any]:
+async def summarize_note(note_content: str, note_title: str = "Sin título", account_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Genera un resumen semántico conciso de una nota individual.
     """
-    llm = get_fast_llm()
+    if account_id:
+        llm = await get_llm_for_user(account_id, purpose="fast")
+    else:
+        llm = get_fast_llm()
     if not llm:
         logger.error("LLM not initialized in summarize_note")
         raise ValueError("LLM not initialized")
@@ -115,18 +110,11 @@ Responde SOLO con el JSON válido."""
 
     try:
         response = await llm.ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)])
-        content = response.content
-        
-        # Limpieza básica de markdown json
-        if "```json" in content:
-            content = content.split("```json")[1].split("```")[0].strip()
-        elif "```" in content:
-            content = content.split("```")[1].split("```")[0].strip()
-        
-        return json.loads(content)
+        return safe_json_loads(response.content)
     except Exception as e:
         logger.error(f"Error summarizing note: {e}")
         return {
             "summary": "Error al generar el resumen.",
             "error": str(e)
         }
+

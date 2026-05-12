@@ -54,9 +54,70 @@ interface CorrectionResult {
     failed: number;
 }
 
+const EMPTY_STATISTICS: Statistics = {
+  summary: {
+    total_entities: 0,
+    total_relationships: 0,
+    entity_types_count: 0,
+    relationship_types_count: 0,
+  },
+  entity_types: [],
+};
+
+const normalizeStatistics = (payload: any): Statistics => {
+  const raw = payload?.data ?? payload ?? {};
+  const summary = raw.summary ?? {};
+
+  return {
+    summary: {
+      total_entities: Number(summary.total_entities ?? 0),
+      total_relationships: Number(summary.total_relationships ?? 0),
+      entity_types_count: Number(summary.entity_types_count ?? 0),
+      relationship_types_count: Number(summary.relationship_types_count ?? 0),
+    },
+    entity_types: Array.isArray(raw.entity_types)
+      ? raw.entity_types.map((item: any) => ({
+          type: String(item?.type ?? 'Desconocido'),
+          count: Number(item?.count ?? 0),
+          avg_confidence: Number(item?.avg_confidence ?? 0),
+          methods: Array.isArray(item?.methods) ? item.methods : [],
+        }))
+      : [],
+  };
+};
+
+const normalizeReviewResults = (payload: any): ReviewResults | null => {
+  const raw = payload?.data ?? payload;
+  if (!raw?.summary) return null;
+
+  return {
+    summary: {
+      quality_score: Number(raw.summary.quality_score ?? 0),
+      corrections_needed: Number(raw.summary.corrections_needed ?? 0),
+      deletions_needed: Number(raw.summary.deletions_needed ?? 0),
+      merges_needed: Number(raw.summary.merges_needed ?? 0),
+      issues_found: Number(raw.summary.issues_found ?? 0),
+      recommendations: Array.isArray(raw.summary.recommendations) ? raw.summary.recommendations : [],
+    },
+    corrections: Array.isArray(raw.corrections) ? raw.corrections : [],
+    deletions: Array.isArray(raw.deletions) ? raw.deletions : [],
+    merges: Array.isArray(raw.merges) ? raw.merges : [],
+  };
+};
+
+const normalizeCorrectionResult = (payload: any): CorrectionResult | null => {
+  const raw = payload?.data ?? payload;
+  if (!raw) return null;
+
+  return {
+    applied: Number(raw.applied ?? 0),
+    failed: Number(raw.failed ?? 0),
+  };
+};
+
 
 const EntityQualityDashboard = () => {
-  const [statistics, setStatistics] = useState<Statistics | null>(null);
+  const [statistics, setStatistics] = useState<Statistics>(EMPTY_STATISTICS);
   const [reviewResults, setReviewResults] = useState<ReviewResults | null>(null);
   const [loading, setLoading] = useState(false);
   const [reviewLoading, setReviewLoading] = useState(false);
@@ -73,11 +134,13 @@ const EntityQualityDashboard = () => {
     setLoading(true);
     try {
       const response = await apiClient.get('/api/knowledge-graph/entity-statistics');
-      if (response.data) {
-        setStatistics(response.data);
+      if (response.data?.success === false) {
+        throw new Error(response.data.error || 'No se pudieron cargar las estadísticas');
       }
+      setStatistics(normalizeStatistics(response.data));
     } catch (error) {
       console.error('Error loading statistics:', error);
+      setStatistics(EMPTY_STATISTICS);
     } finally {
       setLoading(false);
     }
@@ -87,11 +150,13 @@ const EntityQualityDashboard = () => {
     setReviewLoading(true);
     try {
       const response = await apiClient.post('/api/knowledge-graph/review-entities', {});
-      if (response.data) {
-        setReviewResults(response.data);
+      if (response.data?.success === false) {
+        throw new Error(response.data.error || 'No se pudo ejecutar la revisión');
       }
+      setReviewResults(normalizeReviewResults(response.data));
     } catch (error) {
       console.error('Error running quality review:', error);
+      setReviewResults(null);
     } finally {
       setReviewLoading(false);
     }
@@ -104,13 +169,15 @@ const EntityQualityDashboard = () => {
         corrections,
         auto_apply: autoApply
       });
-      if (response.data) {
-        setCorrectionResults(response.data);
-        await loadStatistics();
-        setReviewResults(null);
+      if (response.data?.success === false) {
+        throw new Error(response.data.error || 'No se pudieron aplicar las correcciones');
       }
+      setCorrectionResults(normalizeCorrectionResult(response.data));
+      await loadStatistics();
+      setReviewResults(null);
     } catch (error) {
       console.error('Error applying corrections:', error);
+      setCorrectionResults(null);
     } finally {
       setApplyLoading(false);
     }
@@ -141,43 +208,40 @@ const EntityQualityDashboard = () => {
 
   return (
     <div className="space-y-6">
-      {/* Estadísticas Generales */}
-      {statistics && (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Entidades</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{statistics.summary.total_entities.toLocaleString()}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Relaciones</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{statistics.summary.total_relationships.toLocaleString()}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Tipos de Entidades</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{statistics.summary.entity_types_count}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Tipos de Relaciones</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{statistics.summary.relationship_types_count}</div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Entidades</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{statistics.summary.total_entities.toLocaleString()}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Relaciones</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{statistics.summary.total_relationships.toLocaleString()}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Tipos de Entidades</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{statistics.summary.entity_types_count}</div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Tipos de Relaciones</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{statistics.summary.relationship_types_count}</div>
+          </CardContent>
+        </Card>
+      </div>
 
       {/* Botones de Acción */}
       <div className="flex gap-2">
@@ -263,13 +327,16 @@ const EntityQualityDashboard = () => {
         </Card>
       )}
 
-      {/* Tabla de Entidades por Tipo */}
-      {statistics && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Distribución de Entidades por Tipo</CardTitle>
-          </CardHeader>
-          <CardContent>
+      <Card>
+        <CardHeader>
+          <CardTitle>Distribución de Entidades por Tipo</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {statistics.entity_types.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Aún no hay estadísticas detalladas disponibles para mostrar.
+            </p>
+          ) : (
             <Table>
               <TableHeader>
                 <TableRow>
@@ -296,9 +363,9 @@ const EntityQualityDashboard = () => {
                 ))}
               </TableBody>
             </Table>
-          </CardContent>
-        </Card>
-      )}
+          )}
+        </CardContent>
+      </Card>
 
       {/* Dialog de Confirmación de Correcciones */}
       <Dialog open={showCorrectionDialog} onOpenChange={setShowCorrectionDialog}>

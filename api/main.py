@@ -109,7 +109,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 app.add_middleware(AuditMiddleware)
 
 # Configuración de CORS
-# Permite: localhost, la IP local 192.168.1.7 (cualquier puerto), y los dominios de producción.
+# Permite: localhost, la IP local y los dominios de producción desde settings.
 allowed_origins = [
     "http://localhost:3000",
     "http://localhost:3001",
@@ -124,12 +124,21 @@ allowed_origins = [
     "http://localhost:8081",
 ]
 
+# Incorporar orígenes desde el .env si existen
+if hasattr(settings, 'cors_allowed_origins') and settings.cors_allowed_origins:
+    if isinstance(settings.cors_allowed_origins, str):
+        extra_origins = [o.strip() for o in settings.cors_allowed_origins.split(",") if o.strip()]
+        for origin in extra_origins:
+            if origin not in allowed_origins:
+                allowed_origins.append(origin)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allow_headers=["Authorization", "Content-Type", "Accept", "Origin"],
+    allow_headers=["*"],
+    expose_headers=["*"]
 )
 
 
@@ -204,6 +213,11 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
 
     try:
         payload = decode_access_token(token)
+        if not payload:
+            logger.warning(f"Token inválido o expirado en WebSocket para el usuario {user_id}.")
+            await websocket.close(code=1008, reason="Token inválido o expirado")
+            return
+            
         token_user_id = payload.get("sub")
         if token_user_id != user_id:
             logger.warning(f"Conflicto de ID de usuario en WebSocket. Token ID: {token_user_id}, Path ID: {user_id}")
@@ -247,6 +261,11 @@ async def websocket_transcribe(websocket: WebSocket, account_id: str):
 
     try:
         payload = decode_access_token(token)
+        if not payload:
+            logger.warning(f"Token inválido o expirado en WebSocket de transcripción para el usuario {account_id}.")
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Token inválido o expirado")
+            return
+            
         token_account_id = payload.get("sub")
         if token_account_id != account_id:
             logger.warning(f"Conflicto de ID de usuario en WebSocket de transcripción. Token ID: {token_account_id}, Path ID: {account_id}")
@@ -317,6 +336,7 @@ app.include_router(analysis_router, prefix="/api", tags=["analysis"])
 from api.analysis_share import router as analysis_share_router
 app.include_router(analysis_share_router, prefix="/api/analysis/share", tags=["analysis-share"])
 from api.github import router as github_router
+from api.local_files import router as local_files_router # NUEVO: Importar router de archivos locales
 from api.telegram import router as telegram_router
 from api.logs import router as logs_router
 from api.scheduled_tools import router as scheduled_tools_router
@@ -329,6 +349,7 @@ from api.graph import router as graph_router
 from api.memory import router as memory_router # NUEVO: Importar el router de memory
 
 app.include_router(github_router, prefix="/api/github", tags=["github"])
+app.include_router(local_files_router, prefix="/api/files", tags=["local-files"]) # NUEVO: Incluir router de archivos locales
 app.include_router(telegram_router, prefix="", tags=["telegram"])
 app.include_router(logs_router, prefix="/api", tags=["logs"])
 app.include_router(scheduled_tools_router, prefix="/api", tags=["scheduled-tools"])
@@ -351,6 +372,7 @@ from api.deep_research import router as deep_research_router
 from api.gap_development import router as gap_development_router
 from api.mfa import router as mfa_router # Importar el router de MFA
 from api.onlyoffice import router as onlyoffice_router # IMPORTAR ONLYOFFICE
+from api.openai import router as openai_router # IMPORTAR OPENAI COMPATIVEL
 from skills.media_and_generation_skill.scripts.html_generator_tool import HTMLGeneratorTool # Importar la herramienta HTMLGeneratorTool desde skills
 from utils.security import get_current_account_id # Importar get_current_account_id
 
@@ -359,6 +381,7 @@ app.include_router(onlyoffice_router, prefix="/api/onlyoffice", tags=["onlyoffic
 app.include_router(deep_research_router, prefix="/api", tags=["deep-research"])
 app.include_router(gap_development_router, prefix="/api", tags=["gap-development"])
 app.include_router(mfa_router, prefix="/api", tags=["mfa"])
+app.include_router(openai_router, prefix="", tags=["openai-compatible"])
 
 class GenerateHTMLRequest(BaseModel):
     content: str = Field(..., description="El contenido en formato Markdown o texto plano.")

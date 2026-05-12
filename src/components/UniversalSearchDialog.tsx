@@ -65,7 +65,9 @@ export function UniversalSearchDialog({ isOpen, onOpenChange, searchTerm, setSea
     switch (result.type) {
       case 'chat_thread':
       case 'chat_message':
-        url = `/chat/${result.id}`;
+        // Usar thread_id si está presente, de lo contrario usar id
+        const threadId = result.thread_id || result.id;
+        url = `/chat/${threadId}`;
         break;
       case 'note':
         url = `/notes?noteId=${result.id}`;

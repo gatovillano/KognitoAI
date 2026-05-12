@@ -19,18 +19,26 @@ router = APIRouter()
 
 # --- Modelos Pydantic para Colecciones ---
 class CollectionResponse(BaseModel):
-    topic: str
-    document_count: int
+    id: Optional[str] = None
+    topic: Optional[str] = None
+    name: Optional[str] = None
+    parent_id: Optional[str] = None
+    position: Optional[int] = None
+    item_type: Optional[str] = None
+    document_count: int = 0
     description: Optional[str] = None
     workspace_id: Optional[str] = None
     workspace_name: Optional[str] = None
     workspace_color: Optional[str] = None
     has_knowledge_graph: Optional[bool] = None
+    subcollection_count: int = 0
 
 class CollectionCreateRequest(BaseModel):
     topic: str
     description: Optional[str] = None
     workspaceId: Optional[str] = None
+    parent_id: Optional[str] = None
+    item_type: Optional[str] = None
 
 from urllib.parse import unquote
 
@@ -72,13 +80,19 @@ async def list_collections(current_account_id: str = Depends(get_current_account
         collections = await list_user_collections(account_id=current_account_id, workspace_id=workspace_id)
         logger.info(f"API: list_collections - Collections retrieved from memory_manager: {len(collections)} collections")
         return [CollectionResponse(
-            topic=c['topic'],
-            document_count=c['document_count'],
+            id=c.get('id'),
+            topic=c.get('topic') or c.get('name'),
+            name=c.get('name') or c.get('topic') or "Sin nombre",
+            parent_id=c.get('parent_id'),
+            position=c.get('position'),
+            item_type=c.get('item_type', 'collection'),
+            document_count=c.get('document_count', 0),
             description=c.get('description'),
             workspace_id=c.get('workspace_id'),
             workspace_name=c.get('workspace_name'),
             workspace_color=c.get('workspace_color'),
-            has_knowledge_graph=c.get('has_knowledge_graph')
+            has_knowledge_graph=c.get('has_knowledge_graph', False),
+            subcollection_count=c.get('subcollection_count', 0)
         ) for c in collections]
     except Exception as e:
         logger.error(f"API: list_collections - Error al listar colecciones para account_id: {current_account_id}, error: {e}", exc_info=True)
@@ -93,7 +107,9 @@ async def create_collection(request: CollectionCreateRequest, current_account_id
         collection = await create_empty_collection(
             account_id=current_account_id,
             topic_name=request.topic,
-            workspace_id=request.workspaceId
+            workspace_id=request.workspaceId,
+            parent_id=request.parent_id,
+            item_type=request.item_type
         )
         logger.info(f"API: create_collection - Colección '{request.topic}' creada y asociada al workspace {request.workspaceId if request.workspaceId else 'global'} con éxito.")
         return {"message": f"Colección '{request.topic}' creada y lista para ser usada en el workspace {request.workspaceId if request.workspaceId else 'global'}."}
@@ -107,6 +123,8 @@ class CollectionUpdateRequest(BaseModel):
     new_topic: Optional[str] = None
     new_description: Optional[str] = None
     workspace_id: Optional[str] = None
+    parent_id: Optional[str] = None
+    item_type: Optional[str] = None
 
 @router.post("/update-collection", summary="Actualizar una colección existente")
 async def update_collection_endpoint(
@@ -122,14 +140,15 @@ async def update_collection_endpoint(
     try:
         # Importar la función de actualización
         from core.memory_manager import update_collection
-        
         # Llamar a la función de actualización
         success = await update_collection(
             account_id=current_account_id,
             old_topic_name=request.old_topic,
             new_topic_name=request.new_topic,
             new_description=request.new_description,
-            workspace_id=request.workspace_id
+            workspace_id=request.workspace_id,
+            parent_id=request.parent_id,
+            item_type=request.item_type
         )
         
         if not success:
@@ -145,6 +164,32 @@ async def update_collection_endpoint(
     except Exception as e:
         logger.error(f"API: update_collection - Error al actualizar la colección para account_id: {current_account_id}, error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Error interno del servidor al actualizar la colección.")
+
+class CollectionMoveRequest(BaseModel):
+    topic: str
+    new_parent_id: Optional[str] = None
+    workspace_id: Optional[str] = None
+
+@router.post("/collections/move", summary="Mover una colección a otro parent")
+async def move_collection(request: CollectionMoveRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db_session)):
+    from core.memory_manager import update_collection
+    success = await update_collection(account_id=current_account_id, old_topic_name=request.topic, parent_id=request.new_parent_id, workspace_id=request.workspace_id)
+    if not success:
+        raise HTTPException(status_code=400, detail="No se pudo mover la colección.")
+    return {"message":"Colección movida exitosamente."}
+
+class CollectionRenameRequest(BaseModel):
+    old_topic: str
+    new_topic: str
+    workspace_id: Optional[str] = None
+
+@router.post("/collections/rename", summary="Renombrar una colección")
+async def rename_collection(request: CollectionRenameRequest, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db_session)):
+    from core.memory_manager import update_collection
+    success = await update_collection(account_id=current_account_id, old_topic_name=request.old_topic, new_topic_name=request.new_topic, workspace_id=request.workspace_id)
+    if not success:
+        raise HTTPException(status_code=400, detail="No se pudo renombrar la colección.")
+    return {"message":"Colección renombrada exitosamente."}
 
 class CollectionShareRequest(BaseModel):
     workspace_id: str
@@ -179,3 +224,65 @@ async def share_collection(
     except Exception as e:
         logger.error(f"API: share_collection - Error al compartir la colección '{topic}': {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Error interno del servidor al compartir la colección.")
+
+
+@router.delete("/collections/{topic}", summary="Eliminar una colección")
+async def delete_collection_endpoint(
+    topic: str = Depends(decoded_topic),
+    current_account_id: str = Depends(get_current_account_id),
+    workspace_id: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db_session)
+):
+    from utils.security import check_workspace_permission
+    from core.memory_manager import delete_collection
+
+    # Verificar permisos si workspace especificado
+    if workspace_id:
+        if not await check_workspace_permission(current_account_id, workspace_id, db, required_roles=["owner", "editor"]):
+            raise HTTPException(status_code=403, detail="No tienes permiso para eliminar esta colección en el workspace especificado.")
+
+    try:
+        success = await delete_collection(account_id=current_account_id, topic_name=topic, workspace_id=workspace_id)
+        if not success:
+            raise HTTPException(status_code=400, detail=f"No se pudo eliminar la colección '{topic}'.")
+        return {"message": f"Colección '{topic}' eliminada correctamente."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"API: delete_collection - Error al eliminar la colección '{topic}': {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Error interno del servidor al eliminar la colección.")
+
+
+@router.get("/collections/children", response_model=List[CollectionResponse], summary="Listar subcolecciones de un parent")
+async def list_collection_children(
+    parent_id: Optional[str] = Query(None, description="ID del parent (omit para listar top-level)"),
+    current_account_id: str = Depends(get_current_account_id),
+    workspace_id: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """Lista las subcolecciones directamente hijas de parent_id. Si parent_id es None, devuelve sólo los top-level."""
+    try:
+        collections = await list_user_collections(account_id=current_account_id, workspace_id=workspace_id)
+        # Filtrar por parent_id (None => parent_id is None)
+        if parent_id:
+            filtered = [c for c in collections if c.get('parent_id') == parent_id]
+        else:
+            filtered = [c for c in collections if not c.get('parent_id')]
+
+        return [CollectionResponse(
+            id=c.get('id'),
+            topic=c.get('topic') or c.get('name'),
+            name=c.get('name') or c.get('topic'),
+            parent_id=c.get('parent_id'),
+            position=c.get('position'),
+            item_type=c.get('item_type'),
+            document_count=c.get('document_count'),
+            description=c.get('description'),
+            workspace_id=c.get('workspace_id'),
+            workspace_name=c.get('workspace_name'),
+            workspace_color=c.get('workspace_color'),
+            has_knowledge_graph=c.get('has_knowledge_graph')
+        ) for c in filtered]
+    except Exception as e:
+        logger.error(f"API: list_collection_children - Error al listar subcolecciones: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Error interno del servidor al listar subcolecciones.")

@@ -364,7 +364,9 @@ export const NodeDetailsSidebar: React.FC<NodeDetailsSidebarProps> = ({
                             {/* Información básica */}
                             <div className="min-w-0"> {/* Añadido para evitar truncamiento del título */}
                                 <h3 className="font-semibold text-base mb-2 max-w-full">
-                                    <span style={{ wordBreak: 'break-all', whiteSpace: 'normal' }}>{node.label}</span>
+                                    <span style={{ wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                                        {node.properties?.name || node.properties?.title || node.label}
+                                    </span>
                                 </h3>
                                 <Badge variant="secondary" className="mb-4">
                                     {node.type || 'Desconocido'}

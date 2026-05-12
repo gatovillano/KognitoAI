@@ -62,18 +62,26 @@ class GraphReasoningNode:
             return {}
 
         logger.info(f"🧠 Iniciando Pensamiento Neuronal para la pregunta: '{user_message}'")
+        
+        # Obtener LLM específico para el usuario si está disponible
+        account_id = state.get("account_id")
+        workspace_id = state.get("workspace_id")
+        
+        llm_to_use = self.llm
+        if account_id:
+            from core.llm_manager import get_llm_for_user
+            user_llm = await get_llm_for_user(account_id, purpose="fast")
+            if user_llm:
+                llm_to_use = user_llm
+
         if target_datasets:
             logger.info(f"🎯 Datasets objetivo: {target_datasets}")
         else:
             logger.info("🎯 Buscando en todos los datasets disponibles.")
 
         # 1. Ejecutar Pensamiento Neuronal (Exploración Latente)
-        # Ahora es el motor principal, no depende de resultados previos.
-        account_id = state.get("account_id")
-        workspace_id = state.get("workspace_id")
-        
         neural_insights, analysis_id, neural_data = await self._perform_neural_thinking(
-            user_message, target_datasets, account_id, workspace_id
+            user_message, target_datasets, account_id, workspace_id, llm=llm_to_use
         )
         
         if not neural_data and not neural_insights:
@@ -116,22 +124,67 @@ class GraphReasoningNode:
             "mermaid_diagram": mermaid_diagram,
         }
 
-    async def _perform_neural_thinking(self, user_query: str, target_datasets: Optional[List[str]] = None, account_id: Optional[str] = None, workspace_id: Optional[str] = None) -> Tuple[str, Optional[str], List[Dict[str, Any]]]:
+    async def _perform_neural_thinking(self, user_query: str, target_datasets: Optional[List[str]] = None, account_id: Optional[str] = None, workspace_id: Optional[str] = None, llm: Optional[Any] = None) -> Tuple[str, Optional[str], List[Dict[str, Any]]]:
         """
         Realiza un 'Pensamiento Neuronal' explorando el grafo de forma agresiva 
         para encontrar relaciones que no son evidentes en una consulta simple.
         
         Retorna: (insight_text, analysis_id, raw_data)
         """
+        llm_to_use = llm or self.llm
+        if not llm_to_use:
+            return "", None, []
+
         # Identificar conceptos clave
-        concepts_prompt = f"Extrae los 3 conceptos o entidades más importantes de esta consulta: '{user_query}'. Responde solo con los nombres separados por comas."
-        concepts_resp = await self.llm.ainvoke(concepts_prompt)
-        concepts = [c.strip() for c in str(concepts_resp.content).split(",")]
-        
-        logger.info(f"🧠 Conceptos clave identificados para exploración latente: {concepts}")
+        concepts = []
+        try:
+            # Usar siempre el LLM para mejor calidad, con un prompt más robusto para capturar el intento
+            concepts_prompt = f"Extrae los 3 conceptos o entidades más importantes de esta consulta para buscar en un grafo: '{user_query}'. Responde solo con los nombres separados por comas, sin explicaciones."
+            concepts_resp = await llm_to_use.ainvoke(concepts_prompt)
+            concepts = [c.strip() for c in str(concepts_resp.content).split(",") if c.strip() and len(c) > 2]
+            logger.info(f"🧠 Conceptos clave identificados vía LLM: {concepts}")
+        except Exception as e:
+            logger.error(f"Error extrayendo conceptos vía LLM: {e}")
+            concepts = [w for w in user_query.split() if len(w) > 4][:3] # Fallback simple
         
         all_neural_data = []
         
+        dataset_filter_sp = ""
+        if target_datasets:
+            dataset_filter_sp = f"AND ALL(node IN nodes(p) WHERE node.dataset_name IN {target_datasets})"
+
+        # Profundidad Dinámica: Si hay más de un concepto, intentar encontrar el camino más corto entre los dos primeros
+        if len(concepts) >= 2:
+            concept1 = concepts[0]
+            concept2 = concepts[1]
+            
+            workspace_filter_nodes = ""
+            params_sp = {"concept1": concept1, "concept2": concept2, "account_id": account_id}
+            if workspace_id:
+                workspace_filter_nodes = "AND n.workspace_id = $workspace_id AND m.workspace_id = $workspace_id AND ALL(node IN nodes(p) WHERE node.workspace_id = $workspace_id) AND ALL(rel IN relationships(p) WHERE rel.workspace_id = $workspace_id)"
+                params_sp["workspace_id"] = workspace_id
+            else:
+                workspace_filter_nodes = "AND n.workspace_id IS NULL AND m.workspace_id IS NULL AND ALL(node IN nodes(p) WHERE node.workspace_id IS NULL) AND ALL(rel IN relationships(p) WHERE rel.workspace_id IS NULL)"
+
+            shortest_path_query = f"""
+            MATCH (n), (m)
+            WHERE (n.name CONTAINS $concept1 OR n.description CONTAINS $concept1)
+              AND (m.name CONTAINS $concept2 OR m.description CONTAINS $concept2)
+              AND (n.account_id = $account_id OR n.account_id IS NULL)
+              AND (m.account_id = $account_id OR m.account_id IS NULL)
+            MATCH p = shortestPath((n)-[*1..4]-(m))
+            WHERE ALL(node IN nodes(p) WHERE (node.account_id = $account_id OR node.account_id IS NULL))
+              AND ALL(rel IN relationships(p) WHERE (rel.account_id = $account_id OR rel.account_id IS NULL))
+              {workspace_filter_nodes}
+              {dataset_filter_sp}
+            RETURN p as path
+            LIMIT 5
+            """
+            sp_results = await self.graph_db.execute_query(shortest_path_query, params_sp)
+            if sp_results:
+                logger.info(f"🕸️ Camino más corto encontrado entre '{concept1}' y '{concept2}': {len(sp_results)} caminos.")
+                all_neural_data.extend(sp_results)
+
         for concept in concepts:
             # Query de expansión: busca el concepto y sus vecinos hasta 2 saltos
             dataset_filter = ""
@@ -165,10 +218,18 @@ class GraphReasoningNode:
             logger.info("🧠 No se encontraron conexiones latentes relevantes.")
             return "", None, []
             
+        # Ranking de relevancia por superposición de conceptos
+        def score_path(record):
+            path_str = str(record).lower()
+            return sum(1 for c in concepts if c.lower() in path_str)
+        
+        all_neural_data.sort(key=score_path, reverse=True)
+            
         # Pedir al LLM que "piense" sobre estos datos latentes
-        # Para el prompt de síntesis, simplificamos la data para no saturar el contexto
+        # Para el prompt de síntesis, enriquecemos la semántica (tipo y descripción)
         simplified_data = []
         parser = GraphOutputParser()
+        # Tomamos los top 15 después del ranking
         for record in all_neural_data[:15]:
             path_obj = record.get("path")
             path = parser._to_dict(path_obj) if path_obj else {}
@@ -176,11 +237,15 @@ class GraphReasoningNode:
             rels = []
             
             if path and isinstance(path, dict):
-                nodes = [n.get("name") for n in path.get("nodes", [])]
+                for n in path.get("nodes", []):
+                    node_str = f"[{n.get('type', 'Entity')}] {n.get('name', 'Unknown')}"
+                    desc = n.get('description', '')
+                    if desc:
+                        node_str += f" (Desc: {desc[:80]}...)"
+                    nodes.append(node_str)
                 rels = [r.get("type") for r in path.get("relationships", [])]
             else:
-                # Manejar el caso donde path no es un diccionario (aunque _to_dict debería haberlo resuelto)
-                logger.warning(f"El objeto path no se pudo convertir a diccionario. Tipo original: {type(path_obj)}")
+                logger.warning(f"El objeto path no se pudo convertir a diccionario.")
                 nodes = []
                 rels = []
             simplified_data.append({"camino": " -> ".join(filter(None, nodes)), "relaciones": rels})
@@ -196,7 +261,7 @@ Genera un breve análisis (3-4 frases) sobre conexiones interesantes o patrones 
 Enfócate en cómo estos conceptos se entrelazan y qué revelan sobre el contexto de la pregunta.
 """
         logger.info("🧠 Sintetizando insights a partir de las conexiones encontradas...")
-        response = await self.llm.ainvoke(thinking_prompt)
+        response = await llm_to_use.ainvoke(thinking_prompt)
         insight = str(response.content).strip()
         logger.info(f"🧠 Síntesis completada.")
 
@@ -241,9 +306,12 @@ Enfócate en cómo estos conceptos se entrelazan y qué revelan sobre el context
                 return extract_text_content(message.content)
         return None
 
-    async def _generate_cypher_query(self, user_query: str, target_datasets: Optional[List[str]] = None) -> Optional[str]:
+    async def _generate_cypher_query(self, user_query: str, target_datasets: Optional[List[str]] = None, llm: Optional[Any] = None) -> Optional[str]:
         """Genera una consulta Cypher usando un LLM a partir de la pregunta del usuario."""
-        
+        llm_to_use = llm or self.llm
+        if not llm_to_use:
+            return None
+
         schema_to_use = self.graph_db.schema
         if not schema_to_use:
             logger.warning("⚠️ Schema del grafo no disponible. Intentando refrescar...")
@@ -262,9 +330,7 @@ Enfócate en cómo estos conceptos se entrelazan y qué revelan sobre el context
         prompt = ChatPromptTemplate.from_template(CYPHER_GENERATION_PROMPT)
         
         try:
-            if not self.llm:
-                raise ValueError("LLM no está disponible")
-            chain = prompt | self.llm
+            chain = prompt | llm_to_use
             
             # Preparar información de datasets para el prompt
             dataset_context = ""

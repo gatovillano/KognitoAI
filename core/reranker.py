@@ -57,12 +57,13 @@ class Reranker:
         reranked_documents = sorted(documents, key=lambda x: x.metadata['rerank_score'], reverse=True)
         
         # 2. Filtrar por umbral de relevancia (Thresholding)
-        filtered_documents = [doc for doc in reranked_documents if doc.metadata['rerank_score'] >= final_threshold]
+        # Bajamos el umbral a -10 para ser extremadamente permisivos, dejando que el modelo de síntesis decida
+        filtered_documents = [doc for doc in reranked_documents if doc.metadata['rerank_score'] >= -10.0]
         
-        # 3. Limitar a Top N
-        final_documents = filtered_documents[:final_top_n]
+        # 3. Limitar a Top N (aumentado a 20 para pasar más contexto al reporte)
+        final_documents = filtered_documents[:20]
         
-        logger.info(f"✨ Reranking: Recibidos {len(documents)}, filtrados {len(filtered_documents)}, devueltos {len(final_documents)} (Umbral: {final_threshold}, Top N: {final_top_n})")
+        logger.info(f"✨ Reranking (Relajado): Recibidos {len(documents)}, filtrados {len(filtered_documents)}, devueltos {len(final_documents)} (Umbral: -10.0, Top N: 20)")
         if final_documents:
             top_scores = [doc.metadata['rerank_score'] for doc in final_documents[:3]]
             logger.info(f"📊 Top 3 scores post-filtro: {[round(s, 4) for s in top_scores]}")

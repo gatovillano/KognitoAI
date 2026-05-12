@@ -12,7 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { Users, Settings, Clock, ArrowRight, Plus, Edit, Trash2 } from 'lucide-react';
+import { Users, Settings, Clock, ArrowRight, Plus, Edit, Trash2, Network } from 'lucide-react';
 import apiClient from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 
@@ -513,6 +513,23 @@ export default function AdminPage({ params }: PageProps) {
                   </CardTitle>
                   <CardDescription>
                     Administra las herramientas automáticas del sistema como análisis diarios, insights y limpieza
+                  </CardDescription>
+                </CardHeader>
+              </Link>
+            </Card>
+
+            <Card className="hover:shadow-md transition-shadow cursor-pointer">
+              <Link href="/admin/knowledge-graph">
+                <CardHeader>
+                  <CardTitle className="flex items-center justify-between">
+                    <div className="flex items-center">
+                      <Network className="mr-2 h-5 w-5 text-primary" />
+                      Administración del Grafo
+                    </div>
+                    <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                  </CardTitle>
+                  <CardDescription>
+                    Revisa calidad, detecta duplicados y administra la salud del grafo de conocimiento global.
                   </CardDescription>
                 </CardHeader>
               </Link>

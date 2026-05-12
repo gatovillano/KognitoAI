@@ -82,21 +82,22 @@ class EntityQualityReviewer:
             'año', 'años', 'día', 'días', 'mes', 'meses', 'hora', 'horas'
         }
     
-    async def review_all_entities(self, workspace_id: str = None) -> Dict[str, Any]:
+    async def review_all_entities(self, workspace_id: Optional[str] = None, account_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Revisa todas las entidades en el grafo y sugiere correcciones.
         
         Args:
             workspace_id: ID del workspace (opcional)
+            account_id: ID de la cuenta (obligatorio para aislamiento)
             
         Returns:
             Dict con estadísticas y sugerencias de corrección
         """
         try:
-            logger.info("🔍 Iniciando revisión completa de entidades...")
+            logger.info(f"🔍 Iniciando revisión completa de entidades para cuenta: {account_id}...")
             
             # 1. Obtener todas las entidades
-            entities = await self._get_all_entities(workspace_id)
+            entities = await self._get_all_entities(workspace_id, account_id)
             logger.info(f"📊 Revisando {len(entities)} entidades")
             
             # 2. Revisar cada tipo de entidad
@@ -138,11 +139,29 @@ class EntityQualityReviewer:
             logger.error(f"❌ Error en revisión de entidades: {e}")
             raise
     
-    async def _get_all_entities(self, workspace_id: str = None) -> List[Dict[str, Any]]:
-        """Obtiene todas las entidades del grafo."""
+    async def _get_all_entities(self, workspace_id: Optional[str] = None, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Obtiene todas las entidades del grafo filtradas por usuario y workspace."""
         
-        query = """
+        # Construir filtros de aislamiento
+        where_clauses = []
+        params = {}
+        
+        if account_id:
+            where_clauses.append("n.account_id = $account_id")
+            params["account_id"] = account_id
+            
+        if workspace_id:
+            if workspace_id == "global_context" or not workspace_id:
+                where_clauses.append("(n.workspace_id IS NULL OR n.workspace_id = '')")
+            else:
+                where_clauses.append("n.workspace_id = $workspace_id")
+                params["workspace_id"] = workspace_id
+        
+        where_str = " WHERE " + " AND ".join(where_clauses) if where_clauses else ""
+        
+        query = f"""
         MATCH (n)
+        {where_str}
         RETURN n.id as id, n.name as name, n.type as type, 
                n.description as description, n.confidence as confidence,
                n.source as source, n.extraction_method as extraction_method,
@@ -150,7 +169,7 @@ class EntityQualityReviewer:
         ORDER BY n.type, n.name
         """
         
-        result = await self.graph_db.execute_query(query)
+        result = await self.graph_db.execute_query(query, params)
         return result
     
     async def _review_entities_by_type(self, entity_type: str, entities: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -199,7 +218,13 @@ class EntityQualityReviewer:
     def _validate_entity_by_patterns(self, entity_type: str, entity: Dict[str, Any]) -> Dict[str, Any]:
         """Valida una entidad usando patrones regex."""
         
-        name = entity.get("name", "").strip()
+        # Asegurar que name sea un string, incluso si es None en Neo4j
+        raw_name = entity.get("name")
+        if raw_name is None:
+            # Si no hay name, buscar en title o description como fallback para evitar descartar falsos negativos
+            raw_name = entity.get("title") or entity.get("description") or ""
+            
+        name = str(raw_name).strip()
         
         # Validación básica
         if not name or len(name) < 2:
@@ -223,7 +248,7 @@ class EntityQualityReviewer:
     def _validate_organization(self, entity: Dict[str, Any]) -> Dict[str, Any]:
         """Valida si una entidad es realmente una organización."""
         
-        name = entity.get("name", "").strip().lower()
+        name = str(entity.get("name") or "").strip().lower()
         
         # Verificar patrones que NO son organizaciones
         for pattern in self.non_org_patterns:
@@ -251,7 +276,7 @@ class EntityQualityReviewer:
     def _validate_person(self, entity: Dict[str, Any]) -> Dict[str, Any]:
         """Valida si una entidad es realmente una persona."""
         
-        name = entity.get("name", "").strip().lower()
+        name = str(entity.get("name") or "").strip().lower()
         
         # Verificar patrones que NO son personas
         for pattern in self.non_person_patterns:
@@ -279,7 +304,7 @@ class EntityQualityReviewer:
     def _validate_location(self, entity: Dict[str, Any]) -> Dict[str, Any]:
         """Valida si una entidad es realmente una ubicación."""
         
-        name = entity.get("name", "").strip().lower()
+        name = str(entity.get("name") or "").strip().lower()
         
         # Verificar patrones que NO son ubicaciones
         for pattern in self.non_location_patterns:
@@ -307,7 +332,7 @@ class EntityQualityReviewer:
     def _validate_generic_entity(self, entity: Dict[str, Any]) -> Dict[str, Any]:
         """Validación genérica para otros tipos de entidades."""
         
-        name = entity.get("name", "").strip().lower()
+        name = str(entity.get("name") or "").strip().lower()
         
         # Verificar si es muy corto
         if len(name) < 3:
@@ -330,14 +355,14 @@ class EntityQualityReviewer:
             if i in processed:
                 continue
                 
-            name1 = entity1.get("name", "").strip().lower()
+            name1 = str(entity1.get("name") or "").strip().lower()
             duplicate_group = [entity1]
             
             for j, entity2 in enumerate(entities[i+1:], i+1):
                 if j in processed:
                     continue
                     
-                name2 = entity2.get("name", "").strip().lower()
+                name2 = str(entity2.get("name") or "").strip().lower()
                 
                 # Verificar si son duplicados
                 if self._are_duplicates(name1, name2):
@@ -414,19 +439,20 @@ class EntityQualityReviewer:
         
         return recommendations
 
-    async def apply_corrections(self, corrections: List[Dict[str, Any]], auto_apply: bool = False) -> Dict[str, Any]:
+    async def apply_corrections(self, corrections: List[Dict[str, Any]], auto_apply: bool = False, account_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Aplica las correcciones sugeridas al grafo.
 
         Args:
             corrections: Lista de correcciones a aplicar
             auto_apply: Si aplicar automáticamente sin confirmación
+            account_id: ID de la cuenta para validación de propiedad
 
         Returns:
             Dict con resultados de la aplicación
         """
         try:
-            logger.info(f"🔧 Aplicando {len(corrections)} correcciones...")
+            logger.info(f"🔧 Aplicando {len(corrections)} correcciones para cuenta: {account_id}...")
 
             results = {
                 "applied": 0,
@@ -440,11 +466,11 @@ class EntityQualityReviewer:
                     action = correction.get("action")
 
                     if action == "correct":
-                        success = await self._apply_type_correction(correction)
+                        success = await self._apply_type_correction(correction, account_id)
                     elif action == "delete":
-                        success = await self._apply_deletion(correction)
+                        success = await self._apply_deletion(correction, account_id)
                     elif action == "merge":
-                        success = await self._apply_merge(correction)
+                        success = await self._apply_merge(correction, account_id)
                     else:
                         success = False
                         logger.warning(f"⚠️ Acción desconocida: {action}")
@@ -476,7 +502,7 @@ class EntityQualityReviewer:
             logger.error(f"❌ Error aplicando correcciones: {e}")
             raise
 
-    async def _apply_type_correction(self, correction: Dict[str, Any]) -> bool:
+    async def _apply_type_correction(self, correction: Dict[str, Any], account_id: Optional[str] = None) -> bool:
         """Aplica una corrección de tipo de entidad."""
 
         try:
@@ -487,9 +513,10 @@ class EntityQualityReviewer:
             if not entity_id:
                 return False
 
-            # Query para cambiar el tipo y label
+            # Query para cambiar el tipo y label, filtrando por account_id
             query = f"""
             MATCH (n {{id: $entity_id}})
+            WHERE n.account_id = $account_id
             REMOVE n:`{entity.get("type", "Entity")}`
             SET n:`{new_type}`
             SET n.type = $new_type
@@ -500,6 +527,7 @@ class EntityQualityReviewer:
 
             result = await self.graph_db.execute_query(query, {
                 "entity_id": entity_id,
+                "account_id": account_id,
                 "new_type": new_type,
                 "timestamp": datetime.now().isoformat(),
                 "reason": correction.get("reason", "")
@@ -511,7 +539,7 @@ class EntityQualityReviewer:
             logger.error(f"❌ Error corrigiendo tipo de entidad: {e}")
             return False
 
-    async def _apply_deletion(self, correction: Dict[str, Any]) -> bool:
+    async def _apply_deletion(self, correction: Dict[str, Any], account_id: Optional[str] = None) -> bool:
         """Aplica una eliminación de entidad."""
 
         try:
@@ -521,13 +549,14 @@ class EntityQualityReviewer:
             if not entity_id:
                 return False
 
-            # Query para eliminar la entidad y sus relaciones
+            # Query para eliminar la entidad y sus relaciones, filtrando por account_id
             query = """
             MATCH (n {id: $entity_id})
+            WHERE n.account_id = $account_id
             DETACH DELETE n
             """
 
-            await self.graph_db.execute_query(query, {"entity_id": entity_id})
+            await self.graph_db.execute_query(query, {"entity_id": entity_id, "account_id": account_id})
 
             return True
 
@@ -535,7 +564,7 @@ class EntityQualityReviewer:
             logger.error(f"❌ Error eliminando entidad: {e}")
             return False
 
-    async def _apply_merge(self, correction: Dict[str, Any]) -> bool:
+    async def _apply_merge(self, correction: Dict[str, Any], account_id: Optional[str] = None) -> bool:
         """Aplica una fusión de entidades duplicadas."""
 
         try:
@@ -561,35 +590,42 @@ class EntityQualityReviewer:
                 await self.graph_db.execute_query("""
                     MATCH (source)-[r]->(duplicate {id: $duplicate_id})
                     MATCH (main {id: $main_id})
-                    WHERE source.id <> $main_id
+                    WHERE source.id <> $main_id 
+                    AND duplicate.account_id = $account_id
+                    AND main.account_id = $account_id
                     CREATE (source)-[new_r:MERGED_RELATION]->(main)
                     SET new_r = properties(r)
                     DELETE r
-                """, {"duplicate_id": duplicate_id, "main_id": main_id})
+                """, {"duplicate_id": duplicate_id, "main_id": main_id, "account_id": account_id})
 
                 # Transferir relaciones salientes
                 await self.graph_db.execute_query("""
                     MATCH (duplicate {id: $duplicate_id})-[r]->(target)
                     MATCH (main {id: $main_id})
                     WHERE target.id <> $main_id
+                    AND duplicate.account_id = $account_id
+                    AND main.account_id = $account_id
                     CREATE (main)-[new_r:MERGED_RELATION]->(target)
                     SET new_r = properties(r)
                     DELETE r
-                """, {"duplicate_id": duplicate_id, "main_id": main_id})
+                """, {"duplicate_id": duplicate_id, "main_id": main_id, "account_id": account_id})
 
                 # Eliminar entidad duplicada
                 await self.graph_db.execute_query("""
                     MATCH (n {id: $duplicate_id})
+                    WHERE n.account_id = $account_id
                     DELETE n
-                """, {"duplicate_id": duplicate_id})
+                """, {"duplicate_id": duplicate_id, "account_id": account_id})
 
             # Marcar la entidad principal como fusionada
             await self.graph_db.execute_query("""
                 MATCH (n {id: $main_id})
+                WHERE n.account_id = $account_id
                 SET n.merged_at = $timestamp
                 SET n.merged_count = $count
             """, {
                 "main_id": main_id,
+                "account_id": account_id,
                 "timestamp": datetime.now().isoformat(),
                 "count": len(duplicate_entities)
             })

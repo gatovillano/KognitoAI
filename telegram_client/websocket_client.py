@@ -7,7 +7,7 @@ import logging
 import websockets
 import base64
 from typing import Dict, Any, Optional, List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import jwt
 from io import BytesIO # Importar BytesIO
 
@@ -63,12 +63,24 @@ class TelegramWebSocketClient:
         self.is_running = True
         while self.is_running:
             try:
+                # Refrescar el token antes de cada intento de conexión
+                self.token = _create_bot_jwt()
+                self.uri = f"ws://core:8000/ws/{self.account_id}?token={self.token}"
+                logger.debug(f"Intentando conectar WebSocket con token actualizado.")
+
                 async with websockets.connect(self.uri) as websocket:
                     self.websocket = websocket
-                    logger.info(f"Cliente WebSocket conectado a {self.uri}")
+                    logger.info(f"Cliente WebSocket conectado satisfactoriamente.")
                     await self.listen_for_messages()
             except (websockets.exceptions.ConnectionClosedError, websockets.exceptions.InvalidURI, ConnectionRefusedError) as e:
                 logger.error(f"Error de conexión WebSocket: {e}. Reintentando en 5 segundos...")
+                self.websocket = None
+                await asyncio.sleep(5)
+            except websockets.exceptions.InvalidStatus as e:
+                if e.response.status_code == 403:
+                    logger.error("Error 403: El servidor rechazó la conexión (probablemente token expirado o inválido).")
+                else:
+                    logger.error(f"Error de estado WebSocket: {e}")
                 self.websocket = None
                 await asyncio.sleep(5)
             except Exception as e:
@@ -288,9 +300,13 @@ def _create_bot_jwt() -> str:
     payload = {
         "sub": "telegram_bot_service",
         "account_id": "telegram_bot_service",
-        "exp": datetime.utcnow() + timedelta(days=settings.jwt_expiry_days),
         "is_bot": True
     }
+    
+    # Solo añadir expiración si es mayor a 0. Si es 0, el token no expira (según utils/security.py)
+    if settings.jwt_expiry_days > 0:
+        payload["exp"] = datetime.now(timezone.utc) + timedelta(days=settings.jwt_expiry_days)
+        
     return jwt.encode(payload, settings.jwt_secret_key, algorithm="HS256")
 
 async def start_telegram_ws_client(application: Application):

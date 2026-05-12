@@ -44,6 +44,7 @@ import { KeyTopicDetailDialog } from '@/components/KeyTopicDetailDialog'; // Imp
 
 import { AnalysisDetailDialog } from './analysis-detail-dialog'; // Importar AnalysisDetailDialog
 import { DeepResearchDetailDialog } from './deep-research-detail-dialog'; // Importar DeepResearchDetailDialog
+import { DraftDetailDialog } from './draft-detail-dialog'; // Importar DraftDetailDialog
 
 
 const getAnalysisIcon = (type: string) => {
@@ -76,40 +77,29 @@ const getAnalysisIcon = (type: string) => {
   }
 };
 
-const getAnalysisTypeLabel = (type: string) => {
-  switch (type) {
-    case 'document':
-      return 'Documento';
-    case 'collection':
-      return 'Colección';
-    case 'insight':
-    case 'proactive_insight_manual':
-    case 'neural_insight':
-      return 'Insight';
-    case 'code':
-      return 'Código';
-    case 'semantic':
-      return 'Semántico';
-    case 'semantic_summary':
-      return 'Resumen Semántico';
-    case 'custom':
-      return 'Personalizado';
-    case 'knowledge_graph':
-      return 'Grafo de Conocimiento';
-    case 'note_analysis':
-      return 'Nota';
-    case 'note_collection_analysis':
-      return 'Colección de Notas';
-    case 'gap_development':
-      return 'Desarrollo de Brecha';
-    case 'deep_research':
-      return 'Investigación Profunda';
-    case 'comprehensive_web_analysis':
-      return 'Análisis Web Integral';
-    default:
-      return 'Análisis';
-  }
+const getAnalysisTypeLabel = (analysis: Analysis) => {
+    switch (analysis.type) {
+        case 'document': return 'Documento';
+        case 'collection': return 'Colección';
+        case 'insight':
+        case 'proactive_insight_manual':
+        case 'neural_insight': return 'Insight';
+        case 'code': return 'Código';
+        case 'semantic': return 'Semántico';
+        case 'semantic_summary': return 'Resumen Semántico';
+        case 'custom': return 'Personalizado';
+        case 'knowledge_graph': return 'Grafo de Conocimiento';
+        case 'note_analysis': return 'Nota';
+        case 'note_collection_analysis': return 'Colección de Notas';
+        case 'gap_development':
+            const mode = (analysis.result as any)?.mode || (analysis.result_payload as any)?.mode;
+            return mode === 'draft' ? 'Documento Borrador' : 'Investigación Profunda';
+        case 'deep_research': return 'Investigación Profunda';
+        case 'comprehensive_web_analysis': return 'Análisis Web Integral';
+        default: return 'Análisis';
+    }
 };
+
 
 const getAnalysisTypeBadgeColor = (type: string) => {
   switch (type) {
@@ -451,7 +441,7 @@ export default function AnalysisPage() {
     { value: 'code', label: 'Código' },
     { value: 'semantic', label: 'Semántico' },
     { value: 'semantic_summary', label: 'Resumen Semántico' },
-    { value: 'gap_development', label: 'Desarrollo de Brecha' },
+    { value: 'gap_development', label: 'Investigación Profunda' },
     { value: 'deep_research', label: 'Investigación Profunda' },
     { value: 'comprehensive_web_analysis', label: 'Análisis Web Integral' }
   ];
@@ -747,9 +737,10 @@ export default function AnalysisPage() {
                         <div className="p-3 rounded-2xl bg-background/50 border border-border/40 shadow-inner group-hover:scale-110 transition-transform duration-500">
                           {getAnalysisIcon(analysis.type)}
                         </div>
-                        <div className={`text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-full border-none ${getAnalysisTypeBadgeColor(analysis.type)}`}>
-                          {getAnalysisTypeLabel(analysis.type)}
-                        </div>
+                        <Badge variant="outline" className={`text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-full border-none ${getAnalysisTypeBadgeColor(analysis.type)}`}>
+                            {getAnalysisTypeLabel(analysis)}
+                        </Badge>
+
                       </div>
                       <CardTitle className="text-lg font-bold line-clamp-2 group-hover:text-primary transition-colors leading-tight tracking-tight">
                         {analysis.title}
@@ -813,8 +804,44 @@ export default function AnalysisPage() {
                             </span>
                           </div>
                           <div className="flex items-center gap-1 group-hover:text-primary transition-colors">
-                            <span>Detalles</span>
-                            <Eye className="h-3.5 w-3.5" />
+                            {(analysis.type === 'neural_insight' || analysis.type === 'insight' || analysis.type === 'proactive_insight') ? (
+                              <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 text-green-500 hover:text-green-600 hover:bg-green-50"
+                                  onClick={() => {
+                                    toast.success('Insight aceptado');
+                                  }}
+                                >
+                                  <CheckCircle className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 text-red-500 hover:text-red-600 hover:bg-red-50"
+                                  onClick={async () => {
+                                    if (confirm('¿Eliminar insight?')) {
+                                      try {
+                                        await apiClient.delete('/api/delete-analysis', { 
+                                          data: { task_id: analysis.id } 
+                                        });
+                                        handleAnalysisDeleted(analysis.id);
+                                      } catch (err) {
+                                        toast.error('Error al eliminar');
+                                      }
+                                    }
+                                  }}
+                                >
+                                  <XCircle className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            ) : (
+                              <>
+                                <span>Detalles</span>
+                                <Eye className="h-3.5 w-3.5" />
+                              </>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -849,7 +876,7 @@ export default function AnalysisPage() {
       </>
 
       {/* DIÁLOGOS DE RESULTADOS DE ANÁLISIS */}
-      {selectedAnalysis && selectedAnalysis.type !== 'deep_research' && (
+      {selectedAnalysis && selectedAnalysis.type !== 'deep_research' && selectedAnalysis.type !== 'gap_development' && (
         <AnalysisDetailDialog
           analysis={selectedAnalysis}
           isOpen={!!selectedAnalysis}
@@ -858,13 +885,51 @@ export default function AnalysisPage() {
         />
       )}
 
-      {selectedAnalysis && selectedAnalysis.type === 'deep_research' && (
-        <DeepResearchDetailDialog
-          analysis={selectedAnalysis}
-          isOpen={!!selectedAnalysis}
-          onOpenChange={(open) => !open && setSelectedAnalysis(null)}
-        />
-      )}
+      {selectedAnalysis && (() => {
+        let result = (selectedAnalysis as any).result || {};
+        if (typeof result === 'string') {
+          try { result = JSON.parse(result); } catch (e) { result = {}; }
+        }
+        
+        let result_payload = (selectedAnalysis as any).result_payload || {};
+        if (typeof result_payload === 'string') {
+          try { result_payload = JSON.parse(result_payload); } catch (e) { result_payload = {}; }
+        }
+
+        const payload = result_payload || result || {};
+        const metadata = (selectedAnalysis as any).metadata || {};
+        const report = payload.report || result.report || (selectedAnalysis as any).report || payload || {};
+        
+        // Búsqueda robusta del modo 'draft'
+        const isDraft = selectedAnalysis.type === 'gap_development' && (
+            payload.mode === 'draft' || 
+            metadata.mode === 'draft' || 
+            report.mode === 'draft' ||
+            result.mode === 'draft' ||
+            (selectedAnalysis as any).mode === 'draft' ||
+            selectedAnalysis.title.toLowerCase().includes('borrador') ||
+            selectedAnalysis.title.toLowerCase().includes('draft')
+        );
+
+        if (isDraft) {
+          return (
+            <DraftDetailDialog
+              analysis={selectedAnalysis}
+              isOpen={!!selectedAnalysis}
+              onOpenChange={(open) => !open && setSelectedAnalysis(null)}
+            />
+          );
+        } else if (selectedAnalysis.type === 'deep_research' || selectedAnalysis.type === 'gap_development') {
+          return (
+            <DeepResearchDetailDialog
+              analysis={selectedAnalysis}
+              isOpen={!!selectedAnalysis}
+              onOpenChange={(open) => !open && setSelectedAnalysis(null)}
+            />
+          );
+        }
+        return null;
+      })()}
 
       {/* Modal para generar insights */}
       <Dialog open={showInsightFormModal} onOpenChange={setShowInsightFormModal}>

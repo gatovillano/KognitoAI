@@ -34,7 +34,7 @@ export function ShareDocumentDialog({ isOpen, onOpenChange, onShareSuccess, docu
   const fetchWorkspaces = async () => {
     setIsLoadingWorkspaces(true);
     try {
-      const response = await apiClient.get('/api/workspaces');
+      const response = await apiClient.get('/api/workspaces', { params: { limit: 100 } });
       setWorkspaces(response.data.workspaces);
     } catch (error) {
       toast.error('Error al cargar los workspaces.');

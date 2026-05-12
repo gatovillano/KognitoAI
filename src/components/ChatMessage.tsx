@@ -1,5 +1,5 @@
 // ChatMessage.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import ReactDOMServer from 'react-dom/server';
 import Image from 'next/image';
 import { motion, AnimatePresence } from 'framer-motion'; // Importar motion
@@ -9,11 +9,11 @@ import { ChatAvatar } from './ChatAvatar';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTrigger } from '@/components/ui/dialog';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { ExternalLink, BrainCircuit, ChevronDown, ChevronUp, Check, X, Edit3 } from 'lucide-react';
+import { ExternalLink, BrainCircuit, ChevronDown, ChevronUp, Check, X, Edit3, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
 import { Copy, Play, Loader2, Pause, RefreshCw, Folder, File as FileIcon, Notebook, Network, Download } from 'lucide-react';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 import { Source, SourceButton, ContentPart } from '@/components/SourceButton';
-import { processMessageWithCitations, collectSourcesFromMessage } from '@/lib/chatUtils';
+import { processMessageWithCitations, collectSourcesFromMessage, getSourceIdentityKey } from '@/lib/chatUtils';
 import { useUserSettings } from '@/contexts/UserSettingsContext';
 
 export interface Artifact {
@@ -35,12 +35,14 @@ interface ChatMessageProps {
   msg: {
     text: string;
     sender: 'user' | 'ai';
+    created_at: string;
+    model_name?: string;
     image_base64?: string;
     images_base64?: string[];
     document_url?: string;
     artifact?: Artifact;
     ragContext?: any[];
-    sources?: Source[];
+    sources?: any[];
     chunks?: string[];
     reasoning?: string;
     reasoning_chunks?: string[];
@@ -50,13 +52,20 @@ interface ChatMessageProps {
   index: number;
   handleCopyMessage: (text: string) => void;
   handleRetry: (text: string) => void;
+  handleDeleteMessage?: (msg: { text: string; sender: 'user' | 'ai'; created_at: string }) => void;
   handlePlayAudio: (text: string, index: number) => void;
   isAudioLoading: boolean;
   playingMessageIndex: number | null;
   isAudioPaused: boolean;
   children?: React.ReactNode; // Añadir la propiedad children
-  onSourceClick?: (source: Source) => void;
+  onSourceClick?: (source: any) => void;
   scrollToBottom?: (behavior?: 'smooth' | 'auto', force?: boolean) => void;
+  responsePosition?: {
+    current: number;
+    total: number;
+  };
+  onPrevResponse?: () => void;
+  onNextResponse?: () => void;
 }
 
 
@@ -232,11 +241,12 @@ const ToolCallBlock = ({ part, scrollToBottom }: { part: MessageContentPart, scr
   );
 };
 
-export const ChatMessage: React.FC<ChatMessageProps> = ({
+const ChatMessageComponent: React.FC<ChatMessageProps> = ({
   msg,
   index,
   handleCopyMessage,
   handleRetry,
+  handleDeleteMessage,
   handlePlayAudio,
   isAudioLoading,
   playingMessageIndex,
@@ -244,6 +254,9 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
   children,
   onSourceClick,
   scrollToBottom,
+  responsePosition,
+  onPrevResponse,
+  onNextResponse,
 }) => {
   const { settings } = useUserSettings();
   const [isEditing, setIsEditing] = useState(false);
@@ -251,21 +264,48 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
 
   // Determinar si está pensando solamente (para el fallback)
   const hasReasoning = !!(msg.reasoning || (msg.reasoning_chunks && msg.reasoning_chunks.length > 0));
-  const isThinkingOnly = !!(hasReasoning && !msg.text && (!msg.chunks || msg.chunks.length === 0));
+  const isThinkingOnly = !!(hasReasoning && !msg.text && msg.chunks !== undefined);
 
-  // Obtener nombre amigable del modelo
-  const displayModelName = settings?.llm_model
-    ? settings.llm_model.split('/').pop()?.split(':')[0]
-    : 'Assistant';
+  const displayModelName = useMemo(() => {
+    const rawModelName = msg.model_name || settings?.llm_model;
+    return rawModelName
+      ? rawModelName.split('/').pop()?.split(':')[0]
+      : 'Assistant';
+  }, [msg.model_name, settings?.llm_model]);
 
-  // Recolectar fuentes unificadas
-  const { additionalSources: uniqueSources } = collectSourcesFromMessage(msg.sources, msg.ragContext);
+  const { citationSources, additionalSources } = useMemo(() => {
+    return collectSourcesFromMessage(msg.sources, msg.ragContext);
+  }, [msg.sources, msg.ragContext]);
 
-  // Recolectar imágenes
-  const imagesToShow = Array.from(new Set([
-    ...(msg.image_base64 ? [msg.image_base64] : []),
-    ...(msg.images_base64 || []),
-  ]));
+  const citationText = useMemo(() => {
+    if (msg.content_parts && msg.content_parts.length > 0) {
+      return msg.content_parts
+        .filter((part) => part.type === 'text')
+        .map((part) => part.content)
+        .join('\n\n');
+    }
+
+    return msg.text;
+  }, [msg.content_parts, msg.text]);
+
+  const { citedSources: parsedCitedSources, resolvedSources } = useMemo(() => {
+    return processMessageWithCitations(citationText, citationSources);
+  }, [citationText, citationSources]);
+
+  const citationNumberBySource = useMemo(() => {
+    return new Map(resolvedSources.map((source, index) => [getSourceIdentityKey(source), index + 1]));
+  }, [resolvedSources]);
+
+  const displaySources = parsedCitedSources.length > 0
+    ? parsedCitedSources
+    : (citationSources.length > 0 ? citationSources : additionalSources);
+
+  const imagesToShow = useMemo(() => {
+    return Array.from(new Set([
+      ...(msg.image_base64 ? [msg.image_base64] : []),
+      ...(msg.images_base64 || []),
+    ]));
+  }, [msg.image_base64, msg.images_base64]);
 
   const handleEdit = () => setIsEditing(true);
   const handleSave = () => {
@@ -335,7 +375,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
               )}
             </div>
           </div>
-          <div className="flex items-center gap-1 mt-0 mr-12 opacity-0 group-hover:opacity-100">
+          <div className="flex items-center gap-1 mt-0 mr-12 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all">
             <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => handleCopyMessage(msg.text)}><Copy className="h-3 w-3" /></Button>
             {isEditing ? (
               <>
@@ -346,6 +386,15 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
               <>
                 <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => handleRetry(msg.text)}><RefreshCw className="h-3 w-3" /></Button>
                 <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={handleEdit}><Edit3 className="h-3 w-3" /></Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-8 p-0 text-red-600"
+                  onClick={() => handleDeleteMessage?.({ text: msg.text, sender: msg.sender, created_at: msg.created_at })}
+                  title="Eliminar mensaje"
+                >
+                  <Trash2 className="h-3 w-3" />
+                </Button>
               </>
             )}
           </div>
@@ -368,14 +417,14 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
                 {msg.content_parts && msg.content_parts.length > 0 ? (
                   msg.content_parts.map((part, idx) => {
                     if (part.type === 'reasoning') {
-                      const isLastReasoning = idx === msg.content_parts!.length - 1 && !msg.text;
+                      const isLastReasoning = idx === msg.content_parts!.length - 1 && !msg.text && msg.chunks !== undefined;
                       return <ReasoningBlock key={idx} content={part.content} isThinkingOnly={isLastReasoning} scrollToBottom={scrollToBottom} />;
                     }
                     if (part.type === 'tool_call') {
                       return <ToolCallBlock key={idx} part={part} scrollToBottom={scrollToBottom} />;
                     }
                     if (part.type === 'text') {
-                      const { contentParts: parts } = processMessageWithCitations(part.content, uniqueSources);
+                      const { contentParts: parts } = processMessageWithCitations(part.content, citationSources);
                       return (
                         <div key={idx} className="mb-4">
                           <MarkdownRenderer
@@ -400,7 +449,7 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
                     )}
                     <div className="mb-4">
                       {(() => {
-                        const { contentParts: parts } = processMessageWithCitations(msg.text, uniqueSources);
+                        const { contentParts: parts } = processMessageWithCitations(msg.text, citationSources);
                         return (
                           <MarkdownRenderer
                             contentParts={parts}
@@ -434,18 +483,18 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
                   </div>
                 )}
 
-                {uniqueSources.length > 0 && (
+                {displaySources.length > 0 && (
                   <div className="mt-4 pt-4 border-t border-border/10">
                     <div className="flex items-center gap-2 mb-3 text-muted-foreground">
                       <Notebook className="h-3 w-3" />
                       <span className="text-[10px] font-bold uppercase tracking-widest">Fuentes</span>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      {uniqueSources.map((source, idx) => (
+                      {displaySources.map((source, idx) => (
                         <SourceButton
                           key={idx}
                           source={source}
-                          citationNumber={idx + 1}
+                          citationNumber={citationNumberBySource.get(getSourceIdentityKey(source)) || idx + 1}
                           onSourceClick={() => onSourceClick?.(source)}
                         />
                       ))}
@@ -454,7 +503,32 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
                 )}
               </div>
               
-              <div className="flex items-center gap-1 mt-3 ml-2 opacity-0 group-hover:opacity-100 transition-all">
+              <div className="flex items-center gap-1 mt-3 ml-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all">
+                {msg.sender === 'ai' && responsePosition && responsePosition.total > 1 && (
+                  <div className="flex items-center gap-1 mr-2 px-2 py-1 rounded-xl border border-border/40 bg-muted/30">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 p-0 rounded-lg"
+                      onClick={onPrevResponse}
+                      disabled={!onPrevResponse || responsePosition.current <= 1}
+                    >
+                      <ChevronLeft className="h-3.5 w-3.5" />
+                    </Button>
+                    <span className="text-[11px] font-medium text-muted-foreground min-w-[52px] text-center">
+                      {responsePosition.current}/{responsePosition.total}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 p-0 rounded-lg"
+                      onClick={onNextResponse}
+                      disabled={!onNextResponse || responsePosition.current >= responsePosition.total}
+                    >
+                      <ChevronRight className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                )}
                 <Button variant="ghost" size="sm" className="h-9 w-9 p-0 rounded-xl" onClick={() => handleCopyMessage(msg.text)}><Copy className="h-3.5 w-3.5" /></Button>
                 <Button variant="ghost" size="sm" className="h-9 w-9 p-0 rounded-xl" onClick={() => handlePlayAudio(msg.text, index)}>
                   {playingMessageIndex === index ? (
@@ -469,6 +543,15 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
                     <Play className="h-3.5 w-3.5" />
                   )}
                 </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-9 w-9 p-0 rounded-xl text-red-600"
+                  onClick={() => handleDeleteMessage?.({ text: msg.text, sender: msg.sender, created_at: msg.created_at })}
+                  title="Eliminar mensaje"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
               </div>
             </div>
           </div>
@@ -477,3 +560,23 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
     </motion.div>
   );
 };
+
+export const ChatMessage = React.memo(ChatMessageComponent, (prevProps, nextProps) => {
+  return (
+    prevProps.msg === nextProps.msg &&
+    prevProps.index === nextProps.index &&
+    prevProps.isAudioLoading === nextProps.isAudioLoading &&
+    prevProps.playingMessageIndex === nextProps.playingMessageIndex &&
+    prevProps.isAudioPaused === nextProps.isAudioPaused &&
+    prevProps.handleCopyMessage === nextProps.handleCopyMessage &&
+    prevProps.handleRetry === nextProps.handleRetry &&
+    prevProps.handleDeleteMessage === nextProps.handleDeleteMessage &&
+    prevProps.handlePlayAudio === nextProps.handlePlayAudio &&
+    prevProps.onSourceClick === nextProps.onSourceClick &&
+    prevProps.scrollToBottom === nextProps.scrollToBottom &&
+    prevProps.responsePosition?.current === nextProps.responsePosition?.current &&
+    prevProps.responsePosition?.total === nextProps.responsePosition?.total &&
+    prevProps.onPrevResponse === nextProps.onPrevResponse &&
+    prevProps.onNextResponse === nextProps.onNextResponse
+  );
+});

@@ -210,9 +210,13 @@ async def start_knowledge_graph_analysis(
             # Registrar la tarea en la base de datos
             insert_query = text("""
                 INSERT INTO analysis_tasks (id, account_id, file_name, status, analysis_type, created_at, updated_at)
-                VALUES (:task_id, :account_id, :topic, 'pending', 'knowledge_graph_analysis', NOW(), NOW())
+                VALUES (:task_id, :account_id, :file_name, 'pending', 'knowledge_graph_analysis', NOW(), NOW())
             """)
-            await db.execute(insert_query, {"task_id": task_id, "account_id": account_id, "topic": topic})
+            await db.execute(insert_query, {
+                "task_id": task_id,
+                "account_id": account_id,
+                "file_name": f"Análisis de Grafo de Conocimiento: {topic}"
+            })
             await db.commit()
 
             # Iniciar la tarea en segundo plano

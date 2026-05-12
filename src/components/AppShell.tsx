@@ -18,6 +18,10 @@ import { useWebSocketContext } from '@/contexts/WebSocketContext';
 import { Badge } from '@/components/ui/badge';
 import { Wifi, WifiOff, AlertTriangle } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
+import { GlobalDeepResearchGraph } from './GlobalDeepResearchGraph';
+import { useTaskContext } from '@/contexts/TaskContext';
+import UploadProgressIndicator from './UploadProgressIndicator';
+import GraphProgressIndicator from './GraphProgressIndicator';
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -29,6 +33,7 @@ interface Workspace {
 }
 
 export function AppShell({ children }: AppShellProps) {
+  const { uploadTasks, analysisTasks, removeAnalysisTask } = useTaskContext();
   const isDesktop = useMediaQuery('(min-width: 768px)');
   const pathname = usePathname();
   const router = useRouter();
@@ -188,23 +193,36 @@ export function AppShell({ children }: AppShellProps) {
                 <div className="flex items-center gap-2 bg-card/40 backdrop-blur-md p-1 rounded-2xl border border-border/40">
                   <ThemeToggle />
                   <Separator orientation="vertical" className="h-6 mx-1 opacity-20" />
-                  <div className="relative group">
-                    <div className="absolute -inset-0.5 bg-gradient-to-r from-primary to-secondary rounded-xl blur opacity-30 group-hover:opacity-60 transition duration-300" />
-                    <Image src="/logo-simple.png" alt="Kognito Logo" width={36} height={36} className="relative rounded-xl border border-white/10" />
+                  <div className="relative">
+                    <Image src="/logo-simple.png" alt="Kognito Logo" width={36} height={36} className="rounded-xl" />
                   </div>
                 </div>
               </div>
             </header>
 
             <main className={`flex-1 relative z-0 ${isChatContext ? 'overflow-hidden p-0' : 'p-1 md:p-8 lg:p-10 overflow-y-auto custom-scrollbar'}`}>
-              <div className={isChatContext ? 'h-full w-full' : 'max-w-7xl mx-auto'}>
+              <div className={isChatContext ? 'h-full w-full' : 'w-full mx-auto h-full'}>
                 {children}
               </div>
             </main>
           </div>
         </div>
+
+        {/* Global Task Progress Indicators */}
+        {(uploadTasks.length > 0 || analysisTasks.length > 0) && (
+          <div className="fixed bottom-6 right-6 z-[100] w-80 space-y-4">
+            {uploadTasks.length > 0 && <UploadProgressIndicator tasks={uploadTasks} />}
+            {analysisTasks.length > 0 && (
+              <GraphProgressIndicator 
+                tasks={analysisTasks} 
+                onDismiss={(taskId) => removeAnalysisTask(taskId)} 
+              />
+            )}
+          </div>
+        )}
+
+        <GlobalDeepResearchGraph />
       </SearchProvider>
     </LoadingProvider>
   );
 }
-

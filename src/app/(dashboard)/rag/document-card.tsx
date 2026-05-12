@@ -1,7 +1,7 @@
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { MoreHorizontal, FileText, Edit, Trash2, ScanSearch, Text, Share2 } from 'lucide-react';
+import { MoreHorizontal, FileText, Edit, Trash2, ScanSearch, Text, Share2, Sparkles } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -15,6 +15,7 @@ interface DocumentCardProps {
   onDelete: (doc: Document) => void;
   onAnalyze: (doc: Document) => void;
   onShare: (doc: Document) => void;
+  onSummarize: (doc: Document) => void;
   onExtractTitle: (doc: Document) => void;
   onMoveToCollection?: (doc: Document) => void;
 }
@@ -26,6 +27,7 @@ export function DocumentCard({
   onDelete,
   onAnalyze,
   onShare,
+  onSummarize,
   onExtractTitle,
   onMoveToCollection,
 }: DocumentCardProps) {
@@ -57,6 +59,10 @@ export function DocumentCard({
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => onAnalyze(document)}>
                 Analizar Documento
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onSummarize(document)}>
+                <Sparkles className="mr-2 h-4 w-4" />
+                Resumir
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => onExtractTitle(document)}>
                 Extraer Título
