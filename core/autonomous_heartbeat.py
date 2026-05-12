@@ -721,6 +721,13 @@ Objetivo:
 - Priorizar señales humanas y estratégicas por sobre chequeos técnicos.
 - Solo reportar riesgos técnicos cuando tengan impacto claro en decisiones, plazos o valor.
 
+Importante - Reconocimiento de espacios de trabajo (workspaces):
+- Cada nota, análisis, evento, hilo y memoria tiene asociado un workspace_id.
+- SOLO relacionar elementos que pertenezcan al MISMO workspace_id.
+- Si observas información de diferentes workspaces, identificar claramente cuándo NO están relacionados.
+- Cuando la información es de workspaces distintos, menciona explícitamente que pertenece a diferentes contextos.
+- El workspace actual es: {workspace_id or 'no especificado'}.
+
 Instrucciones personalizadas:
 {heartbeat_instructions}
 
