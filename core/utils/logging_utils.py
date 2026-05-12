@@ -44,19 +44,27 @@ class AgentLogger:
     def inference(self, tool_name: str, arg_name: str, value: str):
         self.logger.debug(f"{Colors.WARNING}💡 [AI]{Colors.ENDC} Inferido {arg_name} para {tool_name}: {value[:50]}...")
 
-    def info(self, msg: str):
+    def info(self, msg: str, *args):
+        if args:
+            msg = msg % args
         self.logger.debug(f"ℹ️ {msg}")
 
-    def warning(self, msg: str):
+    def warning(self, msg: str, *args):
+        if args:
+            msg = msg % args
         self.logger.warning(f"⚠️ {msg}")
 
-    def error(self, msg: str, exc_info: bool = False):
+    def error(self, msg: str, *args, exc_info: bool = False):
+        if args:
+            msg = msg % args
         self.logger.error(f"❌ {msg}", exc_info=exc_info)
 
     def isEnabledFor(self, level: int) -> bool:
         return self.logger.isEnabledFor(level)
 
-    def debug(self, msg: str):
+    def debug(self, msg: str, *args):
+        if args:
+            msg = msg % args
         self.logger.debug(msg)
 
 # Objeto global de ejemplo si se quiere usar por defecto

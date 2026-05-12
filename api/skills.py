@@ -84,7 +84,13 @@ async def run_skill(
              return {"status": "success", "message": f"La habilidad '{tool_name}' ha comenzado en segundo plano."}
         else:
             result = await target_skill._arun(**args)
-            return {"result": result, "status": "success"}
+            response_data = {"result": result, "status": "success"}
+            
+            # Si el resultado contiene un task_id, promoverlo al nivel superior para consistencia
+            if isinstance(result, dict) and "task_id" in result:
+                response_data["task_id"] = result["task_id"]
+                
+            return response_data
 
     except Exception as e:
         logger.error(f"Error ejecutando la habilidad {tool_name}: {e}", exc_info=True)

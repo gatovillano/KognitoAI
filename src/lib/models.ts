@@ -49,6 +49,9 @@ export interface Insight {
   related_items?: any[];
   action_suggestion?: string;
   questions?: (Question | string)[];
+  workspace_id?: string | null;
+  workspace_name?: string | null;
+  workspace_color?: string | null;
 }
 
 export interface Question {
@@ -137,6 +140,26 @@ export interface CodeAnalysisResultFrontend {
   dependencies?: Array<{
     library: string;
     description: string;
+  }>;
+  security_analysis?: Array<{
+    vulnerability: string;
+    description: string;
+    severity: string;
+  }>;
+  performance_analysis?: Array<{
+    area: string;
+    issue: string;
+    suggestion: string;
+  }>;
+  refactoring_opportunities?: Array<{
+    concept: string;
+    description: string;
+    benefit: string;
+  }>;
+  documentation_health?: Array<{
+    item: string;
+    status: string;
+    recommendation: string;
   }>;
   potential_issues?: Array<{
     issue: string;
@@ -231,10 +254,12 @@ export interface DeepResearchAnalysisResult {
 }
 
 export interface ProactiveInsightResult {
-  type: 'duplicidad' | 'sinergia' | 'evolucion' | 'contradiccion';
+  type: 'duplicidad' | 'sinergia' | 'evolucion' | 'contradiccion' | 'opportunity' | 'innovation' | 'synthesis' | 'follow_up' | 'deadline' | 'alert' | 'insight' | string;
+  title?: string;
   insight_message: string;
   confidence_score: number;
   action_suggestion: string;
+  innovation_potential?: string;
   related_items: any[];
   kai_synthesis?: string;
 }
@@ -267,6 +292,9 @@ export interface Analysis {
   status?: 'pending' | 'in_progress' | 'completed' | 'failed';
   error_message?: string;
   result_payload?: any;
+  workspace_id?: string | null;
+  workspace_name?: string | null;
+  workspace_color?: string | null;
 }
 
 export type AnalysisType =
@@ -290,6 +318,11 @@ export type AnalysisType =
   | 'document'
   | 'collection'
   | 'code'
+  | 'code_security'
+  | 'code_performance'
+  | 'code_refactoring'
+  | 'code_documentation'
+  | 'code_structure'
   | 'semantic'
   | 'semantic_summary'
   | 'topic_analysis'

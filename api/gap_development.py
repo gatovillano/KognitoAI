@@ -14,6 +14,7 @@ from sqlalchemy import update
 
 from core.database import GapDevelopmentAnalysis, get_db_session, Account, AnalysisTask
 from core.agents.deep_researcher import compile_deep_researcher_graph
+from core.agents.gap_developer import compile_gap_developer_graph
 from core.llm_manager import get_main_llm
 from langchain_core.language_models.base import BaseLanguageModel
 from langchain_core.messages import HumanMessage
@@ -24,18 +25,23 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Compilar el grafo una sola vez al iniciar la aplicación
+# Compilar los grafos al iniciar
 try:
     deep_researcher_graph = compile_deep_researcher_graph()
-    logger.info("Deep Researcher graph compiled successfully for gap development.")
+    gap_developer_graph = compile_gap_developer_graph()
+    logger.info("Deep Researcher and Gap Developer graphs compiled successfully.")
 except Exception as e:
-    logger.error(f"Failed to compile Deep Researcher graph for gap development: {e}", exc_info=True)
+    logger.error(f"Failed to compile graphs for gap development: {e}", exc_info=True)
     deep_researcher_graph = None
+    gap_developer_graph = None
 
 class GapDevelopmentRequest(BaseModel):
     gap_id: str
     context: Optional[str] = None
     depth: Optional[int] = 3
+    mode: Optional[str] = "research"
+    workspace_id: Optional[str] = None
+    parent_analysis_id: Optional[str] = None  # ID del análisis original que originó la brecha
 
 class GapDevelopmentStatusResponse(BaseModel):
     status: str
@@ -69,28 +75,23 @@ async def run_gap_development_analysis(
     account_id: str,
     analysis_id: str,
     context: Optional[str] = None,
-    depth: int = 3
+    depth: int = 3,
+    mode: str = "research",
+    workspace_id: Optional[str] = None,
+    parent_analysis_id: Optional[str] = None
 ):
     """
-    Ejecuta el análisis de desarrollo de brecha de manera asíncrona.
-    Esta función simula el procesamiento asíncrono que luego se implementará con Celery.
+    Ejecuta el análisis de desarrollo de brecha o la redacción del borrador.
     """
-    logger.info(f"Starting gap development analysis for gap_id: {gap_id}, account: {account_id}")
-    
-    # El registro ya fue creado por el endpoint que inició la tarea
-    logger.info(f"Starting gap development analysis for gap_id: {gap_id}, account: {account_id}, analysis_id: {analysis_id}")
+    logger.info(f"Starting gap development ({mode}) for gap_id: {gap_id}, account: {account_id}")
     
     try:
-        # Simular procesamiento (en producción, esto sería una tarea Celery)
-        logger.info(f"Analysis {analysis_id} created. Starting deep research...")
+        # Consulta para el agente
+        research_query = context if context else f"Investigar brecha: {gap_id}"
         
-        # Construir la consulta para el agente
-        research_query = context if context else f"Investigate knowledge gap with ID: {gap_id}"
-        
-        # Definir el callback de progreso
-        async def send_progress_update(progress: int, message: str, current_node: str = "main"):
-            logger.info(f"Sending progress update: {progress}% - {message} (Node: {current_node}) for analysis_id: {analysis_id}")
-            message_data = {
+        # Callback de progreso
+        async def send_progress_update(progress: int, message: str, current_node: str = "main", data: Optional[dict] = None):
+            payload = {
                 "type": "gap_development_update",
                 "status": "processing",
                 "analysis_id": analysis_id,
@@ -98,214 +99,152 @@ async def run_gap_development_analysis(
                 "progress": progress,
                 "message": message,
                 "current_node": current_node,
+                "mode": mode
             }
-            logger.info(f"WebSocket message payload: {json.dumps(message_data, indent=2)}")
+            if data:
+                payload.update(data)
+                
             await send_personal_message(
                 account_id,
-                message_data
+                payload
             )
 
-        # Ejecutar el agente deep_researcher
-        if deep_researcher_graph is None:
-            raise ValueError("Deep Researcher agent is not available.")
-        
-        inputs = {
-            "messages": [HumanMessage(content=research_query)],
-            "account_id": account_id
-        }
-        
-        config = {
-            "configurable": {
-                "account_id": account_id,
-                "thread_id": analysis_id,
-                "progress_callback": send_progress_update,
-                "base_progress": 0,  # Progreso base para el grafo principal
-                "max_sub_progress": 100, # Rango total de progreso para el grafo principal
-            }
-        }
-        
-        await send_progress_update(1, "Iniciando análisis profundo...", "main_graph_init")
-        logger.info(f"Initial progress update sent for analysis_id: {analysis_id}")
-        
-        final_state = await deep_researcher_graph.ainvoke(inputs, config=config)
-        
-        # Procesar los resultados
-        if final_state and "final_report" in final_state:
-            if final_state.get("final_report") == "CLARIFICATION":
-                clarification_question = "No clarification question found."
-                if final_state.get("messages"):
-                    clarification_question = final_state["messages"][-1].content
-                
-                # Actualizar estado a failed con mensaje de clarificación
-                async for db in get_db_session():
-                    await db.execute(
-                        update(GapDevelopmentAnalysis)
-                        .where(GapDevelopmentAnalysis.id == analysis_id)
-                        .values(
-                            status="failed",
-                            report={"error": "Clarification needed", "question": clarification_question}
-                        )
-                    )
-                    await db.commit()
-                
-                logger.warning(f"Gap development analysis {analysis_id} requires clarification.")
-                
-                # Notificar al frontend mediante WebSocket
-                await send_personal_message(
-                    account_id,
-                    {
-                        "type": "gap_development_update",
-                        "status": "failed",
-                        "analysis_id": analysis_id,
-                        "gap_id": gap_id,
-                        "message": "Clarification needed",
-                        "error": "Clarification needed",
-                        "question": clarification_question
-                    }
-                )
-                
-                return {
-                    "status": "failed",
-                    "analysis_id": analysis_id,
-                    "error": "Clarification needed",
-                    "question": clarification_question
-                }
+        # SELECCIÓN DEL AGENTE SEGÚN EL MODO
+        if mode == "draft":
+            if gap_developer_graph is None:
+                raise ValueError("Gap Developer agent is not available.")
             
-             # Estructurar el informe según el formato requerido por el frontend
-            # Deserializar formato de "override" para fuentes
+            await send_progress_update(5, "Iniciando redacción de borrador...", "init")
+            
+            # Recuperar el análisis padre si se proporcionó un ID
+            analysis_context = ""
+            if parent_analysis_id:
+                try:
+                    parent_uuid = uuid.UUID(parent_analysis_id)
+                    async for db in get_db_session():
+                        # 1. Intentar buscar en GapDevelopmentAnalysis (investigaciones previas)
+                        stmt = select(GapDevelopmentAnalysis).where(GapDevelopmentAnalysis.id == parent_uuid)
+                        res = await db.execute(stmt)
+                        parent = res.scalar_one_or_none()
+                        if parent and parent.report:
+                            analysis_context = json.dumps(parent.report, ensure_ascii=False, indent=2)
+                        
+                        # 2. Si no se encontró, intentar buscar en AnalysisTask (análisis de documentos/colecciones)
+                        if not analysis_context:
+                            stmt = select(AnalysisTask).where(AnalysisTask.id == parent_uuid)
+                            res = await db.execute(stmt)
+                            parent_task = res.scalar_one_or_none()
+                            if parent_task and parent_task.result_payload:
+                                analysis_context = json.dumps(parent_task.result_payload, ensure_ascii=False, indent=2)
+                                
+                    if analysis_context:
+                        logger.info(f"Contexto de análisis original recuperado con éxito para parent_id: {parent_analysis_id}")
+                except Exception as e:
+                    logger.error(f"Error al recuperar análisis padre {parent_analysis_id}: {e}")
+
+            inputs = {
+                "gap_id": gap_id,
+                "context": research_query,
+                "full_analysis_context": analysis_context,
+                "account_id": account_id,
+                "workspace_id": workspace_id,
+                "messages": []
+            }
+            
+            config = {
+                "configurable": {
+                    "account_id": account_id,
+                    "thread_id": analysis_id,
+                    "progress_callback": send_progress_update
+                }
+            }
+            
+            final_state = await gap_developer_graph.ainvoke(inputs, config=config)
+            
+            report_data = {
+                "summary": "Documento borrador desarrollado.",
+                "findings": final_state.get("research_results", ""),
+                "final_report": final_state.get("messages", [])[-1].content if final_state.get("messages") else "Error al generar contenido.",
+                "document_id": final_state.get("document_id"),
+                "sources": final_state.get("sources", []),
+                "visual_schema": final_state.get("visual_schema")
+            }
+        else:
+            # Modo investigación profunda (existente)
+            if deep_researcher_graph is None:
+                raise ValueError("Deep Researcher agent is not available.")
+            
+            inputs = {"messages": [HumanMessage(content=research_query)], "account_id": account_id}
+            config = {"configurable": {"account_id": account_id, "thread_id": analysis_id, "progress_callback": send_progress_update, "base_progress": 0, "max_sub_progress": 100}}
+            
+            await send_progress_update(1, "Iniciando análisis profundo...", "main_graph_init")
+            final_state = await deep_researcher_graph.ainvoke(inputs, config=config)
+            
+            # (Resto de la lógica de procesamiento para investigación profunda...)
+            # [Mantener lógica original para el modo research]
+            
+            if final_state.get("final_report") == "CLARIFICATION":
+                # ... (Lógica de clarificación existente)
+                clarification_question = final_state["messages"][-1].content if final_state.get("messages") else "No clarification question found."
+                async for db in get_db_session():
+                    await db.execute(update(GapDevelopmentAnalysis).where(GapDevelopmentAnalysis.id == analysis_id).values(status="failed", report={"error": "Clarification needed", "question": clarification_question}))
+                    await db.commit()
+                await send_personal_message(account_id, {"type": "gap_development_update", "status": "failed", "analysis_id": analysis_id, "gap_id": gap_id, "message": "Clarification needed", "error": "Clarification needed", "question": clarification_question})
+                return {"status": "failed", "analysis_id": analysis_id}
+
             final_sources = final_state.get("sources", [])
             if isinstance(final_sources, dict) and final_sources.get("type") == "override":
                 final_sources = final_sources.get("value", [])
-            
+
             report_data = {
-                "summary": final_state.get("summary", final_state.get("final_report", "")[:500]),  # Resumen corto para la lista
-                "findings": final_state.get("findings", final_state.get("final_report", "")),  # Hallazgos detallados
-                "final_report": final_state.get("final_report", ""),  # Texto completo para el componente
+                "summary": final_state.get("summary", final_state.get("final_report", "")[:500]),
+                "findings": final_state.get("findings", final_state.get("final_report", "")),
+                "final_report": final_state.get("final_report", ""),
                 "sources": final_sources,
-                "recommendations": final_state.get("recommendations", [])
+                "recommendations": final_state.get("recommendations", []),
+                "visual_schema": final_state.get("visual_schema")
             }
-            
-            # Actualizar estado a completed
-            async for db in get_db_session():
-                await db.execute(
-                    update(GapDevelopmentAnalysis)
-                    .where(GapDevelopmentAnalysis.id == analysis_id)
-                    .values(
-                        status="completed",
-                        report=report_data
-                    )
-                )
-                
-                # --- UNIFICATION: Save to AnalysisTask for Dashboard Visibility ---
-                # Create a corresponding AnalysisTask so it shows up in the main analysis list
-                analysis_task = AnalysisTask(
-                    account_id=uuid.UUID(account_id),
-                    file_name=f"Investigación Profunda: {research_query[:50]}...",
-                    analysis_type="gap_development",
-                    status="completed",
-                    result_payload={
-                        "report": report_data,
-                        "tool_used": "deep_researcher_graph",
-                        "analysis_metadata": {
-                            "source": "gap_development_endpoint",
-                            "gap_id": gap_id,
-                            "original_analysis_id": analysis_id,
-                            "created_at": datetime.now().isoformat()
-                        }
-                    }
-                )
-                db.add(analysis_task)
-                
-                await db.commit()
-            
-            logger.info(f"Gap development analysis {analysis_id} completed successfully.")
-            
-            # Notificar al frontend mediante WebSocket
-            await send_personal_message(
-                account_id,
-                {
-                    "type": "gap_development_update",
-                    "status": "completed",
-                    "analysis_id": analysis_id,
-                    "gap_id": gap_id,
-                    "message": "Analysis completed successfully",
-                    "report": report_data
-                }
-            )
-            
-            return {
-                "status": "completed",
-                "analysis_id": analysis_id,
-                "report": report_data
-            }
-        else:
-            error_msg = "The deep research process finished, but no final report was generated."
-            logger.error(f"Gap development analysis {analysis_id} failed: {error_msg}")
-            
-            async for db in get_db_session():
-                await db.execute(
-                    update(GapDevelopmentAnalysis)
-                    .where(GapDevelopmentAnalysis.id == analysis_id)
-                    .values(
-                        status="failed",
-                        report={"error": error_msg}
-                    )
-                )
-                await db.commit()
-            
-            # Notificar al frontend mediante WebSocket
-            await send_personal_message(
-                account_id,
-                {
-                    "type": "gap_development_update",
-                    "status": "failed",
-                    "analysis_id": analysis_id,
-                    "gap_id": gap_id,
-                    "message": "Analysis failed",
-                    "error": error_msg
-                }
-            )
-            
-            return {
-                "status": "failed",
-                "analysis_id": analysis_id,
-                "error": error_msg
-            }
-    
-    except Exception as e:
-        logger.error(f"Error in gap development analysis {gap_id}: {e}", exc_info=True)
-        
-        # Actualizar estado a failed
+
+        # FINALIZACIÓN COMÚN
         async for db in get_db_session():
             await db.execute(
                 update(GapDevelopmentAnalysis)
-                .where(GapDevelopmentAnalysis.gap_id == gap_id)
-                .where(GapDevelopmentAnalysis.account_id == account_id)
-                .values(
-                    status="failed",
-                    report={"error": str(e)}
-                )
+                .where(GapDevelopmentAnalysis.id == analysis_id)
+                .values(status="completed", report=report_data)
             )
+            
+            analysis_task = AnalysisTask(
+                account_id=uuid.UUID(account_id),
+                file_name=f"{'Borrador' if mode == 'draft' else 'Investigación'}: {research_query[:50]}...",
+                analysis_type="gap_development",
+                status="completed",
+                result_payload={"report": report_data, "mode": mode, "document_id": report_data.get("document_id")}
+            )
+            db.add(analysis_task)
             await db.commit()
         
-        # Notificar al frontend mediante WebSocket
         await send_personal_message(
             account_id,
             {
                 "type": "gap_development_update",
-                "status": "failed",
-                "analysis_id": str(uuid.uuid4()),
+                "status": "completed",
+                "analysis_id": analysis_id,
                 "gap_id": gap_id,
-                "message": "Analysis failed with error",
-                "error": str(e)
+                "message": "Operación completada con éxito",
+                "report": report_data,
+                "mode": mode
             }
         )
-        
-        return {
-            "status": "failed",
-            "analysis_id": str(uuid.uuid4()),
-            "error": str(e)
-        }
+        return {"status": "completed", "analysis_id": analysis_id, "report": report_data}
+    
+    except Exception as e:
+        logger.error(f"Error in gap development analysis {gap_id}: {e}", exc_info=True)
+        # ... (Lógica de error existente)
+        async for db in get_db_session():
+            await db.execute(update(GapDevelopmentAnalysis).where(GapDevelopmentAnalysis.id == analysis_id).values(status="failed", report={"error": str(e)}))
+            await db.commit()
+        await send_personal_message(account_id, {"type": "gap_development_update", "status": "failed", "analysis_id": analysis_id, "gap_id": gap_id, "message": "Analysis failed", "error": str(e)})
+        return {"status": "failed", "error": str(e)}
 
 @router.post("/gap-development/", response_model=GapDevelopmentStatusResponse)
 async def start_gap_development(
@@ -316,13 +255,7 @@ async def start_gap_development(
     llm_instance: BaseLanguageModel = Depends(get_llm_instance)
 ):
     """
-    Inicia una investigación profunda sobre una brecha de conocimiento.
-    
-    Este endpoint:
-    1. Valida los permisos del usuario
-    2. Crea un registro inicial en la base de datos
-    3. Inicia el procesamiento asíncrono
-    4. Devuelve el estado inicial
+    Inicia una investigación profunda o el desarrollo de un borrador sobre una brecha.
     """
     # Obtener la cuenta del usuario
     account = await db.get(Account, uuid.UUID(current_account_id))
@@ -332,20 +265,17 @@ async def start_gap_development(
     # Validar permisos
     validate_user_role(account)
     
-    logger.info(f"Received gap development request for gap_id: {request.gap_id} by account {account.id}")
+    logger.info(f"Received gap development request ({request.mode}) for gap_id: {request.gap_id} by account {account.id}")
+    logger.info(f"--- DEBUG: Request payload mode: {request.mode} ---")
     
     # Validar que gap_id sea un UUID válido, o generar uno determinístico si es texto
     try:
         target_gap_id = uuid.UUID(request.gap_id)
-        logger.info(f"Using provided UUID for gap_id: {target_gap_id}")
     except ValueError:
-        # Generar un UUID v5 basado en el texto de la pregunta para que sea determinístico
-        # Usamos un namespace fijo para Kognito AI
-        KOGNITO_NAMESPACE = uuid.UUID('6ba7b810-9dad-11d1-80b4-00c04fd430c8') # DNS namespace as base
+        KOGNITO_NAMESPACE = uuid.UUID('6ba7b810-9dad-11d1-80b4-00c04fd430c8')
         target_gap_id = uuid.uuid5(KOGNITO_NAMESPACE, request.gap_id)
-        logger.info(f"Generated deterministic UUID for text gap_id: {target_gap_id}")
 
-    # Verificar si ya existe un análisis en progreso para esta brecha
+    # Verificar si ya existe un análisis en progreso
     existing_stmt = select(GapDevelopmentAnalysis).where(
         GapDevelopmentAnalysis.gap_id == target_gap_id,
         GapDevelopmentAnalysis.account_id == account.id,
@@ -355,7 +285,6 @@ async def start_gap_development(
     existing_analysis = existing_result.scalars().first()
     
     if existing_analysis:
-        logger.warning(f"Existing analysis in progress for gap_id {request.gap_id}")
         return GapDevelopmentStatusResponse(
             status=existing_analysis.status,
             gap_id=request.gap_id,
@@ -368,30 +297,31 @@ async def start_gap_development(
         gap_id=target_gap_id,
         account_id=account.id,
         status="pending",
-        report={}
+        report={"mode": request.mode}
     )
     db.add(new_analysis)
     await db.commit()
     await db.refresh(new_analysis)
     analysis_id = str(new_analysis.id)
     
-    # Iniciar procesamiento asíncrono (en producción, esto sería una tarea Celery)
+    # Iniciar procesamiento asíncrono
     background_tasks.add_task(
         run_gap_development_analysis,
         str(target_gap_id),
         str(account.id),
         analysis_id,
         request.context,
-        request.depth
+        request.depth or 3,
+        request.mode or "research",
+        request.workspace_id,
+        request.parent_analysis_id
     )
-    
-    logger.info(f"Gap development analysis {analysis_id} started for gap_id: {request.gap_id}")
     
     return GapDevelopmentStatusResponse(
         status="pending",
         gap_id=request.gap_id,
         analysis_id=analysis_id,
-        message="Analysis started successfully"
+        message=f"Gap development ({request.mode}) started successfully"
     )
 
 @router.get("/gap-development/{analysis_id}", response_model=GapDevelopmentResultResponse)

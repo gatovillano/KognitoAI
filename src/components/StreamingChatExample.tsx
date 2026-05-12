@@ -21,7 +21,7 @@ export const StreamingChatExample: React.FC<StreamingChatExampleProps> = ({
   const { sendMessage, isLoading, currentResponse } = useStreamingChat({
     onChunk: (chunk) => {
       // Actualización en tiempo real del texto que se está escribiendo
-      console.log('Nuevo chunk recibido:', chunk);
+      // console.log('Nuevo chunk recibido:', chunk);
     },
     onComplete: (fullResponse) => {
       // Cuando se completa la respuesta, agregarla al historial

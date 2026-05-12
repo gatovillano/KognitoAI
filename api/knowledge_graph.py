@@ -1,6 +1,6 @@
 # api/knowledge_graph.py
 
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Query
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Query, Request
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional, Literal
 import logging
@@ -16,6 +16,7 @@ from knowledge_graph.entity_quality_reviewer import EntityQualityReviewer
 from knowledge_graph.trend_analyzer import TrendAnalyzer
 from utils.security import get_current_user
 from utils.knowledge_graph_service import KnowledgeGraphService
+from utils.limiter import limiter
 
 logger = logging.getLogger(__name__)
 
@@ -543,7 +544,7 @@ async def apply_corrections(
         reviewer = EntityQualityReviewer(graph_db=db)
 
         # Aplicar correcciones
-        results = await reviewer.apply_corrections(corrections, auto_apply)
+        results = await reviewer.apply_corrections(corrections, auto_apply, account_id=current_user['account_id'])
 
         return GraphResponse(
             success=True,
@@ -711,11 +712,10 @@ async def detect_trends(
         logger.info(f"📈 Detectando tendencias en '{dataset_name}' para {time_window}")
 
         # Inicializar integración
-        db = get_graph_db()
-        cognee_integration = CogneeIntegration(db)
+        graph_integration = get_graph_integration()
 
         # Detectar tendencias
-        trends_result = await cognee_integration.detect_trends(
+        trends_result = await graph_integration.detect_trends(
             dataset_name=dataset_name,
             time_window=time_window,
             trend_threshold=trend_threshold,
@@ -750,11 +750,10 @@ async def temporal_analysis(
         logger.info(f"🕒 Iniciando análisis temporal completo para '{dataset_name}'")
 
         # Inicializar integración
-        db = get_graph_db()
-        cognee_integration = CogneeIntegration(db)
+        graph_integration = get_graph_integration()
 
         # Realizar análisis temporal
-        temporal_result = await cognee_integration.analyze_temporal_patterns(
+        temporal_result = await graph_integration.analyze_temporal_patterns(
             dataset_name=dataset_name,
             analysis_types=analysis_types
         )
@@ -785,11 +784,10 @@ async def get_trend_summary(
         logger.info(f"📊 Obteniendo resumen de tendencias para '{dataset_name}'")
 
         # Inicializar integración
-        db = get_graph_db()
-        cognee_integration = CogneeIntegration(db)
+        graph_integration = get_graph_integration()
 
         # Obtener tendencias con umbral bajo para resumen
-        trends_result = await cognee_integration.detect_trends(
+        trends_result = await graph_integration.detect_trends(
             dataset_name=dataset_name,
             time_window=time_window,
             trend_threshold=0.5,  # Umbral más bajo para resumen
@@ -834,7 +832,7 @@ async def get_available_datasets(
         
         # Construir query para obtener datasets únicos
         params = {'account_id': current_user['account_id']}
-        where_clauses = ["(n.account_id = $account_id OR n.account_id IS NULL)", "n.dataset_name IS NOT NULL"]
+        where_clauses = ["n.account_id = $account_id", "n.dataset_name IS NOT NULL"]
 
         if workspace_id and workspace_id.lower() != "all":
             if workspace_id.lower() == "global_context":
@@ -878,7 +876,9 @@ async def get_available_datasets(
 
 
 @router.get("/data", response_model=GraphResponse)
+@limiter.limit("1000/minute")
 async def get_knowledge_graph_data(
+    request: Request,
     workspace_id: Optional[str] = None,
     dataset_name: Optional[str] = None,
     limit: int = 100,
@@ -898,7 +898,7 @@ async def get_knowledge_graph_data(
         params = {'account_id': current_user['account_id'], 'limit': limit}
 
         # Construir la cláusula WHERE dinámicamente
-        where_clauses = ["(n.account_id = $account_id OR n.account_id IS NULL)"]
+        where_clauses = ["n.account_id = $account_id"]
 
         if workspace_id and workspace_id.lower() != "all":
             if workspace_id.lower() == "global_context":
@@ -936,7 +936,7 @@ async def get_knowledge_graph_data(
         MATCH (n)
         {where_statement}
         OPTIONAL MATCH (n)-[r]-(m)
-        WHERE (m.account_id = $account_id OR m.account_id IS NULL OR m IS NULL)
+        WHERE m.account_id = $account_id
         {rel_where_clause}
         {node_type_filter}
         RETURN n, r, m
@@ -966,23 +966,29 @@ async def get_knowledge_graph_data(
 
                 if isinstance(node, dict):
                     node_id_str = str(node.get('id'))
-                    node_label = node.get("name", node.get("label", node_id_str))
-                    node_type = node.get('type', 'Desconocido') # Preferir la propiedad 'type'
-                    if node_type == 'Desconocido' and node.get('labels'): # Si no hay propiedad 'type', intentar con las etiquetas de Neo4j
-                         node_type = node['labels'][0] if node['labels'] else 'Desconocido'
-                    node_name_for_title = node.get('name', node.get('label', ''))
+                    node_label = node.get("name") or node.get("title") or node.get("label") or node_id_str
+                    # Preferir 'type', luego 'node_type' (nodos MEMORY), luego primer label Neo4j
+                    node_type = node.get('type') or node.get('node_type', 'Desconocido')
+                    if (not node_type or node_type == 'Desconocido') and node.get('labels'):
+                        labels = node['labels']
+                        # Para nodos multi-label (ej: MEMORY + USER_MEMORY), preferir el más específico
+                        node_type = next((l for l in labels if l != 'MEMORY'), labels[0]) if labels else 'Desconocido'
+                    node_name_for_title = node.get("name") or node.get("title") or node.get("label", "")
                     all_properties = node
                 elif hasattr(node, 'id') and hasattr(node, 'labels') and hasattr(node, 'items'): # neo4j.graph.Node object
                     node_id_str = str(node.id)
-                    # Tomar el primer label de Neo4j como el tipo principal
-                    if node.labels:
-                        node_type = list(node.labels)[0]
-                    else:
-                        node_type = getattr(node, 'type', 'Desconocido') # Fallback a la propiedad 'type' si no hay labels
+                    node_props = dict(node)
+                    # Preferir propiedad 'type' o 'node_type', luego labels (priorizando sublabels sobre 'MEMORY')
+                    node_type = node_props.get('type') or node_props.get('node_type')
+                    if not node_type and node.labels:
+                        labels = list(node.labels)
+                        node_type = next((l for l in labels if l != 'MEMORY'), labels[0])
+                    if not node_type:
+                        node_type = 'Desconocido'
 
-                    node_label = getattr(node, 'name', getattr(node, 'label', node_id_str))
-                    node_name_for_title = getattr(node, 'name', getattr(node, 'label', ''))
-                    all_properties = dict(node) # Convertir a dict para propiedades
+                    node_label = getattr(node, 'name', getattr(node, 'title', getattr(node, 'label', node_id_str)))
+                    node_name_for_title = getattr(node, 'name', getattr(node, 'title', getattr(node, 'label', '')))
+                    all_properties = node_props
 
                 # Lógica para generar etiquetas más descriptivas
                 if node_type == "IDEA_PROFILE":
@@ -1055,7 +1061,9 @@ async def get_knowledge_graph_data(
         )
 
 @router.get("/metadata", response_model=GraphResponse)
+@limiter.limit("1000/minute")
 async def get_graph_metadata(
+    request: Request,
     workspace_id: Optional[str] = None,
     dataset_name: Optional[str] = None,
     current_user: dict = Depends(get_current_user)
@@ -1068,7 +1076,7 @@ async def get_graph_metadata(
         params = {'account_id': current_user['account_id']}
         
         # Construir cláusula WHERE base
-        where_clauses = ["(n.account_id = $account_id OR n.account_id IS NULL)"]
+        where_clauses = ["n.account_id = $account_id"]
 
         if workspace_id and workspace_id.lower() != "all":
             if workspace_id.lower() == "global_context":
@@ -1361,26 +1369,34 @@ async def get_all_active_progress(
 @router.post("/process-memories", response_model=GraphResponse)
 async def process_memories_endpoint(
     background_tasks: BackgroundTasks,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    force: bool = False,
 ):
     """
-    Dispara manualmente el procesamiento de memorias del usuario actual
-    para actualizarlas en el grafo de conocimiento.
+    Dispara manualmente el procesamiento de memorias del usuario actual.
+    Usa ?force=true para resetear el flag y reprocesar todas las memorias.
     """
     try:
-        account_id = current_user.get("uid")
+        account_id = current_user.get("account_id")
         if not account_id:
             raise HTTPException(status_code=400, detail="Usuario no identificado")
 
         from knowledge_graph.memory_graph_processor import process_memory_batches
-        
+        from knowledge_graph.progress_tracker import create_progress_tracker
+        import uuid as _uuid
+
+        task_id = str(_uuid.uuid4())[:8]
+        # Registrar el tracker antes del background task para que el polling
+        # lo encuentre de inmediato
+        create_progress_tracker(task_id=task_id, processing_mode="memory", total_phases=5)
+
         # Ejecutar en background para no bloquear
-        background_tasks.add_task(process_memory_batches, account_id=account_id)
-        
+        background_tasks.add_task(process_memory_batches, account_id=account_id, task_id=task_id, force=force)
+
         return GraphResponse(
             success=True,
-            message="Procesamiento de memorias iniciado en segundo plano.",
-            data={"account_id": account_id}
+            message=f"Procesamiento de memorias iniciado {'(forzado)' if force else 'en segundo plano'}.",
+            data={"account_id": account_id, "task_id": task_id, "force": force}
         )
     except Exception as e:
         logger.error(f"Error al iniciar procesamiento de memorias: {e}")

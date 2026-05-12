@@ -242,6 +242,28 @@ class DeepResearchToolLiteLLM(BaseTool):
         logger.warning(f"⚠️ No se pudo mapear el modelo '{litellm_model}', usando formato OpenAI")
         return f"openai:{litellm_model}"
 
+    def _run(
+        self,
+        query: str,
+        max_iterations: int = 6,
+        max_concurrent_units: int = 3
+    ) -> str:
+        """
+        Ejecución sincrónica (fallback).
+        """
+        import asyncio
+        try:
+            # Intentar ejecutar de forma asíncrona en el bucle actual o uno nuevo
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    return "Error: Esta herramienta requiere ejecución asíncrona."
+                return loop.run_until_complete(self._arun(query, max_iterations, max_concurrent_units))
+            except RuntimeError:
+                return asyncio.run(self._arun(query, max_iterations, max_concurrent_units))
+        except Exception as e:
+            return f"Error en ejecución sincrónica de Deep Research: {str(e)}"
+
     async def _arun(
         self,
         query: str,

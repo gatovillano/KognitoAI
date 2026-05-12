@@ -18,6 +18,7 @@ interface QuestionSliderProps {
   slideInterval?: number;
   showCounter?: boolean;
   onDevelopClick?: () => void;
+  hideDevelopButtons?: boolean;
 }
 
 export function QuestionSlider({
@@ -30,7 +31,8 @@ export function QuestionSlider({
   autoSlide = true,
   slideInterval = 4000,
   showCounter = true,
-  onDevelopClick
+  onDevelopClick,
+  hideDevelopButtons
 }: QuestionSliderProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isHovered, setIsHovered] = useState(false);
@@ -202,6 +204,7 @@ export function QuestionSlider({
       questions={questions}
       title={title}
       onDevelopClick={onDevelopClick}
+      hideDevelopButtons={hideDevelopButtons}
     />
   </>
   );

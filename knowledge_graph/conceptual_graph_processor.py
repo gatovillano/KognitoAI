@@ -6,6 +6,7 @@ Crea un grafo donde cada nodo es una idea/concepto expresado como cita textual.
 import logging
 import uuid
 import asyncio
+import time
 from typing import Dict, Any, List, Optional, Tuple, TYPE_CHECKING
 from datetime import datetime
 import re
@@ -38,6 +39,7 @@ class ConceptualGraphProcessor:
                  enable_parallel_processing=True,
                  max_parallel_batches=4,
                  max_parallel_documents=10,
+                 max_parallel_llm_calls=5,
                  cache_size_limit=1000,
                  progress_tracker: Optional["ProgressTracker"] = None):
         """
@@ -51,6 +53,7 @@ class ConceptualGraphProcessor:
             enable_parallel_processing: Habilitar procesamiento paralelo de lotes
             max_parallel_batches: Máximo número de lotes de relaciones a procesar en paralelo
             max_parallel_documents: Máximo número de documentos a procesar en paralelo
+            max_parallel_llm_calls: Máximo número de llamadas concurrentes al LLM (Semáforo)
             cache_size_limit: Límite de tamaño del caché (0 = sin límite)
             progress_tracker: Tracker opcional para reportar progreso
         """
@@ -65,7 +68,19 @@ class ConceptualGraphProcessor:
         self.enable_parallel_processing = enable_parallel_processing
         self.max_parallel_batches = max_parallel_batches
         self.max_parallel_documents = max_parallel_documents
+        self.max_parallel_llm_calls = max_parallel_llm_calls
         self.cache_size_limit = cache_size_limit
+        
+        # Rate limiting para evitar exceder límites de LLM (20 requests/min para modelos gratuitos)
+        self.llm_rate_limit_per_minute = 20  # Límite seguro para modelos gratuitos
+        self.llm_min_interval = 60.0 / self.llm_rate_limit_per_minute  # Intervalo mínimo entre llamadas
+        self.last_llm_call_time = 0.0  # Timestamp de la última llamada LLM
+
+        # Semáforo para control de concurrencia de LLM
+        self.llm_semaphore = asyncio.Semaphore(max_parallel_llm_calls)
+        
+        # Lock para rate limiting thread-safe
+        self._rate_limit_lock = asyncio.Lock()
 
         # Cache para resultados de LLM con límite de tamaño
         self.llm_cache = {}
@@ -141,8 +156,11 @@ class ConceptualGraphProcessor:
         
         try:
             # Añadir logs para LLM y fast_LLM
-            logger.info(f"💡 ConceptualGraphProcessor: LLM principal recibido: {self.llm is not None}")
-            logger.info(f"💡 ConceptualGraphProcessor: Fast LLM recibido: {self.fast_llm is not None}")
+            main_model_name = getattr(self.llm, "model", "unknown") if self.llm else "None"
+            fast_model_name = getattr(self.fast_llm, "model", "unknown") if self.fast_llm else "None"
+            
+            logger.info(f"💡 ConceptualGraphProcessor: LLM principal: {main_model_name}")
+            logger.info(f"💡 ConceptualGraphProcessor: Fast LLM: {fast_model_name}")
 
             # Inicializar Embedding Model si no se proporciona
             if not self.embedding_model:
@@ -155,6 +173,29 @@ class ConceptualGraphProcessor:
             logger.error(f"❌ Error inicializando procesador conceptual: {e}")
             raise
     
+    async def _get_llms_for_processing(self, account_id: Optional[str] = None) -> Tuple[Any, Any]:
+        """
+        Obtiene las instancias de LLM (principal y rápido) para el procesamiento,
+        priorizando la configuración del usuario si se proporciona account_id.
+        """
+        from core.llm_manager import get_llm_for_user, get_main_llm, get_fast_llm
+        
+        if account_id:
+            try:
+                llm = await get_llm_for_user(account_id, purpose="main")
+                fast_llm = await get_llm_for_user(account_id, purpose="fast")
+                
+                if llm:
+                    logger.info(f"✅ Usando LLMs personalizados para usuario {account_id}")
+                    return llm, fast_llm or llm
+                else:
+                    logger.warning(f"⚠️ No se pudo obtener LLM personalizado para {account_id}, usando globales.")
+            except Exception as e:
+                logger.error(f"❌ Error al obtener LLMs para usuario {account_id}: {e}")
+        
+        # Fallback a las instancias de la clase o globales
+        return self.llm or get_main_llm(), self.fast_llm or get_fast_llm()
+
     async def _initialize_embedding_model(self):
         """Inicializa el modelo de embeddings (Ollama/OpenAI/etc)."""
         try:
@@ -176,14 +217,17 @@ class ConceptualGraphProcessor:
         self, 
         documents: List[Dict[str, Any]], 
         dataset_name: str,
+        account_id: Optional[str] = None,
         progress_tracker: Optional["ProgressTracker"] = None
     ) -> Dict[str, Any]:
         """
         Procesa documentos extrayendo citas conceptuales y sus relaciones temáticas.
+        Persiste los resultados automáticamente en Neo4j si el adaptador está disponible.
         
         Args:
             documents: Lista de documentos con contenido
             dataset_name: Nombre del dataset
+            account_id: ID de la cuenta para multi-tenancy
             progress_tracker: Tracker opcional para reportar progreso
             
         Returns:
@@ -199,7 +243,11 @@ class ConceptualGraphProcessor:
         if not self.initialized:
             await self.initialize()
         
+        # 0. Resolver LLMs para este procesamiento (dinámico)
+        llm_main, llm_fast = await self._get_llms_for_processing(account_id)
+        
         logger.info(f"🧠 Iniciando procesamiento conceptual de {len(documents)} documentos")
+        logger.info(f"   🤖 Modelos: Main={getattr(llm_main, 'model', 'N/A')}, Fast={getattr(llm_fast, 'model', 'N/A')}")
         
         try:
             # ═══════════════════════════════════════════════════════════════
@@ -214,8 +262,16 @@ class ConceptualGraphProcessor:
                 )
             
             workspace_id = documents[0].get('metadata', {}).get('workspace_id')
-            account_id = documents[0].get('metadata', {}).get('account_id')
-            processed_documents = await self._create_document_nodes(documents, workspace_id, account_id, dataset_name)
+            if not account_id:
+                account_id = documents[0].get('metadata', {}).get('account_id')
+            
+            processed_documents = await self._create_document_nodes(
+                documents, 
+                workspace_id, 
+                account_id, 
+                dataset_name,
+                llm_fast=llm_fast
+            )
             logger.info(f"✅ NUEVA FASE 1: {len(processed_documents)} nodos DOCUMENT creados y preparados.")
             
             if tracker:
@@ -236,8 +292,54 @@ class ConceptualGraphProcessor:
                     20
                 )
             
-            conceptual_quotes = await self._extract_conceptual_quotes(processed_documents)
+            conceptual_quotes = await self._extract_conceptual_quotes(
+                processed_documents, 
+                llm_to_use=llm_fast
+            )
             logger.info(f"✅ Fase 2: {len(conceptual_quotes)} citas conceptuales extraídas")
+
+            # NUEVO: Persistencia incremental de citas
+            if self.neo4j_adapter and conceptual_quotes:
+                logger.info(f"💾 Persistiendo {len(conceptual_quotes)} citas conceptuales (incremental)...")
+                formatted_quotes = []
+                for quote in conceptual_quotes:
+                    formatted_quotes.append({
+                        "id": quote["id"],
+                        "properties": {
+                            "name": quote.get("concept", "Cita Conceptual"),
+                            "text": quote.get("text"),
+                            "concept": quote.get("concept"),
+                            "importance": quote.get("importance"),
+                            "category": quote.get("category"),
+                            "source_document": quote.get("source_document"),
+                            "source_document_id": quote.get("source_document_id"),
+                            "extraction_method": quote.get("extraction_method"),
+                            "confidence": quote.get("confidence")
+                        }
+                    })
+                await self.neo4j_adapter.create_conceptual_quote_nodes(
+                    formatted_quotes, 
+                    account_id, 
+                    documents[0].get("workspace_id") if documents else None
+                )
+
+                # NUEVO: Persistencia incremental de relación Documento -> Cita
+                doc_quotes_rels = []
+                for quote in conceptual_quotes:
+                    doc_id = quote.get("source_document_id")
+                    if doc_id:
+                        doc_quotes_rels.append({
+                            "source_id": doc_id,
+                            "target_id": quote["id"],
+                            "type": "HAS_QUOTE"
+                        })
+                
+                if doc_quotes_rels:
+                    await self.neo4j_adapter.create_conceptual_relationships(
+                        doc_quotes_rels,
+                        account_id,
+                        documents[0].get("workspace_id") if documents else None
+                    )
             
             if tracker:
                 tracker.update_phase(
@@ -260,6 +362,15 @@ class ConceptualGraphProcessor:
             thematic_relationships = await self._analyze_thematic_relationships(conceptual_quotes)
             logger.info(f"✅ Fase 3: {len(thematic_relationships)} relaciones temáticas")
             
+            # NUEVO: Persistencia incremental de relaciones
+            if self.neo4j_adapter and thematic_relationships:
+                logger.info(f"💾 Persistiendo {len(thematic_relationships)} relaciones temáticas (incremental)...")
+                await self.neo4j_adapter.create_conceptual_relationships(
+                    thematic_relationships, 
+                    account_id, 
+                    documents[0].get("workspace_id") if documents else None
+                )
+
             if tracker:
                 tracker.update_phase(
                     ProcessingPhase.CONCEPTUAL_THEMATIC_RELATIONSHIPS,
@@ -313,19 +424,28 @@ class ConceptualGraphProcessor:
             logger.info(f"   🔗 Relaciones temáticas: {len(thematic_relationships)}")
             logger.info(f"   📊 Perfiles de ideas: {len(idea_profiles)}")
             
-            # Marcar progreso como casi completo (el guardado a Neo4j se hace después)
-            if tracker:
-                tracker.update_phase(
-                    ProcessingPhase.SAVING_TO_NEO4J,
-                    f"💾 Guardando {len(conceptual_quotes)} citas y {len(thematic_relationships)} relaciones en Neo4j...",
-                    95,
-                    {
-                        "quotes_extracted": len(conceptual_quotes),
-                        "relationships_count": len(thematic_relationships),
-                        "entities_count": len(conceptual_quotes)  # Para compatibilidad
-                    }
+            # ═══════════════════════════════════════════════════════════════
+            # PERSISTENCIA (NUEVO: Integrado directamente aquí)
+            # ═══════════════════════════════════════════════════════════════
+            if self.neo4j_adapter:
+                if tracker:
+                    tracker.update_phase(
+                        ProcessingPhase.SAVING_TO_NEO4J,
+                        f"💾 Persistiendo grafo conceptual ({len(conceptual_quotes)} citas, {len(idea_profiles)} perfiles)...",
+                        95
+                    )
+                
+                await self.save_conceptual_graph(
+                    conceptual_quotes=conceptual_quotes,
+                    thematic_relationships=thematic_relationships,
+                    idea_profiles=idea_profiles,
+                    account_id=account_id,
+                    workspace_id=documents[0].get("workspace_id") if documents else None
                 )
-            
+                
+                if tracker:
+                    tracker.update_sub_progress("✅ Grafo conceptual guardado en Neo4j", 100)
+
             return result
             
         except Exception as e:
@@ -334,7 +454,139 @@ class ConceptualGraphProcessor:
                 tracker.set_error(str(e))
             raise
     
-    async def _extract_conceptual_quotes(self, documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    async def save_conceptual_graph(
+        self, 
+        conceptual_quotes: List[Dict[str, Any]], 
+        thematic_relationships: List[Dict[str, Any]], 
+        idea_profiles: List[Dict[str, Any]],
+        account_id: Optional[str] = None,
+        workspace_id: Optional[str] = None
+    ):
+        """
+        Persiste el grafo conceptual completo en Neo4j usando métodos especializados.
+        """
+        if not self.neo4j_adapter:
+            logger.warning("⚠️ No hay adaptador Neo4j configurado, saltando guardado.")
+            return
+
+        try:
+            # Asegurar que los IDs sean strings para evitar problemas de tipos en Neo4j
+            account_id = str(account_id) if account_id else None
+            workspace_id = str(workspace_id) if workspace_id else None
+
+            # 1. Guardar Citas Conceptuales
+            formatted_quotes = []
+            for quote in conceptual_quotes:
+                formatted_quotes.append({
+                    "id": quote["id"],
+                    "properties": {
+                        "name": quote.get("concept", "Cita Conceptual"),
+                        "text": quote.get("text"),
+                        "concept": quote.get("concept"),
+                        "importance": quote.get("importance"),
+                        "category": quote.get("category"),
+                        "source_document": quote.get("source_document"),
+                        "source_document_id": quote.get("source_document_id"),
+                        "extraction_method": quote.get("extraction_method"),
+                        "confidence": quote.get("confidence")
+                    }
+                })
+            
+            await self.neo4j_adapter.create_conceptual_quote_nodes(formatted_quotes, account_id, workspace_id)
+            logger.info(f"✅ {len(formatted_quotes)} citas conceptuales persistidas.")
+
+            # 2. Guardar Perfiles de Ideas
+            formatted_profiles = []
+            for profile in idea_profiles:
+                formatted_profiles.append({
+                    "id": profile["id"],
+                    "properties": {
+                        "name": profile.get("central_concept", "Perfil de Idea"),
+                        "central_concept": profile.get("central_concept"),
+                        "description": profile.get("description"),
+                        "quotes_count": profile.get("quotes_count"),
+                        "categories": profile.get("categories"),
+                        "importance_score": profile.get("importance_score"),
+                        "coherence_score": profile.get("coherence_score")
+                    }
+                })
+            
+            await self.neo4j_adapter.create_idea_profile_nodes(formatted_profiles, account_id, workspace_id)
+            logger.info(f"✅ {len(formatted_profiles)} perfiles de ideas persistidos.")
+
+            # 3. Guardar Relaciones (Usar el método genérico para relaciones)
+            formatted_relationships = []
+            
+            # Relaciones entre citas
+            for rel in thematic_relationships:
+                # Priorizar source_id/target_id si ya están presentes (relaciones de categoría/documento)
+                # Fallback a original_pair si es una relación de LLM/Similitud
+                source_id = rel.get("source_id")
+                target_id = rel.get("target_id")
+                
+                if not source_id and "original_pair" in rel:
+                    q1_idx = rel["original_pair"]["quote1_idx"]
+                    source_id = q1_idx if isinstance(q1_idx, str) else conceptual_quotes[q1_idx]["id"]
+                
+                if not target_id and "original_pair" in rel:
+                    q2_idx = rel["original_pair"]["quote2_idx"]
+                    target_id = q2_idx if isinstance(q2_idx, str) else conceptual_quotes[q2_idx]["id"]
+
+                if source_id and target_id:
+                    formatted_relationships.append({
+                        "source_id": source_id,
+                        "target_id": target_id,
+                        "type": rel["type"],
+                        "properties": {
+                            "description": rel.get("description", ""),
+                            "confidence": rel.get("confidence", 0.7)
+                        }
+                    })
+
+            # 3. Relaciones Perfil -> Cita
+            for profile in idea_profiles:
+                for quote_id in profile.get("quote_ids", []):
+                    formatted_relationships.append({
+                        "source_id": profile["id"],
+                        "target_id": quote_id,
+                        "type": "CONTAINS_IDEA",
+                        "properties": {
+                            "description": "Este perfil integra esta idea conceptual"
+                        }
+                    })
+
+            # 4. Relaciones Documento -> Cita (Importante para la trazabilidad)
+            for quote in conceptual_quotes:
+                doc_id = quote.get("source_document_id")
+                if doc_id:
+                    formatted_relationships.append({
+                        "source_id": doc_id,
+                        "target_id": quote["id"],
+                        "type": "HAS_QUOTE",
+                        "properties": {
+                            "description": "Documento contiene esta cita conceptual"
+                        }
+                    })
+
+            if formatted_relationships:
+                # CORRECCIÓN: Pasar argumentos por nombre para evitar errores de posición
+                await self.neo4j_adapter.add_cognee_results_to_graph(
+                    entities=[], 
+                    relationships=formatted_relationships, 
+                    account_id=account_id, 
+                    workspace_id=workspace_id
+                )
+                logger.info(f"✅ {len(formatted_relationships)} relaciones del grafo conceptual persistidas.")
+
+        except Exception as e:
+            logger.error(f"❌ Error guardando grafo conceptual: {e}")
+            raise
+    async def _extract_conceptual_quotes(
+        self, 
+        documents: List[Dict[str, Any]], 
+        account_id: Optional[str] = None,
+        llm_to_use: Optional[Any] = None
+    ) -> List[Dict[str, Any]]:
         """
         Método privado: Extrae citas conceptuales usando múltiples estrategias en paralelo.
 
@@ -362,7 +614,13 @@ class ConceptualGraphProcessor:
             tasks = []
             for doc_idx, doc in enumerate(batch):
                 global_idx = i + doc_idx
-                task = asyncio.create_task(self._process_single_document(doc, global_idx))
+                task = asyncio.create_task(
+                    self._process_single_document(
+                        doc, 
+                        global_idx, 
+                        llm_to_use=llm_to_use
+                    )
+                )
                 tasks.append(task)
 
             # Ejecutar todas las tareas del lote en paralelo
@@ -370,15 +628,15 @@ class ConceptualGraphProcessor:
                 batch_results = await asyncio.gather(*tasks, return_exceptions=True)
 
                 # Procesar resultados
-                for result in batch_results:
-                    if isinstance(result, Exception):
-                        logger.error(f"❌ Error procesando documento: {result}")
-                        continue
-                    if result:
-                        all_quotes.extend(result)
+                for res in batch_results:
+                    if isinstance(res, list):
+                        all_quotes.extend(res)
+                    elif isinstance(res, Exception):
+                        logger.error(f"❌ Error procesando documento en lote: {res}")
 
             except Exception as e:
-                logger.error(f"❌ Error en procesamiento de lote: {e}")
+                error_msg = str(e) or type(e).__name__
+                logger.error(f"❌ Error en procesamiento de lote: {error_msg}")
                 # Continuar con el siguiente lote
 
         logger.info(f"✅ Extracción paralela completada: {len(all_quotes)} citas extraídas")
@@ -388,7 +646,12 @@ class ConceptualGraphProcessor:
 
         return unique_quotes
 
-    async def _process_single_document(self, doc: Dict[str, Any], doc_idx: int) -> List[Dict[str, Any]]:
+    async def _process_single_document(
+        self, 
+        doc: Dict[str, Any], 
+        doc_idx: int,
+        llm_to_use: Optional[Any] = None
+    ) -> List[Dict[str, Any]]:
         """
         Procesa un documento individual extrayendo citas conceptuales usando múltiples estrategias.
 
@@ -414,7 +677,7 @@ class ConceptualGraphProcessor:
             # Estrategia 1: Usar LLM para extraer ideas clave (solo si el contenido es significativo)
             if self.llm and len(content) > 500:
                 logger.debug(f"🚀 _process_single_document: Llamando a _extract_quotes_with_llm para documento {doc_idx + 1}")
-                llm_quotes = await self._extract_quotes_with_llm(content, doc)
+                llm_quotes = await self._extract_quotes_with_llm(content, doc, llm_to_use=llm_to_use)
                 quotes.extend(llm_quotes)
             elif self.llm:
                 logger.debug(f"⚠️ Documento {doc_idx + 1}: Contenido demasiado corto ({len(content)} chars) para extracción con LLM (>500 chars requerido)")
@@ -436,12 +699,11 @@ class ConceptualGraphProcessor:
             logger.debug(f"✅ Documento {doc_idx + 1}: {len(quotes)} citas extraídas en total.")
             return quotes
 
-
         except Exception as e:
             logger.error(f"❌ Error procesando documento {doc_idx + 1}: {e}", exc_info=True)
             return []
 
-    async def _extract_quotes_with_llm_batch(self, documents_batch: List[Tuple[str, Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    async def _extract_conceptual_quotes_batch(self, documents_batch: List[Tuple[str, Dict[str, Any]]], llm_to_use: Optional[Any] = None) -> List[Dict[str, Any]]:
         """
         Extrae citas conceptuales usando LLM con procesamiento por lotes optimizado.
         OPTIMIZACIÓN: Usa fast_llm para tareas de extracción simples.
@@ -453,7 +715,7 @@ class ConceptualGraphProcessor:
             Lista de citas conceptuales extraídas
         """
         # OPTIMIZACIÓN: Usar fast_llm si está disponible, sino main llm
-        llm_to_use = self.fast_llm or self.llm
+        llm_to_use = llm_to_use or self.fast_llm or self.llm
         if not llm_to_use:
             return []
 
@@ -523,7 +785,9 @@ IMPORTANTE:
 """
 
             logger.info(f"⚡ Usando {'fast_llm' if self.fast_llm and llm_to_use == self.fast_llm else 'main_llm'} para extracción por lotes")
-            response = await llm_to_use.ainvoke(prompt)
+            
+            async with self.llm_semaphore:
+                response = await llm_to_use.ainvoke(prompt)
             response_text = response.content if hasattr(response, 'content') else str(response)
 
             # Parsear respuesta JSON usando el limpiador robusto
@@ -581,10 +845,10 @@ IMPORTANTE:
             all_quotes.extend(quotes)
         return all_quotes
 
-    async def _extract_quotes_with_llm(self, content: str, doc: Dict[str, Any]) -> List[Dict[str, Any]]:
+    async def _extract_quotes_with_llm(self, content: str, doc: Dict[str, Any], llm_to_use: Optional[Any] = None) -> List[Dict[str, Any]]:
         """Usa el LLM para extraer citas conceptuales de alta calidad (método individual)."""
 
-        llm_to_use = self.fast_llm or self.llm
+        llm_to_use = llm_to_use or self.fast_llm or self.llm
         if not llm_to_use:
             logger.error("❌ _extract_quotes_with_llm: LLM no disponible.")
             return []
@@ -634,7 +898,8 @@ IMPORTANTE: Solo el JSON solicitado.
 """
             logger.debug(f"💬 _extract_quotes_with_llm: Enviando prompt al LLM (primeros 500 chars): {prompt[:500]}...")
 
-            response = await llm_to_use.ainvoke(prompt)
+            async with self.llm_semaphore:
+                response = await llm_to_use.ainvoke(prompt)
             response_text = response.content if hasattr(response, 'content') else str(response)
             logger.debug(f"✅ _extract_quotes_with_llm: Respuesta cruda del LLM (primeros 500 chars): {response_text[:500]}...")
 
@@ -1038,14 +1303,14 @@ IMPORTANTE: Solo el JSON solicitado.
                 if pairs:
                     # Determinar tamaño de lote dinámicamente basado en calidad
                     if similarity_group == 'high':
-                        batch_size = min(75, max(25, len(pairs) // 2))  # Lotes más grandes para alta calidad
+                        batch_size = min(40, max(20, len(pairs) // 2))  # Reducido de 75 a 40 para evitar timeouts
                     else:
-                        batch_size = min(50, max(20, len(pairs) // 3))  # Lotes medianos para media calidad
+                        batch_size = min(30, max(15, len(pairs) // 3))  # Reducido de 50 a 30 para evitar timeouts
 
                     logger.info(f"📦 {similarity_group} similitud: {len(pairs)} pares → lotes de {batch_size}")
 
                     # Crear tareas de lotes para procesamiento paralelo
-                    batch_tasks = self._create_parallel_batch_tasks(pairs, quotes, batch_size)
+                    batch_tasks = self._create_parallel_batch_tasks(pairs, quotes, batch_size, group_id=similarity_group)
                     all_batch_tasks.extend(batch_tasks)
             
             # Ejecutar todos los lotes en paralelo
@@ -1056,7 +1321,8 @@ IMPORTANTE: Solo el JSON solicitado.
                 # Procesar resultados
                 for i, result in enumerate(batch_results):
                     if isinstance(result, Exception):
-                        logger.error(f"❌ Error en lote {i}: {result}")
+                        error_msg = str(result) or type(result).__name__
+                        logger.error(f"❌ Error en lote {i}: {error_msg}")
                         continue
                     
                     if result:
@@ -1083,7 +1349,8 @@ IMPORTANTE: Solo el JSON solicitado.
                                 }
                                 relationships.append(relationship)
                             except (KeyError, IndexError) as e:
-                                logger.error(f"❌ Error procesando resultado de lote: {e} - Data: {res}")
+                                error_msg = str(e) or type(e).__name__
+                                logger.error(f"❌ Error procesando resultado de lote: {error_msg} - Data: {res}")
             
             # Procesar pares de baja similitud con reglas optimizadas
             if candidate_pairs['low']:
@@ -1143,7 +1410,7 @@ IMPORTANTE: Solo el JSON solicitado.
         logger.info(f"📊 Pares agrupados: {len(grouped_pairs['high'])} alta, {len(grouped_pairs['medium'])} media, {len(grouped_pairs['low'])} baja similitud")
         return grouped_pairs
     
-    def _create_parallel_batch_tasks(self, pairs: List[Dict[str, Any]], quotes: List[Dict[str, Any]], batch_size: int) -> List[asyncio.Task]:
+    def _create_parallel_batch_tasks(self, pairs: List[Dict[str, Any]], quotes: List[Dict[str, Any]], batch_size: int, group_id: str = "batch") -> List[asyncio.Task]:
         """
         Crea tareas para procesamiento paralelo de lotes respetando el límite de paralelismo.
         
@@ -1151,6 +1418,7 @@ IMPORTANTE: Solo el JSON solicitado.
             pairs: Lista de pares a procesar
             quotes: Lista completa de citas
             batch_size: Tamaño del lote
+            group_id: Prefijo para identificar el grupo de lotes
             
         Returns:
             Lista de tareas asyncio (limitadas por max_parallel_batches)
@@ -1161,7 +1429,7 @@ IMPORTANTE: Solo el JSON solicitado.
         total_batches = (len(pairs) + batch_size - 1) // batch_size
         batches_to_process = min(total_batches, self.max_parallel_batches)
         
-        logger.info(f"📦 Creando {batches_to_process} tareas paralelas (de {total_batches} lotes totales)")
+        logger.info(f"📦 Creando {batches_to_process} tareas paralelas para '{group_id}' (de {total_batches} lotes totales)")
         
         for i in range(0, len(pairs), batch_size):
             batch_num = i // batch_size
@@ -1170,9 +1438,10 @@ IMPORTANTE: Solo el JSON solicitado.
                 
             batch = pairs[i:i + batch_size]
             
-            # Crear tarea para el lote
+            # Crear tarea para el lote con ID único
+            unique_batch_id = f"{group_id}_{batch_num}"
             task = asyncio.create_task(
-                self._create_batch_llm_relationships_optimized(batch, quotes, f"batch_{batch_num}")
+                self._create_batch_llm_relationships_optimized(batch, quotes, unique_batch_id)
             )
             tasks.append(task)
         
@@ -1281,7 +1550,7 @@ IMPORTANTE: Solo el JSON solicitado.
         
         return False
     
-    async def _create_batch_llm_relationships_optimized(self, batch: List[Dict[str, Any]], quotes: List[Dict[str, Any]], batch_id: str) -> List[Dict[str, Any]]:
+    async def _create_batch_llm_relationships_optimized(self, batch: List[Dict[str, Any]], quotes: List[Dict[str, Any]], batch_id: str, llm_to_use: Optional[Any] = None) -> List[Dict[str, Any]]:
         """
         Versión optimizada para crear relaciones de un lote usando LLM.
         
@@ -1289,11 +1558,12 @@ IMPORTANTE: Solo el JSON solicitado.
             batch: Lista de pares de citas para analizar
             quotes: Lista completa de citas
             batch_id: Identificador del lote
+            llm_to_use: Modelo de lenguaje a usar
             
         Returns:
             Lista de relaciones temáticas generadas por el LLM
         """
-        llm_to_use = self.fast_llm or self.llm
+        llm_to_use = llm_to_use or self.fast_llm or self.llm
         if not llm_to_use:
             logger.error("❌ LLM no disponible para crear relaciones por lotes optimizadas")
             return []
@@ -1315,10 +1585,11 @@ IMPORTANTE: Solo el JSON solicitado.
                 return cached_result
             
             # Llamar al LLM con el lote completo
-            response = await asyncio.wait_for(
-                llm_to_use.ainvoke(prompt), 
-                timeout=60.0  # Timeout más largo para lotes grandes
-            )
+            async with self.llm_semaphore:
+                response = await asyncio.wait_for(
+                    llm_to_use.ainvoke(prompt), 
+                    timeout=90.0  # Aumentado a 90s para lotes grandes
+                )
             
             response_text = response.content if hasattr(response, 'content') else str(response)
             
@@ -1333,12 +1604,16 @@ IMPORTANTE: Solo el JSON solicitado.
             else:
                 # Fallback: procesar pares individualmente
                 logger.warning(f"⚠️ Falló procesamiento de lote {batch_id}, usando fallback individual")
-                return await self._fallback_individual_processing(batch, quotes, batch_id)
+                return await self._fallback_individual_processing(batch, quotes, batch_id, llm_to_use=llm_to_use)
                 
+        except asyncio.TimeoutError:
+            logger.error(f"⌛ Timeout (90s) en procesamiento de lote {batch_id}. Iniciando fallback individual...")
+            return await self._fallback_individual_processing(batch, quotes, batch_id, llm_to_use=llm_to_use)
         except Exception as e:
-            logger.error(f"❌ Error en procesamiento de lote {batch_id}: {e}")
+            error_msg = str(e) or type(e).__name__
+            logger.error(f"❌ Error en procesamiento de lote {batch_id}: {error_msg}")
             # Fallback a procesamiento individual
-            return await self._fallback_individual_processing(batch, quotes, batch_id)
+            return await self._fallback_individual_processing(batch, quotes, batch_id, llm_to_use=llm_to_use)
     
     def _build_optimized_batch_prompt(self, batch: List[Dict[str, Any]], quotes: List[Dict[str, Any]]) -> str:
         """
@@ -1473,7 +1748,7 @@ Responde ÚNICAMENTE con el array JSON solicitado."""
             logger.warning(f"⚠️ Error parseando respuesta optimizada del lote {batch_id}: {e}")
             return []
     
-    async def _fallback_individual_processing(self, batch: List[Dict[str, Any]], quotes: List[Dict[str, Any]], batch_id: str) -> List[Dict[str, Any]]:
+    async def _fallback_individual_processing(self, batch: List[Dict[str, Any]], quotes: List[Dict[str, Any]], batch_id: str, llm_to_use: Optional[Any] = None) -> List[Dict[str, Any]]:
         """
         Fallback para procesar pares individualmente cuando falla el procesamiento por lotes.
         
@@ -1481,6 +1756,7 @@ Responde ÚNICAMENTE con el array JSON solicitado."""
             batch: Lista de pares
             quotes: Lista completa de citas
             batch_id: Identificador del lote
+            llm_to_use: Modelo de lenguaje a usar
             
         Returns:
             Lista de relaciones procesadas individualmente
@@ -1498,7 +1774,7 @@ Responde ÚNICAMENTE con el array JSON solicitado."""
                 cache_key = f"fallback_individual_{quote1_idx}_{quote2_idx}"
                 
                 result = await self._call_llm_with_retry_and_validation(
-                    quote1, quote2, similarity, cache_key, quote1_idx, quote2_idx
+                    quote1, quote2, similarity, cache_key, quote1_idx, quote2_idx, llm_to_use=llm_to_use
                 )
                 
                 if result:
@@ -1506,7 +1782,8 @@ Responde ÚNICAMENTE con el array JSON solicitado."""
                     results.append(result)
                     
             except Exception as e:
-                logger.warning(f"⚠️ Falló procesamiento individual del par {i} en lote {batch_id}: {e}")
+                error_msg = str(e) or type(e).__name__
+                logger.warning(f"⚠️ Falló procesamiento individual del par {i} en lote {batch_id}: {error_msg}")
                 # Usar relación por defecto
                 default_rel = self._create_default_relationship(
                     pair["quote1_idx"], pair["quote2_idx"], pair["similarity"]
@@ -1829,13 +2106,13 @@ Responde ÚNICAMENTE con el array JSON solicitado."""
 
         return profile
 
-    async def _identify_central_concept(self, cluster_quotes: List[Dict[str, Any]]) -> str:
+    async def _identify_central_concept(self, cluster_quotes: List[Dict[str, Any]], llm_to_use: Optional[Any] = None) -> str:
         """Identifica el concepto central de un grupo de citas, usando LLM si está disponible."""
 
         # Extraer conceptos para el LLM
         concepts = [quote.get("concept", "") for quote in cluster_quotes if quote.get("concept")]
         
-        llm_to_use = self.fast_llm or self.llm
+        llm_to_use = llm_to_use or self.fast_llm or self.llm
         if llm_to_use and concepts:
             try:
                 combined_concepts = ", ".join(list(set(concepts)))
@@ -1886,13 +2163,13 @@ Responde ÚNICAMENTE con el array JSON solicitado."""
 
         raise ValueError("El LLM no está disponible o no se proporcionaron conceptos para identificar un concepto central.")
 
-    async def _generate_profile_description(self, central_concept: str, categories: List[str], quotes_count: int, cluster_quotes: List[Dict[str, Any]]) -> str:
+    async def _generate_profile_description(self, central_concept: str, categories: List[str], quotes_count: int, cluster_quotes: List[Dict[str, Any]], llm_to_use: Optional[Any] = None) -> str:
         """Genera descripción de un perfil de ideas, usando fast_llm para tareas simples."""
 
         categories_str = ", ".join(categories) if categories else "conceptos generales"
 
         # OPTIMIZACIÓN: Usar fast_llm para descripciones de perfil (tarea más simple)
-        llm_to_use = self.fast_llm or self.llm
+        llm_to_use = llm_to_use or self.fast_llm or self.llm
         if not llm_to_use:
             raise ValueError("El LLM no está disponible para generar la descripción del perfil.")
 
@@ -1923,20 +2200,22 @@ Responde ÚNICAMENTE con el array JSON solicitado."""
             Responde ÚNICAMENTE con la descripción."""
 
             logger.info(f"⚡ Usando {'fast_llm' if self.fast_llm and llm_to_use == self.fast_llm else 'main_llm'} para descripción de perfil")
-            response = await llm_to_use.ainvoke(prompt)
-            profile_description_llm = response.content.strip() if hasattr(response, 'content') else str(response).strip()
+            
+            # NUEVO: Usar _call_llm_safely para mayor robustez y reintentos
+            response_text = await self._call_llm_safely(prompt, cache_key, llm_to_use=llm_to_use)
 
-            if profile_description_llm:
+            if response_text and response_text.strip():
+                profile_description_llm = response_text.strip()
                 logger.debug(f"🧠 LLM generó descripción de perfil: {profile_description_llm[:100]}...")
                 # Almacenar en caché
                 self._store_in_cache(cache_key, profile_description_llm)
                 return profile_description_llm
             else:
-                logger.error("❌ El LLM devolvió una descripción de perfil vacía.")
-                raise ValueError("El LLM no pudo generar una descripción de perfil válida.")
+                logger.error("❌ El LLM no devolvió una descripción de perfil válida.")
+                return f"Perfil de ideas sobre {central_concept} en las categorías {categories_str}."
         except Exception as e:
             logger.error(f"❌ Falló la generación de descripción de perfil por LLM: {e}")
-            raise
+            return f"Perfil de ideas sobre {central_concept} (error en descripción)."
 
     def _calculate_coherence_score(self, quotes: List[Dict[str, Any]]) -> float:
         """Calcula la puntuación de coherencia de un grupo de citas."""
@@ -1953,18 +2232,19 @@ Responde ÚNICAMENTE con el array JSON solicitado."""
         coherence = (avg_confidence + category_coherence) / 2
         return round(coherence, 2)
 
-    async def _create_batch_llm_relationships(self, batch: List[Dict[str, Any]], quotes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    async def _create_batch_llm_relationships(self, batch: List[Dict[str, Any]], quotes: List[Dict[str, Any]], llm_to_use: Optional[Any] = None) -> List[Dict[str, Any]]:
         """
         Crea relaciones temáticas para un lote de pares de citas usando el LLM.
         
         Args:
             batch: Lista de pares de citas para analizar
             quotes: Lista completa de citas
+            llm_to_use: Modelo de lenguaje a usar
             
         Returns:
             Lista de relaciones temáticas generadas por el LLM
         """
-        llm_to_use = self.fast_llm or self.llm
+        llm_to_use = llm_to_use or self.fast_llm or self.llm
         if not llm_to_use:
             logger.error("❌ LLM no disponible para crear relaciones por lotes")
             return []
@@ -1972,9 +2252,12 @@ Responde ÚNICAMENTE con el array JSON solicitado."""
         batch_results = []
         
         for pair in batch:
+            quote1_idx = pair.get("quote1_idx", -1)
+            quote2_idx = pair.get("quote2_idx", -1)
             try:
-                quote1_idx = pair["quote1_idx"]
-                quote2_idx = pair["quote2_idx"]
+                if quote1_idx == -1 or quote2_idx == -1:
+                    continue
+                    
                 quote1 = quotes[quote1_idx]
                 quote2 = quotes[quote2_idx]
                 similarity = pair["similarity"]
@@ -2004,7 +2287,7 @@ Responde ÚNICAMENTE con el array JSON solicitado."""
         return batch_results
     
     async def _call_llm_with_retry_and_validation(self, quote1: Dict, quote2: Dict, similarity: float, 
-                                                cache_key: str, quote1_idx: int, quote2_idx: int) -> Optional[Dict[str, Any]]:
+                                                cache_key: str, quote1_idx: int, quote2_idx: int, llm_to_use: Optional[Any] = None) -> Optional[Dict[str, Any]]:
         """
         Llamada al LLM con validación mejorada, reintentos y manejo robusto de errores.
         
@@ -2015,15 +2298,16 @@ Responde ÚNICAMENTE con el array JSON solicitado."""
             cache_key: Clave para el caché
             quote1_idx: Índice de la primera cita
             quote2_idx: Índice de la segunda cita
+            llm_to_use: Modelo de lenguaje a usar
             
         Returns:
-            Resultado procesado o None si falla completamente
+            Resultado procesado o None si falla
         """
         import json
         import re
         import time
         
-        llm_to_use = self.fast_llm or self.llm
+        llm_to_use = llm_to_use or self.fast_llm or self.llm
         if not llm_to_use:
             logger.error("❌ LLM no disponible para _call_llm_with_retry_and_validation")
             return None
@@ -2039,10 +2323,11 @@ Responde ÚNICAMENTE con el array JSON solicitado."""
                 
                 logger.debug(f"🤖 Llamando LLM para par {quote1_idx}-{quote2_idx} (intento {attempt + 1}/{max_retries})")
                 
-                response = await asyncio.wait_for(
-                    llm_to_use.ainvoke(prompt), 
-                    timeout=30.0  # Timeout de 30 segundos
-                )
+                async with self.llm_semaphore:
+                    response = await asyncio.wait_for(
+                        llm_to_use.ainvoke(prompt), 
+                        timeout=30.0  # Timeout de 30 segundos
+                    )
                 response_text = response.content if hasattr(response, 'content') else str(response)
                 
                 # Log de la respuesta para debugging
@@ -2321,9 +2606,9 @@ NO incluyas texto adicional, solo el JSON."""
         """Limpia la respuesta del LLM para extracción de citas usando el limpiador robusto."""
         return self._robust_json_cleaner(response_text)
     
-    async def _call_llm_safely(self, prompt: str, cache_key: str) -> Optional[str]:
+    async def _call_llm_safely(self, prompt: str, cache_key: str, llm_to_use: Optional[Any] = None) -> Optional[str]:
         """
-        Llamada segura al LLM con reintentos y manejo de errores.
+        Llamada segura al LLM con reintentos, manejo de errores y rate limiting.
         
         Args:
             prompt: Prompt para el LLM
@@ -2335,7 +2620,7 @@ NO incluyas texto adicional, solo el JSON."""
         max_retries = 2
         retry_delay = 1.0
         
-        llm_to_use = self.fast_llm or self.llm
+        llm_to_use = llm_to_use or self.fast_llm or self.llm
         if not llm_to_use:
             logger.error("❌ LLM no disponible para _call_llm_safely")
             return None
@@ -2344,10 +2629,24 @@ NO incluyas texto adicional, solo el JSON."""
             try:
                 logger.debug(f"🤖 Llamada segura LLM (intento {attempt + 1}/{max_retries})")
                 
-                response = await asyncio.wait_for(
-                    llm_to_use.ainvoke(prompt), 
-                    timeout=20.0
-                )
+                # Rate limiting: esperar el tiempo necesario para no exceder el límite
+                async with self._rate_limit_lock:
+                    current_time = time.time()
+                    time_since_last_call = current_time - self.last_llm_call_time
+                    if time_since_last_call < self.llm_min_interval:
+                        wait_time = self.llm_min_interval - time_since_last_call
+                        logger.debug(f"⏳ Rate limiting: esperando {wait_time:.2f}s antes de la llamada LLM")
+                        await asyncio.sleep(wait_time)
+                    
+                    # Actualizar timestamp de última llamada
+                    self.last_llm_call_time = time.time()
+                
+                async with self.llm_semaphore:
+                    # Aumentar timeout a 120s para tareas complejas
+                    response = await asyncio.wait_for(
+                        llm_to_use.ainvoke(prompt), 
+                        timeout=120.0
+                    )
                 
                 response_text = response.content if hasattr(response, 'content') else str(response)
                 
@@ -2359,7 +2658,7 @@ NO incluyas texto adicional, solo el JSON."""
                     if attempt < max_retries - 1:
                         await asyncio.sleep(retry_delay * (2 ** attempt))
                         continue
-                    
+                        
             except asyncio.TimeoutError:
                 logger.warning(f"⏰ Timeout en llamada LLM (intento {attempt + 1})")
                 if attempt < max_retries - 1:
@@ -2371,7 +2670,7 @@ NO incluyas texto adicional, solo el JSON."""
                 if attempt < max_retries - 1:
                     await asyncio.sleep(retry_delay * (2 ** attempt))
                     continue
-        
+         
         logger.error(f"❌ Todos los intentos fallaron para llamada LLM")
         return None
     
@@ -2400,7 +2699,7 @@ NO incluyas texto adicional, solo el JSON."""
         else:
             return ", ".join(unique_concepts[:3]) + f" y {len(unique_concepts)-3} conceptos relacionados"
 
-    async def _create_document_nodes(self, documents: List[Dict[str, Any]], workspace_id: str, account_id: str, dataset_name: Optional[str] = None) -> List[Dict[str, Any]]:
+    async def _create_document_nodes(self, documents: List[Dict[str, Any]], workspace_id: str, account_id: str, dataset_name: Optional[str] = None, llm_fast: Optional[Any] = None) -> List[Dict[str, Any]]:
         """
         Crea nodos DOCUMENT de primer nivel en el grafo, generando ID, resumen, keywords y embedding para cada documento.
         Persiste los nodos en Neo4j usando neo4j_adapter.
@@ -2410,7 +2709,7 @@ NO incluyas texto adicional, solo el JSON."""
         
         tasks = []
         for doc_data in documents:
-            tasks.append(self._process_single_document_for_node(doc_data, workspace_id, account_id, dataset_name))
+            tasks.append(self._process_single_document_for_node(doc_data, workspace_id, account_id, dataset_name, llm_fast=llm_fast))
         
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -2429,25 +2728,35 @@ NO incluyas texto adicional, solo el JSON."""
         logger.info(f"✅ {len(document_nodes)} nodos DOCUMENT creados.")
         return document_nodes
 
-    async def _process_single_document_for_node(self, doc_data: Dict[str, Any], workspace_id: str, account_id: str, dataset_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    async def _process_single_document_for_node(self, doc_data: Dict[str, Any], workspace_id: str, account_id: str, dataset_name: Optional[str] = None, llm_fast: Optional[Any] = None) -> Optional[Dict[str, Any]]:
         """
         Procesa un solo documento para crear su nodo DOCUMENT con metadatos y embedding.
         """
         try:
-            doc_id = doc_data.get('document_id') or doc_data.get('metadata', {}).get('document_id') or str(uuid.uuid4())
+            metadata = doc_data.get('metadata', {})
+            doc_id = doc_data.get('id') or doc_data.get('document_id') or metadata.get('document_id') or str(uuid.uuid4())
 
             content = doc_data.get('content', '')
             title = doc_data.get('title', 'Documento sin título')
+            name = doc_data.get('name') or metadata.get('name') or title
             url = doc_data.get('url', '')
             source_type = doc_data.get('source_type', 'unknown')
             publication_date = doc_data.get('publication_date')
             author = doc_data.get('author')
             topic = doc_data.get('topic', 'general')
+            memory_type = metadata.get('memory_type')
+            node_type = (
+                doc_data.get('type')
+                or metadata.get('graph_node_type')
+                or source_type
+                or "DOCUMENT"
+            )
+            node_type = re.sub(r'[^A-Z0-9_]', '_', str(node_type).upper())
             
             content_hash = hashlib.md5(content.encode('utf-8')).hexdigest() if content else ''
 
-            summary = await self._generate_document_summary(content)
-            keywords = await self._generate_document_keywords(content)
+            summary = await self._generate_document_summary(content, llm_to_use=llm_fast)
+            keywords = await self._generate_document_keywords(content, llm_to_use=llm_fast)
 
             embedding = None
             if self.embedding_model and content:
@@ -2460,6 +2769,7 @@ NO incluyas texto adicional, solo el JSON."""
             
             document_node = {
                 "id": doc_id,
+                "name": name,
                 "title": title,
                 "url": url,
                 "content": summary or (content[:500] + "..." if content else ""),
@@ -2470,27 +2780,35 @@ NO incluyas texto adicional, solo el JSON."""
                 "publication_date": publication_date,
                 "author": author,
                 "source_type": source_type,
+                "memory_type": memory_type,
                 "topic": topic,
                 "created_at": datetime.now().isoformat(),
                 "updated_at": datetime.now().isoformat(),
                 "workspace_id": workspace_id,
                 "account_id": account_id,
                 "dataset_name": dataset_name,
-                "type": "DOCUMENT"
+                "type": node_type
             }
             return document_node
         except Exception as e:
             logger.error(f"❌ Error al crear nodo DOCUMENT para '{doc_data.get('title', 'documento sin título')}': {e}")
             return None
 
-    async def _generate_document_summary(self, content: str) -> str:
+    async def _generate_document_summary(self, content: str, llm_to_use: Optional[Any] = None) -> str:
         """Genera un resumen conciso de un documento usando LLM."""
         if not content or len(content.strip()) < 100:
             return content[:200] + "..." if content else "Contenido demasiado corto para resumir."
 
-        llm_to_use = self.fast_llm or self.llm
+        llm_to_use = llm_to_use or self.fast_llm or self.llm
         if not llm_to_use:
             return content[:200] + "..."
+
+        # Log del modelo que se va a usar
+        try:
+            model_name = getattr(llm_to_use, "model", "unknown")
+            logger.info(f"📝 Generando resumen con modelo: {model_name}")
+        except Exception:
+            pass
 
         cache_key = f"doc_summary_{hashlib.md5(content.encode()).hexdigest()[:16]}"
         cached_result = self._check_cache(cache_key)
@@ -2506,20 +2824,21 @@ NO incluyas texto adicional, solo el JSON."""
         Resumen:
         """
         try:
-            response = await llm_to_use.ainvoke(prompt)
+            async with self.llm_semaphore:
+                response = await llm_to_use.ainvoke(prompt)
             summary = response.content.strip() if hasattr(response, 'content') else str(response).strip()
             self._store_in_cache(cache_key, summary)
             return summary
         except Exception as e:
-            logger.warning(f"⚠️ Falló la generación de resumen con LLM: {e}")
+            logger.warning(f"⚠️ Falló la generación de resumen con LLM ({getattr(llm_to_use, 'model', 'unknown')}): {e}")
             return content[:200] + "..."
 
-    async def _generate_document_keywords(self, content: str) -> List[str]:
+    async def _generate_document_keywords(self, content: str, llm_to_use: Optional[Any] = None) -> List[str]:
         """Extrae palabras clave representativas de un documento usando LLM."""
         if not content or len(content.strip()) < 100:
             return []
 
-        llm_to_use = self.fast_llm or self.llm
+        llm_to_use = llm_to_use or self.fast_llm or self.llm
         if not llm_to_use:
             return []
 
@@ -2527,4 +2846,24 @@ NO incluyas texto adicional, solo el JSON."""
         cached_result = self._check_cache(cache_key)
         if cached_result is not None:
             return cached_result
+        prompt = f"""
+        Extrae 5-8 palabras clave o etiquetas que representen los temas principales del siguiente documento.
+        Responde ÚNICAMENTE con las palabras clave separadas por comas.
 
+        Documento:
+        {content[:4000]}
+
+        Keywords:
+        """
+        try:
+            async with self.llm_semaphore:
+                response = await llm_to_use.ainvoke(prompt)
+            keywords_text = response.content.strip() if hasattr(response, 'content') else str(response).strip()
+            
+            # Limpiar y parsear
+            keywords = [k.strip() for k in keywords_text.split(',') if k.strip()]
+            self._store_in_cache(cache_key, keywords)
+            return keywords
+        except Exception as e:
+            logger.warning(f"⚠️ Falló la extracción de keywords con LLM: {e}")
+            return []

@@ -53,7 +53,15 @@ async def get_user_vector_memories(
     # Llamar a get_all_user_memories en lugar de get_relevant_memories
     docs = await get_all_user_memories(
         account_id=current_account_id,
-        content_types=["user_memory_proactive_llm", "user_memories", "general_memory", "user_memory"],
+        content_types=[
+            "user_memory_proactive_llm",
+            "user_memories",
+            "general_memory",
+            "user_memory",
+            "chat_summary",
+            "thread_summary",
+            "enhanced_episodic",
+        ],
         limit=100
     )
     

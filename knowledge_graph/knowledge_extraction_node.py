@@ -116,6 +116,16 @@ class KnowledgeExtractionNode:
             await self._initialize_gliner()
 
         messages = state.get("messages", [])
+        account_id = state.get("account_id")
+        
+        # Intentar obtener un LLM específico para el usuario si está disponible
+        llm_to_use = self.llm
+        if account_id:
+            from core.llm_manager import get_llm_for_user
+            user_llm = await get_llm_for_user(account_id, purpose="fast")
+            if user_llm:
+                llm_to_use = user_llm
+
         if len(messages) < 2:
             return state
 
@@ -155,7 +165,7 @@ class KnowledgeExtractionNode:
                 logger.warning(f"Error en predicción GLiNER: {e}")
 
         # 2. Refinamiento y Relaciones con LLM
-        extracted_data = await self._refine_with_llm(user_message, ai_message, gliner_entities)
+        extracted_data = await self._refine_with_llm(user_message, ai_message, gliner_entities, llm=llm_to_use)
         if not extracted_data:
             return state
 
@@ -164,13 +174,14 @@ class KnowledgeExtractionNode:
 
         return state
 
-    async def _refine_with_llm(self, user_msg: str, ai_msg: str, gliner_ents: List[Dict]) -> Optional[Dict]:
+    async def _refine_with_llm(self, user_msg: str, ai_msg: str, gliner_ents: List[Dict], llm: Optional[Any] = None) -> Optional[Dict]:
         """Usa el LLM para conectar las entidades y extraer relaciones."""
-        if not self.llm:
+        llm_to_use = llm or self.llm
+        if not llm_to_use:
             return None
 
         prompt = ChatPromptTemplate.from_template(KNOWLEDGE_EXTRACTION_PROMPT)
-        chain = prompt | self.llm
+        chain = prompt | llm_to_use
         
         try:
             gliner_json = json.dumps(gliner_ents, ensure_ascii=False, indent=2)

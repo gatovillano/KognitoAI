@@ -65,7 +65,7 @@ class ChatRequest(BaseModel):
     images_base64: Optional[List[str]] = None
     document_url: Optional[str] = None  # Campo para URL de documentos
     mode: Optional[str] = None
-    rag_context: Optional[str] = None # Contexto RAG: [{'type': 'document', 'id': '...'}, {'type': 'collection', 'id': '...'}]
+    rag_context: Optional[str] = None # Contexto seleccionado por el usuario: [{'type': 'document', 'id': '...', 'name': '...', 'file_name': '...'}]
     workspace_id: Optional[str] = None  # Campo para el ID del workspace
     context: Optional[Dict[str, Any]] = None # Contexto específico: {"type": "table", "id": "...", "snapshot": {...}}
 
@@ -93,6 +93,7 @@ class Message(BaseModel):
     document_url: Optional[str] = None
     sources: Optional[List[Source]] = None # Añadido para incluir las fuentes
     reasoning: Optional[str] = None # Añadido para persistir el pensamiento del LLM
+    model_name: Optional[str] = None
 
 class PaginatedChatMessagesResponse(BaseModel):
     total: int
@@ -114,6 +115,13 @@ class TextToSpeechRequest(BaseModel):
 class PinThreadRequest(BaseModel):
     """Define la estructura de datos para una solicitud de fijar/desfijar un hilo de chat."""
     isPinned: bool
+
+class DeleteThreadMessageRequest(BaseModel):
+    """Define la estructura para eliminar un mensaje individual de un hilo."""
+    sender: str
+    created_at: Optional[str] = None
+    text: Optional[str] = None
+    allow_fallback_latest: bool = True
 
 class CreateThreadRequest(BaseModel):
     """Define la estructura de datos para crear un nuevo hilo de chat."""
@@ -183,8 +191,11 @@ async def get_threads(
     try:
         account_uuid = uuid.UUID(current_account_id)
         
-        # Base query
-        base_query = select(ChatThread).where(ChatThread.account_id == account_uuid)
+        # Base query — excluir hilos de sistema (heartbeat) del sidebar
+        base_query = select(ChatThread).where(
+            ChatThread.account_id == account_uuid,
+            ChatThread.platform != "heartbeat",
+        )
         
         # Filter by workspace_id if provided
         if workspace_id:
@@ -285,6 +296,7 @@ async def get_messages_for_thread(
                 
                 # Extraer sources si existen en additional_kwargs
                 message_sources = msg.additional_kwargs.get("sources", [])
+                message_model_name = msg.additional_kwargs.get("model_name")
                 
                 real_messages.append(Message(
                     text=text_content,
@@ -293,7 +305,8 @@ async def get_messages_for_thread(
                     image_base64=image_contents[0] if image_contents else None,
                     images_base64=image_contents if len(image_contents) > 1 else None,
                     sources=message_sources, # Asignar las fuentes extraídas
-                    reasoning=msg.additional_kwargs.get("reasoning") or msg.additional_kwargs.get("think") # Extraer razonamiento
+                    reasoning=msg.additional_kwargs.get("reasoning") or msg.additional_kwargs.get("think"), # Extraer razonamiento
+                    model_name=message_model_name
                 ))
 
         # Sort messages by created_at in ascending order
@@ -423,6 +436,7 @@ async def search_chat_messages(
         if query.lower() in text_content.lower():
             results.append({
                 "type": "chat_message",
+                "id": str(thread_id_str),  # Added for frontend compatibility
                 "thread_id": str(thread_id_str),
                 "thread_title": thread_title,
                 "content": text_content,
@@ -494,6 +508,109 @@ async def delete_thread(thread_id: str, current_account_id: str = Depends(get_cu
         logger.error(f"Error al eliminar el hilo {thread_id} para la cuenta {current_account_id}: {e}", exc_info=True)
         await db.rollback()
         raise HTTPException(status_code=500, detail="Ocurrió un error al eliminar el hilo de chat.")
+
+@router.delete("/threads/{thread_id}/messages", summary="Eliminar un mensaje individual de un hilo")
+async def delete_thread_message(
+    thread_id: str,
+    request: DeleteThreadMessageRequest,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Elimina un mensaje específico de `langchain_chat_history` dentro del hilo indicado.
+    Busca por `sender` y opcionalmente `created_at` y `text`, eliminando el match más reciente.
+    """
+    try:
+        # Verificar que el hilo existe y pertenece al usuario autenticado
+        thread = await db.scalar(select(ChatThread).where(
+            ChatThread.id == uuid.UUID(thread_id),
+            ChatThread.account_id == uuid.UUID(current_account_id)
+        ))
+        if not thread:
+            raise HTTPException(status_code=404, detail="Hilo de chat no encontrado.")
+
+        sender_normalized = (request.sender or "").strip().lower()
+        sender_to_message_type = {
+            "user": "human",
+            "human": "human",
+            "ai": "ai",
+            "assistant": "ai",
+        }
+        message_type = sender_to_message_type.get(sender_normalized)
+        if not message_type:
+            raise HTTPException(status_code=400, detail="Sender inválido. Use 'user' o 'ai'.")
+
+        filters = [
+            "session_id = :session_id",
+            "message->>'type' = :message_type",
+        ]
+        params: Dict[str, Any] = {
+            "session_id": thread_id,
+            "message_type": message_type,
+        }
+
+        if request.created_at:
+            filters.append(
+                "COALESCE(message #>> '{data,additional_kwargs,created_at}', message #>> '{additional_kwargs,created_at}', '') = :created_at"
+            )
+            params["created_at"] = request.created_at
+
+        if request.text is not None:
+            filters.append("COALESCE(message #>> '{data,content}', message #>> '{content}', '') = :message_text")
+            params["message_text"] = request.text
+
+        where_clause = " AND ".join(filters)
+        select_stmt = text(f"""
+            SELECT id
+            FROM langchain_chat_history
+            WHERE {where_clause}
+            ORDER BY id DESC
+            LIMIT 1
+        """)
+        result = await db.execute(select_stmt, params)
+        row = result.first()
+
+        if not row and request.allow_fallback_latest:
+            logger.warning(
+                f"⚠️ No se encontró coincidencia exacta para borrar mensaje en hilo {thread_id}. "
+                "Aplicando fallback al mensaje más reciente del mismo remitente."
+            )
+            fallback_result = await db.execute(
+                text("""
+                    SELECT id
+                    FROM langchain_chat_history
+                    WHERE session_id = :session_id
+                      AND message->>'type' = :message_type
+                    ORDER BY id DESC
+                    LIMIT 1
+                """),
+                {
+                    "session_id": thread_id,
+                    "message_type": message_type,
+                },
+            )
+            row = fallback_result.first()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="No se encontró un mensaje que coincida con los criterios.")
+
+        message_id = row[0]
+        await db.execute(text("DELETE FROM langchain_chat_history WHERE id = :message_id"), {"message_id": message_id})
+        await db.commit()
+
+        return {
+            "deleted": True,
+            "thread_id": thread_id,
+            "message_id": message_id,
+        }
+    except ValueError:
+        raise HTTPException(status_code=400, detail="El thread_id proporcionado no tiene un formato válido.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error al eliminar mensaje del hilo {thread_id} para la cuenta {current_account_id}: {e}", exc_info=True)
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Ocurrió un error al eliminar el mensaje.")
 
 @router.post("/threads/{thread_id}/generate-title", summary="Generar un título para un hilo de chat")
 async def generate_thread_title(thread_id: str, current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db_session)):
@@ -650,7 +767,12 @@ async def text_to_speech(
     if not text_to_speak:
         return StreamingResponse(BytesIO(), media_type="audio/mpeg")
 
-    text_chunks = _split_text_into_chunks(text_to_speak)
+    # Para Kokoro y Coqui, no dividimos el texto en fragmentos porque devuelven WAV.
+    # Concatenar múltiples WAVs con cabeceras rompe la reproducción en el navegador.
+    if effective_provider.lower() in ["kokoro", "coquitts", "coqui"]:
+        text_chunks = [text_to_speak]
+    else:
+        text_chunks = _split_text_into_chunks(text_to_speak)
 
     async def generate_audio_stream():
         """Genera el stream de audio usando el servicio TTS configurado para cada fragmento."""
@@ -677,7 +799,7 @@ async def text_to_speech(
 
     # Determinar el tipo de medio según el proveedor
     media_type = "audio/mpeg"
-    if effective_provider.lower() in ["coquitts", "coqui"]:
+    if effective_provider.lower() in ["coquitts", "coqui", "kokoro"]:
         media_type = "audio/wav"
 
     return StreamingResponse(generate_audio_stream(), media_type=media_type)
@@ -742,13 +864,25 @@ async def get_tts_models(
         # Por ahora solo soportamos descubrimiento automático para OpenAI/Compatibles/Kokoro/Coqui
         return {"models": []}
     
-    url = api_base or "https://api.openai.com/v1"
+    if not api_base:
+        if provider == "kokoro":
+            # Para Kokoro, intentar detectar si estamos en Docker
+            import os
+            if os.path.exists("/.dockerenv"):
+                url = "http://kokoro-tts:8011"
+            else:
+                url = "http://localhost:8011"
+        else:
+            url = "https://api.openai.com/v1"
+    else:
+        url = api_base
     
     # Si estamos en Docker y el usuario pone localhost, lo traducimos a host.docker.internal
     if "localhost" in url or "127.0.0.1" in url:
         import os
         if os.path.exists("/.dockerenv"):
             url = url.replace("localhost", "host.docker.internal").replace("127.0.0.1", "host.docker.internal")
+            logger.info(f"🔄 Traduciendo localhost/127.0.0.1 a host.docker.internal para descubrimiento de modelos TTS: {url}")
     
     if not url.endswith("/"):
         url += "/"
@@ -802,7 +936,18 @@ async def get_tts_voices(
     if provider not in ["openai", "openai-compatible", "kokoro", "coquitts"]:
         return {"voices": []}
     
-    url = api_base or "https://api.openai.com/v1"
+    if not api_base:
+        if provider == "kokoro":
+            # Para Kokoro, intentar detectar si estamos en Docker
+            import os
+            if os.path.exists("/.dockerenv"):
+                url = "http://kokoro-tts:8011"
+            else:
+                url = "http://localhost:8011"
+        else:
+            url = "https://api.openai.com/v1"
+    else:
+        url = api_base
     
     # Si estamos en Docker y el usuario pone localhost, lo traducimos a host.docker.internal
     if "localhost" in url or "127.0.0.1" in url:
@@ -811,16 +956,6 @@ async def get_tts_voices(
             url = url.replace("localhost", "host.docker.internal").replace("127.0.0.1", "host.docker.internal")
             logger.info(f"🔄 Traduciendo localhost/127.0.0.1 a host.docker.internal para descubrimiento de voces: {url}")
     
-    if not url.endswith("/"):
-        url += "/"
-
-    # Si estamos en Docker y el usuario pone localhost, lo traducimos a host.docker.internal
-    if "localhost" in url or "127.0.0.1" in url:
-        import os
-        if os.path.exists("/.dockerenv"):
-            url = url.replace("localhost", "host.docker.internal").replace("127.0.0.1", "host.docker.internal")
-            logger.info(f"🔄 Traduciendo localhost/127.0.0.1 a host.docker.internal para descubrimiento de voces: {url}")
-
     if not url.endswith("/"):
         url += "/"
     
@@ -1192,7 +1327,48 @@ async def create_and_run_agent_streaming(
                 await asyncio.sleep(1)
 
 
-        # El rag_context se pasará directamente al estado del agente, no se pre-procesa aquí.
+        # Si rag_context no viene en la request, intentar recuperarlo del hilo (persistent_rag_context)
+        if not rag_context:
+            try:
+                from core.database import ChatThread
+                from sqlalchemy import select
+                async with SessionLocal() as db_ctx:
+                    thread_obj = await db_ctx.scalar(select(ChatThread).where(ChatThread.id == uuid.UUID(thread_id)))
+                    if thread_obj and thread_obj.persistent_rag_context:
+                        rag_context = thread_obj.persistent_rag_context
+                        logger.info(f"Cargado persistent_rag_context del hilo: {len(rag_context)} items.")
+            except Exception as e:
+                logger.warning(f"Error al cargar persistent_rag_context: {e}")
+
+        # Inyección Automática de Contexto de OnlyOffice
+        # Leemos el contenido actualizado del documento y lo inyectamos directamente en el rag_context
+        # Esto permite que el agente "vea" el documento en cada turno, incluyendo los cambios que acaba de hacer.
+        if rag_context:
+            onlyoffice_docs = [item for item in rag_context if item.get('type') == 'document' and 'OnlyOffice' in (item.get('topic') or item.get('name') or '')]
+            if onlyoffice_docs:
+                try:
+                    from skills.onlyoffice_skill.scripts.read_onlyoffice_document_tool import ReadOnlyOfficeDocumentTool
+                    reader = ReadOnlyOfficeDocumentTool(account_id=account_id)
+                    
+                    # Crear una copia del rag_context para modificarlo en memoria sin afectar la DB
+                    new_rag_context = list(rag_context)
+                    
+                    for doc_to_inject in onlyoffice_docs:
+                        logger.info(f"Cargando contenido en vivo del documento OnlyOffice: {doc_to_inject.get('id')}")
+                        doc_content = await reader._arun(document_id=doc_to_inject['id'])
+                        
+                        if doc_content and "--- CONTENIDO" in doc_content:
+                            # Reemplazar el ítem en la nueva lista con el contenido inyectado
+                            idx = new_rag_context.index(doc_to_inject)
+                            new_doc = dict(doc_to_inject)
+                            new_doc['content'] = f"DOCUMENTO ACTUAL ABIERTO POR EL USUARIO:\n\n{doc_content}\n\nRECUERDA: Tienes herramientas para editar este documento directamente si el usuario lo pide."
+                            new_rag_context[idx] = new_doc
+                    
+                    rag_context = new_rag_context
+                    logger.info("Contenido de los documentos inyectado exitosamente en rag_context.")
+                except Exception as e:
+                    logger.error(f"Error en la inyección automática de documento en vivo: {e}")
+
         # El user_message se mantiene sin modificar aquí.
 
         # --- Construcción del Mensaje Multimodal ---
@@ -1279,21 +1455,37 @@ async def create_and_run_agent_streaming(
             logger.error("La salida final del grafo no contenía mensajes.")
             raise ValueError("La salida final del grafo no contenía mensajes.")
 
-        # Buscar el último AIMessage en el historial del estado final
-        final_ai_message = next((msg for msg in reversed(final_messages) if isinstance(msg, AIMessage)), None)
+        def _extract_text_content(message: AIMessage) -> str:
+            if isinstance(message.content, str):
+                return message.content
+            if isinstance(message.content, list):
+                text = ""
+                for part in message.content:
+                    if isinstance(part, dict) and part.get("type") == "text":
+                        text += part.get("text", "")
+                return text
+            return ""
+
+        # Buscar primero el último AIMessage con contenido textual para evitar respuestas finales vacías.
+        final_ai_message = next(
+            (
+                msg
+                for msg in reversed(final_messages)
+                if isinstance(msg, AIMessage) and _extract_text_content(msg).strip()
+            ),
+            None,
+        )
+
+        # Fallback: si ninguno tiene texto, usar el último AIMessage disponible.
+        if not final_ai_message:
+            final_ai_message = next((msg for msg in reversed(final_messages) if isinstance(msg, AIMessage)), None)
 
         if not final_ai_message:
             logger.error("El grafo no produjo un AIMessage en su estado final.")
             raise ValueError("El grafo no produjo un AIMessage en su estado final.")
 
         # Extraer el texto final para el evento stream_end
-        full_response_text = ""
-        if isinstance(final_ai_message.content, str):
-            full_response_text = final_ai_message.content
-        elif isinstance(final_ai_message.content, list):
-            for part in final_ai_message.content:
-                if isinstance(part, dict) and part.get("type") == "text":
-                    full_response_text += part.get("text", "")
+        full_response_text = _extract_text_content(final_ai_message)
 
         # Guardar el AIMessage final completo en el historial
         logger.info(f"DEBUG (create_and_run_agent_streaming): Guardando respuesta final en historial. thread_id: {thread_id}, task_id: {task_id}")
@@ -1336,6 +1528,7 @@ async def create_and_run_agent_streaming(
         # Aquí, simplemente extraemos las fuentes del AIMessage final.
         final_sources = final_ai_message.additional_kwargs.get("sources", [])
         final_reasoning = final_ai_message.additional_kwargs.get("reasoning", "")
+        final_model_name = final_ai_message.additional_kwargs.get("model_name")
         
         logger.info(f"DEBUG (create_and_run_agent_streaming): Fuentes finales extraídas del AIMessage: {final_sources}")
         
@@ -1346,13 +1539,58 @@ async def create_and_run_agent_streaming(
             "text": full_response_text,
             "reasoning": final_reasoning,
             "sources": final_sources,
+            "model_name": final_model_name,
         }, connection_type=conn_type)
 
     except asyncio.CancelledError:
-        logger.info(f"Chat task {task_id} cancelled by user.")
+        logger.info(f"Chat task {task_id} cancelled by user. Guardando mensaje parcial.")
+        try:
+            from core.websocket_manager import partial_task_messages, partial_task_reasoning
+            from core.agent import sanitize_json_content
+            from langchain_core.messages import AIMessage
+            
+            partial_text = partial_task_messages.pop(task_id, "")
+            partial_reasoning = partial_task_reasoning.pop(task_id, "")
+            
+            if partial_text or partial_reasoning:
+                final_kwargs = {"status": "cancelled"}
+                if partial_reasoning:
+                    final_kwargs["reasoning"] = partial_reasoning
+                    
+                sanitized_ai_message = AIMessage(
+                    content=sanitize_json_content(partial_text),
+                    additional_kwargs=final_kwargs
+                )
+                if 'chat_message_history' in locals() and chat_message_history:
+                    await chat_message_history.aadd_messages([sanitized_ai_message])
+        except Exception as save_err:
+            logger.error(f"Error salvando mensaje parcial: {save_err}")
+            
         raise  # Re-raise to ensure task is marked as cancelled
     except Exception as e:
         logger.error(f"Error en streaming agent LangGraph: {e}", exc_info=True)
+        try:
+            from core.websocket_manager import partial_task_messages, partial_task_reasoning
+            from core.agent import sanitize_json_content
+            from langchain_core.messages import AIMessage
+            
+            partial_text = partial_task_messages.pop(task_id, "")
+            partial_reasoning = partial_task_reasoning.pop(task_id, "")
+            
+            if partial_text or partial_reasoning:
+                final_kwargs = {"status": "error"}
+                if partial_reasoning:
+                    final_kwargs["reasoning"] = partial_reasoning
+                    
+                sanitized_ai_message = AIMessage(
+                    content=sanitize_json_content(partial_text),
+                    additional_kwargs=final_kwargs
+                )
+                if 'chat_message_history' in locals() and chat_message_history:
+                    await chat_message_history.aadd_messages([sanitized_ai_message])
+        except Exception as save_err:
+            logger.error(f"Error salvando mensaje parcial tras excepcion: {save_err}")
+            
         await send_personal_message(target_account_id, {
             "type": "error",
             "thread_id": thread_id,

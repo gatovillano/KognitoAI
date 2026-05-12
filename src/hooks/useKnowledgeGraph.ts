@@ -56,7 +56,7 @@ export const useKnowledgeGraph = (workspaceId: string | null) => {
     setProcessingStatus('processing');
 
     try {
-      const response = await apiClient.post('/api/process-knowledge-graph-optimized', {
+      const response = await apiClient.post('/api/knowledge-graph/process-knowledge-graph-optimized', {
         workspace_id: workspaceId,
         force_reprocess: false
       });
@@ -106,7 +106,9 @@ export const useKnowledgeGraph = (workspaceId: string | null) => {
         setGraphData(null); // Limpiar datos si el grafo está vacío
       } else {
         console.warn('🟡 Datos del grafo incompletos o ausentes, o error inesperado. Comprobando estado del procesamiento...');
-        const statusResponse = await apiClient.get(`/api/knowledge-graph/${workspaceId}/status`);
+        const statusResponse = await apiClient.get(`/api/knowledge-graph/status`, {
+          params: { workspace_id: workspaceId }
+        });
 
         if (statusResponse.data) {
           setProcessingStatus(statusResponse.data.status);
@@ -132,7 +134,7 @@ export const useKnowledgeGraph = (workspaceId: string | null) => {
     if (!workspaceId || !query) return [];
 
     try {
-      const response = await apiClient.post('/api/search-graph', {
+      const response = await apiClient.post('/api/knowledge-graph/search-graph', {
         workspace_id: workspaceId,
         query: query,
         limit: 50
@@ -149,7 +151,7 @@ export const useKnowledgeGraph = (workspaceId: string | null) => {
     if (!workspaceId || !entityId) return null;
 
     try {
-      const response = await apiClient.post('/api/entity-connections', {
+      const response = await apiClient.post('/api/knowledge-graph/entity-connections', {
         workspace_id: workspaceId,
         entity_id: entityId,
         max_depth: maxDepth
@@ -166,7 +168,9 @@ export const useKnowledgeGraph = (workspaceId: string | null) => {
     if (!workspaceId) return null;
 
     try {
-      const response = await apiClient.get(`/api/knowledge-graph/${workspaceId}/stats`);
+      const response = await apiClient.get(`/api/knowledge-graph/stats`, {
+        params: { workspace_id: workspaceId }
+      });
       return response.data ? response.data : null;
     } catch (err) {
       console.error('Error obteniendo estadísticas:', err);
@@ -175,7 +179,7 @@ export const useKnowledgeGraph = (workspaceId: string | null) => {
   }, [workspaceId]);
   const clearGraph = useCallback(async () => {
     try {
-      const response = await apiClient.post('/api/clear-neo4j');
+      const response = await apiClient.post('/api/knowledge-graph/clear-neo4j', { confirm_delete_all: true });
       console.log('🔵 Respuesta de la API (clearGraph):', response.data);
       if (response.data.success) {
         setGraphData(null);

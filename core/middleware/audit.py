@@ -17,7 +17,16 @@ class AuditMiddleware(BaseHTTPMiddleware):
         # Intentar obtener el usuario del token (sin fallar si no hay token)
         user_id = "anonymous"
         auth_header = request.headers.get("Authorization")
-        if auth_header and auth_header.startswith("Bearer "):
+        path = request.url.path
+
+        # OnlyOffice puede enviar JWT firmados con otra clave para callbacks/descarga.
+        # En esas rutas evitamos decodificar para no contaminar logs de auditoria.
+        skip_auth_decode = (
+            path.startswith("/api/onlyoffice/download/")
+            or path.startswith("/api/onlyoffice/office-callback/")
+        )
+
+        if not skip_auth_decode and auth_header and auth_header.startswith("Bearer "):
             token = auth_header.split(" ")[1]
             payload = decode_access_token(token)
             if payload:

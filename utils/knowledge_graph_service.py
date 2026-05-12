@@ -58,7 +58,7 @@ class KnowledgeGraphService:
             # Query para obtener memorias (documentos procesados, conversaciones, etc.)
             query = """
             MATCH (n)
-            WHERE (n.account_id = $account_id OR n.account_id IS NULL)
+            WHERE n.account_id = $account_id
             AND (
                 n.type IN ['DOCUMENT', 'CONCEPTUAL_QUOTE', 'IDEA_PROFILE'] OR
                 n.name CONTAINS 'memoria' OR
@@ -179,44 +179,129 @@ class KnowledgeGraphService:
 
     async def search_graph_flow(self, query: str, workspace_id: Optional[str] = None, limit: int = 50, account_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """
-        Flujo para buscar información dentro del grafo de conocimiento.
-        
-        Args:
-            query: Término de búsqueda
-            workspace_id: ID del workspace (opcional)
-            limit: Límite de resultados
-            account_id: ID de cuenta del usuario
-            
-        Returns:
-            Lista de resultados de búsqueda
+        Busca nodos en el grafo combinando tres estrategias en cascada:
+        1. Full-text index (rápido, requiere que los nodos tengan dataset_name indexado)
+        2. Búsqueda por CONTAINS sobre name/title/content (tolerante, sin filtro de dataset)
+        3. Fuzzy por similitud de embedding si los anteriores no dan resultados
         """
         try:
             logger.info(f"🔍 Buscando en grafo: '{query}' para cuenta: {account_id}")
-            
-            # Asegurar que la conexión esté activa
+
             if self.graph_db._driver is None or getattr(self.graph_db._driver, 'closed', True):
                 self.graph_db.connect()
-            
-            # Usar GraphIntegration para realizar la búsqueda
-            search_results = await self.graph_integration.search_knowledge_graph(
-                query=query,
-                dataset_name="default",
-                return_type="summary"
-            )
-            
-            # Formatear resultados para la API
-            results = search_results.get("results", [])
-            
-            # Limitar resultados si es necesario
-            if limit and len(results) > limit:
-                results = results[:limit]
-            
-            logger.info(f"✅ Búsqueda completada: {len(results)} resultados")
-            return results
-            
+
+            params: Dict[str, Any] = {"account_id": account_id, "limit": limit}
+
+            # Filtro de workspace opcional
+            ws_clause = ""
+            if workspace_id and workspace_id not in ("all", "global_context"):
+                ws_clause = "AND n.workspace_id = $workspace_id"
+                params["workspace_id"] = workspace_id
+
+            # ── Estrategia 1: full-text index ───────────────────────────────
+            # Escapar caracteres especiales de Lucene que rompen la query
+            safe_query = query.replace("+", " ").replace("-", " ").replace("AND", " ").replace("OR", " ").replace("NOT", " ").strip()
+            params["ft_query"] = safe_query
+
+            ft_cypher = f"""
+            CALL db.index.fulltext.queryNodes('node_fulltext_index', $ft_query)
+            YIELD node AS n, score
+            WHERE (n.account_id = $account_id OR n.account_id IS NULL)
+            {ws_clause}
+            RETURN n.id AS id,
+                   coalesce(n.name, n.title, '') AS label,
+                   coalesce(n.type, labels(n)[0], 'Entity') AS type,
+                   coalesce(n.content, n.description, n.summary, '') AS description,
+                   n.dataset_name AS dataset_name,
+                   n.workspace_id AS workspace_id,
+                   score
+            ORDER BY score DESC
+            LIMIT $limit
+            """
+
+            results = await self.graph_db.execute_query(ft_cypher, params)
+            hits = [dict(r) for r in (results or []) if r.get("id") or r.get("label")]
+
+            # ── Estrategia 2: CONTAINS fallback ─────────────────────────────
+            if not hits:
+                logger.info(f"🔍 Full-text sin resultados, intentando CONTAINS para: '{query}'")
+                query_lower = query.lower()
+                params["q"] = query_lower
+
+                contains_cypher = f"""
+                MATCH (n)
+                WHERE (n.account_id = $account_id OR n.account_id IS NULL)
+                {ws_clause}
+                AND (
+                    toLower(coalesce(n.name, ''))        CONTAINS $q OR
+                    toLower(coalesce(n.title, ''))       CONTAINS $q OR
+                    toLower(coalesce(n.content, ''))     CONTAINS $q OR
+                    toLower(coalesce(n.description, '')) CONTAINS $q OR
+                    toLower(coalesce(n.summary, ''))     CONTAINS $q
+                )
+                RETURN n.id AS id,
+                       coalesce(n.name, n.title, '') AS label,
+                       coalesce(n.type, labels(n)[0], 'Entity') AS type,
+                       coalesce(n.content, n.description, n.summary, '') AS description,
+                       n.dataset_name AS dataset_name,
+                       n.workspace_id AS workspace_id,
+                       1.0 AS score
+                ORDER BY label ASC
+                LIMIT $limit
+                """
+
+                results2 = await self.graph_db.execute_query(contains_cypher, params)
+                hits = [dict(r) for r in (results2 or []) if r.get("id") or r.get("label")]
+
+            # ── Estrategia 3: términos individuales (query multi-palabra) ────
+            if not hits and " " in query:
+                logger.info(f"🔍 Sin resultados, intentando términos individuales")
+                terms = [t.strip().lower() for t in query.split() if len(t.strip()) > 3]
+                if terms:
+                    term_conditions = " OR ".join(
+                        [f"toLower(coalesce(n.name, '')) CONTAINS $t{i} OR "
+                         f"toLower(coalesce(n.title, '')) CONTAINS $t{i} OR "
+                         f"toLower(coalesce(n.content, '')) CONTAINS $t{i}"
+                         for i, _ in enumerate(terms)]
+                    )
+                    term_params = {f"t{i}": t for i, t in enumerate(terms)}
+                    term_params.update({"account_id": account_id, "limit": limit})
+                    if workspace_id and workspace_id not in ("all", "global_context"):
+                        term_params["workspace_id"] = workspace_id
+
+                    terms_cypher = f"""
+                    MATCH (n)
+                    WHERE (n.account_id = $account_id OR n.account_id IS NULL)
+                    {ws_clause}
+                    AND ({term_conditions})
+                    RETURN n.id AS id,
+                           coalesce(n.name, n.title, '') AS label,
+                           coalesce(n.type, labels(n)[0], 'Entity') AS type,
+                           coalesce(n.content, n.description, n.summary, '') AS description,
+                           n.dataset_name AS dataset_name,
+                           n.workspace_id AS workspace_id,
+                           0.5 AS score
+                    ORDER BY label ASC
+                    LIMIT $limit
+                    """
+                    results3 = await self.graph_db.execute_query(terms_cypher, term_params)
+                    hits = [dict(r) for r in (results3 or []) if r.get("id") or r.get("label")]
+
+            # Deduplicar por id
+            seen_ids: set = set()
+            unique_hits = []
+            for h in hits:
+                key = h.get("id") or h.get("label")
+                if key and key not in seen_ids:
+                    seen_ids.add(key)
+                    unique_hits.append(h)
+
+            logger.info(f"✅ Búsqueda completada: {len(unique_hits)} resultados para '{query}'")
+            return unique_hits[:limit]
+
         except Exception as e:
             logger.error(f"❌ Error en búsqueda: {e}", exc_info=True)
-            return [{"error": str(e), "type": "search_error"}]
+            return []
 
     async def get_entity_connections_flow(self, entity_id: str, workspace_id: Optional[str] = None, depth: int = 1, account_id: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -242,7 +327,7 @@ class KnowledgeGraphService:
             query = f"""
             MATCH (n)-[r]-(m)
             WHERE n.id = $entity_id
-            AND (n.account_id = $account_id OR n.account_id IS NULL)
+            AND n.account_id = $account_id
             """
             
             params = {'entity_id': entity_id, 'account_id': account_id}
@@ -300,7 +385,7 @@ class KnowledgeGraphService:
             # Query para contar nodos del usuario
             count_query = """
             MATCH (n)
-            WHERE (n.account_id = $account_id OR n.account_id IS NULL)
+            WHERE n.account_id = $account_id
             RETURN count(n) as total_nodes
             """
             
@@ -354,12 +439,12 @@ class KnowledgeGraphService:
             
             if workspace_id:
                 if workspace_id == "global_context":
-                    delete_query += " WHERE (n.workspace_id IS NULL OR n.workspace_id = '') AND (n.account_id = $account_id OR n.account_id IS NULL)"
+                    delete_query += " WHERE (n.workspace_id IS NULL OR n.workspace_id = '') AND n.account_id = $account_id"
                 else:
-                    delete_query += " WHERE n.workspace_id = $workspace_id AND (n.account_id = $account_id OR n.account_id IS NULL)"
+                    delete_query += " WHERE n.workspace_id = $workspace_id AND n.account_id = $account_id"
                     params['workspace_id'] = workspace_id
             else:
-                delete_query += " WHERE (n.account_id = $account_id OR n.account_id IS NULL)"
+                delete_query += " WHERE n.account_id = $account_id"
             
             delete_query += " DETACH DELETE n"
             
@@ -479,7 +564,7 @@ class KnowledgeGraphService:
             # Query para obtener estadísticas básicas
             stats_query = """
             MATCH (n)
-            WHERE (n.account_id = $account_id OR n.account_id IS NULL)
+            WHERE n.account_id = $account_id
             """
             
             params = {'account_id': account_id}
@@ -514,44 +599,63 @@ class KnowledgeGraphService:
             logger.error(f"❌ Error obteniendo estadísticas: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
 
-    async def get_visualization_data_flow(self) -> Dict[str, Any]:
+    async def get_visualization_data_flow(self, workspace_id: Optional[str] = None, account_id: Optional[str] = None, dataset_name: str = "default", focus_query: Optional[str] = None, max_nodes: int = 50) -> Dict[str, Any]:
         """
-        Flujo para obtener datos para la visualización del grafo.
-        """
-        try:
-            logger.info("📈 Obteniendo datos para visualización")
-            
-            # Por ahora, delegar a get_graph_data_flow
-            return await self.get_graph_data_flow()
-            
-        except Exception as e:
-            logger.error(f"❌ Error obteniendo datos de visualización: {e}", exc_info=True)
-            return {"success": False, "error": str(e)}
-
-    async def get_datasets_flow(self) -> Dict[str, Any]:
-        """
-        Flujo para obtener conjuntos de datos relacionados con el grafo.
+        Flujo para obtener datos para la visualización del grafo, filtrando por usuario y workspace.
+        
+        Args:
+            workspace_id: ID del workspace (opcional)
+            account_id: ID de cuenta del usuario
+            dataset_name: Nombre del dataset
+            focus_query: Consulta de foco para filtrar nodos relevantes
+            max_nodes: Número máximo de nodos a devolver
         """
         try:
-            logger.info("📚 Obteniendo datasets disponibles")
+            logger.info(f"📈 Obteniendo datos para visualización: account={account_id}, workspace={workspace_id}")
             
             # Asegurar que la conexión esté activa
             if self.graph_db._driver is None or getattr(self.graph_db._driver, 'closed', True):
                 self.graph_db.connect()
             
-            # Query para obtener datasets únicos
-            query = """
-            MATCH (n)
-            WHERE n.dataset_name IS NOT NULL
-            RETURN DISTINCT n.dataset_name as dataset_name, count(n) as node_count
-            ORDER BY dataset_name
-            """
+            # Delegar a GraphIntegration con los filtros correctos
+            result = await self.graph_integration.get_visualization_data(
+                dataset_name=dataset_name,
+                focus_query=focus_query,
+                max_nodes=max_nodes,
+                account_id=account_id,
+                workspace_id=workspace_id
+            )
+            result["success"] = True
+            return result
             
-            result = asyncio.run(self.graph_db.execute_query(query))
+        except Exception as e:
+            logger.error(f"❌ Error obteniendo datos de visualización: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    async def get_datasets_flow(self, account_id: Optional[str] = None, workspace_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Flujo para obtener conjuntos de datos relacionados con el grafo, filtrando por usuario y workspace.
+        
+        Args:
+            account_id: ID de cuenta del usuario
+            workspace_id: ID del workspace (opcional)
+        """
+        try:
+            logger.info(f"📚 Obteniendo datasets para account={account_id}, workspace={workspace_id}")
+            
+            # Asegurar que la conexión esté activa
+            if self.graph_db._driver is None or getattr(self.graph_db._driver, 'closed', True):
+                self.graph_db.connect()
+            
+            # Delegar a GraphDB con filtros de usuario
+            result = await self.graph_db.get_available_datasets(
+                account_id=account_id or "",
+                workspace_id=workspace_id
+            )
             
             datasets = [
                 {
-                    "name": record["dataset_name"],
+                    "name": record["name"],
                     "node_count": record["node_count"]
                 }
                 for record in result
@@ -567,47 +671,72 @@ class KnowledgeGraphService:
             logger.error(f"❌ Error obteniendo datasets: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
 
-    async def get_graph_data_flow(self) -> Dict[str, Any]:
+    async def get_graph_data_flow(self, account_id: Optional[str] = None, workspace_id: Optional[str] = None, max_nodes: int = 100) -> Dict[str, Any]:
         """
-        Flujo para obtener los datos crudos del grafo.
+        Flujo para obtener los datos crudos del grafo, filtrando estrictamente por usuario y workspace.
+        
+        Args:
+            account_id: ID de cuenta del usuario
+            workspace_id: ID del workspace (opcional)
+            max_nodes: Número máximo de nodos a devolver
         """
         try:
-            logger.info("📊 Obteniendo datos del grafo")
+            logger.info(f"📊 Obteniendo datos del grafo para account={account_id}, workspace={workspace_id}")
             
             # Asegurar que la conexión esté activa
             if self.graph_db._driver is None or getattr(self.graph_db._driver, 'closed', True):
                 self.graph_db.connect()
             
-            # Query para obtener datos del grafo
-            query = """
+            # Construir query con filtros obligatorios de usuario
+            params: Dict[str, Any] = {"account_id": account_id}
+            where_clauses = ["(n.account_id = $account_id OR n.account_id IS NULL)"]
+            
+            if workspace_id and workspace_id != "global_context":
+                where_clauses.append("n.workspace_id = $workspace_id")
+                params["workspace_id"] = workspace_id
+            elif workspace_id == "global_context":
+                where_clauses.append("(n.workspace_id IS NULL OR n.workspace_id = '')")
+            else:
+                # Sin workspace_id: solo nodos del usuario sin workspace asignado
+                where_clauses.append("(n.workspace_id IS NULL OR n.workspace_id = '')")
+            
+            where_str = " AND ".join(where_clauses)
+            
+            query = f"""
             MATCH (n)
+            WHERE {where_str}
             OPTIONAL MATCH (n)-[r]-(m)
+            WHERE (m.account_id = $account_id OR m.account_id IS NULL)
             RETURN n, r, m
-            LIMIT 100
+            LIMIT {max_nodes}
             """
             
-            result = asyncio.run(self.graph_db.execute_query(query))
+            result = await self.graph_db.execute_query(query, params)
             
-            # Procesar resultados (simplificado)
+            # Procesar resultados
+            seen_nodes = set()
             nodes = []
             edges = []
             
             for record in result:
-                n = record["n"]
-                if n and n not in nodes:
-                    nodes.append({
-                        "id": str(n.get('id', '')),
-                        "label": n.get('name', 'unknown'),
-                        "type": n.get('type', 'unknown')
-                    })
+                n = record.get("n")
+                if n is not None:
+                    node_id = str(n.get('id', n.get('element_id', '')))
+                    if node_id and node_id not in seen_nodes:
+                        seen_nodes.add(node_id)
+                        nodes.append({
+                            "id": node_id,
+                            "label": n.get('name', 'unknown'),
+                            "type": n.get('type', 'unknown')
+                        })
                 
-                r = record["r"]
-                m = record["m"]
-                if r and m:
+                r = record.get("r")
+                m = record.get("m")
+                if r is not None and m is not None:
                     edges.append({
-                        "from": str(n.get('id', '')),
+                        "from": str(n.get('id', '') if n else ''),
                         "to": str(m.get('id', '')),
-                        "type": r.get('type', 'related')
+                        "type": r.get('type', 'related') if isinstance(r, dict) else getattr(r, 'type', 'related')
                     })
             
             return {
@@ -620,33 +749,47 @@ class KnowledgeGraphService:
             logger.error(f"❌ Error obteniendo datos del grafo: {e}", exc_info=True)
             return {"success": False, "error": str(e)}
 
-    async def get_graph_metadata_flow(self) -> Dict[str, Any]:
+    async def get_graph_metadata_flow(self, account_id: Optional[str] = None, workspace_id: Optional[str] = None) -> Dict[str, Any]:
         """
-        Flujo para obtener los metadatos del grafo.
+        Flujo para obtener los metadatos del grafo, filtrando por usuario y workspace.
+        
+        Args:
+            account_id: ID de cuenta del usuario
+            workspace_id: ID del workspace (opcional)
         """
         try:
-            logger.info("📋 Obteniendo metadatos del grafo")
+            logger.info(f"📋 Obteniendo metadatos del grafo para account={account_id}, workspace={workspace_id}")
             
             # Asegurar que la conexión esté activa
             if self.graph_db._driver is None or getattr(self.graph_db._driver, 'closed', True):
                 self.graph_db.connect()
             
-            # Query para obtener tipos de nodos
-            node_types_query = """
+            params: Dict[str, Any] = {"account_id": account_id}
+            workspace_filter = ""
+            if workspace_id and workspace_id != "global_context":
+                workspace_filter = " AND n.workspace_id = $workspace_id"
+                params["workspace_id"] = workspace_id
+            elif workspace_id == "global_context":
+                workspace_filter = " AND (n.workspace_id IS NULL OR n.workspace_id = '')"
+            
+            # Query para obtener tipos de nodos filtrados por usuario
+            node_types_query = f"""
             MATCH (n)
+            WHERE n.account_id = $account_id{workspace_filter}
             RETURN DISTINCT n.type as type, count(n) as count
             ORDER BY count DESC
             """
             
-            # Query para obtener tipos de relaciones
-            rel_types_query = """
-            MATCH ()-[r]->()
+            # Query para obtener tipos de relaciones filtrados por usuario
+            rel_types_query = f"""
+            MATCH (n)-[r]->(m)
+            WHERE n.account_id = $account_id{workspace_filter}
             RETURN DISTINCT type(r) as type, count(r) as count
             ORDER BY count DESC
             """
             
-            node_results = await self.graph_db.execute_query(node_types_query)
-            rel_results = await self.graph_db.execute_query(rel_types_query)
+            node_results = await self.graph_db.execute_query(node_types_query, params)
+            rel_results = await self.graph_db.execute_query(rel_types_query, params)
             
             metadata = {
                 "nodeTypes": [

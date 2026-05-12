@@ -29,7 +29,6 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
   }, [onMessage]);
 
   const connect = useCallback(() => {
-    console.log('WS: Intentando conectar...');
     try {
       const token = authToken || (typeof window !== 'undefined' ? localStorage.getItem('authToken') : null);
 
@@ -52,7 +51,6 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
       }
 
       if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
-        console.log('WS: Cerrando conexión WebSocket existente antes de abrir una nueva.');
         wsRef.current.close(1000, 'Reconexión');
         wsRef.current = null;
       }
@@ -70,12 +68,10 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
       }
 
       const wsUrl = `${wsProtocol}://${wsHost}/ws/${userId}?token=${encodeURIComponent(token)}`;
-      console.log(`WS: Intentando conectar a: ${wsUrl}`);
 
       wsRef.current = new WebSocket(wsUrl);
 
       wsRef.current.onopen = () => {
-        console.log('WS: 🔌 WebSocket conectado exitosamente.');
         setIsConnected(true);
         setConnectionError(null);
 
@@ -84,7 +80,6 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
         setTimeout(() => {
           if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
             reconnectAttempts.current = 0;
-            console.log('WS: Conexión estable por 5s, reseteando contador de intentos.');
           }
         }, 5000);
       };
@@ -115,7 +110,6 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
       };
 
       wsRef.current.onclose = (event) => {
-        console.log(`WS: 🔌 WebSocket desconectado. Código: ${event.code}, Razón: "${event.reason}", Limpio: ${event.wasClean}.`);
         setIsConnected(false);
 
         // Log detallado del evento de cierre
@@ -129,7 +123,6 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
 
         if (event.code !== 1000 && reconnectAttempts.current < maxReconnectAttempts) {
           const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 30000);
-          console.log(`WS: 🔄 Reintentando conexión en ${delay}ms (intento ${reconnectAttempts.current + 1}/${maxReconnectAttempts}).`);
 
           reconnectTimeoutRef.current = setTimeout(() => {
             reconnectAttempts.current++;
@@ -170,7 +163,6 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
   }, [userId, authToken]); // Added authToken to dependencies
 
   const disconnect = useCallback(() => {
-    console.log('WS: Desconectando WebSocket...');
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
@@ -198,7 +190,7 @@ export const useWebSocket = (options: UseWebSocketOptions = {}) => {
       }, 20000) as any;
 
     } else {
-      console.log("WS: No userId available yet, skipping WebSocket connection attempt.");
+      // Waiting for user identity before opening the socket.
     }
 
     return () => {

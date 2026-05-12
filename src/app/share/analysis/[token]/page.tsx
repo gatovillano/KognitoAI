@@ -19,7 +19,9 @@ import { SourcesTab } from '@/components/SourcesTab';
 import { QuestionSliderDialog } from '@/components/QuestionSliderDialog';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 import { Source, ContentPart, SourceButton } from '@/components/SourceButton';
-import { processMessageWithCitations, collectSourcesFromMessage } from '@/lib/chatUtils';
+import { processMessageWithCitations, collectSourcesFromMessage, getSourceIdentityKey } from '@/lib/chatUtils';
+import CodeAnalysis from '@/app/(dashboard)/analysis/CodeAnalysis';
+import { CodeAnalysisResultFrontend } from '@/lib/models';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { ChevronDown } from 'lucide-react';
 
@@ -115,7 +117,7 @@ const getAnalysisTypeLabel = (type: string) => {
         case 'semantic_summary': return 'Resumen Semántico';
         case 'note_analysis': return 'Análisis de Nota';
         case 'note_collection_analysis': return 'Análisis de Colección de Notas';
-        case 'gap_development': return 'Desarrollo de Brecha';
+        case 'gap_development': return 'Investigación Profunda';
         default: return 'Análisis Desconocido';
     }
 };
@@ -237,21 +239,26 @@ const DeepResearchContent: React.FC<DeepResearchContentProps> = ({ resultPayload
     const recommendations = reportData?.recommendations || [];
 
     // Process sources using the same utility as DeepResearchDetailDialog
-    const { additionalSources: uniqueSources } = useMemo(() => {
+    const { citationSources, additionalSources } = useMemo(() => {
         return collectSourcesFromMessage(sources as any[]);
     }, [sources]);
 
-    const { contentParts: summaryContentParts, citedSources: citedSourcesSummary, uncitedSources: uncitedSourcesSummary } = useMemo(() => {
-        return processMessageWithCitations(summary, uniqueSources);
-    }, [summary, uniqueSources]);
+    const { contentParts: summaryContentParts, citedSources: citedSourcesSummary, uncitedSources: uncitedSourcesSummary, resolvedSources: resolvedSummarySources } = useMemo(() => {
+        return processMessageWithCitations(summary, citationSources);
+    }, [summary, citationSources]);
 
     const { contentParts: findingsContentParts, citedSources: citedSourcesFindings, uncitedSources: uncitedSourcesFindings } = useMemo(() => {
-        return processMessageWithCitations(findings, uniqueSources);
-    }, [findings, uniqueSources]);
+        return processMessageWithCitations(findings, citationSources);
+    }, [findings, citationSources]);
 
     const { contentParts: recommendationsContentParts, citedSources: citedSourcesRecommendations, uncitedSources: uncitedSourcesRecommendations } = useMemo(() => {
-        return processMessageWithCitations(recommendations.join("\n\n"), uniqueSources);
-    }, [recommendations, uniqueSources]);
+        return processMessageWithCitations(recommendations.join("\n\n"), citationSources);
+    }, [recommendations, citationSources]);
+
+    const displaySources = resolvedSummarySources.length > 0 ? resolvedSummarySources : additionalSources;
+    const citationNumberBySource = useMemo(() => {
+        return new Map(displaySources.map((source, index) => [getSourceIdentityKey(source), index + 1]));
+    }, [displaySources]);
 
     const handleSourceClick = (source: Source) => {
         console.log('Source clicked:', source);
@@ -309,14 +316,19 @@ const DeepResearchContent: React.FC<DeepResearchContentProps> = ({ resultPayload
                                             <ExternalLink className="h-3 w-3 text-primary" />
                                         </div>
                                         <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">
-                                            Fuentes y Resultados RAG ({citedSourcesSummary?.length || 0} citadas de {uniqueSources.length} totales)
+                                            Fuentes y Resultados RAG ({citedSourcesSummary?.length || 0} citadas de {displaySources.length} totales)
                                         </span>
                                     </div>
                                     {/* Fuentes Citadas (Siempre visibles) */}
                                     {citedSourcesSummary && citedSourcesSummary.length > 0 && (
                                         <div className="flex flex-wrap gap-2 mb-2">
                                             {citedSourcesSummary.map((source: Source, idx: number) => (
-                                                <SourceButton key={source.id || idx} source={source} citationNumber={idx + 1} onSourceClick={handleSourceClick} />
+                                                <SourceButton
+                                                    key={source.id || idx}
+                                                    source={source}
+                                                    citationNumber={citationNumberBySource.get(getSourceIdentityKey(source)) || idx + 1}
+                                                    onSourceClick={handleSourceClick}
+                                                />
                                             ))}
                                         </div>
                                     )}
@@ -361,7 +373,7 @@ const DeepResearchContent: React.FC<DeepResearchContentProps> = ({ resultPayload
 
                 <TabsContent value="sources">
                     <div className="pt-2">
-                        <SourcesTab sources={uniqueSources} onSourceClick={handleSourceClick} />
+                        <SourcesTab sources={displaySources} onSourceClick={handleSourceClick} />
                     </div>
                 </TabsContent>
 
@@ -640,6 +652,15 @@ export default function SharedAnalysisPage() {
                                 type={type}
                                 summary={summary}
                             />
+                        ) : type === 'code' ? (
+                            <CodeAnalysis 
+                                analysis={resultPayload as CodeAnalysisResultFrontend}
+                                codeColors={{
+                                    iconColor: colorScheme.iconColor,
+                                    cardBorder: colorScheme.cardBorder,
+                                    titleColor: colorScheme.cardTitle,
+                                }}
+                            />
                         ) : (
                             <>
                                 {/* Summary Card */}
@@ -729,6 +750,7 @@ export default function SharedAnalysisPage() {
                 onOpenChange={setIsQuestionsDialogOpen}
                 questions={sliderQuestions}
                 title={sliderTitle}
+                hideDevelopButtons={true}
             />
 
             {/* Concept Detail Dialog */}

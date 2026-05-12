@@ -443,6 +443,51 @@ class HybridGraphProcessor:
                 tracker.set_error(str(e))
             raise
     
+    def _is_meaningful_entity(self, text: str, label: str) -> bool:
+        """
+        Determina si una entidad es significativa y no es ruido.
+        
+        Criterios:
+        1. No es una palabra genérica o de relleno.
+        2. No es solo números o caracteres especiales.
+        3. Tiene una longitud mínima razonable.
+        4. No es una palabra común que el NER suele confundir (pronombres, artículos, etc).
+        """
+        text_lower = text.lower().strip()
+        
+        # 1. Lista de ruido extendida (Palabras que no aportan valor como entidad)
+        noise_words = {
+            'cosa', 'cosas', 'parte', 'partes', 'tipo', 'tipos', 'forma', 'formas',
+            'manera', 'maneras', 'ejemplo', 'ejemplos', 'caso', 'casos', 'vez', 'veces',
+            'tiempo', 'tiempos', 'momento', 'momentos', 'lugar', 'lugares', 'punto', 'puntos',
+            'área', 'áreas', 'aspecto', 'aspectos', 'elemento', 'elementos', 'factor', 'factores',
+            'día', 'días', 'año', 'años', 'mes', 'meses', 'semana', 'semanas', 'hoy', 'mañana',
+            'ayer', 'ahora', 'después', 'antes', 'aquí', 'allí', 'esto', 'eso', 'aquello',
+            'algo', 'nada', 'todo', 'todos', 'cada', 'algunos', 'algunas', 'otros', 'otras',
+            'él', 'ella', 'ellos', 'ellas', 'nosotros', 'ustedes', 'mí', 'ti', 'sí',
+            'quién', 'qué', 'cuál', 'cuánto', 'cuándo', 'dónde', 'cómo', 'por qué'
+        }
+        
+        if text_lower in noise_words:
+            return False
+            
+        # 2. Filtrar si es muy corta o muy larga (sin ser una frase conceptual)
+        if len(text) < 2:
+            return False
+            
+        if label != "CONCEPT_PHRASE" and len(text) > 60:
+            return False
+            
+        # 3. Debe tener al menos una letra
+        if not any(c.isalpha() for c in text):
+            return False
+            
+        # 4. No debe ser solo una fecha o número simple si no es relevante
+        if text.replace(' ', '').replace('.', '').replace(',', '').replace(':', '').isdigit():
+            return False
+            
+        return True
+
     async def _extract_entities_spacy(self, documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Extrae entidades usando spaCy con validaciones de calidad mejoradas."""
         # ✅ NUEVA VERIFICACIÓN: Verificar que spaCy está disponible
@@ -475,17 +520,9 @@ class HybridGraphProcessor:
             # Extraer entidades nombradas con validación mejorada
             for ent in spacy_doc.ents:
                 entity_text = ent.text.strip()
-                entity_lower = entity_text.lower()
                 
-                # Validaciones de calidad RELAJADAS para más cobertura
-                if (len(entity_text) < 2 or  # Reducido de 3 a 2 para mayor cobertura
-                    entity_lower in generic_words or  # No palabras genéricas
-                    not any(c.isalpha() for c in entity_text) or  # Debe contener letras
-                    entity_text.count(' ') > 8):  # Aumentado de 5 a 8 (máximo 9 palabras)
-                    continue
-                
-                # Filtrar entidades que son solo números o puntuación
-                if entity_text.replace(' ', '').replace('.', '').replace(',', '').isdigit():
+                # Validar calidad de la entidad
+                if not self._is_meaningful_entity(entity_text, ent.label_):
                     continue
                 
                 entity_key = f"{entity_lower}_{ent.label_}"
@@ -641,10 +678,8 @@ class HybridGraphProcessor:
                         entity_label = ent['label']
                         entity_score = ent['score']
                         
-                        # Validaciones de calidad RELAJADAS para más cobertura
-                        if (len(entity_text) < 2 or  # Reducido de 3 a 2
-                            not any(c.isalpha() for c in entity_text) or
-                            entity_text.count(' ') > 8):  # Aumentado de 6 a 8 (máximo 9 palabras)
+                        # Validar calidad de la entidad
+                        if not self._is_meaningful_entity(entity_text, entity_label):
                             continue
                         
                         entity_key = f"{entity_lower}_{entity_label}"
@@ -810,7 +845,7 @@ class HybridGraphProcessor:
         similarities = await asyncio.to_thread(cosine_similarity, embeddings)
         
         # Encontrar y fusionar duplicados
-        threshold = 0.92  # Muy similar (>92%)
+        threshold = 0.94  # Aumentado de 0.92 a 0.94 para ser más estricto
         processed = set()
         deduplicated_entities = []
         duplicates_found = 0
@@ -1069,8 +1104,8 @@ class HybridGraphProcessor:
         similarities = await asyncio.to_thread(cosine_similarity, embeddings)
 
         # OPTIMIZACIÓN: Limitar el número de relaciones por concepto
-        threshold = 0.70  # REDUCIDO de 0.80 para mayor densidad
-        max_relations_per_concept = 5  # AUMENTADO de 2 para mayor conectividad
+        threshold = 0.82  # AUMENTADO de 0.70 para mayor calidad
+        max_relations_per_concept = 3  # REDUCIDO de 5 para evitar ruido
         
         logger.info(f"⚡ Optimizando: buscando top-{max_relations_per_concept} conceptos similares por concepto (umbral: {threshold})")
         
@@ -1565,9 +1600,10 @@ class HybridGraphProcessor:
                             ent_a = entity_map.get(orig_rel["source_entity_id"])
                             ent_b = entity_map.get(orig_rel["target_entity_id"])
                             
-                            # Asegurarse de que el tipo no sea "NO_RELATION"
-                            if llm_rel.get("type") == "NO_RELATION":
-                                logger.debug(f"ℹ️ LLM no encontró relación para {ent_a['name']} y {ent_b['name']}")
+                            # Asegurarse de que el tipo no sea "NO_RELATION" y tenga confianza mínima
+                            confidence = float(llm_rel.get("confidence", 0.7))
+                            if llm_rel.get("type") == "NO_RELATION" or confidence < 0.65:
+                                logger.debug(f"ℹ️ Relación descartada por baja confianza o tipo nulo: {ent_a['name']} - {ent_b['name']} ({confidence})")
                                 continue
 
                             direction = llm_rel.get("direction", "a->b")
@@ -1581,10 +1617,10 @@ class HybridGraphProcessor:
                                 "id": rel_id,
                                 "source_entity_id": source_id,
                                 "target_entity_id": target_id,
-                                "type": llm_rel.get("type", "RELATED_TO"),
-                                "relationship_type": llm_rel.get("type", "RELATED_TO"),
+                                "type": rel_type,
+                                "relationship_type": rel_type,
                                 "description": llm_rel.get("description", ""),
-                                "confidence": float(llm_rel.get("confidence", 0.7)),
+                                "confidence": confidence,
                                 "extraction_method": "llm_enriched_cooccurrence",
                                 "source_document": doc_title
                             }))

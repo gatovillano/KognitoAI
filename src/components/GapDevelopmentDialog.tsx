@@ -49,7 +49,7 @@ const normalizeFindings = (findings: any): string[] => {
   return [];
 };
 
-export function GapDevelopmentDialog({ gapId, gapTitle, isOpen, onOpenChange }: GapDevelopmentDialogProps) {
+export function GapDevelopmentDialog({ gapId, gapTitle, isOpen, onOpenChange, mode = 'research' }: GapDevelopmentDialogProps & { mode?: 'research' | 'draft' }) {
   const [developmentStatus, setDevelopmentStatus] = useState<GapDevelopmentStatus | null>(null);
   const [progressValue, setProgressValue] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
@@ -65,16 +65,14 @@ export function GapDevelopmentDialog({ gapId, gapTitle, isOpen, onOpenChange }: 
       const report = developmentStatus.report;
       const rawSources = report.sources || [];
 
-      // Usar collectSourcesFromMessage para normalizar y unificar fuentes
-      const { additionalSources } = collectSourcesFromMessage(rawSources);
-      setProcessedSources(additionalSources);
+      const { citationSources, additionalSources } = collectSourcesFromMessage(rawSources);
 
-      // Procesar el informe final con citas si las hay
-      // El backend manda tanto 'summary' como 'final_report'
-      const { contentParts: parts, citedSources, uncitedSources } = processMessageWithCitations(
+      const { contentParts: parts, resolvedSources } = processMessageWithCitations(
         report.final_report || report.summary || "",
-        additionalSources
+        citationSources
       );
+
+      setProcessedSources(resolvedSources.length > 0 ? resolvedSources : additionalSources);
       setContentParts(parts);
     }
   }, [developmentStatus]);
@@ -130,8 +128,9 @@ export function GapDevelopmentDialog({ gapId, gapTitle, isOpen, onOpenChange }: 
         },
         body: JSON.stringify({
           gap_id: gapId,
-          context: `Investigar brecha de conocimiento: ${gapTitle}`,
-          depth: 3
+          context: `Investigar brecha: ${gapTitle}`,
+          depth: 3,
+          mode: mode
         })
       });
 
