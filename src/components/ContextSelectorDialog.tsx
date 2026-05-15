@@ -166,7 +166,7 @@ const ContextSelectorDialog: React.FC<ContextSelectorDialogProps> = ({
   const fetchGithubRepositories = useCallback(async () => {
     setIsLoadingGithub(true);
     try {
-      const response = await apiClient.get('/api/github/list-github-repositories');
+      const response = await apiClient.post('/api/github/list-github-repositories', {});
       setGithubRepos(response.data || []);
     } catch (error) {
       console.error('Error fetching GitHub repositories:', error);

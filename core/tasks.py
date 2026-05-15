@@ -47,7 +47,7 @@ async def process_upload_task(task_id: str, account_id: str, file_data_list: Lis
             extracted_results = await asyncio.gather(*extraction_tasks, return_exceptions=True)
 
             # Directorio base para documentos físicos
-            DOCUMENTS_ROOT = os.path.join("/app/media", "documents")
+            DOCUMENTS_ROOT = "/media/gato/Almacenamiento/Nueva Fototeca/kognitoalbums/documents"
             os.makedirs(DOCUMENTS_ROOT, exist_ok=True)
 
             for i, result in enumerate(extracted_results):

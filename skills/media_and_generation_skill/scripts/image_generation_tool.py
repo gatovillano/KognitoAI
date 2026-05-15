@@ -132,7 +132,7 @@ class ImageGenerationTool(BaseTool):
                     # Si falla, guardamos en archivo temporal como respaldo.
                     import os
                     import datetime
-                    temp_dir = "/app/tmp/generated_images"
+                    temp_dir = "/media/gato/Almacenamiento/Nueva Fototeca/kognitoalbums/tmp"
                     os.makedirs(temp_dir, exist_ok=True)
                     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                     temp_filename = f"{temp_dir}/imagen_{self.account_id}_{timestamp}.png"
