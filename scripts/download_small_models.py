@@ -43,7 +43,8 @@ def download_sentence_transformer_small():
 
         # Usar modelo multilingüe pequeño que funciona bien con español
         model_name = "paraphrase-multilingual-MiniLM-L12-v2"  # ~420MB pero multilingüe
-        cache_dir = "/app/.cache/sentence_transformers"
+        # Usar directorio .cache en el home del usuario en lugar de /app
+        cache_dir = os.path.expanduser("~/.cache/sentence_transformers")
 
         logger.info(f"📥 Descargando SentenceTransformer multilingüe: {model_name}")
 

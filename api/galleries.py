@@ -111,8 +111,13 @@ class SharedLinkAccess(BaseModel):
     password: Optional[str] = None
 
 # --- Constants ---
-MEDIA_ROOT = "/app/media"
-THUMBNAIL_ROOT = "/app/thumbnails"
+# Usar la ruta original de almacenamiento (funciona en host y docker)
+MEDIA_ROOT = "/media/gato/Almacenamiento/Nueva Fototeca/kognitoalbums"
+THUMBNAIL_ROOT = "/media/gato/Almacenamiento/Nueva Fototeca/kognitoalbums/thumbnails"
+
+# Crear directorios si no existen
+os.makedirs(MEDIA_ROOT, exist_ok=True)
+os.makedirs(THUMBNAIL_ROOT, exist_ok=True)
 
 # --- Helper Functions ---
 async def get_photo_and_verify_ownership(photo_id: uuid.UUID, current_account: Account, db: AsyncSession) -> Photo:

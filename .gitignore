@@ -36,3 +36,4 @@ secrets/
 venv
 kogninotes-app
 .kilo
+venv_host

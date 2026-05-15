@@ -112,7 +112,8 @@ async def _can_access_document(
     return False
 
 # Directorio para los documentos de OnlyOffice
-DEFAULT_DOCS_ROOT = os.path.join("/app/media", "documents")
+# Usar la ruta original de almacenamiento (funciona en host y docker)
+DEFAULT_DOCS_ROOT = "/media/gato/Almacenamiento/Nueva Fototeca/kognitoalbums/documents"
 DOCUMENTS_ROOT = os.environ.get("ONLYOFFICE_DOCS_ROOT", DEFAULT_DOCS_ROOT)
 os.makedirs(DOCUMENTS_ROOT, exist_ok=True)
 

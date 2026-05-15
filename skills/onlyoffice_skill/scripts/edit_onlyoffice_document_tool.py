@@ -33,7 +33,7 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_DOCS_ROOT = os.path.join("/app/media", "documents")
+DEFAULT_DOCS_ROOT = "/media/gato/Almacenamiento/Nueva Fototeca/kognitoalbums/documents"
 DOCUMENTS_ROOT = os.environ.get("ONLYOFFICE_DOCS_ROOT", DEFAULT_DOCS_ROOT)
 
 # --- Acciones disponibles ---
