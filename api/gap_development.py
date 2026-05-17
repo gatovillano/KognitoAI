@@ -56,11 +56,6 @@ class GapDevelopmentResultResponse(BaseModel):
     report: Optional[dict] = None
     error: Optional[str] = None
 
-async def get_llm_instance() -> BaseLanguageModel:
-    llm = get_main_llm()
-    if not llm:
-        raise HTTPException(status_code=500, detail="LLM not initialized. Please contact administrator.")
-    return llm
 
 def validate_user_role(account: Account):
     """Validar que el usuario tenga permisos para usar esta funcionalidad."""
@@ -251,8 +246,7 @@ async def start_gap_development(
     request: GapDevelopmentRequest,
     background_tasks: BackgroundTasks,
     current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db_session),
-    llm_instance: BaseLanguageModel = Depends(get_llm_instance)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """
     Inicia una investigación profunda o el desarrollo de un borrador sobre una brecha.

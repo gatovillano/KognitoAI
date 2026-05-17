@@ -5,6 +5,11 @@ import logging
 from typing import List, Optional, Any, Dict
 from pydantic import BaseModel
 
+# Embedding and async
+import asyncio
+from core.embedding_manager import aembed_query, aembed_documents
+import numpy as np
+
 from langchain_core.tools import BaseTool
 from core.config import settings
 
@@ -42,6 +47,83 @@ class SkillManager:
         self._enhanced_memory_manager = None
         self._knowledge_graph_service = None
 
+        # Cache for skill markdowns and embeddings
+        self._skill_md_cache: Optional[List[Dict[str, Any]]] = None
+        self._skill_md_embeddings: Optional[np.ndarray] = None
+    async def _load_skill_markdowns(self) -> List[Dict[str, Any]]:
+        """
+        Load all SKILL.md (or .md) files for all skills and return a list of dicts:
+        [{ 'id': skill_id, 'description': ..., 'markdown': ... }]
+        Robust to missing/deleted skill directories.
+        """
+        if self._skill_md_cache is not None:
+            return self._skill_md_cache
+        metadata = await self.get_skills_metadata()
+        skill_mds = []
+        for entry in metadata:
+            skill_id = entry["id"]
+            try:
+                # Try to find the markdown file for this skill
+                # Native
+                native_path = os.path.join(self.skills_dir, skill_id)
+                if os.path.exists(native_path):
+                    md = self._read_markdown_description(native_path, skill_id)
+                    if md:
+                        skill_mds.append({"id": skill_id, "description": entry.get("description", ""), "markdown": md})
+                        continue
+                # User/global
+                user_global_path = os.path.join(self.skills_dir, "user_global", skill_id)
+                if os.path.exists(user_global_path):
+                    md = self._read_markdown_description(user_global_path, skill_id)
+                    if md:
+                        skill_mds.append({"id": skill_id, "description": entry.get("description", ""), "markdown": md})
+            except Exception as e:
+                logger.warning(f"[SKILL.md loader] Ignoring missing or broken skill '{skill_id}': {e}")
+                continue
+        self._skill_md_cache = skill_mds
+        return skill_mds
+
+    async def _ensure_skill_md_embeddings(self):
+        """
+        Ensure that embeddings for all SKILL.md files are computed and cached.
+        """
+        if self._skill_md_embeddings is not None:
+            return
+        skill_mds = await self._load_skill_markdowns()
+        texts = [s["markdown"] for s in skill_mds]
+        if not texts:
+            self._skill_md_embeddings = np.zeros((0, 384), dtype=np.float32)
+            return
+        # Compute embeddings
+        embeddings = await aembed_documents(texts)
+        self._skill_md_embeddings = np.array(embeddings)
+
+    async def search_skills_semantic(self, query: str, top_k: int = 3) -> List[Dict[str, Any]]:
+        """
+        Perform semantic search over all SKILL.md files and return the top-k most relevant skills.
+        Returns a list of dicts: [{ 'id': ..., 'description': ..., 'markdown': ... }]
+        """
+        await self._ensure_skill_md_embeddings()
+        skill_mds = await self._load_skill_markdowns()
+        if not skill_mds or self._skill_md_embeddings.shape[0] == 0:
+            return []
+        # Embed the query
+        query_emb = await aembed_query(query)
+        query_emb = np.array(query_emb)
+        # Compute cosine similarity
+        skill_embs = self._skill_md_embeddings
+        # Normalize
+        skill_embs_norm = skill_embs / (np.linalg.norm(skill_embs, axis=1, keepdims=True) + 1e-8)
+        query_emb_norm = query_emb / (np.linalg.norm(query_emb) + 1e-8)
+        sims = np.dot(skill_embs_norm, query_emb_norm)
+        # Get top-k
+        top_idx = np.argsort(sims)[::-1][:top_k]
+        return [skill_mds[i] for i in top_idx]
+
+    def clear_skill_md_cache(self):
+        self._skill_md_cache = None
+        self._skill_md_embeddings = None
+
     async def initialize_dependencies(self):
         """Inicializa despendenicss globales necesarias para las tools (ej: base de datos Neo4j)"""
         try:
@@ -73,13 +155,32 @@ class SkillManager:
             logger.error(f"Error reading markdown file {md_path}: {e}")
         return None
 
-    def _get_tool_classes_from_module(self, module) -> List[type]:
-        """Extrae todas las clases que heredan de BaseTool en un módulo dado."""
-        classes = []
+    def _get_tool_classes_from_module(self, module) -> List[Any]:
+        """
+        Extrae todas las clases que heredan de BaseTool en un módulo dado,
+        y también funciones públicas estándar (run, main, execute) como herramientas ejecutables.
+        """
+        tools = []
+        # Clases BaseTool
         for name, obj in inspect.getmembers(module, inspect.isclass):
             if issubclass(obj, BaseTool) and obj != BaseTool and obj.__module__ == module.__name__:
-                classes.append(obj)
-        return classes
+                tools.append(obj)
+        # Funciones públicas estándar
+        for fname in ("run", "main", "execute"):
+            func = getattr(module, fname, None)
+            if callable(func):
+                # Envolver la función en una clase simple para compatibilidad
+                tool_name = getattr(module, "name", module.__name__)
+                tool_desc = getattr(module, "description", func.__doc__ or "Función ejecutable expuesta por el script.")
+                class FunctionTool:
+                    name = tool_name
+                    description = tool_desc
+                    def __init__(self, *args, **kwargs):
+                        pass
+                    def __call__(self, *args, **kwargs):
+                        return func(*args, **kwargs)
+                tools.append(FunctionTool)
+        return tools
 
     async def _instantiate_skill(
         self,

@@ -145,7 +145,18 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
       });
 
       setSavedAnalyses(savedAnalysesData);
-      setCollectionDescription(collectionData.description || null);
+      let desc = collectionData.description;
+      console.log('🔍 DEBUG collectionData.description:', desc, 'typeof:', typeof desc);
+      if (typeof desc !== 'string') {
+        // Si es un objeto, intentar obtener la propiedad description como string
+        if (desc && typeof desc === 'object' && 'description' in desc) {
+          desc = String(desc.description);
+        } else {
+          desc = JSON.stringify(desc);
+        }
+      }
+      console.log('🔍 DEBUG desc final:', desc, 'typeof:', typeof desc);
+      setCollectionDescription(desc || null);
       // Cargar subcolecciones directas (hijos) para mostrar como "carpetas"
       try {
         const parentId = collectionData.id;
@@ -866,7 +877,7 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
                     name: sc.name || sc.topic || 'Sin nombre',
                     document_count: sc.document_count ?? 0,
                     subcollection_count: sc.subcollection_count ?? 0,
-                    description: sc.description,
+                    description: typeof sc.description === 'string' ? sc.description : (typeof sc.description === 'object' && sc.description !== null && 'description' in sc.description ? String(sc.description.description) : (sc.description ? JSON.stringify(sc.description) : 'Sin descripción')),
                     workspace_id: sc.workspace_id,
                     workspace_name: sc.workspace_name,
                     workspace_color: sc.workspace_color,
@@ -941,7 +952,7 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
                 }
 
                 // Obtener el resumen según el tipo
-                let summary = '';
+                let summary: any = '';
                 if (analysis.result_payload?.collection_summary) {
                   summary = analysis.result_payload.collection_summary;
                 } else if (analysis.result_payload?.resumen_semantico) {
@@ -951,13 +962,17 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
                 } else if (analysis.result_payload?.resumen_ejecutivo) {
                   summary = analysis.result_payload.resumen_ejecutivo;
                 } else if (analysis.result_payload?.analysis_result) {
-                  summary = typeof analysis.result_payload.analysis_result === 'string'
-                    ? analysis.result_payload.analysis_result
-                    : JSON.stringify(analysis.result_payload.analysis_result).substring(0, 200) + '...';
+                  summary = analysis.result_payload.analysis_result;
                 } else if (analysis.result_payload?.report?.summary || analysis.result_payload?.summary) {
                   summary = analysis.result_payload?.report?.summary || analysis.result_payload?.summary;
                 } else if (analysis.result_payload?.final_report) {
-                  summary = analysis.result_payload.final_report.substring(0, 200) + '...';
+                  summary = typeof analysis.result_payload.final_report === 'string' ? analysis.result_payload.final_report.substring(0, 200) + '...' : analysis.result_payload.final_report;
+                }
+                
+                if (typeof summary === 'object' && summary !== null) {
+                  summary = summary.description || summary.resumen || JSON.stringify(summary).substring(0, 200) + '...';
+                } else if (typeof summary !== 'string') {
+                  summary = String(summary || '');
                 }
 
                 return (

@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Card, CardContent, CardFooter, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -577,91 +577,89 @@ export function AnalysisView() {
                                     transition={{ duration: 0.3, delay: index * 0.05 }}
                                 >
                                     <Card
-                                        className="group relative cursor-pointer overflow-hidden border-border/40 bg-card/40 backdrop-blur-xl hover:bg-card/60 transition-all duration-500 rounded-[2rem] flex flex-col h-full shadow-sm hover:shadow-2xl hover:shadow-primary/5 hover:-translate-y-1"
+                                        className="group relative cursor-pointer overflow-hidden border-border/40 bg-card/40 backdrop-blur-xl hover:bg-card/60 transition-all duration-500 h-[280px] flex flex-col shadow-sm hover:shadow-2xl hover:shadow-primary/5 hover:-translate-y-1"
                                         onClick={() => handleViewDetails(analysis)}
                                     >
-                                        {/* Efecto de resplandor en el hover */}
-                                        <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                                        {/* Efecto de reflejo en el hover */}
+                                        <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" style={{ background: 'linear-gradient(135deg, hsl(var(--primary)/0.08) 0%, transparent 60%)' }} />
 
                                         <CardHeader className="pb-3 relative z-10">
                                             <div className="flex items-center justify-between mb-3">
-                                                <div className="p-3 rounded-2xl bg-background/50 border border-border/40 shadow-inner group-hover:scale-110 transition-transform duration-500">
+                                                <div className="p-3 rounded-2xl bg-background/50 border border-border/40 shadow-inner group-hover:scale-110 transition-transform duration-500 flex-shrink-0">
                                                     {getAnalysisIcon(analysis.type)}
                                                 </div>
-                                                <div className="flex gap-2 items-center">
+                                                <div className="flex gap-2 items-center flex-wrap justify-end">
                                                     {analysis.workspace_name && (
-                                                        <Badge 
-                                                            variant="outline" 
-                                                            className="text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-full border-border/40" 
-                                                            style={{ 
-                                                                color: analysis.workspace_color || 'inherit', 
-                                                                borderColor: analysis.workspace_color ? `${analysis.workspace_color}40` : undefined, 
-                                                                backgroundColor: analysis.workspace_color ? `${analysis.workspace_color}10` : undefined 
+                                                        <Badge
+                                                            variant="outline"
+                                                            className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full"
+                                                            style={{
+                                                                color: analysis.workspace_color || 'inherit',
+                                                                borderColor: analysis.workspace_color ? `${analysis.workspace_color}40` : undefined,
+                                                                backgroundColor: analysis.workspace_color ? `${analysis.workspace_color}15` : undefined
                                                             }}
                                                         >
                                                             {analysis.workspace_name}
                                                         </Badge>
                                                     )}
-                                                    <Badge variant="outline" className={`text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-full border-none ${getAnalysisTypeBadgeColor(analysis.type, analysis.result_payload?.mode || (analysis as any).report?.mode)}`}>
+                                                    <Badge variant="outline" className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full border-none ${getAnalysisTypeBadgeColor(analysis.type, analysis.result_payload?.mode || (analysis as any).report?.mode)}`}>
                                                         {getAnalysisTypeLabel(analysis.type, analysis.result_payload?.mode || (analysis as any).report?.mode)}
                                                     </Badge>
                                                 </div>
                                             </div>
-                                            <CardTitle className="text-lg font-bold line-clamp-2 group-hover:text-primary transition-colors leading-tight tracking-tight">
+                                            <CardTitle className="text-base font-bold line-clamp-2 group-hover:text-primary transition-colors leading-tight tracking-tight">
                                                 {analysis.title}
                                             </CardTitle>
                                         </CardHeader>
-                                        <CardContent className="flex-grow relative z-10">
-                                            <div className="text-xs text-muted-foreground/80 line-clamp-3 leading-relaxed font-medium">
+
+                                        <CardContent className="pt-0 flex-grow overflow-hidden relative z-10">
+                                            <div className="text-xs text-muted-foreground/80 line-clamp-4 leading-relaxed font-medium">
                                                 <InlineMarkdownRenderer content={getCleanSummary(analysis)} />
                                             </div>
-                                            <div className="mt-6 pt-4 border-t border-border/20 flex items-center justify-between text-[10px] font-bold text-muted-foreground/60 uppercase tracking-widest">
-                                                <div className="flex items-center gap-2">
-                                                    <div className="w-1.5 h-1.5 rounded-full bg-primary/40" />
-                                                    {formatDate(analysis.created_at || new Date().toISOString())}
-                                                </div>
-                                                <div className="flex items-center gap-1 group-hover:text-primary transition-colors">
-                                                    {(analysis.type === 'neural_insight' || analysis.type === 'insight' || analysis.type === 'proactive_insight') ? (
-                                                        <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
-                                                            <Button
-                                                                variant="ghost"
-                                                                size="icon"
-                                                                className="h-6 w-6 text-green-500 hover:text-green-600 hover:bg-green-50"
-                                                                onClick={() => {
-                                                                    toast.success('Insight aceptado');
-                                                                }}
-                                                            >
-                                                                <CheckCircle className="h-4 w-4" />
-                                                            </Button>
-                                                            <Button
-                                                                variant="ghost"
-                                                                size="icon"
-                                                                className="h-6 w-6 text-red-500 hover:text-red-600 hover:bg-red-50"
-                                                                onClick={async () => {
-                                                                    if (confirm('¿Eliminar insight?')) {
-                                                                        try {
-                                                                            await apiClient.delete('/api/delete-analysis', { 
-                                                                                data: { task_id: analysis.id } 
-                                                                            });
-                                                                            handleAnalysisDeleted(analysis.id);
-                                                                        } catch (err) {
-                                                                            toast.error('Error al eliminar');
-                                                                        }
-                                                                    }
-                                                                }}
-                                                            >
-                                                                <XCircle className="h-4 w-4" />
-                                                            </Button>
-                                                        </div>
-                                                    ) : (
-                                                        <>
-                                                            <span>Detalles</span>
-                                                            <Eye className="h-3.5 w-3.5" />
-                                                        </>
-                                                    )}
-                                                </div>
-                                            </div>
                                         </CardContent>
+
+                                        <CardFooter className="flex justify-between items-center pt-3 mt-auto border-t border-border/20 relative z-10 text-[10px] font-bold text-muted-foreground/60 uppercase tracking-widest">
+                                            <div className="flex items-center gap-2">
+                                                <div className="w-1.5 h-1.5 rounded-full bg-primary/40" />
+                                                {formatDate(analysis.created_at || new Date().toISOString())}
+                                            </div>
+                                            <div className="flex items-center gap-1 group-hover:text-primary transition-colors">
+                                                {(analysis.type === 'neural_insight' || analysis.type === 'insight' || analysis.type === 'proactive_insight') ? (
+                                                    <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            className="h-6 w-6 text-green-500 hover:text-green-600 hover:bg-green-50"
+                                                            onClick={() => { toast.success('Insight aceptado'); }}
+                                                        >
+                                                            <CheckCircle className="h-4 w-4" />
+                                                        </Button>
+                                                        <Button
+                                                            variant="ghost"
+                                                            size="icon"
+                                                            className="h-6 w-6 text-red-500 hover:text-red-600 hover:bg-red-50"
+                                                            onClick={async () => {
+                                                                if (confirm('¿Eliminar insight?')) {
+                                                                    try {
+                                                                        await apiClient.delete('/api/delete-analysis', { data: { task_id: analysis.id } });
+                                                                        handleAnalysisDeleted(analysis.id);
+                                                                    } catch (err) {
+                                                                        toast.error('Error al eliminar');
+                                                                    }
+                                                                }
+                                                            }}
+                                                        >
+                                                            <XCircle className="h-4 w-4" />
+                                                        </Button>
+                                                    </div>
+                                                ) : (
+                                                    <>
+                                                        <span>Detalles</span>
+                                                        <Eye className="h-3.5 w-3.5" />
+                                                    </>
+                                                )}
+                                            </div>
+                                        </CardFooter>
                                     </Card>
                                 </motion.div>
                             ))}

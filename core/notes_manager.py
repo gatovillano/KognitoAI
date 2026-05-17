@@ -78,6 +78,7 @@ class NotesManager:
             "title": new_note.title,
             "content": new_note.content,
             "category": new_note.category,
+            "is_starred": new_note.is_starred,
             "created_at": new_note.created_at.isoformat(),
             "workspace_id": str(new_note.workspace_id) if new_note.workspace_id else None,
         }
@@ -158,6 +159,7 @@ class NotesManager:
                 "id": note.id, "title": note.title, "content": note.content,
                 "category": note.category, "created_at": note.created_at.isoformat(),
                 "updated_at": note.updated_at.isoformat(),
+                "is_starred": note.is_starred,
                 "workspace_id": str(note.workspace_id) if note.workspace_id else None,
                 "workspace_name": note.workspace.name if note.workspace else None,
                 "workspace_color": note.workspace.color if note.workspace else None,
@@ -192,7 +194,7 @@ class NotesManager:
         )
         return total, notes
 
-    async def update_note(self, account_id: str, note_id: int, new_title: Optional[str] = None, new_content: Optional[str] = None, new_category: Optional[str] = None, new_workspace_id: Optional[str] = None) -> bool:
+    async def update_note(self, account_id: str, note_id: int, new_title: Optional[str] = None, new_content: Optional[str] = None, new_category: Optional[str] = None, new_workspace_id: Optional[str] = None, is_starred: Optional[bool] = None) -> bool:
         """
         Actualiza una nota existente. Devuelve True si fue exitoso, False en caso contrario.
         """
@@ -220,6 +222,8 @@ class NotesManager:
             update_data['category'] = sanitize_text(new_category)
         if new_workspace_id is not None:
             update_data['workspace_id'] = uuid.UUID(new_workspace_id) if new_workspace_id else None
+        if is_starred is not None:
+            update_data['is_starred'] = is_starred
 
         if content_changed:
             embeddings_model = get_embedding_model()
@@ -467,6 +471,7 @@ class NotesManager:
             "title": note.title,
             "content": note.content,
             "category": note.category,
+            "is_starred": note.is_starred,
             "created_at": note.created_at.isoformat(),
             "updated_at": note.updated_at.isoformat(),
             "workspace_id": str(note.workspace_id) if note.workspace_id else None,

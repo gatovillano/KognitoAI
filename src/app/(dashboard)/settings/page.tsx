@@ -40,6 +40,7 @@ const LLM_PROVIDERS = [
   { id: 'ollama-cloud', name: '☁️ Ollama Cloud', env_key: 'OLLAMA_API_KEY' },
   { id: 'openai-compatible', name: '🖥️ Local AI / OpenAI Compatible', env_key: null },
   { id: 'mistral', name: 'Mistral AI', env_key: 'MISTRAL_API_KEY' },
+  { id: 'kilocode', name: '🚀 Kilocode Gateway', env_key: 'KILOCODE_API_KEY' },
 ];
 
 const MODELS_BY_PROVIDER: Record<string, string[]> = {
@@ -55,6 +56,12 @@ const MODELS_BY_PROVIDER: Record<string, string[]> = {
   'ollama-cloud': ['ollama_chat/llama3.1', 'ollama_chat/mistral', 'ollama_chat/phi3', 'ollama_chat/gemma2', 'ollama_chat/qwen2.5'],
   'openai-compatible': [],
   mistral: ['mistral/mistral-large-latest', 'mistral/mistral-small-latest'],
+  kilocode: [
+    'kilocode/kilo/auto',
+    'kilocode/anthropic/claude-sonnet-4',
+    'kilocode/openai/gpt-5.5',
+    'kilocode/google/gemini-3.1-pro-preview',
+  ],
 };
 
 const TTS_PROVIDERS = [
