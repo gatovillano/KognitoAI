@@ -138,7 +138,7 @@ async def upload_document(
     extension = filename.split('.')[-1].lower() if '.' in filename else ""
     
     # Validar extensiones soportadas por OnlyOffice (básico)
-    supported = ['docx', 'xlsx', 'pptx', 'doc', 'xls', 'ppt', 'txt', 'csv']
+    supported = ['docx', 'xlsx', 'pptx', 'doc', 'xls', 'ppt', 'txt', 'csv', 'md']
     if extension not in supported:
         raise HTTPException(status_code=400, detail=f"Extensión .{extension} no soportada.")
 
@@ -411,14 +411,38 @@ async def delete_folder(
     current_account_id: str = Depends(get_current_account_id),
     db: AsyncSession = Depends(get_db_session)
 ):
-    """Elimina una carpeta y opcionalmente su contenido (cascada en DB)."""
+    """Elimina una carpeta y su contenido (documentos y subcarpetas)."""
     folder = await db.get(DocumentFolder, folder_id)
     if not folder or str(folder.account_id) != current_account_id:
         raise HTTPException(status_code=404, detail="Carpeta no encontrada")
     
+    async def delete_folder_recursive(fid: uuid.UUID):
+        # 1. Eliminar documentos hijos
+        docs_stmt = select(Document).where(Document.folder_id == fid)
+        docs = (await db.execute(docs_stmt)).scalars().all()
+        for doc in docs:
+            file_full_path = os.path.join(DOCUMENTS_ROOT, doc.file_path)
+            if os.path.exists(file_full_path):
+                try:
+                    os.remove(file_full_path)
+                except Exception as e:
+                    logger.error(f"Error al eliminar archivo físico: {e}")
+            await db.delete(doc)
+            
+        # 2. Obtener y eliminar subcarpetas
+        subfolders_stmt = select(DocumentFolder).where(DocumentFolder.parent_id == fid)
+        subfolders = (await db.execute(subfolders_stmt)).scalars().all()
+        for subfolder in subfolders:
+            await delete_folder_recursive(subfolder.id)
+            await db.delete(subfolder)
+            
+    # Iniciar borrado recursivo de todo el contenido
+    await delete_folder_recursive(folder_id)
+    
+    # Eliminar la carpeta original (y hacer commit final)
     await db.delete(folder)
     await db.commit()
-    return {"message": "Carpeta eliminada"}
+    return {"message": "Carpeta y contenido eliminados con éxito"}
 
 @router.get("/config/{document_id}")
 async def get_onlyoffice_config(
@@ -791,7 +815,7 @@ async def get_or_create_document_chat_link(
 def get_document_type(ext: str) -> str:
     """Mapea extensiones a tipos de documentos de OnlyOffice."""
     ext = ext.lower()
-    if ext in ['doc', 'docx', 'rtf', 'txt', 'odt']: return 'word'
+    if ext in ['doc', 'docx', 'rtf', 'txt', 'odt', 'md']: return 'word'
     if ext in ['xls', 'xlsx', 'csv', 'ods']: return 'cell'
     if ext in ['ppt', 'pptx', 'odp']: return 'slide'
     return 'word'
@@ -877,13 +901,16 @@ async def onlyoffice_callback(document_id: uuid.UUID, request: Request):
                                 if time.time() - os.path.getmtime(bk_path) > 2592000: # 30 dias en segundos
                                     os.remove(bk_path)
                         
-                        # Guardar nueva version
-                        with open(file_full_path, "wb") as f:
-                            f.write(resp.content)
-                        
-                        doc.updated_at = datetime.now()
-                        await db.commit()
-                        logger.info(f"✅ Documento guardado. Backup creado automaticamente.")
+                        # Guardar nueva version solo si el archivo es válido (>100 bytes)
+                        if len(resp.content) > 100:
+                            with open(file_full_path, "wb") as f:
+                                f.write(resp.content)
+                            
+                            doc.updated_at = datetime.now()
+                            await db.commit()
+                            logger.info(f"✅ Documento guardado (size: {len(resp.content)} bytes). Backup creado automáticamente.")
+                        else:
+                            logger.error(f"❌ PELIGRO: OnlyOffice devolvió un archivo vacío ({len(resp.content)} bytes). Se ignora para evitar corrupción.")
                     else:
                         logger.error(f"Documento {document_id} no encontrado en DB durante callback.")
             else:
@@ -931,6 +958,77 @@ async def duplicate_document(
     
     return {"id": str(duplicated_doc.id), "filename": duplicated_doc.filename, "message": "Documento duplicado correctamente"}
 
+
+@router.get("/history/{document_id}")
+async def get_document_history(
+    document_id: uuid.UUID,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """Obtiene el historial de backups automáticos de un documento."""
+    doc = await db.get(Document, document_id)
+    if not doc or str(doc.account_id) != current_account_id:
+        raise HTTPException(status_code=404, detail="Documento no encontrado")
+        
+    file_full_path = os.path.join(DOCUMENTS_ROOT, doc.file_path)
+    backups_dir = os.path.join(os.path.dirname(file_full_path), '.backups')
+    
+    if not os.path.exists(backups_dir):
+        return []
+        
+    backups = []
+    base_name = os.path.basename(file_full_path)
+    for f in os.listdir(backups_dir):
+        if f.startswith(base_name) and f.endswith(".bak"):
+            bk_path = os.path.join(backups_dir, f)
+            # Extraer la fecha del nombre del archivo (ej: nombre.ext.20231015_120000.bak)
+            timestamp_str = f.replace(base_name + ".", "").replace(".bak", "")
+            try:
+                date_obj = datetime.strptime(timestamp_str, "%Y%m%d_%H%M%S")
+                backups.append({
+                    "filename": f,
+                    "date": date_obj.isoformat(),
+                    "size": os.path.getsize(bk_path)
+                })
+            except:
+                pass
+                
+    # Ordenar por fecha descendente
+    backups.sort(key=lambda x: x["date"], reverse=True)
+    return backups
+
+@router.post("/{document_id}/restore/{backup_filename}")
+async def restore_document_backup(
+    document_id: uuid.UUID,
+    backup_filename: str,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """Restaura un documento desde un backup específico."""
+    doc = await db.get(Document, document_id)
+    if not doc or str(doc.account_id) != current_account_id:
+        raise HTTPException(status_code=404, detail="Documento no encontrado")
+        
+    file_full_path = os.path.join(DOCUMENTS_ROOT, doc.file_path)
+    backups_dir = os.path.join(os.path.dirname(file_full_path), '.backups')
+    backup_path = os.path.join(backups_dir, backup_filename)
+    
+    if not os.path.exists(backup_path):
+        raise HTTPException(status_code=404, detail="Backup no encontrado")
+        
+    import shutil
+    # Crear un último backup del estado actual antes de restaurar
+    if os.path.exists(file_full_path):
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        pre_restore_backup = os.path.join(backups_dir, f"{os.path.basename(file_full_path)}.{timestamp}.bak")
+        shutil.copy2(file_full_path, pre_restore_backup)
+        
+    shutil.copy2(backup_path, file_full_path)
+    
+    doc.updated_at = datetime.now()
+    await db.commit()
+    
+    return {"message": "Documento restaurado con éxito"}
 
 @router.delete("/{document_id}")
 async def delete_document(

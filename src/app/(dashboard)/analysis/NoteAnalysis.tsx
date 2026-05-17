@@ -112,14 +112,19 @@ const NoteAnalysis: React.FC<NoteAnalysisProps> = ({
                 Temas Clave
               </h4>
               <div className="flex flex-wrap gap-2">
-                {analysis.key_themes.map((theme, index) => (
-                  <InteractiveTag
-                    key={index}
-                    type="theme"
-                    label={theme}
-                    onClick={() => handleThemeClick?.({ theme, related_quotes: [] })}
-                  />
-                ))}
+                {analysis.key_themes.map((theme: any, index: number) => {
+                  const labelText = typeof theme === 'string' 
+                    ? theme 
+                    : (theme.theme || theme.name || (theme.key_themes ? theme.key_themes.join(', ') : JSON.stringify(theme)));
+                  return (
+                    <InteractiveTag
+                      key={index}
+                      type="theme"
+                      label={labelText}
+                      onClick={() => handleThemeClick?.({ theme: labelText, related_quotes: [] })}
+                    />
+                  );
+                })}
               </div>
             </div>
           )}
@@ -133,14 +138,19 @@ const NoteAnalysis: React.FC<NoteAnalysisProps> = ({
                 Conceptos Relacionados
               </h4>
               <div className="flex flex-wrap gap-2">
-                {analysis.related_concepts.map((concept, index) => (
-                  <InteractiveTag
-                    key={index}
-                    type="concept"
-                    label={concept}
-                    onClick={() => handleConceptClick?.(concept)}
-                  />
-                ))}
+                {analysis.related_concepts.map((concept: any, index: number) => {
+                  const labelText = typeof concept === 'string'
+                    ? concept
+                    : (concept.concept || concept.name || JSON.stringify(concept));
+                  return (
+                    <InteractiveTag
+                      key={index}
+                      type="concept"
+                      label={labelText}
+                      onClick={() => handleConceptClick?.(typeof concept === 'string' ? concept : labelText)}
+                    />
+                  );
+                })}
               </div>
             </div>
           )}

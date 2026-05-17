@@ -87,7 +87,7 @@ class GraphCypherGeneratorTool(BaseTool):
             1.  **Siempre filtra por el dataset:** Incluye `n.dataset_name = '{dataset_name_with_account}'` para nodos y `r.dataset_name = '{dataset_name_with_account}'` para relaciones.
             2.  **Usa `name` o `concept` para buscar conceptos:** Para identificar nodos específicos, usa `n.name` o `n.concept`.
             3.  **Usa `CONTAINS` para búsquedas parciales de texto:** Si la pregunta implica "sobre" o "contiene", usa `CONTAINS` (ej. `n.description CONTAINS 'palabra'`).
-            4.  **Para encontrar caminos:** Usa `MATCH path = (s)-[*1..X]-(t) RETURN path`. Si la pregunta pide el "camino más corto", usa `shortestPath`.
+            4.  **Para encontrar caminos:** Usa `MATCH path = (s)-[*1..X]-(t) RETURN path`. Si la pregunta pide el "camino más corto", usa `shortestPath`. **IMPORTANTE:** Al usar `shortestPath`, asegúrate siempre de que el nodo de inicio y fin sean diferentes (ej. `WHERE n <> m`) para evitar errores en Neo4j.
             5.  **Para estadísticas o conteos:** Usa funciones de agregación como `COUNT()`, `SUM()`.
             6.  **Para relaciones directas:** `(n)-[r]->(m)`.
             7.  **Para cualquier tipo de relación:** `(n)-[r]->(m)` sin especificar el tipo `r`.

@@ -22,17 +22,27 @@ Esta habilidad permite al agente **leer, analizar y editar directamente** los do
 3. Aplica los cambios con `edit_onlyoffice_document_tool` usando la acción más apropiada.
 4. Informa al usuario de los cambios realizados y pídele que recargue el editor para verlos.
 
+## 🚀 Motor de Renderizado de Markdown Avanzado (Exclusivo .docx)
+Al editar documentos de Word (`.docx`) usando las acciones **`append`** o **`clear_and_write`**, puedes enviar **texto completo estructurado en Markdown**. El motor de renderizado avanzado lo traducirá automáticamente a elementos nativos de Office con un diseño y tipografía de altísima calidad (Premium):
+
+- **Tipografía**: Fuente **Segoe UI** moderna con tamaños de lectura ideales y color slate-gray profesional.
+- **Títulos**: `# H1` (Azul Rey, 18pt), `## H2` (Azul Medio, 14pt), `### H3` (Slate Dark, 12pt).
+- **Listas**: Formateadas nativamente como viñetas o números.
+- **Tablas Modernas**: Soportadas mediante formato de tablas Markdown (`| Col | Col |`). Se renderizan sin bordes verticales ruidosos, con bordes horizontales sutiles y elegantes, encabezados sombreados de azul y filas alternas con sombreado gris claro (Zebra Striping).
+- **Bloques de Código**: Sombreado de fondo gris claro (`#F8FAFC`) con borde lateral sutil e tipografía `Courier New`.
+- **Estilos Inline**: Negritas (`**texto**`), cursivas (`*texto*`) y código inline (`` `código` ``) se traducen nativamente a atributos de Runs de Word sin dejar caracteres crudos de Markdown.
+
 ## Acciones de edición disponibles para .docx:
 | Acción | Descripción | Campos requeridos |
 |---|---|---|
-| `append` | Añade un párrafo de texto al final | `text` |
-| `append_heading` | Añade un título (H1/H2/H3) | `text`, `heading_level` |
+| `append` | Añade texto o Markdown completo al final | `text` |
+| `append_heading` | Añade un título nativo (H1/H2/H3) | `text`, `heading_level` |
 | `append_list` | Añade una lista de viñetas | `list_items` |
-| `replace` | Busca y reemplaza texto en todo el documento | `search_text`, `text` |
-| `replace_section` | Reemplaza el párrafo que empieza con `search_text` | `search_text`, `text` |
+| `replace` | Busca y reemplaza texto (soporta inline Markdown en el reemplazo) | `search_text`, `text` |
+| `replace_section` | Reemplaza el párrafo que empieza con `search_text` (soporta inline Markdown) | `search_text`, `text` |
 | `insert_table` | Inserta una tabla al final | `table_data` (matriz 2D) |
 | `apply_bold` | Pone en negrita las ocurrencias de un texto | `search_text` |
-| `clear_and_write` | Borra todo el contenido y escribe nuevo | `text` |
+| `clear_and_write` | Borra todo el contenido y escribe nuevo texto o Markdown completo | `text` |
 
 ## Creación de documentos:
 Para crear un archivo nuevo, usa `create_onlyoffice_document_tool` especificando el `doc_type`:
@@ -54,3 +64,4 @@ Para crear un archivo nuevo, usa `create_onlyoffice_document_tool` especificando
 
 ---
 **IMPORTANTE**: Siempre lee el documento antes de editar para entender su estructura y evitar sobreescribir contenido valioso. Informa al usuario que debe recargar el editor para ver los cambios.
+

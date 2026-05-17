@@ -70,6 +70,7 @@ class NoteResponse(BaseModel):
     title: Optional[str] # Modificado para ser opcional
     content: str
     category: Optional[str]
+    is_starred: bool = False
     created_at: datetime
     updated_at: datetime
     workspace_id: Optional[str]
@@ -89,6 +90,7 @@ class NoteUpdateRequest(BaseModel):
     content: Optional[str] = None
     category: Optional[str] = None
     workspace_id: Optional[str] = None
+    is_starred: Optional[bool] = None
 
 class NoteDeleteRequest(BaseModel):
     note_id: int
@@ -584,7 +586,8 @@ async def update_note_endpoint(
         new_title=note.title,
         new_content=note.content,
         new_category=note.category,
-        new_workspace_id=note.workspace_id
+        new_workspace_id=note.workspace_id,
+        is_starred=note.is_starred
     )
     if not success:
         raise HTTPException(status_code=404, detail="Nota no encontrada o no pertenece al usuario.")

@@ -479,6 +479,48 @@ async def get_provider_models(
                 ]
             logger.info(f"Obtenidos {len(models)} modelos de Azure")
 
+        elif provider == "kilocode":
+            # Kilocode Gateway - API unificada de IA
+            api_key = user_api_key or os.getenv("KILOCODE_API_KEY")
+            # Kilocode usa una API base fija, no usa la del usuario
+            kilocode_base = "https://api.kilo.ai/api/gateway"
+            
+            if api_key:
+                try:
+                    async with httpx.AsyncClient() as client:
+                        response = await client.get(
+                            f"{kilocode_base}/models",
+                            headers={"Authorization": f"Bearer {api_key}"},
+                            timeout=15.0
+                        )
+                        if response.status_code == 200:
+                            data = response.json()
+                            raw_models = data.get("data", [])
+                            for m in raw_models:
+                                model_id = m.get("id", "")
+                                model_name = m.get("name") or model_id
+                                models.append({
+                                    "id": f"kilocode/{model_id}",
+                                    "name": model_name,
+                                    "context_length": m.get("context_length"),
+                                    "pricing": m.get("pricing", {})
+                                })
+                            logger.info(f"Obtenidos {len(models)} modelos de Kilocode Gateway")
+                        else:
+                            logger.warning(f"Kilocode respondió con error {response.status_code}")
+                except Exception as e:
+                    logger.warning(f"Error al conectar con Kilocode Gateway: {e}")
+            
+            if not models:
+                # Modelos por defecto si no hay conexión
+                models = [
+                    {"id": "kilocode/kilo/auto", "name": "Kilo Auto (Smart Routing)"},
+                    {"id": "kilocode/anthropic/claude-sonnet-4", "name": "Claude Sonnet 4 (vía Kilo)"},
+                    {"id": "kilocode/openai/gpt-5.5", "name": "GPT-5.5 (vía Kilo)"},
+                    {"id": "kilocode/google/gemini-3.1-pro-preview", "name": "Gemini 3.1 Pro (vía Kilo)"},
+                ]
+                logger.info(f"Usando modelos por defecto de Kilocode Gateway")
+
         else:
             logger.warning(f"Proveedor '{provider}' no reconocido.")
             models = []

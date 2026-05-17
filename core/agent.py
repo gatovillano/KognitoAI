@@ -74,6 +74,7 @@ from knowledge_graph.graph_database import GraphDB
 from knowledge_graph.graph_reasoning_node import GraphReasoningNode # NUEVO
 from knowledge_graph.knowledge_extraction_node import KnowledgeExtractionNode # NUEVO
 from skills.search_and_research_skill.scripts.deep_research_tool import DeepResearchTool # Importar DeepResearchTool
+from core.skill_manager import get_skill_manager
 
 # --- Claves para estado temporal ---
 from utils.image_generation import GENERATED_IMAGE_KEY
@@ -888,16 +889,14 @@ async def call_model_node(state: AgentState):
     context = state.get("context")
     rag_context = state.get("rag_context")
 
+
     # 1. Construir el prompt del sistema dinámicamente y cargar metadatos en paralelo
     user_message = extract_text_content(state["messages"][-1].content)
-    
-    # OPTIMIZACIÓN: Ejecutar peticiones de metadatos en paralelo
+
     logger.info(f"🚀 Cargando metadatos del agente en paralelo para cuenta {state['account_id']}...")
-    
+
     # Preparamos las tareas
     user_profile_task = get_user_profile(state['account_id'])
-    
-    # Para get_all_langchain_tools, necesitamos preparar los argumentos
     tools_task = get_all_langchain_tools(
         account_id=state['account_id'],
         telegram_id=state.get('telegram_id'),
@@ -905,32 +904,33 @@ async def call_model_node(state: AgentState):
         workspace_id=state.get('workspace_id'),
         query=user_message,
     )
-    
     llm_preview_task = get_llm_for_user(state['account_id'], purpose="main")
-    
+
+    # Semantic skill search (async)
+    skill_manager = get_skill_manager()
+    semantic_skills_task = skill_manager.search_skills_semantic(user_message, top_k=4)
+
     # Ejecutar todas en paralelo
     metadata_results = await asyncio.gather(
         user_profile_task,
         tools_task,
         llm_preview_task,
+        semantic_skills_task,
         return_exceptions=True
     )
-    
-    # Extraer resultados con manejo de errores
+
     user_profile = metadata_results[0] if not isinstance(metadata_results[0], Exception) else None
-    
-    # Asegurar que tools sea SIEMPRE una lista
     tools_result = metadata_results[1]
     if isinstance(tools_result, Exception) or tools_result is None:
         logger.error(f"Error cargando herramientas: {tools_result}")
         full_toolbox = []
     else:
         full_toolbox = tools_result
-        
     _llm_preview = metadata_results[2] if not isinstance(metadata_results[2], Exception) else None
-    
+    relevant_skills = metadata_results[3] if not isinstance(metadata_results[3], Exception) else []
     if isinstance(metadata_results[0], Exception): logger.error(f"Error cargando perfil: {metadata_results[0]}")
     if isinstance(metadata_results[2], Exception): logger.error(f"Error cargando LLM preview: {metadata_results[2]}")
+    if isinstance(metadata_results[3], Exception): logger.error(f"Error en búsqueda semántica de skills: {metadata_results[3]}")
 
     document_ids_for_rag = None
     document_names_for_rag = None # Nuevo
@@ -1150,7 +1150,8 @@ async def call_model_node(state: AgentState):
         explicit_rag_context_items=rag_context,
         context=state.get('context'), # Pasar el contexto aquí
         compact_mode=_is_ollama_model,
-        mode="prompt_tooling" if (use_prompt_tooling_guidance or has_user_skills) else None # Usar modo documentación como refuerzo
+        mode="prompt_tooling" if (use_prompt_tooling_guidance or has_user_skills) else None, # Usar modo documentación como refuerzo
+        relevant_skills=relevant_skills
     )
     
     logger.model_start(model_name)
@@ -1288,6 +1289,7 @@ async def call_model_node(state: AgentState):
     full_ai_message_content = ""
     tool_calls_from_llm = []
     final_response_message = None
+    in_thinking_tag = False
     
     target_account_id = "telegram_bot_service" if state.get('telegram_id') else state['account_id']
     conn_type = "chat" if state.get('telegram_id') else None
@@ -1541,6 +1543,18 @@ async def call_model_node(state: AgentState):
     final_response_message = None
     in_thinking_tag = False
     
+    # Normalización de seguridad para proveedores custom (KiloCode)
+    # Si el LLM tiene un nombre de modelo con prefijo kilocode/, nos aseguramos de que
+    # LiteLLM lo vea como openai/ pero con la api_base correcta ya configurada.
+    for llm_attr in ['llm', 'vision_llm']:
+        target_llm = locals().get(llm_attr)
+        if target_llm and hasattr(target_llm, 'model_name') and target_llm.model_name:
+            if target_llm.model_name.startswith("kilocode/"):
+                logger.info(f"🔄 Normalizando modelo {llm_attr} para LiteLLM: {target_llm.model_name} -> openai/...")
+                target_llm.model_name = target_llm.model_name.replace("kilocode/", "openai/")
+                if not getattr(target_llm, 'custom_llm_provider', None):
+                    target_llm.custom_llm_provider = "openai"
+
     async for chunk in chain.astream({"messages": cleaned_messages}):
         if isinstance(chunk, AIMessage):
             # DEBUG: Log del chunk completo para ver el formato crudo
@@ -1578,7 +1592,7 @@ async def call_model_node(state: AgentState):
                     "full_reasoning": full_reasoning_content
                 }, connection_type=conn_type)
 
-            # 2. Procesar contenido normal y DETECCIÓN DE ETIQUETAS <think> ROBUSTA
+            # 2. Procesar contenido normal y DETECCIÓN DE ETIQUETAS 认 robusta
             current_content = ""
             if isinstance(chunk.content, str):
                 current_content = chunk.content
@@ -1591,19 +1605,19 @@ async def call_model_node(state: AgentState):
             # Nota: Implementar un buffer completo es complejo aqui, usamos heuristica de tags
             
             if current_content:
-                # Lógica de detección de etiquetas <think> para modelos como DeepSeek-R1
+                # Lógica de detección de etiquetas 认 para modelos como DeepSeek-R1
                 processed_content = ""
                 
-                # Caso simple: El chunk contiene <think>
-                if "<think>" in current_content:
-                    parts = current_content.split("<think>")
-                    processed_content += parts[0] # Texto antes de <think>
+                # Caso simple: El chunk contiene 认
+                if "认" in current_content:
+                    parts = current_content.split("认")
+                    processed_content += parts[0] # Texto antes de 认
                     in_thinking_tag = True
                     thinking_part = parts[1] if len(parts) > 1 else ""
                     
-                    # Si también contiene </think> en el mismo chunk
-                    if "</think>" in thinking_part:
-                        subparts = thinking_part.split("</think>")
+                    # Si también contiene 认 en el mismo chunk
+                    if "认" in thinking_part:
+                        subparts = thinking_part.split("认")
                         reasoning_to_send = subparts[0]
                         full_reasoning_content += reasoning_to_send
                         in_thinking_tag = False
@@ -1630,8 +1644,8 @@ async def call_model_node(state: AgentState):
                 
                 # Caso: Estamos dentro de un tag de pensamiento abierto en chunks anteriores
                 elif in_thinking_tag:
-                    if "</think>" in current_content:
-                        parts = current_content.split("</think>")
+                    if "认" in current_content:
+                        parts = current_content.split("认")
                         reasoning_to_send = parts[0]
                         full_reasoning_content += reasoning_to_send
                         in_thinking_tag = False
@@ -2243,8 +2257,7 @@ def get_langgraph_agent():
 
 async def unified_context_node(state: AgentState):
     """
-    Nodo orquestador optimizado que ejecuta RAG, Recuperación Proactiva y la Decisión del Grafo
-    en paralelo para reducir significativamente la latencia de respuesta.
+    Nodo orquestador optimizado que ejecuta RAG, Recuperación Proactiva y la Decisión del Router en paralelo para reducir significativamente la latencia de respuesta.
     """
     logger.info("--- (Grafo) Nodo: Orquestador de Contexto Unificado (Optimizado) ---")
     
