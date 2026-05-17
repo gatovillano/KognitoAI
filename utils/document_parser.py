@@ -52,12 +52,39 @@ async def extract_text_and_metadata_from_document(file_name: str, file_bytes: by
 
         elif file_name_lower.endswith(".docx"):
             metadata["file_type"] = "docx"
-            logger.info("Detectado archivo DOCX, usando python-docx...")
+            logger.info("Detectado archivo DOCX, usando python-docx de forma secuencial...")
             file_stream = BytesIO(file_bytes)
             document = docx.Document(file_stream)
-            paragraphs = [p.text for p in document.paragraphs if p.text.strip()]
-            text = "\n".join(paragraphs)
-            logger.info(f"Texto extraído de DOCX exitosamente. Longitud: {len(text)} caracteres.")
+            
+            # Recorrer todos los elementos del cuerpo preservando el orden secuencial de párrafos y tablas
+            body_elements = []
+            for element in document.element.body:
+                tag = element.tag.split('}')[-1]
+                if tag == 'p':
+                    p = docx.text.paragraph.Paragraph(element, document)
+                    if p.text.strip():
+                        body_elements.append(p.text)
+                elif tag == 'tbl':
+                    table = docx.table.Table(element, document)
+                    table_lines = []
+                    for row in table.rows:
+                        row_cells = []
+                        for cell in row.cells:
+                            # Extraer todo el texto de los párrafos dentro de la celda
+                            cell_txt = " ".join(p.text.strip() for p in cell.paragraphs if p.text.strip())
+                            row_cells.append(cell_txt)
+                        table_lines.append("| " + " | ".join(row_cells) + " |")
+                    
+                    if table_lines:
+                        # Añadir separador de cabecera si hay más de una fila
+                        if len(table_lines) > 1:
+                            num_cols = len(table.columns)
+                            sep = "|" + "|".join("---" for _ in range(num_cols)) + "|"
+                            table_lines.insert(1, sep)
+                        body_elements.append("\n" + "\n".join(table_lines) + "\n")
+            
+            text = "\n".join(body_elements)
+            logger.info(f"Texto y tablas extraídos de DOCX secuencialmente. Longitud: {len(text)} caracteres.")
 
         elif file_name_lower.endswith((".txt", ".md")):
             file_type = "txt" if file_name_lower.endswith(".txt") else "markdown"

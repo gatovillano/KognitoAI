@@ -37,4 +37,4 @@ if __name__ == "__main__":
     security_logger.setLevel(logging.DEBUG)
     logger.info(f"Nivel de logging para utils.security: {logging.getLevelName(security_logger.level)}")
 
-    uvicorn.run("api.main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("api.main:app", host="0.0.0.0", port=8000, reload=False)

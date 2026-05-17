@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Plus, Bot, Info, Share2, Briefcase } from 'lucide-react';
 import apiClient from '@/lib/api';
 import { WorkspaceDialog } from './workspace-dialog';
@@ -120,14 +120,27 @@ export default function WorkspacesPage() {
         <>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
             {workspaces.map((workspace) => (
-              <Card key={workspace.id} className="cursor-pointer hover:border-primary/20" onClick={() => handleCardClick(workspace.id)}>
-                <CardHeader className="pb-3">
+              <Card
+                key={workspace.id}
+                className="group relative cursor-pointer overflow-hidden border-border/40 bg-card/40 backdrop-blur-xl hover:bg-card/60 transition-all duration-500 h-[280px] flex flex-col shadow-sm hover:shadow-2xl hover:shadow-primary/5 hover:-translate-y-1"
+                onClick={() => handleCardClick(workspace.id)}
+              >
+                {/* Efecto de reflejo en el hover */}
+                <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" style={{ background: 'linear-gradient(135deg, hsl(var(--primary)/0.08) 0%, transparent 60%)' }} />
+
+                <CardHeader className="pb-3 relative z-10">
                   <CardTitle className="flex items-start justify-between gap-3">
-                    <div className="flex items-center gap-2 min-w-0 flex-1">
-                      <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
-                        <Bot className="h-5 w-5 text-primary" />
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <div
+                        className="p-3 rounded-2xl border border-border/40 shadow-inner group-hover:scale-110 transition-transform duration-500 flex-shrink-0"
+                        style={{
+                          backgroundColor: workspace.color ? `${workspace.color}20` : 'hsl(var(--background)/0.5)',
+                          borderColor: workspace.color ? `${workspace.color}40` : undefined,
+                        }}
+                      >
+                        <Bot className="h-5 w-5" style={{ color: workspace.color || 'hsl(var(--primary))' }} />
                       </div>
-                      <span className="font-semibold text-lg truncate">{workspace.name}</span>
+                      <span className="font-bold text-lg line-clamp-2 group-hover:text-primary transition-colors leading-tight tracking-tight">{workspace.name}</span>
                     </div>
                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                       <Button
@@ -170,24 +183,24 @@ export default function WorkspacesPage() {
                     </div>
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="pt-0">
-                  <div className="space-y-3">
-                    <p className="text-sm text-muted-foreground line-clamp-3 leading-relaxed">
-                      {workspace.system_prompt ? workspace.system_prompt : 'Sin prompt de sistema configurado'}
-                    </p>
-                    <div className="flex items-center justify-between pt-2 border-t border-border/50">
-                      <span className="text-xs text-muted-foreground font-medium">
-                        {workspace.system_prompt ? 'Configurado' : 'Sin configurar'}
-                      </span>
-                      <div className="flex items-center gap-1">
-                        <div className={`h-2 w-2 rounded-full ${workspace.system_prompt ? 'bg-green-500' : 'bg-orange-400'}`}></div>
-                        <span className="text-xs text-muted-foreground">
-                          {workspace.system_prompt ? 'Activo' : 'Pendiente'}
-                        </span>
-                      </div>
-                    </div>
+
+                <CardContent className="pt-0 flex-grow overflow-hidden relative z-10">
+                  <div className="text-xs text-muted-foreground/80 line-clamp-4 leading-relaxed font-medium">
+                    {workspace.system_prompt ? workspace.system_prompt : (
+                      <span className="text-muted-foreground/60 italic">Sin prompt de sistema configurado</span>
+                    )}
                   </div>
                 </CardContent>
+
+                <CardFooter className="flex justify-between items-center pt-3 mt-auto border-t border-border/20 relative z-10 text-[10px] font-bold text-muted-foreground/60 uppercase tracking-widest">
+                  <div className="flex items-center gap-2">
+                    <span>{workspace.role}</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <div className={`h-1.5 w-1.5 rounded-full ${workspace.system_prompt ? 'bg-green-500' : 'bg-orange-400'}`} />
+                    <span>{workspace.system_prompt ? 'Activo' : 'Pendiente'}</span>
+                  </div>
+                </CardFooter>
               </Card>
             ))}
           </div>

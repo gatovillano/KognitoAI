@@ -17,37 +17,74 @@ const getNormalizedSourceId = (rawSource: any, fallbackIndex: number): string | 
 };
 
 export const getSourceIdentityKey = (source: Source): string => {
-  return [
-    source.type || 'document',
-    source.url || '',
-    source.title || source.name || '',
-    source.snippet || '',
-  ].join('::');
+  // Use url+title for dedup: snippet varies per chunk but same document should collapse
+  const urlKey = source.url || '';
+  const titleKey = (source.title || source.name || '').toLowerCase().trim();
+  // For types without URL (memory, graph, note), include snippet prefix to distinguish chunks
+  const snippetKey = !urlKey ? (source.snippet || '').slice(0, 80) : '';
+  return [source.type || 'document', urlKey, titleKey, snippetKey].join('::');
+};
+
+const detectSourceType = (url: string, rawType: string | undefined, metadata: Record<string, any>): Source['type'] => {
+  // Explicit type from backend takes priority if it's a known value
+  const knownTypes = ['web', 'document', 'memory', 'code', 'database', 'graph', 'note', 'github'];
+  if (rawType && knownTypes.includes(rawType)) return rawType as Source['type'];
+
+  // Infer from URL scheme / domain
+  if (!url) return (metadata.type as Source['type']) || 'document';
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    if (url.includes('github.com')) return 'github';
+    return 'web';
+  }
+  if (url.startsWith('note://')) return 'note';
+  if (url.startsWith('graph://') || url.startsWith('analysis://')) return 'graph';
+  if (url.startsWith('memory://')) return 'memory';
+  if (url.startsWith('db://') || url.startsWith('database://')) return 'database';
+  if (url.startsWith('code://') || metadata.language) return 'code';
+
+  // Infer from metadata hints
+  if (metadata.file_id || metadata.page !== undefined) return 'document';
+  if (metadata.node_id || metadata.graph_id) return 'graph';
+  if (metadata.note_id) return 'note';
+
+  return 'document';
 };
 
 const normalizeSource = (rawSource: any, fallbackIndex: number): Source => {
   const url = rawSource.url || rawSource.metadata?.document_id || '';
   const metadata = rawSource.metadata || {};
+  const detectedType = detectSourceType(url, rawSource.type || metadata.type, metadata);
 
-  let detectedType: Source['type'] = rawSource.type || metadata.type || 'document';
+  const title =
+    rawSource.name ||
+    rawSource.title ||
+    metadata.title ||
+    (detectedType === 'github' ? 'GitHub Repository' :
+     detectedType === 'web' ? new URL(url).hostname.replace(/^www\./, '') :
+     'Fuente');
 
-  if (url.includes('github.com')) {
-    detectedType = 'github';
-  } else if (url.startsWith('graph://') || url.startsWith('analysis://')) {
-    detectedType = 'graph';
-  } else if (url.startsWith('note://')) {
-    detectedType = 'note';
-  }
+  const snippet =
+    rawSource.snippet ||
+    rawSource.content ||
+    rawSource.page_content ||
+    metadata.excerpt ||
+    '';
 
-  const title = rawSource.name || rawSource.title || (detectedType === 'github' ? 'GitHub Repository' : 'Fuente');
+  // Enrich metadata with page/score info if present at top level
+  const enrichedMetadata = {
+    ...metadata,
+    ...(rawSource.score != null && metadata.similarity_score == null ? { similarity_score: rawSource.score } : {}),
+    ...(rawSource.distance != null && metadata.similarity_score == null ? { similarity_score: 1 - rawSource.distance } : {}),
+    ...(rawSource.page != null && metadata.page == null ? { page: rawSource.page } : {}),
+  };
 
   return {
     id: getNormalizedSourceId(rawSource, fallbackIndex),
     title,
     url,
-    snippet: rawSource.snippet || rawSource.content || rawSource.page_content || '',
+    snippet,
     type: detectedType,
-    metadata,
+    metadata: enrichedMetadata,
     name: title,
     is_cited: rawSource.is_cited,
   };
@@ -100,32 +137,36 @@ export const processMessageWithCitations = (text: string | any[], allSources: So
     }
   });
 
-  // Expresión regular para buscar citas individuales como [1], [2], etc.
-  const citationRegex = /\[(\d+)\]/g;
+  // Soporta citas individuales [1], agrupadas [1,2,3] y con espacios [1, 2]
+  const citationRegex = /\[(\d+(?:\s*,\s*\d+)*)\]/g;
   let match: RegExpExecArray | null;
 
   while ((match = citationRegex.exec(textString)) !== null) {
-    const citationNumber = parseInt(match[1], 10);
     const fullMatch = match[0];
     const index = match.index!;
+    const nums = match[1].split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
 
-    // El LLM cita usando el orden del contexto enviado: [1] apunta a la primera fuente.
-    // Solo si ese índice no existe hacemos fallback a un id numérico equivalente.
-    const sourceIndex = citationNumber - 1 < allSources.length
-      ? citationNumber - 1
-      : numericIdToIndex.get(citationNumber);
-    const source = sourceIndex !== undefined ? allSources[sourceIndex] : undefined;
+    // Resolver todas las fuentes del grupo
+    const resolvedGroup: Array<{ source: Source; citationNumber: number; sourceIndex: number }> = [];
+    for (const citationNumber of nums) {
+      const sourceIndex = citationNumber - 1 < allSources.length
+        ? citationNumber - 1
+        : numericIdToIndex.get(citationNumber);
+      const source = sourceIndex !== undefined ? allSources[sourceIndex] : undefined;
+      if (source && sourceIndex !== undefined) {
+        resolvedGroup.push({ source, citationNumber, sourceIndex });
+      }
+    }
 
-    if (source) {
-      // Añadir el texto antes de la cita
+    if (resolvedGroup.length > 0) {
       if (index > lastIndex) {
         contentParts.push({ type: 'text', content: textString.substring(lastIndex, index) });
       }
-
-      // Añadir la cita como un componente
-      contentParts.push({ type: 'citation', source: source, citationNumber: citationNumber });
-      citedSourceIndexes.add(sourceIndex!);
-
+      // Emitir cada cita del grupo como su propio ContentPart
+      for (const { source, citationNumber, sourceIndex } of resolvedGroup) {
+        contentParts.push({ type: 'citation', source, citationNumber });
+        citedSourceIndexes.add(sourceIndex);
+      }
       lastIndex = index + fullMatch.length;
     }
   }

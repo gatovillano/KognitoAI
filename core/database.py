@@ -597,6 +597,7 @@ class Nota(Base):
     content = Column(Text, nullable=False)
     visual_content = Column(Text, nullable=True, comment="Contenido HTML generado preservando el diseño visual.")
     category = Column(String, default="General")
+    is_starred = Column(Boolean, default=False, nullable=False, server_default=text('false'))
     created_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"))
     updated_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
     etag = Column(String, nullable=True)

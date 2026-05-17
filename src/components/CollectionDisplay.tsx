@@ -68,6 +68,26 @@ export const CollectionDisplay = ({
 }: CollectionDisplayProps) => {
   const router = useRouter();
 
+  const ensureString = (val: any) => {
+    if (typeof val === 'string') return val;
+    if (val && typeof val === 'object') {
+      if ('description' in val && typeof val.description === 'string') {
+        return val.description;
+      }
+      if ('key_themes' in val || 'description' in val) {
+        // Es un objeto de descripción enriquecida, extraer el texto
+        const parts = [];
+        if (val.description && typeof val.description === 'string') parts.push(val.description);
+        if (val.key_themes && Array.isArray(val.key_themes)) {
+          parts.push(`Temas: ${val.key_themes.join(', ')}`);
+        }
+        return parts.join('. ') || 'Sin descripción.';
+      }
+      return JSON.stringify(val);
+    }
+    return 'Sin descripción.';
+  };
+
   const handleCardClick = (e: React.MouseEvent) => {
     if (type === 'list') {
       // Evitar la navegación si se hace clic en el menú desplegable
@@ -264,7 +284,7 @@ export const CollectionDisplay = ({
             </div>
           ) : (
             <p className="text-sm text-muted-foreground line-clamp-3 leading-relaxed">
-              {collection.description || 'Sin descripción.'}
+              {ensureString(collection.description)}
             </p>
           )}
         </CardContent>

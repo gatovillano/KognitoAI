@@ -191,8 +191,11 @@ async def delete_analysis_endpoint(
     """
     Elimina un análisis guardado por su ID de tarea, si pertenece al usuario autenticado.
     """
-    account_uuid = uuid.UUID(current_account_id)
-    task_uuid = uuid.UUID(req.task_id)
+    try:
+        account_uuid = uuid.UUID(current_account_id)
+        task_uuid = uuid.UUID(req.task_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="ID de tarea inválido. Debe ser un UUID válido.")
     
     task = await db.get(AnalysisTask, task_uuid)
     if task is None:

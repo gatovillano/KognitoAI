@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
+import { CommonChat } from '@/components/CommonChat';
 import { Card } from '@/components/ui/card';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
@@ -34,7 +35,8 @@ import {
   Share2,
   MessageSquare,
   Link2,
-  UserPlus
+  UserPlus,
+  FolderOutput
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
@@ -49,10 +51,12 @@ import {
   DropdownMenu, 
   DropdownMenuContent, 
   DropdownMenuItem, 
-  DropdownMenuTrigger 
+  DropdownMenuTrigger,
+  DropdownMenuSeparator
 } from '@/components/ui/dropdown-menu';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
   DialogContent,
@@ -131,9 +135,12 @@ export default function DocumentsPage() {
   const [isOpeningEditor, setIsOpeningEditor] = useState(false);
   
   const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false);
+  const [isMoveItemDialogOpen, setIsMoveItemDialogOpen] = useState(false);
   const [itemToMove, setItemToMove] = useState<{id: string, name: string, type: 'doc' | 'folder'} | null>(null);
   const [isMoving, setIsMoving] = useState(false);
   const [selectedWorkspaceForMove, setSelectedWorkspaceForMove] = useState<string | null>(null);
+  const [selectedTargetFolderForMove, setSelectedTargetFolderForMove] = useState<string>("null");
+  const [allFolders, setAllFolders] = useState<OnlyOfficeFolder[]>([]);
   
   const [isRenameDialogOpen, setIsRenameDialogOpen] = useState(false);
   const [itemToRename, setItemToRename] = useState<{id: string, name: string, type: 'doc' | 'folder'} | null>(null);
@@ -159,7 +166,14 @@ export default function DocumentsPage() {
   const [privateSuggestions, setPrivateSuggestions] = useState<ShareUserSuggestion[]>([]);
   const [selectedPrivateUser, setSelectedPrivateUser] = useState<ShareUserSuggestion | null>(null);
   const [isChatSidebarOpen, setIsChatSidebarOpen] = useState(false);
-  const [currentChatUrl, setCurrentChatUrl] = useState<string | null>(null);
+  const [currentChatThreadId, setCurrentChatThreadId] = useState<string | null>(null);
+  const [sidebarWidth, setSidebarWidth] = useState(450);
+  const [isDraggingSidebar, setIsDraggingSidebar] = useState(false);
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [selectedDocs, setSelectedDocs] = useState<string[]>([]);
+  const [selectedFolders, setSelectedFolders] = useState<string[]>([]);
+  const [lastSelected, setLastSelected] = useState<{id: string, type: 'doc' | 'folder'} | null>(null);
+  const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false);
   
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -169,6 +183,27 @@ export default function DocumentsPage() {
   useEffect(() => {
     setHasMounted(true);
   }, []);
+
+  useEffect(() => {
+    if (!isDraggingSidebar) return;
+    const handleMouseMove = (e: MouseEvent) => {
+      const newWidth = document.body.clientWidth - e.clientX;
+      if (newWidth > 300 && newWidth < Math.min(1000, document.body.clientWidth * 0.8)) {
+        setSidebarWidth(newWidth);
+      }
+    };
+    const handleMouseUp = () => setIsDraggingSidebar(false);
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    document.body.style.userSelect = 'none';
+    
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.userSelect = '';
+    };
+  }, [isDraggingSidebar]);
 
   const fetchWorkspaces = async () => {
     try {
@@ -216,6 +251,15 @@ export default function DocumentsPage() {
     }
   };
 
+  const fetchAllFolders = async () => {
+    try {
+      const response = await apiClient.get('/api/onlyoffice/folders');
+      setAllFolders(response.data);
+    } catch (error) {
+      console.error('Error fetching all folders:', error);
+    }
+  };
+
   const fetchDocuments = async () => {
     setIsLoading(true);
     try {
@@ -240,11 +284,101 @@ export default function DocumentsPage() {
   }, [hasMounted]);
 
   useEffect(() => {
+    setSelectedDocs([]);
+    setSelectedFolders([]);
     if (hasMounted) {
       fetchFolders();
       fetchDocuments();
     }
   }, [currentFolderId, currentWorkspaceId, hasMounted]);
+
+  const handleSelection = (id: string, type: 'doc' | 'folder', e?: React.MouseEvent | React.ChangeEvent) => {
+    if (e && 'stopPropagation' in e) e.stopPropagation();
+    
+    const isShiftPressed = e && 'nativeEvent' in e && (e.nativeEvent as any).shiftKey;
+    
+    if (isShiftPressed && lastSelected) {
+      const allItems = [
+        ...filteredFolders.map(f => ({ id: f.id, type: 'folder' as const })),
+        ...filteredDocs.map(d => ({ id: d.id, type: 'doc' as const }))
+      ];
+      
+      const currentIndex = allItems.findIndex(item => item.id === id && item.type === type);
+      const lastIndex = allItems.findIndex(item => item.id === lastSelected.id && item.type === lastSelected.type);
+      
+      if (currentIndex !== -1 && lastIndex !== -1) {
+        const start = Math.min(currentIndex, lastIndex);
+        const end = Math.max(currentIndex, lastIndex);
+        const range = allItems.slice(start, end + 1);
+        
+        const newSelectedDocs = new Set(selectedDocs);
+        const newSelectedFolders = new Set(selectedFolders);
+        
+        range.forEach(item => {
+          if (item.type === 'doc') newSelectedDocs.add(item.id);
+          else newSelectedFolders.add(item.id);
+        });
+        
+        setSelectedDocs(Array.from(newSelectedDocs));
+        setSelectedFolders(Array.from(newSelectedFolders));
+        return;
+      }
+    }
+
+    if (type === 'doc') {
+      setSelectedDocs(prev => {
+        const next = prev.includes(id) ? prev.filter(d => d !== id) : [...prev, id];
+        if (next.includes(id)) setLastSelected({ id, type: 'doc' });
+        return next;
+      });
+    } else {
+      setSelectedFolders(prev => {
+        const next = prev.includes(id) ? prev.filter(f => f !== id) : [...prev, id];
+        if (next.includes(id)) setLastSelected({ id, type: 'folder' });
+        return next;
+      });
+    }
+  };
+
+  const toggleDocSelection = (id: string, e?: React.MouseEvent | React.ChangeEvent) => handleSelection(id, 'doc', e);
+  const toggleFolderSelection = (id: string, e?: React.MouseEvent | React.ChangeEvent) => handleSelection(id, 'folder', e);
+
+  const selectAll = () => {
+    setSelectedFolders(filteredFolders.map(f => f.id));
+    setSelectedDocs(filteredDocs.map(d => d.id));
+  };
+
+  const deselectAll = () => {
+    setSelectedFolders([]);
+    setSelectedDocs([]);
+  };
+
+  const handleBulkDelete = async () => {
+    const count = selectedDocs.length + selectedFolders.length;
+    if (!count) return;
+    
+    try {
+      if (selectedFolders.length > 0) {
+        await Promise.all(selectedFolders.map(id => apiClient.delete(`/api/onlyoffice/folders/${id}`)));
+      }
+      if (selectedDocs.length > 0) {
+        await Promise.all(selectedDocs.map(id => apiClient.delete(`/api/onlyoffice/${id}`)));
+      }
+      
+      toast.success(`${count} elemento(s) eliminado(s) correctamente`);
+      setSelectedDocs([]);
+      setSelectedFolders([]);
+      setBulkDeleteConfirmOpen(false);
+      fetchFolders();
+      fetchDocuments();
+    } catch (error) {
+      console.error('Error during bulk delete:', error);
+      toast.error('Ocurrió un error al intentar eliminar algunos elementos.');
+      setBulkDeleteConfirmOpen(false);
+      fetchFolders();
+      fetchDocuments();
+    }
+  };
 
   useEffect(() => {
     if (!hasMounted) return;
@@ -253,7 +387,6 @@ export default function DocumentsPage() {
       const doc = documents.find(d => d.id === openId);
       if (doc) {
         openEditor(doc);
-        // Clear param to avoid reopening
         const newUrl = window.location.pathname;
         router.replace(newUrl);
       }
@@ -282,7 +415,6 @@ export default function DocumentsPage() {
       toast.error(detail, { id: toastId });
     }
     
-    // Reset input
     e.target.value = '';
   };
 
@@ -370,7 +502,6 @@ export default function DocumentsPage() {
       const wsId = selectedWorkspaceForMove === "none" ? "null" : selectedWorkspaceForMove;
       formData.append('workspace_id', wsId);
       
-      // When changing workspace, move to root of that workspace to guarantee visibility
       if (wsId !== "null") {
         if (itemToMove.type === 'doc') {
           formData.append('folder_id', 'null');
@@ -389,7 +520,6 @@ export default function DocumentsPage() {
       setIsMoveDialogOpen(false);
       setItemToMove(null);
       
-      // Delay refresh for DB consistency
       setTimeout(() => {
         fetchDocuments();
         fetchFolders();
@@ -402,41 +532,92 @@ export default function DocumentsPage() {
     }
   };
 
-  const handleDropToFolder = async (itemId: string, folderId: string, type: 'doc' | 'folder') => {
-    if (type === 'folder' && itemId === folderId) return;
+  const handleBulkMove = async () => {
+    const itemsToMove = [
+      ...selectedDocs.map(id => ({ id, type: 'doc' as const })),
+      ...selectedFolders.map(id => ({ id, type: 'folder' as const }))
+    ];
+    if (itemsToMove.length === 0) return;
     
-    // Find the target folder to inherit its workspace
+    setIsMoving(true);
+    try {
+      await Promise.all(itemsToMove.map(async (item) => {
+        const formData = new FormData();
+        if (item.type === 'doc') {
+          formData.append('folder_id', selectedTargetFolderForMove === "null" ? "null" : selectedTargetFolderForMove);
+        } else {
+          formData.append('parent_id', selectedTargetFolderForMove === "null" ? "null" : selectedTargetFolderForMove);
+        }
+        
+        const endpoint = item.type === 'doc' 
+          ? `/api/onlyoffice/${item.id}/meta` 
+          : `/api/onlyoffice/folders/${item.id}/meta`;
+          
+        await apiClient.post(endpoint, formData);
+      }));
+
+      toast.success('Elementos movidos correctamente');
+      setIsMoveItemDialogOpen(false);
+      setSelectedDocs([]);
+      setSelectedFolders([]);
+      fetchDocuments();
+      fetchFolders();
+    } catch (error) {
+      console.error('Bulk move error:', error);
+      toast.error('Error al mover elementos');
+    } finally {
+      setIsMoving(false);
+    }
+  };
+
+  const handleDropToFolder = async (itemId: string, folderId: string, type: 'doc' | 'folder') => {
+    const isDocSelected = type === 'doc' && selectedDocs.includes(itemId);
+    const isFolderSelected = type === 'folder' && selectedFolders.includes(itemId);
+    
+    const itemsToMove: { id: string, type: 'doc' | 'folder' }[] = [];
+    if (isDocSelected || isFolderSelected) {
+      selectedDocs.forEach(id => itemsToMove.push({ id, type: 'doc' }));
+      selectedFolders.forEach(id => itemsToMove.push({ id, type: 'folder' }));
+    } else {
+      itemsToMove.push({ id: itemId, type });
+    }
+    
     const targetFolder = folders.find(f => f.id === folderId);
     
     try {
-      const formData = new FormData();
-      if (type === 'doc') {
-        formData.append('folder_id', folderId);
-      } else {
-        formData.append('parent_id', folderId);
-      }
-      
-      // Also sync workspace if moving to a folder
-      if (targetFolder?.workspace_id) {
-        formData.append('workspace_id', targetFolder.workspace_id);
-      }
-      
-      const endpoint = type === 'doc' 
-        ? `/api/onlyoffice/${itemId}/meta` 
-        : `/api/onlyoffice/folders/${itemId}/meta`;
+      await Promise.all(itemsToMove.map(async (item) => {
+        if (item.type === 'folder' && item.id === folderId) return;
         
-      console.log(`Moving ${type} ${itemId} to folder ${folderId} via ${endpoint}`);
-      await apiClient.post(endpoint, formData);
-      toast.success(`${type === 'doc' ? 'Documento' : 'Carpeta'} movido correctamente`);
+        const formData = new FormData();
+        if (item.type === 'doc') {
+          formData.append('folder_id', folderId);
+        } else {
+          formData.append('parent_id', folderId);
+        }
+        
+        if (targetFolder?.workspace_id) {
+          formData.append('workspace_id', targetFolder.workspace_id);
+        }
+        
+        const endpoint = item.type === 'doc' 
+          ? `/api/onlyoffice/${item.id}/meta` 
+          : `/api/onlyoffice/folders/${item.id}/meta`;
+          
+        await apiClient.post(endpoint, formData);
+      }));
+
+      toast.success(`${itemsToMove.length > 1 ? 'Ítems movidos' : (type === 'doc' ? 'Documento movido' : 'Carpeta movida')} correctamente`);
       
-      // Delay re-fetch to allow DB consistency to propagate
+      setSelectedDocs([]);
+      setSelectedFolders([]);
+
       setTimeout(() => {
         fetchDocuments();
         fetchFolders();
       }, 500);
     } catch (error) {
       console.error('Error at handleDropToFolder:', error);
-      toast.error('Error al mover el ítem');
+      toast.error('Error al mover los ítems');
     } finally {
       setDraggingItem(null);
     }
@@ -557,8 +738,7 @@ export default function DocumentsPage() {
   };
 
   const handleOpenDocumentChat = async (doc: OnlyOfficeDoc) => {
-    // If it's already open, just toggle it
-    if (isChatSidebarOpen && currentChatUrl) {
+    if (isChatSidebarOpen && currentChatThreadId) {
       setIsChatSidebarOpen(false);
       return;
     }
@@ -566,14 +746,13 @@ export default function DocumentsPage() {
     setIsPreparingDocChat(true);
     try {
       const response = await apiClient.get(`/api/onlyoffice/${doc.id}/chat-link`);
-      const sharePath = response.data?.share_url;
-      if (!sharePath) {
+      const threadId = response.data?.thread_id;
+      if (!threadId) {
         toast.error('No se pudo generar el enlace del chat del documento');
         return;
       }
       
-      const chatUrl = `${window.location.origin}${sharePath}?embed=true`;
-      setCurrentChatUrl(chatUrl);
+      setCurrentChatThreadId(threadId);
       setIsChatSidebarOpen(true);
     } catch (error) {
       console.error('Error opening document chat:', error);
@@ -589,15 +768,13 @@ export default function DocumentsPage() {
     setIsPreparingDocChat(true);
     try {
       const response = await apiClient.get(`/api/onlyoffice/${doc.id}/chat-link?force_new=true`);
-      const sharePath = response.data?.share_url;
-      if (!sharePath) {
+      const threadId = response.data?.thread_id;
+      if (!threadId) {
         toast.error('No se pudo reiniciar el chat');
         return;
       }
       
-      // Añadir timestamp para forzar recarga del iframe
-      const chatUrl = `${window.location.origin}${sharePath}?embed=true&t=${Date.now()}`;
-      setCurrentChatUrl(chatUrl);
+      setCurrentChatThreadId(threadId);
       setIsChatSidebarOpen(true);
       toast.success('Nueva sesión de chat iniciada');
     } catch (error) {
@@ -640,7 +817,6 @@ export default function DocumentsPage() {
       
       setEditingDoc(doc);
       
-      // Load OnlyOffice script if not already present
       if (!(window as any).DocsAPI) {
         const script = document.createElement('script');
         script.src = `${onlyoffice_url}/web-apps/apps/api/documents/api.js`;
@@ -648,11 +824,9 @@ export default function DocumentsPage() {
         script.onload = () => initEditor(config);
         document.head.appendChild(script);
       } else {
-        // Unload old editor if exists
         if (editorRef.current) {
           editorRef.current.destroyEditor();
         }
-        // Short delay to ensure container is ready
         setTimeout(() => initEditor(config), 100);
       }
     } catch (error) {
@@ -680,8 +854,8 @@ export default function DocumentsPage() {
     }
     setEditingDoc(null);
     setIsChatSidebarOpen(false);
-    setCurrentChatUrl(null);
-    fetchDocuments(); // Refresh to show updated time
+    setCurrentChatThreadId(null);
+    fetchDocuments();
   };
 
   const navigateToFolder = (folder: OnlyOfficeFolder | null) => {
@@ -782,29 +956,37 @@ export default function DocumentsPage() {
               </Button>
             </div>
           </header>
-          <div className="flex-1 flex overflow-hidden">
-            <div id="onlyoffice-placeholder" className="flex-1 bg-muted/30">
+          <div className="flex-1 flex overflow-hidden relative">
+            {isDraggingSidebar && (
+              <div className="absolute inset-0 z-50 cursor-col-resize" />
+            )}
+            <div className="flex-1 relative bg-muted/30">
+              <div id="onlyoffice-placeholder" className="absolute inset-0" />
               {isOpeningEditor && (
-                <div className="h-full w-full flex flex-col items-center justify-center gap-4">
+                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-background/80 backdrop-blur-sm">
                   <Loader2 className="h-10 w-10 text-primary animate-spin" />
                   <p className="text-muted-foreground font-medium animate-pulse">Iniciando Editor OnlyOffice...</p>
                 </div>
               )}
             </div>
-            {isChatSidebarOpen && currentChatUrl && (
+            {isChatSidebarOpen && currentChatThreadId && (
               <motion.div 
                 initial={{ width: 0, opacity: 0 }}
-                animate={{ width: 450, opacity: 1 }}
+                animate={{ width: sidebarWidth, opacity: 1 }}
                 exit={{ width: 0, opacity: 0 }}
-                transition={{ type: "spring", damping: 20, stiffness: 150 }}
+                transition={isDraggingSidebar ? { duration: 0 } : { type: "spring", damping: 20, stiffness: 150 }}
                 className="border-l bg-background flex flex-col shadow-[-10px_0_15px_-3px_rgba(0,0,0,0.1)] z-10 relative"
               >
-                <div className="absolute left-0 top-0 bottom-0 w-px bg-border/50" />
-                <iframe 
-                  key={currentChatUrl}
-                  src={currentChatUrl}
-                  className="flex-1 border-none w-full h-full"
-                  title="Chat IA del documento"
+                <div 
+                  className="absolute left-0 top-0 bottom-0 w-2 hover:bg-primary/30 cursor-col-resize z-20 transition-colors group"
+                  onMouseDown={(e) => { e.preventDefault(); setIsDraggingSidebar(true); }}
+                >
+                  <div className={`absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-1 h-8 rounded-full transition-colors ${isDraggingSidebar ? 'bg-primary' : 'bg-border group-hover:bg-primary/50'}`} />
+                </div>
+                <CommonChat 
+                  key={currentChatThreadId}
+                  threadId={currentChatThreadId}
+                  workspaceId={editingDoc?.workspace_id || undefined}
                 />
               </motion.div>
             )}
@@ -818,160 +1000,158 @@ export default function DocumentsPage() {
     <>
     {editorOverlay}
     <div key="documents-main-container" className="p-4 sm:p-8 max-w-7xl mx-auto space-y-8 h-full flex flex-col">
-      <div key="hero-header" className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-        <div className="space-y-2">
-          <div className="flex items-center gap-3">
-            <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center">
-              <FileBox className="h-7 w-7 text-primary" />
-            </div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-3xl font-extrabold tracking-tight">OnlyOffice</h1>
-              <Sheet>
-                <SheetTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-6 w-6 rounded-full hover:bg-primary/10 text-primary/60 hover:text-primary transition-all">
-                    <Info className="h-4 w-4" />
-                  </Button>
-                </SheetTrigger>
-                <SheetContent className="w-[400px] sm:w-[540px] overflow-y-auto">
-                  <SheetHeader className="pb-6 border-b">
-                    <SheetTitle className="text-2xl font-bold flex items-center gap-2">
-                      <FileBox className="h-6 w-6 text-primary" />
-                      Sobre OnlyOffice
-                    </SheetTitle>
-                    <SheetDescription>
-                      Gestión avanzada de documentos y colaboración inteligente.
-                    </SheetDescription>
-                  </SheetHeader>
-                  
-                  <div className="py-6 space-y-8">
-                    <section className="space-y-3">
-                      <h3 className="text-sm font-bold uppercase tracking-wider text-primary">¿Qué es OnlyOffice en Kognito?</h3>
-                      <p className="text-sm text-muted-foreground leading-relaxed">
-                        Es tu suite de ofimática privada. Aquí puedes subir, organizar y editar documentos de Word, Excel y PowerPoint sin que tus datos salgan de tu servidor.
-                      </p>
-                    </section>
-
-                    <section className="space-y-3">
-                      <h3 className="text-sm font-bold uppercase tracking-wider text-primary">Interacción con el Agente</h3>
-                      <div className="bg-primary/5 rounded-2xl p-4 border border-primary/10 space-y-3">
-                        <p className="text-xs font-medium text-primary flex items-center gap-2">
-                          <Bot className="h-4 w-4" /> El Agente puede ayudarte a:
-                        </p>
-                        <ul className="text-xs space-y-2 text-muted-foreground list-disc pl-4">
-                          <li><strong>Listar carpetas</strong> para encontrar tus archivos por ti.</li>
-                          <li><strong>Buscar documentos</strong> globalmente por nombre.</li>
-                          <li><strong>Leer el contenido</strong> completo de archivos Word, Excel y PPT para resumirlos o responder preguntas basadas en sus datos.</li>
-                        </ul>
-                      </div>
-                    </section>
-
-                    <section className="space-y-3">
-                      <h3 className="text-sm font-bold uppercase tracking-wider text-primary">Jerarquía y Workspaces</h3>
-                      <p className="text-sm text-muted-foreground leading-relaxed">
-                        Puedes asociar carpetas enteras a un <strong>Workspace</strong>. Al hacerlo, todos los documentos internos heredarán automáticamente ese proyecto, facilitando la colaboración con tu equipo.
-                      </p>
-                    </section>
-
-                    <section className="space-y-3">
-                      <h3 className="text-sm font-bold uppercase tracking-wider text-primary">Formatos compatibles</h3>
-                      <div className="grid grid-cols-2 gap-2 text-[11px]">
-                        <div className="flex items-center gap-2 p-2 rounded-lg bg-orange-500/5 text-orange-600 border border-orange-500/10">
-                          <span className="font-bold">WORD</span> .docx, .doc, .txt
-                        </div>
-                        <div className="flex items-center gap-2 p-2 rounded-lg bg-emerald-500/5 text-emerald-600 border border-emerald-500/10">
-                          <span className="font-bold">EXCEL</span> .xlsx, .xls, .csv
-                        </div>
-                        <div className="flex items-center gap-2 p-2 rounded-lg bg-blue-500/5 text-blue-600 border border-blue-500/10">
-                          <span className="font-bold">PPT</span> .pptx, .ppt
-                        </div>
-                      </div>
-                    </section>
-                  </div>
-                </SheetContent>
-              </Sheet>
-            </div>
-          </div>
-          <p className="text-muted-foreground ml-15 max-w-lg">
-            Gestión documental inteligente y edición colaborativa integrada con OnlyOffice.
-          </p>
-        </div>
-        
-        <div className="flex flex-wrap md:flex-nowrap items-center justify-between gap-4">
-          {/* 1. Buscar a la izquierda - Ancho fijo en desktop, flexible en mobile */}
-          <div className="relative w-full md:w-96 group">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-all duration-300" />
-            <Input 
-              placeholder="Buscar documentos..." 
-              className="pl-11 h-12 rounded-2xl bg-card/60 backdrop-blur-sm border-border/40 focus:border-primary/40 focus:ring-4 focus:ring-primary/5 transition-all text-sm font-medium"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-          </div>
-          
-          {/* 2. Filtro y Acciones a la derecha - Alineados horizontalmente */}
-          <div className="flex items-center gap-3 w-full md:w-auto">
-            <Select 
-              value={currentWorkspaceId || "all"} 
-              onValueChange={(val) => setCurrentWorkspaceId(val === "all" ? null : val)}
-            >
-              <SelectTrigger className="w-full md:w-56 h-12 rounded-2xl border-border/40 bg-card/60 hover:bg-muted/50 transition-all font-bold">
-                <Briefcase className="h-4 w-4 mr-2 text-primary" />
-                <SelectValue placeholder="Workspaces" />
-              </SelectTrigger>
-              <SelectContent className="rounded-2xl p-2 border-primary/10 shadow-2xl">
-                <SelectItem value="all" className="rounded-xl font-medium">Todos los Proyectos</SelectItem>
-                {workspaces.map(ws => (
-                  <SelectItem key={ws.id} value={ws.id} className="rounded-xl font-medium">
-                    <div className="flex items-center gap-2">
-                      <div className="h-2 w-2 rounded-full" style={{ backgroundColor: ws.color || 'var(--primary)' }} />
-                      {ws.name}
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" className="gap-2 h-12 px-6 rounded-2xl border-border/40 bg-card/60 hover:bg-muted/50 transition-all font-bold group shadow-sm">
-                  <MoreHorizontal className="h-4 w-4 group-hover:scale-125 transition-transform duration-300" />
-                  <span className="hidden sm:inline">Acciones</span>
-                  <ChevronDown className="h-4 w-4 text-muted-foreground group-hover:text-foreground group-data-[state=open]:rotate-180 transition-all duration-300" />
+      <div className="flex items-center justify-between mb-2">
+        <div>
+          <h1 className="text-3xl font-bold flex items-center">
+            <FileBox className="mr-3 h-8 w-8 text-primary" />
+            OnlyOffice
+            <Sheet>
+              <SheetTrigger asChild>
+                <Button variant="ghost" size="icon" className="ml-2 h-6 w-6 text-muted-foreground">
+                  <Info className="h-4 w-4" />
                 </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-64 rounded-2xl p-2 shadow-2xl border-primary/10 backdrop-blur-xl">
-                <DropdownMenuItem onClick={() => setIsCreateFolderOpen(true)} className="gap-3 py-3 rounded-xl cursor-pointer">
-                  <div className="p-2 rounded-lg bg-orange-500/10 text-orange-600">
-                    <Folder className="h-4 w-4" />
-                  </div>
-                  <span className="font-bold text-orange-600">Nueva Carpeta</span>
-                </DropdownMenuItem>
-                <div className="h-px bg-border/40 my-2" />
-                <DropdownMenuItem className="gap-3 py-3 rounded-xl p-0 h-auto cursor-pointer">
-                  <label htmlFor="file-upload" className="flex items-center gap-3 w-full px-3 cursor-pointer">
-                    <div className="p-2 rounded-lg bg-primary/10 text-primary">
-                      <Plus className="h-4 w-4" />
-                    </div>
-                    <span className="font-bold text-primary">Subir Archivo</span>
-                  </label>
-                </DropdownMenuItem>
-                <div className="h-px bg-border/40 my-2" />
-                <DropdownMenuItem onClick={() => setIsCreateDocOpen(true)} className="gap-3 py-3 rounded-xl cursor-pointer">
-                  <div className="p-2 rounded-lg bg-green-500/10 text-green-600">
-                    <FileText className="h-4 w-4" />
-                  </div>
-                  <span className="font-bold text-green-600">Nuevo Documento</span>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+              </SheetTrigger>
+              <SheetContent className="w-[400px] sm:w-[540px] overflow-y-auto">
+                <SheetHeader className="pb-6 border-b">
+                  <SheetTitle className="text-2xl font-bold flex items-center gap-2">
+                    <FileBox className="h-6 w-6 text-primary" />
+                    Sobre OnlyOffice
+                  </SheetTitle>
+                  <SheetDescription>
+                    Gestión avanzada de documentos y colaboración inteligente.
+                  </SheetDescription>
+                </SheetHeader>
+                
+                <div className="py-6 space-y-8">
+                  <section className="space-y-3">
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-primary">¿Qué es OnlyOffice en Kognito?</h3>
+                    <p className="text-sm text-muted-foreground leading-relaxed">
+                      Es tu suite de ofimática privada. Aquí puedes subir, organizar y editar documentos de Word, Excel y PowerPoint sin que tus datos salgan de tu servidor.
+                    </p>
+                  </section>
 
-            <input
-              type="file"
-              id="file-upload"
-              className="hidden"
-              onChange={handleUpload}
-              accept=".docx,.xlsx,.pptx,.doc,.xls,.ppt,.txt,.csv"
-            />
+                  <section className="space-y-3">
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-primary">Interacción con el Agente</h3>
+                    <div className="bg-primary/5 rounded-2xl p-4 border border-primary/10 space-y-3">
+                      <p className="text-xs font-medium text-primary flex items-center gap-2">
+                        <Bot className="h-4 w-4" /> El Agente puede ayudarte a:
+                      </p>
+                      <ul className="text-xs space-y-2 text-muted-foreground list-disc pl-4">
+                        <li><strong>Listar carpetas</strong> para encontrar tus archivos por ti.</li>
+                        <li><strong>Buscar documentos</strong> globalmente por nombre.</li>
+                        <li><strong>Leer el contenido</strong> completo de archivos Word, Excel y PPT para resumirlos o responder preguntas basadas en sus datos.</li>
+                      </ul>
+                    </div>
+                  </section>
+
+                  <section className="space-y-3">
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-primary">Jerarquía y Workspaces</h3>
+                    <p className="text-sm text-muted-foreground leading-relaxed">
+                      Puedes asociar carpetas enteras a un <strong>Workspace</strong>. Al hacerlo, todos los documentos internos heredarán automáticamente ese proyecto, facilitando la colaboración con tu equipo.
+                    </p>
+                  </section>
+
+                  <section className="space-y-3">
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-primary">Formatos compatibles</h3>
+                    <div className="grid grid-cols-2 gap-2 text-[11px]">
+                      <div className="flex items-center gap-2 p-2 rounded-lg bg-orange-500/5 text-orange-600 border border-orange-500/10">
+                        <span className="font-bold">WORD</span> .docx, .doc, .txt
+                      </div>
+                      <div className="flex items-center gap-2 p-2 rounded-lg bg-emerald-500/5 text-emerald-600 border border-emerald-500/10">
+                        <span className="font-bold">EXCEL</span> .xlsx, .xls, .csv
+                      </div>
+                      <div className="flex items-center gap-2 p-2 rounded-lg bg-blue-500/5 text-blue-600 border border-blue-500/10">
+                        <span className="font-bold">PPT</span> .pptx, .ppt
+                      </div>
+                    </div>
+                  </section>
+                </div>
+              </SheetContent>
+            </Sheet>
+          </h1>
+        </div>
+        <div className="flex items-center gap-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="h-8 px-2 md:px-4">
+                <span className="hidden md:inline">Acciones</span> <MoreHorizontal className="md:ml-2 h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-[180px]">
+              <DropdownMenuItem onClick={() => setIsCreateFolderOpen(true)}>
+                <Folder className="mr-2 h-4 w-4" />
+                Nueva Carpeta
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem className="p-0 h-auto">
+                <label htmlFor="file-upload" className="flex items-center w-full px-2 py-1.5 cursor-pointer text-sm">
+                  <Plus className="mr-2 h-4 w-4" />
+                  Subir Archivo
+                </label>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => setIsCreateDocOpen(true)}>
+                <FileText className="mr-2 h-4 w-4" />
+                Nuevo Documento
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <input
+            type="file"
+            id="file-upload"
+            className="hidden"
+            onChange={handleUpload}
+            accept=".docx,.xlsx,.pptx,.doc,.xls,.ppt,.txt,.csv"
+          />
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-4">
+        <div className="relative w-full md:flex-1 md:max-w-md group">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-focus-within:text-primary transition-all duration-300" />
+          <Input 
+            placeholder="Buscar documentos..." 
+            className="pl-11 h-10 rounded-full bg-card/60 backdrop-blur-sm border-border/40 focus:border-primary/40 focus:ring-2 transition-all text-sm font-medium w-full"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+        </div>
+        <div className="flex items-center gap-3">
+          <Select 
+            value={currentWorkspaceId || "all"} 
+            onValueChange={(val) => setCurrentWorkspaceId(val === "all" ? null : val)}
+          >
+            <SelectTrigger className="w-[180px] h-10 rounded-full border-border/40 bg-card/60">
+              <SelectValue placeholder="Workspaces" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos los Proyectos</SelectItem>
+              {workspaces.map(ws => (
+                <SelectItem key={ws.id} value={ws.id}>
+                  <div className="flex items-center gap-2">
+                    <div className="h-2 w-2 rounded-full" style={{ backgroundColor: ws.color || 'var(--primary)' }} />
+                    {ws.name}
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <div className="flex items-center border border-border/40 bg-card/60 rounded-full overflow-hidden h-10">
+            <button 
+              onClick={() => setViewMode('grid')} 
+              className={`px-3 h-full flex items-center justify-center transition-colors ${viewMode === 'grid' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted/50'}`}
+              title="Vista de cuadrícula"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></svg>
+            </button>
+            <div className="w-px h-5 bg-border/40"></div>
+            <button 
+              onClick={() => setViewMode('list')} 
+              className={`px-3 h-full flex items-center justify-center transition-colors ${viewMode === 'list' ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-muted/50'}`}
+              title="Vista de lista"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/><line x1="3" x2="3.01" y1="6" y2="6"/><line x1="3" x2="3.01" y1="12" y2="12"/><line x1="3" x2="3.01" y1="18" y2="18"/></svg>
+            </button>
           </div>
         </div>
       </div>
@@ -1019,6 +1199,28 @@ export default function DocumentsPage() {
         ))}
       </div>
 
+      <AnimatePresence>
+        {(selectedDocs.length > 0 || selectedFolders.length > 0) && (
+          <motion.div 
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="flex items-center gap-2 mb-4 p-2 bg-primary/5 rounded-2xl border border-primary/10 overflow-x-auto"
+          >
+            <div className="flex items-center gap-2 px-3 text-sm font-semibold text-primary/80 whitespace-nowrap">
+              <Layers className="h-4 w-4" />
+              {selectedDocs.length + selectedFolders.length} seleccionados
+            </div>
+            <Button variant="secondary" size="sm" onClick={() => { setItemToMove(null); setSelectedTargetFolderForMove("null"); setIsMoveItemDialogOpen(true); fetchAllFolders(); }} className="gap-2">
+              <FolderOutput className="h-4 w-4" /> Mover
+            </Button>
+            <Button variant="destructive" size="sm" onClick={() => setBulkDeleteConfirmOpen(true)} className="gap-2 ml-auto">
+              <Trash2 className="h-4 w-4" /> Eliminar
+            </Button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <div key="main-content-area" className="flex-1 flex flex-col">
         {isLoading ? (
           <div className="flex-1 flex flex-col items-center justify-center gap-4 py-20">
@@ -1026,9 +1228,9 @@ export default function DocumentsPage() {
             <p className="text-muted-foreground font-medium animate-pulse">Cargando...</p>
           </div>
         ) : (filteredDocs.length > 0 || filteredFolders.length > 0) ? (
+          viewMode === 'grid' ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             <AnimatePresence>
-            {/* Folders first */}
             {filteredFolders.map((folder) => (
               <motion.div 
                 key={`folder-${folder.id}`}
@@ -1055,8 +1257,19 @@ export default function DocumentsPage() {
                 className="h-full"
               >
                 <Card 
-                  className="group relative h-full overflow-hidden bg-orange-500/5 backdrop-blur-sm border-orange-500/20 hover:border-orange-500/40 transition-all duration-300 hover:shadow-xl cursor-grab active:cursor-grabbing rounded-3xl p-5 border"
-                  onClick={() => navigateToFolder(folder)}
+                  className={`group relative h-full overflow-hidden backdrop-blur-sm transition-all duration-300 hover:shadow-xl cursor-grab active:cursor-grabbing rounded-3xl p-5 border ${
+                    selectedFolders.includes(folder.id) 
+                      ? 'bg-orange-500/10 border-orange-500 ring-2 ring-orange-500/50 shadow-md' 
+                      : 'bg-orange-500/5 border-orange-500/20 hover:border-orange-500/40'
+                  }`}
+                  onClick={(e) => {
+                     const isMod = (e as any).shiftKey || (e as any).ctrlKey || (e as any).metaKey;
+                     if (selectedDocs.length > 0 || selectedFolders.length > 0 || isMod) {
+                       toggleFolderSelection(folder.id, e as any);
+                     } else {
+                       navigateToFolder(folder);
+                     }
+                  }}
                   onDragOver={(e: any) => {
                     e.preventDefault();
                     e.dataTransfer.dropEffect = "move";
@@ -1074,11 +1287,18 @@ export default function DocumentsPage() {
                     e.currentTarget.classList.remove('bg-orange-500/10', 'border-orange-500/60', 'scale-105');
                     const itemId = e.dataTransfer.getData('itemId') || e.dataTransfer.getData('text/plain') || draggingItem?.id;
                     const itemType = (e.dataTransfer.getData('itemType') as 'doc' | 'folder') || draggingItem?.type;
-                    console.log('Dropped at Folder:', {itemId, itemType, targetFolderId: folder.id});
                     if (itemId && itemType) handleDropToFolder(itemId, folder.id, itemType);
                   }}
                 >
-                  <div className="flex items-start justify-between">
+                  <div className={`absolute top-4 left-4 z-10 transition-opacity ${selectedFolders.includes(folder.id) ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                    <Checkbox 
+                      checked={selectedFolders.includes(folder.id)}
+                      onCheckedChange={() => toggleFolderSelection(folder.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      className="data-[state=checked]:bg-orange-600 data-[state=checked]:border-orange-600"
+                    />
+                  </div>
+                  <div className="flex items-start justify-between pl-8">
                     <div className="p-4 rounded-2xl bg-orange-500/10 text-orange-600 shadow-sm transition-transform group-hover:scale-110 duration-500">
                       <Folder className="h-8 w-8 fill-current" />
                     </div>
@@ -1105,6 +1325,19 @@ export default function DocumentsPage() {
                         >
                           <Edit3 className="h-4 w-4" />
                           <span>Renombrar</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem 
+                          onClick={(e) => { 
+                            e.stopPropagation(); 
+                            setItemToMove({id: folder.id, name: folder.name, type: 'folder'});
+                            setSelectedTargetFolderForMove("null");
+                            setIsMoveItemDialogOpen(true);
+                            fetchAllFolders();
+                          }} 
+                          className="gap-2 cursor-pointer"
+                        >
+                          <FolderOutput className="h-4 w-4" />
+                          <span>Mover a...</span>
                         </DropdownMenuItem>
                         <DropdownMenuItem 
                           onClick={(e) => { 
@@ -1158,7 +1391,6 @@ export default function DocumentsPage() {
               </motion.div>
             ))}
 
-            {/* Documents */}
             {filteredDocs.map((doc) => (
               <motion.div 
                 key={`doc-${doc.id}`}
@@ -1183,8 +1415,27 @@ export default function DocumentsPage() {
                 }}
                 className="h-full"
               >
-                <Card className="group relative h-full overflow-hidden bg-card/40 backdrop-blur-sm border-border/40 hover:border-primary/30 transition-all duration-300 hover:shadow-2xl hover:shadow-primary/5 rounded-3xl p-5 border cursor-grab active:cursor-grabbing">
-                  <div className="flex flex-col gap-4">
+                <Card 
+                  className={`group relative h-full overflow-hidden backdrop-blur-sm transition-all duration-300 hover:shadow-2xl rounded-3xl p-5 border cursor-grab active:cursor-grabbing ${
+                    selectedDocs.includes(doc.id)
+                      ? 'bg-primary/5 border-primary ring-2 ring-primary/50 shadow-md'
+                      : 'bg-card/40 border-border/40 hover:border-primary/30 hover:shadow-primary/5'
+                  }`}
+                  onClick={(e) => {
+                     const isMod = (e as any).shiftKey || (e as any).ctrlKey || (e as any).metaKey;
+                     if (selectedDocs.length > 0 || selectedFolders.length > 0 || isMod) {
+                       toggleDocSelection(doc.id, e as any);
+                     }
+                  }}
+                >
+                  <div className={`absolute top-4 left-4 z-10 transition-opacity ${selectedDocs.includes(doc.id) ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                    <Checkbox 
+                      checked={selectedDocs.includes(doc.id)}
+                      onCheckedChange={() => toggleDocSelection(doc.id)}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-4 pl-8">
                     <div className="flex items-start justify-between">
                       <div className={`p-4 rounded-2xl shadow-sm ${getIconColor(doc.extension)} transition-transform group-hover:scale-110 duration-500`}>
                         <FileText className="h-8 w-8" />
@@ -1215,6 +1466,19 @@ export default function DocumentsPage() {
                           <DropdownMenuItem className="gap-2 cursor-pointer py-2 px-3">
                             <Download className="h-4 w-4" />
                             <span className="font-medium">Descargar</span>
+                          </DropdownMenuItem>
+                           <DropdownMenuItem 
+                            onClick={(e) => { 
+                              e.stopPropagation(); 
+                              setItemToMove({id: doc.id, name: doc.filename, type: 'doc'});
+                              setSelectedTargetFolderForMove("null");
+                              setIsMoveItemDialogOpen(true);
+                              fetchAllFolders();
+                            }} 
+                            className="gap-2 cursor-pointer py-2 px-3"
+                          >
+                            <FolderOutput className="h-4 w-4" />
+                            <span className="font-medium">Mover a...</span>
                           </DropdownMenuItem>
                            <DropdownMenuItem 
                             onClick={() => {
@@ -1281,7 +1545,7 @@ export default function DocumentsPage() {
                         onClick={() => openEditor(doc)}
                         className="w-full bg-primary/5 text-primary hover:bg-primary hover:text-primary-foreground border border-primary/10 rounded-xl font-bold transition-all group-hover:shadow-md"
                       >
-                        Abir Editor
+                        Abrir Editor
                         <ChevronRight className="h-4 w-4 ml-1 transition-transform group-hover:translate-x-1" />
                       </Button>
                     </div>
@@ -1291,6 +1555,239 @@ export default function DocumentsPage() {
           ))}
             </AnimatePresence>
           </div>
+          ) : (
+          <div className="flex flex-col gap-2">
+            {/* List View Header */}
+            <div className="grid grid-cols-12 gap-4 px-4 py-2 text-sm font-semibold text-muted-foreground border-b mb-2">
+              <div className="col-span-6 md:col-span-5">Nombre</div>
+              <div className="col-span-3 hidden md:block">Workspace</div>
+              <div className="col-span-4 md:col-span-3 text-right">Actualizado</div>
+              <div className="col-span-2 md:col-span-1 text-right"></div>
+            </div>
+            
+            <AnimatePresence>
+              {filteredFolders.map((folder) => (
+                <motion.div
+                  key={`list-folder-${folder.id}`}
+                  layout
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className={`grid grid-cols-12 gap-4 items-center px-4 py-3 border rounded-xl cursor-pointer transition-colors ${
+                    selectedFolders.includes(folder.id) ? 'border-orange-500 bg-orange-500/10 hover:bg-orange-500/20' : 'bg-card/40 hover:bg-card/80'
+                  }`}
+                  onClick={(e) => {
+                     const isMod = (e as any).shiftKey || (e as any).ctrlKey || (e as any).metaKey;
+                     if (selectedDocs.length > 0 || selectedFolders.length > 0 || isMod) {
+                       toggleFolderSelection(folder.id, e as any);
+                     } else {
+                       navigateToFolder(folder);
+                     }
+                  }}
+                >
+                  <div className="col-span-6 md:col-span-5 flex items-center gap-3">
+                    <Checkbox 
+                      checked={selectedFolders.includes(folder.id)}
+                      onCheckedChange={() => toggleFolderSelection(folder.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      className="data-[state=checked]:bg-orange-600 data-[state=checked]:border-orange-600"
+                    />
+                    <div className="p-2 rounded-lg bg-orange-500/10 text-orange-600">
+                      <Folder className="h-5 w-5 fill-current" />
+                    </div>
+                    <span className="font-bold truncate" title={folder.name}>{folder.name}</span>
+                  </div>
+                  <div className="col-span-3 hidden md:flex items-center">
+                    {folder.workspace_name && (
+                      <div className="flex items-center gap-2 text-sm">
+                        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: folder.workspace_color || '#888888' }}></span>
+                        <span className="truncate">{folder.workspace_name}</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="col-span-4 md:col-span-3 text-right text-sm text-muted-foreground flex items-center justify-end">
+                    -
+                  </div>
+                  <div className="col-span-2 md:col-span-1 flex justify-end">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full hover:bg-muted" onClick={(e) => e.stopPropagation()}>
+                          <MoreVertical className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-48 rounded-xl shadow-xl">
+                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); navigateToFolder(folder); }} className="gap-2 cursor-pointer">
+                          <ExternalLink className="h-4 w-4" />
+                          <span>Abrir</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem 
+                          onClick={(e) => { 
+                            e.stopPropagation(); 
+                            setItemToRename({id: folder.id, name: folder.name, type: 'folder'});
+                            setNewName(folder.name);
+                            setIsRenameDialogOpen(true);
+                          }} 
+                          className="gap-2 cursor-pointer"
+                        >
+                          <Edit3 className="h-4 w-4" />
+                          <span>Renombrar</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem 
+                          onClick={(e) => { 
+                            e.stopPropagation(); 
+                            setItemToMove({id: folder.id, name: folder.name, type: 'folder'});
+                            setSelectedTargetFolderForMove("null");
+                            setIsMoveItemDialogOpen(true);
+                            fetchAllFolders();
+                          }} 
+                          className="gap-2 cursor-pointer"
+                        >
+                          <FolderOutput className="h-4 w-4" />
+                          <span>Mover a...</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuItem 
+                          onClick={(e) => { 
+                            e.stopPropagation(); 
+                            setItemToMove({id: folder.id, name: folder.name, type: 'folder'});
+                            setSelectedWorkspaceForMove(folder.workspace_id || "none");
+                            setIsMoveDialogOpen(true);
+                          }} 
+                          className="gap-2 cursor-pointer"
+                        >
+                          <Briefcase className="h-4 w-4" />
+                          <span>Asociar Workspace</span>
+                        </DropdownMenuItem>
+                        <div className="h-px bg-border/40 my-1" />
+                        <DropdownMenuItem 
+                          onClick={(e) => { e.stopPropagation(); handleDeleteFolder(folder.id, folder.name); }} 
+                          className="gap-2 cursor-pointer text-destructive focus:text-destructive focus:bg-destructive/10"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          <span>Eliminar</span>
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </motion.div>
+              ))}
+
+              {filteredDocs.map((doc) => (
+                <motion.div
+                  key={`list-doc-${doc.id}`}
+                  layout
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className={`grid grid-cols-12 gap-4 items-center px-4 py-3 border rounded-xl cursor-pointer transition-colors ${
+                    selectedDocs.includes(doc.id) ? 'bg-primary/10 border-primary hover:bg-primary/20' : 'bg-card/40 hover:bg-card/80'
+                  }`}
+                  onClick={(e) => {
+                     const isMod = (e as any).shiftKey || (e as any).ctrlKey || (e as any).metaKey;
+                     if (selectedDocs.length > 0 || selectedFolders.length > 0 || isMod) {
+                       toggleDocSelection(doc.id, e as any);
+                     } else {
+                       openEditor(doc);
+                     }
+                  }}
+                >
+                  <div className="col-span-6 md:col-span-5 flex items-center gap-3">
+                    <Checkbox 
+                      checked={selectedDocs.includes(doc.id)}
+                      onCheckedChange={() => toggleDocSelection(doc.id)}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                    <div className={`p-2 rounded-lg shadow-sm ${getIconColor(doc.extension)}`}>
+                      <FileText className="h-5 w-5" />
+                    </div>
+                    <span className="font-bold truncate group-hover:text-primary transition-colors" title={doc.filename}>{doc.filename}</span>
+                  </div>
+                  <div className="col-span-3 hidden md:flex items-center">
+                    {doc.workspace_name && (
+                      <div className="flex items-center gap-2 text-sm">
+                        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: doc.workspace_color || '#888888' }}></span>
+                        <span className="truncate">{doc.workspace_name}</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="col-span-4 md:col-span-3 text-right text-sm text-muted-foreground flex items-center justify-end gap-1.5">
+                    {new Date(doc.updated_at).toLocaleDateString()}
+                  </div>
+                  <div className="col-span-2 md:col-span-1 flex justify-end">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full hover:bg-muted" onClick={(e) => e.stopPropagation()}>
+                          <MoreVertical className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-48 rounded-xl border-border/40 shadow-xl">
+                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); openEditor(doc); }} className="gap-2 cursor-pointer py-2 px-3">
+                            <Edit3 className="h-4 w-4 text-primary" />
+                            <span className="font-medium">Editar Ahora</span>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setItemToRename({id: doc.id, name: doc.filename, type: 'doc'});
+                              setNewName(doc.filename);
+                              setIsRenameDialogOpen(true);
+                            }} 
+                            className="gap-2 cursor-pointer py-2 px-3"
+                          >
+                            <Edit3 className="h-4 w-4" />
+                            <span className="font-medium">Renombrar</span>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={(e) => e.stopPropagation()} className="gap-2 cursor-pointer py-2 px-3">
+                            <Download className="h-4 w-4" />
+                            <span className="font-medium">Descargar</span>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem 
+                            onClick={(e) => { 
+                              e.stopPropagation(); 
+                              setItemToMove({id: doc.id, name: doc.filename, type: 'doc'});
+                              setSelectedTargetFolderForMove("null");
+                              setIsMoveItemDialogOpen(true);
+                              fetchAllFolders();
+                            }} 
+                            className="gap-2 cursor-pointer py-2 px-3"
+                          >
+                            <FolderOutput className="h-4 w-4" />
+                            <span className="font-medium">Mover a...</span>
+                          </DropdownMenuItem>
+                           <DropdownMenuItem 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setItemToMove({id: doc.id, name: doc.filename, type: 'doc'});
+                              setSelectedWorkspaceForMove(doc.workspace_id || "none");
+                              setIsMoveDialogOpen(true);
+                            }} 
+                            className="gap-2 cursor-pointer py-2 px-3"
+                          >
+                            <Briefcase className="h-4 w-4" />
+                            <span className="font-medium">Asociar Workspace</span>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem 
+                            onClick={(e) => { e.stopPropagation(); handleDuplicate(doc); }}
+                            className="gap-2 cursor-pointer py-2 px-3"
+                          >
+                            <Copy className="h-4 w-4" />
+                            <span className="font-medium">Duplicar Documento</span>
+                          </DropdownMenuItem>
+                          <div className="h-px bg-border/40 my-1" />
+                          <DropdownMenuItem 
+                            onClick={(e) => { e.stopPropagation(); handleDelete(doc.id, doc.filename); }} 
+                            className="gap-2 cursor-pointer py-2 px-3 text-destructive focus:text-destructive focus:bg-destructive/10"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            <span className="font-medium">Eliminar</span>
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </motion.div>
+              ))}
+            </AnimatePresence>
+          </div>
+          )
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center p-12 text-center bg-card/20 backdrop-blur-sm rounded-[3rem] border border-dashed border-border/60 animate-in fade-in zoom-in duration-500">
             <div className="h-24 w-24 bg-muted/50 rounded-full flex items-center justify-center mb-6">
@@ -1445,6 +1942,75 @@ export default function DocumentsPage() {
             >
               {isRenaming ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
               Guardar Cambios
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Move Item to Folder Dialog */}
+      <Dialog open={isMoveItemDialogOpen} onOpenChange={setIsMoveItemDialogOpen}>
+        <DialogContent className="sm:max-w-md rounded-[2rem] border-primary/10 shadow-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold flex items-center gap-3">
+              <div className="p-2 rounded-xl bg-primary/10 text-primary">
+                <FolderOutput className="h-6 w-6" />
+              </div>
+              Mover
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-6 space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Selecciona la carpeta de destino para <strong>{itemToMove?.name || (selectedDocs.length + selectedFolders.length + " ítems seleccionados")}</strong>.
+            </p>
+            <Select 
+              value={selectedTargetFolderForMove || "null"} 
+              onValueChange={setSelectedTargetFolderForMove}
+            >
+              <SelectTrigger className="w-full h-12 rounded-xl border-primary/20">
+                <SelectValue placeholder="Carpeta destino" />
+              </SelectTrigger>
+              <SelectContent className="max-h-[300px]">
+                <SelectItem value="null">
+                  <div className="flex items-center gap-2 font-bold">
+                    <FileBox className="h-4 w-4" />
+                    Inicio (Raíz)
+                  </div>
+                </SelectItem>
+                {allFolders.map(f => (
+                  <SelectItem key={f.id} value={f.id}>
+                    <div className="flex items-center gap-2">
+                      <Folder className="h-4 w-4 text-orange-500" />
+                      {f.name}
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter className="sm:justify-end gap-3">
+            <Button variant="ghost" onClick={() => setIsMoveItemDialogOpen(false)} className="rounded-xl h-12 px-6">
+              Cancelar
+            </Button>
+            <Button 
+              onClick={() => {
+                if (itemToMove) {
+                  handleDropToFolder(itemToMove.id, selectedTargetFolderForMove, itemToMove.type);
+                } else if (selectedDocs.length > 0 || selectedFolders.length > 0) {
+                  const firstDocId = selectedDocs[0];
+                  const firstFolderId = selectedFolders[0];
+                  if (firstDocId) {
+                    handleDropToFolder(firstDocId, selectedTargetFolderForMove, 'doc');
+                  } else if (firstFolderId) {
+                    handleDropToFolder(firstFolderId, selectedTargetFolderForMove, 'folder');
+                  }
+                }
+                setIsMoveItemDialogOpen(false);
+              }} 
+              disabled={isMoving}
+              className="rounded-xl h-12 px-8 bg-primary shadow-lg shadow-primary/20 font-bold"
+            >
+              {isMoving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <FolderOutput className="h-4 w-4 mr-2" />}
+              Mover
             </Button>
           </DialogFooter>
         </DialogContent>

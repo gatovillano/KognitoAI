@@ -18,7 +18,7 @@ export default function CollectionDetailPage() {
         collectionName={topic}
         workspaceId={workspaceId || undefined}
         backButtonText={workspaceId ? "Volver al Workspace" : "Volver a Colecciones"}
-        backButtonHref={workspaceId ? `/workspaces/${workspaceId}` : "/rag/all"}
+        backButtonHref={workspaceId ? `/workspaces/${workspaceId}` : "/rag"}
       />
     </div>
   );

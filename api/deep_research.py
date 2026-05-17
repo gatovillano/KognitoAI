@@ -1,9 +1,11 @@
 import logging
 import uuid
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage, AIMessage 
 from typing import List, Union 
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from core.agents.deep_researcher import compile_deep_researcher_graph
 from core.llm_manager import get_main_llm, get_llm_for_user
@@ -42,16 +44,9 @@ class DeepResearchPDFExportRequest(BaseModel):
     recommendations: List[str] = []
     # account_id se obtiene del token, no del body
 
-async def get_llm_instance() -> BaseLanguageModel:
-    llm = get_main_llm()
-    if not llm:
-        raise HTTPException(status_code=500, detail="LLM not initialized. Please contact administrator.")
-    return llm
-
 @router.post("/deep_research/")
 async def run_deep_research(
-    request: DeepResearchRequest,
-    llm_instance: BaseLanguageModel = Depends(get_llm_instance) 
+    request: DeepResearchRequest
 ):
     """
     Ejecuta una investigación profunda sobre una consulta dada utilizando el agente LangGraph.
@@ -79,8 +74,20 @@ async def run_deep_research(
 
         logger.info(f"Invoking Deep Research graph with run_id: {run_id}")
         
-        # Ejecutar el grafo
-        final_state = await deep_researcher_graph.ainvoke(inputs, config=config)
+        # Implementación de reintentos para manejar MidStreamFallbackError y otros errores de API
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                final_state = await deep_researcher_graph.ainvoke(inputs, config=config)
+                break # Éxito, salir del loop de reintentos
+            except Exception as e:
+                error_str = f"{type(e).__name__}: {str(e)} {repr(e)}"
+                if ("MidStreamFallbackError" in error_str or "APIError" in error_str or "OpenrouterException" in error_str or "unmapped" in error_str) and attempt < max_retries - 1:
+                    wait_time = (attempt + 1) * 3
+                    logger.warning(f"LLM API Error detected (attempt {attempt + 1}/{max_retries}): {error_str}. Retrying in {wait_time}s...")
+                    await asyncio.sleep(wait_time)
+                    continue
+                raise e
 
         if final_state and "final_report" in final_state:
             # Manejar el caso de clarificación
@@ -123,8 +130,7 @@ async def run_deep_research(
 
 @router.post("/deep_research/clarify")
 async def clarify_deep_research(
-    request: ClarificationResponse,
-    llm_instance: BaseLanguageModel = Depends(get_llm_instance)
+    request: ClarificationResponse
 ):
     """
     Proporciona una respuesta a una pregunta de clarificación para una investigación profunda en curso.
@@ -151,7 +157,20 @@ async def clarify_deep_research(
 
         logger.info(f"Re-invoking Deep Research graph with run_id: {request.run_id} after clarification.")
         
-        final_state = await deep_researcher_graph.ainvoke(inputs, config=config)
+        # Implementación de reintentos para manejar MidStreamFallbackError y otros errores de API
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                final_state = await deep_researcher_graph.ainvoke(inputs, config=config)
+                break # Éxito, salir del loop de reintentos
+            except Exception as e:
+                error_str = f"{type(e).__name__}: {str(e)} {repr(e)}"
+                if ("MidStreamFallbackError" in error_str or "APIError" in error_str or "OpenrouterException" in error_str or "unmapped" in error_str) and attempt < max_retries - 1:
+                    wait_time = (attempt + 1) * 3
+                    logger.warning(f"LLM API Error detected (attempt {attempt + 1}/{max_retries}): {error_str}. Retrying in {wait_time}s...")
+                    await asyncio.sleep(wait_time)
+                    continue
+                raise e
 
         if final_state and "final_report" in final_state:
             if final_state.get("final_report") == "CLARIFICATION":
@@ -261,12 +280,24 @@ Procede a generar el PDF.""")
         
         chain = prompt | llm_with_tools
         
-        result = await chain.ainvoke({
-            "title": request.title,
-            "summary": request.final_report,
-            "recommendations": recommendations_text,
-            "sources": sources_text
-        })
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                result = await chain.ainvoke({
+                    "title": request.title,
+                    "summary": request.final_report,
+                    "recommendations": recommendations_text,
+                    "sources": sources_text
+                })
+                break
+            except Exception as e:
+                error_str = f"{type(e).__name__}: {str(e)} {repr(e)}"
+                if ("MidStreamFallbackError" in error_str or "APIError" in error_str or "OpenrouterException" in error_str or "unmapped" in error_str) and attempt < max_retries - 1:
+                    wait_time = (attempt + 1) * 3
+                    logger.warning(f"LLM API Error detected in PDF export (attempt {attempt + 1}/{max_retries}): {error_str}. Retrying in {wait_time}s...")
+                    await asyncio.sleep(wait_time)
+                    continue
+                raise e
         
         # 5. Procesar la respuesta (buscar tool call)
         # El resultado será un AIMessage que puede contener tool_calls

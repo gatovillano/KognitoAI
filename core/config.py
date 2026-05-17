@@ -133,6 +133,8 @@ class Config:
         self.openrouter_api_key: Optional[str] = get_secret("openrouter_api_key", "OPENROUTER_API_KEY")
         # ¡NUEVA LÍNEA! Clave de API para Ollama Cloud.
         self.ollama_api_key: Optional[str] = get_secret("ollama_api_key", "OLLAMA_API_KEY")
+        # ¡NUEVA LÍNEA! Clave de API para Kilocode Gateway.
+        self.kilocode_api_key: Optional[str] = get_secret("kilocode_api_key", "KILOCODE_API_KEY")
 
         # ¡NUEVA LÍNEA! La URL de nuestro servidor API para que los clientes sepan a dónde llamar.
         self.api_server_url: str = os.getenv("API_SERVER_URL", "https://apibase.cuerpolibre.cl")

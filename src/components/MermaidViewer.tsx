@@ -37,7 +37,11 @@ const MermaidViewer: React.FC<MermaidViewerProps> = ({ mermaidCode }) => {
   const renderMermaid = useCallback(async (container: HTMLDivElement, id: string) => {
     if (container && mermaidCode) {
       try {
-        const { svg } = await mermaid.render(id, mermaidCode);
+        // Asegurar que el contenedor sea visible y no se quede oculto de ejecuciones previas
+        container.style.display = '';
+        
+        // Renderizar usando el contenedor para evitar errores en Portales/Dialogs
+        const { svg } = await mermaid.render(id, mermaidCode, container);
         container.innerHTML = svg;
         const svgElement = container.querySelector('svg');
         if (svgElement) {
@@ -46,14 +50,16 @@ const MermaidViewer: React.FC<MermaidViewerProps> = ({ mermaidCode }) => {
           svgElement.style.display = 'block';
         }
       } catch (error) {
-        // En lugar de mostrar un error ruidoso en la interfaz (que genera las "bombas" de Mermaid),
-        // simplemente ocultamos el contenedor para los bloques de código que Mermaid no pueda parsear.
+        console.error("Error al renderizar Mermaid:", error);
         container.style.display = 'none';
 
-        // Si el contenedor padre es el div que tiene las clases de estilo del grupo, también lo ocultamos
-        const parentViewer = container.closest('.my-4.w-full') as HTMLElement;
-        if (parentViewer) {
-          parentViewer.style.display = 'none';
+        // Solo ocultamos el parentViewer si NO estamos dentro de un diálogo modal
+        const isInsideDialog = container.closest('[role="dialog"]') !== null;
+        if (!isInsideDialog) {
+          const parentViewer = container.closest('.my-4.w-full') as HTMLElement;
+          if (parentViewer) {
+            parentViewer.style.display = 'none';
+          }
         }
       }
     }
@@ -68,8 +74,13 @@ const MermaidViewer: React.FC<MermaidViewerProps> = ({ mermaidCode }) => {
 
   // Render para el diálogo a pantalla completa
   useEffect(() => {
-    if (isOpen && mermaidContainerRef.current) {
-      renderMermaid(mermaidContainerRef.current, `mermaid-full-${Math.random().toString(36).substr(2, 9)}`);
+    if (isOpen) {
+      const timer = setTimeout(() => {
+        if (mermaidContainerRef.current) {
+          renderMermaid(mermaidContainerRef.current, `mermaid-full-${Math.random().toString(36).substr(2, 9)}`);
+        }
+      }, 100);
+      return () => clearTimeout(timer);
     }
   }, [isOpen, renderMermaid]);
 

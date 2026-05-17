@@ -172,6 +172,7 @@ class GraphReasoningNode:
               AND (m.name CONTAINS $concept2 OR m.description CONTAINS $concept2)
               AND (n.account_id = $account_id OR n.account_id IS NULL)
               AND (m.account_id = $account_id OR m.account_id IS NULL)
+              AND n <> m
             MATCH p = shortestPath((n)-[*1..4]-(m))
             WHERE ALL(node IN nodes(p) WHERE (node.account_id = $account_id OR node.account_id IS NULL))
               AND ALL(rel IN relationships(p) WHERE (rel.account_id = $account_id OR rel.account_id IS NULL))
