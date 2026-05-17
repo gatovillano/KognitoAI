@@ -1604,10 +1604,52 @@ async def get_full_document_content(
 
         logger.info(f"📊 Encontrados {len(chunks)} chunks para el documento '{file_name}'")
 
-        # Reconstruir el contenido completo
-        full_content = "".join([chunk[0] for chunk in chunks])  # chunk[0] es el document
+        # Agrupar los chunks por document_id para evitar mezclar diferentes versiones o archivos homónimos
+        chunks_by_doc = {}
+        for chunk in chunks:
+            doc_content, doc_metadata = chunk[0], chunk[1]
+            if isinstance(doc_metadata, str):
+                try:
+                    doc_metadata = json.loads(doc_metadata)
+                except json.JSONDecodeError:
+                    doc_metadata = {}
+            elif not isinstance(doc_metadata, dict):
+                doc_metadata = {}
+            
+            doc_id = doc_metadata.get("document_id") or "unknown"
+            chunks_by_doc.setdefault(doc_id, []).append((doc_content, doc_metadata))
+            
+        # Elegir la versión más completa (con más chunks) para evitar fragmentaciones
+        best_doc_id = max(chunks_by_doc.keys(), key=lambda k: len(chunks_by_doc[k]))
+        selected_chunks = chunks_by_doc[best_doc_id]
+        
+        # Ordenar rigurosamente los fragmentos seleccionados por su chunk_index en Python
+        def get_chunk_index(ch):
+            try:
+                return int(ch[1].get("chunk_index", 0))
+            except (ValueError, TypeError):
+                return 0
+                
+        selected_chunks.sort(key=get_chunk_index)
+        logger.info(f"Versiones encontradas: {len(chunks_by_doc)}. Seleccionado document_id '{best_doc_id}' con {len(selected_chunks)} chunks.")
 
-        logger.info(f"✅ Reconstruido documento '{file_name}'. Longitud: {len(full_content)} chars.")
+        # Reconstruir el contenido eliminando solapamientos (chunk_overlap) de forma inteligente
+        chunk_texts = [ch[0] for ch in selected_chunks]
+        
+        # Algoritmo de unión sin solapamientos
+        full_content = ""
+        if chunk_texts:
+            full_content = chunk_texts[0]
+            for next_chunk in chunk_texts[1:]:
+                max_overlap = min(len(full_content), len(next_chunk), 2000)
+                overlap_len = 0
+                for i in range(max_overlap, 0, -1):
+                    if full_content.endswith(next_chunk[:i]):
+                        overlap_len = i
+                        break
+                full_content += next_chunk[overlap_len:]
+
+        logger.info(f"✅ Reconstruido documento '{file_name}' sin duplicaciones por overlap. Longitud final: {len(full_content)} chars.")
         return full_content
 
     except Exception as e:

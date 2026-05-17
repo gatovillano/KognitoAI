@@ -161,12 +161,23 @@ async def create_thread(
             account_id=uuid.UUID(current_account_id),
             platform=request.platform,
             workspace_id=uuid.UUID(request.workspace_id) if request.workspace_id else None,
-            created_at=datetime.now(timezone.utc) # Asegurarse de que created_at se establece
+            created_at=datetime.now(timezone.utc)
         )
         db.add(new_thread)
         await db.commit()
         await db.refresh(new_thread)
         logger.info(f"Nuevo hilo creado: {new_thread.id} para la cuenta {current_account_id}")
+
+        # Lanzar generación automática de título en background si el título es el default
+        if request.title == "Nuevo Chat":
+            try:
+                import asyncio
+                from core.agent import force_update_thread_title
+                # Lanzar en background, no bloquear respuesta
+                asyncio.create_task(force_update_thread_title(str(new_thread.id)))
+            except Exception as e:
+                logger.warning(f"No se pudo lanzar la generación automática de título para el hilo {new_thread.id}: {e}")
+
         return {"id": str(new_thread.id), "title": new_thread.title, "isPinned": new_thread.is_pinned, "platform": new_thread.platform, "workspace_id": str(new_thread.workspace_id) if new_thread.workspace_id else None}
     except ValueError:
         logger.error(f"El account_id o workspace_id proporcionado no es un UUID válido.")
@@ -1279,7 +1290,7 @@ async def create_and_run_agent_streaming(
     from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
     from langchain_community.chat_message_histories import PostgresChatMessageHistory
     from core.config import settings
-    from core.database import LangchainPgEmbedding
+    from core.database import LangchainPgEmbedding, ChatThread
     from sqlalchemy.future import select
     from sqlalchemy.orm import selectinload
     from core.websocket_manager import send_personal_message # Asegurarse de que esté importado aquí también si es necesario

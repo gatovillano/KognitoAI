@@ -25,6 +25,33 @@ import uuid
 # Asegúrate de que litellm elimine parámetros no soportados globalmente
 litellm.drop_params = True
 
+# --- Registro de Proveedores Custom ---
+# Esto permite que LiteLLM reconozca el prefijo kilocode/ sin lanzar BadRequestError
+def _register_custom_providers():
+    try:
+        # Añadir kilocode a la lista de proveedores conocidos como compatible con OpenAI
+        if "kilocode" not in litellm.provider_list:
+            litellm.provider_list.append("kilocode")
+        
+        # Mapear dinámicamente modelos de kilocode a la lógica de openai
+        # LiteLLM usa esto para determinar qué clase de cliente instanciar
+        litellm.custom_provider_map = getattr(litellm, "custom_provider_map", [])
+        kilocode_map = {"provider": "kilocode", "custom_handler": "openai"}
+        if kilocode_map not in litellm.custom_provider_map:
+            litellm.custom_provider_map.append(kilocode_map)
+            
+        logger.info("📡 Proveedor KiloCode registrado globalmente en LiteLLM")
+    except Exception as e:
+        logger.warning(f"⚠️ No se pudo registrar el proveedor custom kilocode: {e}")
+
+# --- Configuración del Logger ---
+from core.utils.logging_utils import AgentLogger
+
+logger = AgentLogger(__name__)
+
+# Registrar proveedores al importar el módulo
+_register_custom_providers()
+
 # Disable debug mode for LiteLLM to reduce logging
 litellm.set_verbose = False
 logging.getLogger("LiteLLM").setLevel(logging.WARNING)
@@ -33,11 +60,6 @@ logging.getLogger("LiteLLM/UniversalDeployer").setLevel(logging.WARNING)
 import os
 
 os.environ["LITELLM_LOG"] = "ERROR"
-
-# --- Configuración del Logger ---
-from core.utils.logging_utils import AgentLogger
-
-logger = AgentLogger(__name__)
 
 # --- Rate Limiter Implementation ---
 
@@ -299,6 +321,11 @@ async def get_llm_for_user(
                 if account.vision_llm_provider:
                     provider_target = account.vision_llm_provider
 
+            # Auto-detección de proveedor Kilocode por prefijo de modelo
+            if model_target and model_target.startswith("kilocode/") and provider_target != "kilocode":
+                logger.info(f"Detectado modelo Kilocode: {model_target}. Forzando provider a 'kilocode'.")
+                provider_target = "kilocode"
+
             # Si el usuario no tiene proveedor o modelo configurado, usar global
             if not provider_target or not model_target:
                 if purpose == "fast":
@@ -342,6 +369,11 @@ async def get_llm_for_user(
             if not api_key and provider_target.lower().replace("_", "-") == "ollama-cloud":
                 if settings.ollama_api_key:
                     api_key = settings.ollama_api_key
+
+            # Fallback para Kilocode Gateway
+            if not api_key and provider_target.lower() == "kilocode":
+                if settings.kilocode_api_key:
+                    api_key = settings.kilocode_api_key
 
             # Si no hay API key y el proveedor requiere una (casi todos menos ollama),
             # podríamos intentar usar la global o fallar. Usaremos la global como fallback.
@@ -485,10 +517,35 @@ async def get_llm_for_user(
                     logger.info("ℹ️ Ignorando API Key para Ollama local.")
                     llm_kwargs.pop("api_key", None)
 
+            elif provider_target.lower() == "kilocode":
+                # Kilocode Gateway - API unificada de IA (OpenAI-compatible)
+                llm_kwargs["api_base"] = "https://api.kilo.ai/api/gateway"
+                
+                # Autenticación
+                if api_key:
+                    llm_kwargs["api_key"] = api_key
+                
+                # Normalizar modelo
+                actual_model = model_target
+                if actual_model.startswith("kilocode/"):
+                    actual_model = actual_model[len("kilocode/"):]
+                
+                # Para LiteLLM, el modelo debe tener el prefijo 'openai/' 
+                # y el custom_llm_provider debe ser 'openai'
+                llm_kwargs["model_name"] = f"openai/{actual_model}"
+                llm_kwargs["custom_llm_provider"] = "openai"
+                
+                # IMPORTANTE: Remover cualquier 'provider' explícito que pudiera causar conflicto
+                if "provider" in llm_kwargs:
+                    del llm_kwargs["provider"]
+                
+                logger.info(f"🚀 Kilocode Gateway configurado: {llm_kwargs['model_name']} en {llm_kwargs['api_base']}")
+
             elif account.llm_api_base and ("http" in account.llm_api_base):
                 # Solo usar api_base si parece una URL válida (contiene http)
                 # Esto previene el uso de valores accidentales como correos electrónicos
                 llm_kwargs["api_base"] = account.llm_api_base
+
 
             # Configuraciones específicas por proveedor (LiteLLM)
             if (
@@ -502,7 +559,10 @@ async def get_llm_for_user(
             )
 
             # Nota: ChatLiteLLM pasará extra_body a la API de OpenRouter
-            return ChatLiteLLM(**llm_kwargs)
+            llm_instance = ChatLiteLLM(**llm_kwargs)
+            if "custom_llm_provider" in llm_kwargs:
+                llm_instance.custom_llm_provider = llm_kwargs["custom_llm_provider"]
+            return llm_instance
 
     except Exception as e:
         logger.error(
@@ -648,10 +708,31 @@ async def initialize_llms():
             llm_kwargs["provider"] = "google_ai_studio"
         elif "openai" in model_lower or "gpt" in model_lower:
             logger.info("🔧 Applying OpenAI/GPT specific config.")
+        elif "kilocode" in model_lower:
+            logger.info("🔧 Applying Kilocode Gateway specific config for main LLM.")
+            kilocode_base = "https://api.kilo.ai/api/gateway"
+            llm_kwargs["api_base"] = kilocode_base
+            
+            # Autenticación: Usar KILOCODE_API_KEY de settings si existe
+            if settings.kilocode_api_key:
+                llm_kwargs["api_key"] = settings.kilocode_api_key
+            
+            # Normalizar el nombre del modelo
+            actual_model = settings.llm_model
+            if actual_model.startswith("kilocode/"):
+                actual_model = actual_model[len("kilocode/"):]
+            
+            # Asegurarnos de que el model_name tenga prefijo openai/ para LiteLLM
+            llm_kwargs["model_name"] = f"openai/{actual_model}"
+            llm_kwargs["custom_llm_provider"] = "openai"
 
         main_llm = ChatLiteLLM(**llm_kwargs)
+        # Patch the instance explicitly if LiteLLM didn't pick it up
+        if hasattr(main_llm, "custom_llm_provider") and llm_kwargs.get("custom_llm_provider"):
+            main_llm.custom_llm_provider = llm_kwargs["custom_llm_provider"]
         _main_agent_llm_instance = main_llm
         logger.info("Modelo LLM Principal listo.")
+
     except Exception as e:
         logger.error(f"❌ FATAL: Failed to initialize the main LLM: {e}", exc_info=True)
         raise
@@ -701,8 +782,27 @@ async def initialize_llms():
             fast_llm_kwargs["provider"] = "google_ai_studio"
         elif "openai" in fast_model_lower or "gpt" in fast_model_lower:
             logger.info("🔧 Applying OpenAI/GPT specific config for fast LLM.")
+        elif "kilocode" in fast_model_lower:
+            logger.info("🔧 Applying Kilocode Gateway specific config for fast LLM.")
+            kilocode_base = "https://api.kilo.ai/api/gateway"
+            fast_llm_kwargs["api_base"] = kilocode_base
+            
+            # Autenticación: Usar KILOCODE_API_KEY de settings si existe
+            if settings.kilocode_api_key:
+                fast_llm_kwargs["api_key"] = settings.kilocode_api_key
+            
+            # Normalizar el nombre del modelo
+            actual_model = settings.fast_llm_model
+            if actual_model.startswith("kilocode/"):
+                actual_model = actual_model[len("kilocode/"):]
+            
+            # Asegurarnos de que el model_name tenga prefijo openai/ para LiteLLM
+            fast_llm_kwargs["model_name"] = f"openai/{actual_model}"
 
         fast_llm = ChatLiteLLM(**fast_llm_kwargs)
+        # Patch the instance explicitly if LiteLLM didn't pick it up
+        if hasattr(fast_llm, "custom_llm_provider") and fast_llm_kwargs.get("custom_llm_provider"):
+            fast_llm.custom_llm_provider = fast_llm_kwargs["custom_llm_provider"]
         _fast_task_llm_instance = fast_llm
         logger.info("Modelo LLM Rápido listo.")
     except Exception as e:
@@ -747,8 +847,27 @@ async def initialize_llms():
             vision_llm_kwargs["provider"] = "google_ai_studio"
         elif "openai" in vision_model_lower or "gpt" in vision_model_lower:
             logger.info("🔧 Applying OpenAI/GPT specific config for vision LLM.")
+        elif "kilocode" in vision_model_lower:
+            logger.info("🔧 Applying Kilocode Gateway specific config for vision LLM.")
+            kilocode_base = "https://api.kilo.ai/api/gateway"
+            vision_llm_kwargs["api_base"] = kilocode_base
+            
+            # Autenticación: Usar KILOCODE_API_KEY de settings si existe
+            if settings.kilocode_api_key:
+                vision_llm_kwargs["api_key"] = settings.kilocode_api_key
+            
+            # Normalizar el nombre del modelo
+            actual_model = settings.vision_model
+            if actual_model.startswith("kilocode/"):
+                actual_model = actual_model[len("kilocode/"):]
+            
+            # Asegurarnos de que el model_name tenga prefijo openai/ para LiteLLM
+            vision_llm_kwargs["model_name"] = f"openai/{actual_model}"
 
         vision_llm = ChatLiteLLM(**vision_llm_kwargs)
+        # Patch the instance explicitly if LiteLLM didn't pick it up
+        if hasattr(vision_llm, "custom_llm_provider") and vision_llm_kwargs.get("custom_llm_provider"):
+            vision_llm.custom_llm_provider = vision_llm_kwargs["custom_llm_provider"]
         _vision_llm_instance = vision_llm
         logger.info("Modelo LLM Visión listo.")
     except Exception as e:

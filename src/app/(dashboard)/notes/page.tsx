@@ -6,7 +6,7 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/componen
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
-import { Plus, Notebook, Users, Edit, Trash2, MoreHorizontal, Info, Lightbulb, FileText, Link, Bot } from 'lucide-react'; // Añadido Link y Bot
+import { Plus, Notebook, Users, Edit, Trash2, MoreHorizontal, Info, Lightbulb, FileText, Link, Bot, Star } from 'lucide-react'; // Añadido Link, Bot y Star
 import { motion, AnimatePresence } from 'framer-motion';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -29,6 +29,7 @@ export interface Note {
   content: string;
   category: string;
   created_at: string;
+  is_starred?: boolean;
   team_shared?: boolean | string;
   team_id?: string;
   workspace_id?: string;
@@ -77,7 +78,11 @@ export default function NotesPage() {
       }
       const response = await apiClient.post('/api/notes/list-notes', payload);
       console.log("API Response Data:", response.data);
-      const fetchedNotes = response.data.notes.sort((a: Note, b: Note) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      const fetchedNotes = response.data.notes.sort((a: Note, b: Note) => {
+        if (a.is_starred && !b.is_starred) return -1;
+        if (!a.is_starred && b.is_starred) return 1;
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      });
 
       // Obtener roles de workspace para cada nota
       const notesWithRoles = await Promise.all(
@@ -350,6 +355,41 @@ export default function NotesPage() {
     }
   };
 
+  const handleToggleStar = async (e: React.MouseEvent, note: Note) => {
+    e.stopPropagation();
+    const newStarredStatus = !note.is_starred;
+    
+    // Optimistic update
+    setNotes(prevNotes => {
+      const updatedNotes = prevNotes.map(n => n.id === note.id ? { ...n, is_starred: newStarredStatus } : n);
+      return updatedNotes.sort((a, b) => {
+        if (a.is_starred && !b.is_starred) return -1;
+        if (!a.is_starred && b.is_starred) return 1;
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      });
+    });
+
+    try {
+      await apiClient.post('/api/update-note', {
+        note_id: note.id,
+        is_starred: newStarredStatus
+      });
+      toast.success(newStarredStatus ? 'Nota destacada' : 'Nota quitada de destacadas');
+    } catch (error) {
+      // Revert if error
+      setNotes(prevNotes => {
+        const updatedNotes = prevNotes.map(n => n.id === note.id ? { ...n, is_starred: !newStarredStatus } : n);
+        return updatedNotes.sort((a, b) => {
+          if (a.is_starred && !b.is_starred) return -1;
+          if (!a.is_starred && b.is_starred) return 1;
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        });
+      });
+      toast.error('Error al destacar la nota.');
+      console.error(error);
+    }
+  };
+
   const NoteCard = ({ note, onAnalyzeNote, onLinkProfile, onSummarizeNote }: { note: Note, onAnalyzeNote: (note: Note) => void, onLinkProfile: (note: Note) => void, onSummarizeNote: (note: Note) => void }) => {
     const [{ isDragging }, drag] = useDrag({
       type: 'NOTE',
@@ -374,7 +414,7 @@ export default function NotesPage() {
         style={{ opacity: isDragging ? 0.5 : 1 }}
       >
         <Card
-          className="h-[280px] hover:bg-card/60"
+          className="group relative overflow-hidden h-[280px] hover:bg-card/60 transition-all duration-300"
           onClick={() => {
             setViewingNote(note);
             setIsViewDialogOpen(true);
@@ -393,18 +433,31 @@ export default function NotesPage() {
                   {note.title || 'Nota sin título'}
                 </span>
               </div>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity rounded-xl hover:bg-primary/10"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <MoreHorizontal className="h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-[180px] rounded-2xl border-border/40 bg-card/95 backdrop-blur-xl">
+              <div className="flex items-center gap-1 z-20">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={`h-8 w-8 p-0 rounded-xl transition-all duration-300 ${
+                    note.is_starred 
+                      ? 'opacity-100 text-amber-400 hover:bg-amber-500/10' 
+                      : 'opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-amber-400 hover:bg-primary/10'
+                  }`}
+                  onClick={(e) => handleToggleStar(e, note)}
+                >
+                  <Star className={`h-4.5 w-4.5 transition-transform duration-300 active:scale-125 ${note.is_starred ? 'fill-amber-400 text-amber-400' : ''}`} />
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity rounded-xl hover:bg-primary/10"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-[180px] rounded-2xl border-border/40 bg-card/95 backdrop-blur-xl">
                   {canEdit && (
                     <>
                       <DropdownMenuItem onClick={(e) => {
@@ -449,6 +502,7 @@ export default function NotesPage() {
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
+              </div>
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-0 flex-grow overflow-hidden relative z-10">

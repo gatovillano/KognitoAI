@@ -9,8 +9,8 @@ import { ChatAvatar } from './ChatAvatar';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTrigger } from '@/components/ui/dialog';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { ExternalLink, BrainCircuit, ChevronDown, ChevronUp, Check, X, Edit3, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
-import { Copy, Play, Loader2, Pause, RefreshCw, Folder, File as FileIcon, Notebook, Network, Download } from 'lucide-react';
+import { BrainCircuit, ChevronDown, ChevronUp, Check, X, Edit3, ChevronLeft, ChevronRight, Trash2, ExternalLink } from 'lucide-react';
+import { Copy, Play, Loader2, Pause, RefreshCw, Folder, File as FileIcon, Network, Download } from 'lucide-react';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 import { Source, SourceButton, ContentPart } from '@/components/SourceButton';
 import { processMessageWithCitations, collectSourcesFromMessage, getSourceIdentityKey } from '@/lib/chatUtils';
@@ -168,6 +168,10 @@ const ReasoningBlock = ({ content, isThinkingOnly, scrollToBottom }: { content: 
       </AnimatePresence>
     </div>
   );
+};
+
+const stripHtml = (text: string) => {
+  return text.replace(/<[^>]*>/g, '');
 };
 
 const ToolCallBlock = ({ part, scrollToBottom }: { part: MessageContentPart, scrollToBottom?: (behavior?: 'smooth' | 'auto', force?: boolean) => void }) => {
@@ -367,7 +371,7 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
                     {msg.ragContext.map((item, idx) => (
                       <div key={idx} className="flex items-center gap-2 text-sm p-2 bg-background/50 rounded-lg">
                         {item.type === 'document' ? <FileIcon className="h-4 w-4" /> : <Folder className="h-4 w-4" />}
-                        <span className="truncate">{item.name}</span>
+                        <span>{item.name}</span>
                       </div>
                     ))}
                   </div>
@@ -484,22 +488,11 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
                 )}
 
                 {displaySources.length > 0 && (
-                  <div className="mt-4 pt-4 border-t border-border/10">
-                    <div className="flex items-center gap-2 mb-3 text-muted-foreground">
-                      <Notebook className="h-3 w-3" />
-                      <span className="text-[10px] font-bold uppercase tracking-widest">Fuentes</span>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {displaySources.map((source, idx) => (
-                        <SourceButton
-                          key={idx}
-                          source={source}
-                          citationNumber={citationNumberBySource.get(getSourceIdentityKey(source)) || idx + 1}
-                          onSourceClick={() => onSourceClick?.(source)}
-                        />
-                      ))}
-                    </div>
-                  </div>
+                  <SourcesList
+                    sources={displaySources}
+                    citationNumberBySource={citationNumberBySource}
+                    onSourceClick={onSourceClick}
+                  />
                 )}
               </div>
               
@@ -530,7 +523,20 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
                   </div>
                 )}
                 <Button variant="ghost" size="sm" className="h-9 w-9 p-0 rounded-xl" onClick={() => handleCopyMessage(msg.text)}><Copy className="h-3.5 w-3.5" /></Button>
-                <Button variant="ghost" size="sm" className="h-9 w-9 p-0 rounded-xl" onClick={() => handlePlayAudio(msg.text, index)}>
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  className="h-9 w-9 p-0 rounded-xl" 
+                  onClick={() => {
+                    const cleanText = stripHtml(msg.text);
+                    if (playingMessageIndex === index && !isAudioLoading) {
+                      // Si ya está sonando, el handlePlayAudio debería actuar como toggle de pausa/play
+                      handlePlayAudio(cleanText, index);
+                    } else {
+                      handlePlayAudio(cleanText, index);
+                    }
+                  }}
+                >
                   {playingMessageIndex === index ? (
                     isAudioLoading ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -558,6 +564,73 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
         </div>
       )}
     </motion.div>
+  );
+};
+
+// ─── Sources toggle (OpenWebUI-inspired grouping, original SourceButton cards) ─
+const SourcesList: React.FC<{
+  sources: Source[];
+  citationNumberBySource: Map<string, number>;
+  onSourceClick?: (source: any) => void;
+}> = ({ sources, citationNumberBySource, onSourceClick }) => {
+  const [open, setOpen] = useState(false);
+
+  const webSources = sources.filter(s => s.type === 'web' && s.url?.startsWith('http'));
+
+  return (
+    <div className="mt-3 -mx-0.5 w-full">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground px-3 h-8 rounded-full hover:bg-muted/60 transition-colors border border-border/30"
+      >
+        {webSources.length > 0 && (
+          <span className="flex -space-x-1 items-center mr-0.5">
+            {webSources.slice(0, 3).map((s, i) => (
+              <img
+                key={i}
+                src={`https://www.google.com/s2/favicons?sz=16&domain=${s.url}`}
+                alt=""
+                className="w-4 h-4 rounded-full border border-background bg-muted"
+                onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+              />
+            ))}
+          </span>
+        )}
+        {sources.length === 1 ? '1 fuente' : `${sources.length} fuentes`}
+        {open ? <ChevronUp className="h-3 w-3 ml-0.5" /> : <ChevronDown className="h-3 w-3 ml-0.5" />}
+      </button>
+
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            key="sources-list"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.28, ease: 'easeInOut' }}
+            className="overflow-hidden mt-5 pt-2 flex flex-col gap-2 pl-1"
+          >
+            {sources.map((source, idx) => (
+              <motion.div
+                key={idx}
+                initial={{ opacity: 0, x: -12 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -12 }}
+                transition={{ duration: 0.18, delay: idx * 0.03, ease: 'easeOut' }}
+                className="flex items-center gap-2"
+              >
+                <SourceButton
+                  source={source}
+                  citationNumber={citationNumberBySource.get(getSourceIdentityKey(source)) ?? idx + 1}
+                  onSourceClick={onSourceClick}
+                />
+                <span className="text-xs text-muted-foreground">{source.title}</span>
+              </motion.div>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
   );
 };
 

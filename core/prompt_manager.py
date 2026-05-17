@@ -11,6 +11,7 @@ sin alterar la lógica del agente.
 """
 
 import logging
+import re
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 import pytz
@@ -21,7 +22,8 @@ from core.prompts import (
     THREAD_TITLE_PROMPT,
     ENRICHED_PROMPT_TEMPLATE,
     HTML_DESIGN_PROMPT,
-    TELEGRAM_FORMATTING_PROMPT
+    TELEGRAM_FORMATTING_PROMPT,
+    SKILL_INSTALLATION_GUIDANCE_PROMPT
 )
 from core.citation_models import CITATION_SYSTEM_PROMPT # Importar CITATION_SYSTEM_PROMPT
 
@@ -105,6 +107,7 @@ class PromptManager:
         explicit_rag_context_items: Optional[List[Dict[str, Any]]] = None,
         context: Optional[Dict[str, Any]] = None,
         compact_mode: bool = False,
+        relevant_skills: Optional[List[dict]] = None,
     ) -> str:
         """
         Construye el prompt del sistema dinámicamente, integrando todos los
@@ -326,6 +329,9 @@ Instrucción: El usuario está interesado en la información contenida en esta c
 - Para CUALQUIER herramienta que requiera el argumento `telegram_id`, DEBES usar este valor exacto: <b>{telegram_id}</b>.
 """
 
+        install_intent = bool(re.search(r"\b(instala|instalar|agrega|añade|habilita|activa|skill|skills\.sh|github\.com)\b", user_message, re.IGNORECASE))
+        installation_guidance = SKILL_INSTALLATION_GUIDANCE_PROMPT if install_intent else ""
+
         tools_capabilities = """
 <b>🌐 CAPACIDADES Y HERRAMIENTAS:</b>
 
@@ -340,12 +346,20 @@ Herramientas clave:
 - Otras: gestión de notas, agenda, documentos, imágenes, etc.
 """
         tools_documentation = ""
-        if tools:
+        # If relevant_skills is provided, use it to document only those skills
+        if relevant_skills is not None and len(relevant_skills) > 0:
+            tools_documentation = "\n\n<b>🛠️ MANUAL DE SKILLS RELEVANTES:</b>\n"
+            for skill in relevant_skills:
+                name = skill.get("id", "(sin-nombre)")
+                desc = skill.get("description", "Sin descripción.")
+                tools_documentation += f"--- SKILL: {name} ---\n"
+                tools_documentation += f"Descripción: {desc}\n"
+                tools_documentation += "\n"
+        elif tools:
             tools_documentation = "\n\n<b>🛠️ MANUAL DE HERRAMIENTAS DISPONIBLES:</b>\n"
             tools_documentation += "Si tienes problemas para realizar una llamada técnica, usa este formato exacto en tu respuesta para ejecutar una herramienta:\n"
             tools_documentation += "LLAMADA_A_HERRAMIENTA: nombre_herramienta\n"
             tools_documentation += '{"arg1": "valor1", "arg2": "valor2"}\n\n'
-            
             for tool in tools:
                 try:
                     name = getattr(tool, 'name', str(tool))
@@ -353,7 +367,6 @@ Herramientas clave:
                     args = ""
                     if hasattr(tool, 'args'):
                         args = str(tool.args)
-                    
                     tools_documentation += f"--- HERRAMIENTA: {name} ---\n"
                     tools_documentation += f"Descripción: {desc}\n"
                     if args:
@@ -408,6 +421,8 @@ Usa esta información para responder preguntas sobre el tiempo, programar evento
             tools_capabilities,
             tools_documentation if mode == "prompt_tooling" else "",
             "<hr>",
+            installation_guidance,
+            "<hr>" if installation_guidance else "",
             "<b>Instrucción crítica:</b> Usa herramientas de una en una. No intentes usar más de una herramienta por respuesta. Espera la siguiente interacción.",
             "<hr>",
             system_prompt_content,

@@ -156,6 +156,25 @@ graph TD
 """
 
 
+SKILL_INSTALLATION_GUIDANCE_PROMPT = """
+🧭 **GUÍA PROCEDIMENTAL DE INSTALACIÓN DE SKILLS**
+
+Cuando el usuario pida instalar, agregar, activar o compartir una skill, o pegue un enlace relacionado con una skill, sigue este orden:
+
+1. **Ruta local**: si parece una ruta válida del workspace, trátala como skill local.
+2. **URL de GitHub**: si el enlace es `github.com`, normalízalo a `owner/repo[/subdir]`.
+3. **skills.sh**: si el enlace o identificador apunta al registry, resuélvelo como skill del registry.
+4. **Identificador remoto**: si el usuario da `owner/repo` o `owner/repo/subdir`, usa esa forma canónica.
+5. **Ambigüedad**: si no puedes inferir la fuente con seguridad, pregunta solo por el dato mínimo faltante.
+
+Reglas de ejecución:
+- Usa `SkillInstaller.install_from_identifier()` o el equivalente procedural del CLI.
+- No pidas confirmaciones innecesarias si el identificador ya es inequívoco.
+- Si el usuario solo pegó un enlace, interprétalo como una solicitud de instalación salvo que el contexto indique otra cosa.
+- Cuando el caso sea ambiguo, explica cómo lo vas a resolver antes de ejecutar.
+"""
+
+
 # ==============================================================================
 # PLANTILLA PARA SUMARIZACIÓN DE HISTORIAL
 # ==============================================================================

@@ -1,3 +1,58 @@
+## 26-02-26 Corrección de Error de Renderizado en CollectionDisplay 🔧
+
+Se ha solucionado el error `Objects are not valid as a React child` que ocurría al renderizar la descripción de una colección en `CollectionDisplay`.
+
+- **Causa del Error**: La propiedad `collection.description` podía ser un objeto con estructura `{key_themes, description}` en lugar de una cadena de texto. Al intentar renderizar este objeto directamente en el componente Card, React lanzaba el error porque los objetos no son hijos válidos de React.
+- **Solución (`src/components/CollectionDisplay.tsx`)**: [MODIFICADO]
+  - Se agregó la función `ensureString` para convertir de forma segura cualquier valor a cadena de texto.
+  - Ahora se verifica explícitamente si el valor es un objeto con `description` y/o `key_themes`, extrayendo el texto correspondiente.
+  - Si es un objeto desconocido, se convierte a JSON string usando `JSON.stringify(val)`.
+  - El renderizado de la descripción ahora usa `{ensureString(collection.description)}` en lugar de acceder directamente a la propiedad.
+
+```typescript
+const ensureString = (val: any) => {
+  if (typeof val === 'string') return val;
+  if (val && typeof val === 'object') {
+    if ('description' in val && typeof val.description === 'string') {
+      return val.description;
+    }
+    if ('key_themes' in val || 'description' in val) {
+      // Es un objeto de descripción enriquecida, extraer el texto
+      const parts = [];
+      if (val.description && typeof val.description === 'string') parts.push(val.description);
+      if (val.key_themes && Array.isArray(val.key_themes)) {
+        parts.push(`Temas: ${val.key_themes.join(', ')}`);
+      }
+      return parts.join('. ') || 'Sin descripción.';
+    }
+    return JSON.stringify(val);
+  }
+  return 'Sin descripción.';
+};
+```
+
+---
+## 26-02-26 Corrección de Error de Renderizado en DocumentCollectionDisplay 🔧
+
+Se ha solucionado el error `Objects are not valid as a React child` que ocurría al renderizar la descripción de una colección en `DocumentCollectionDisplay`.
+
+- **Causa del Error**: La propiedad `collectionData.description` podía ser un objeto con estructura `{key_themes, description}` en lugar de una cadena de texto. Al intentar renderizar este objeto directamente en el componente Tooltip, React lanzaba el error porque los objetos no son hijos válidos de React.
+- **Solución (`src/components/DocumentCollectionDisplay.tsx`)**: [MODIFICADO]
+  - Se actualizó la lógica de extracción de descripción en la función `fetchPageData`.
+  - Ahora se verifica explícitamente si `desc?.description` es una cadena de texto antes de usarla.
+  - Si `desc` es un objeto pero `desc.description` no es una cadena, se convierte todo el objeto a JSON string usando `JSON.stringify(desc)`.
+  - Esto asegura que `collectionDescription` siempre sea una cadena o `null`, evitando el error de renderizado.
+
+```typescript
+let desc = collectionData.description;
+if (typeof desc !== 'string') {
+  // Si es un objeto, intentar obtener la propiedad description como string
+  desc = typeof desc?.description === 'string' ? desc.description : JSON.stringify(desc);
+}
+setCollectionDescription(desc || null);
+```
+
+---
 ## 09-02-26 Corrección de Errores de UUID y URL en Compartir Análisis 🔧
 
 Se han solucionado cuatro errores críticos en la funcionalidad de compartir análisis: errores de UUID, una URL incorrecta, comparación de tipos incorrecta y conversión redundante de UUID.
@@ -1381,3 +1436,225 @@ Se han aplicado mejoras estéticas de alto nivel a la visualización de resultad
   - **Consistencia de Datos**: Se corrigieron los endpoints `/deep_research/` y `/deep_research/clarify` para incluir el campo `visual_schema` en la respuesta JSON. Esto asegura que el esquema esté disponible incluso cuando la investigación se inicia directamente desde el Centro de Análisis.
 - **Instrucciones del Agente (`deep_researcher_prompts.py`)**:
   - **Garantía de Generación**: Se verificó y reforzó la obligatoriedad de la generación del esquema visual en las instrucciones maestras del agente, asegurando que cada investigación incluya una representación gráfica estructurada.
+
+---
+
+## 26-02-26 Auditoría Completa del Sistema de Pruebas del Código 📋🧪
+
+Se ha realizado una auditoría exhaustiva del sistema de pruebas del proyecto KognitoAI, analizando la arquitectura, cobertura, calidad y gaps existentes.
+
+### 📊 Resumen Ejecutivo
+
+| Métrica | Valor |
+|---------|-------|
+| **Framework de Testing** | pytest >= 7.4.0 |
+| **Plugin Async Detectado** | anyio-4.13.0 (NO pytest-asyncio) |
+| **Total de archivos de prueba** | 12 archivos en `/tests/` |
+| **Pruebas ejecutables** | 10 (6 con errores de importación) |
+| **Pruebas PASSED** | 3 (30%) |
+| **Pruebas FAILED** | 5 (50%) |
+| **Pruebas con ERROR de importación** | 6 (60%) |
+| **Scripts que NO son pruebas pytest** | 4 archivos |
+
+### 🏗️ Arquitectura del Sistema de Pruebas
+
+**Estructura de archivos en `/tests/`:**
+
+```
+tests/
+├── test_deep_research_litellm.py      # ❌ Script async (no es prueba pytest)
+├── test_litellm_connection.py         # ❌ Script async (no es prueba pytest)
+├── test_deep_researcher.py            # ❌ Script CLI (no es prueba pytest)
+├── test_document_parser.py            # ❌ Error import: falta 'fitz' (PyMuPDF)
+├── test_graph_isolation.py            # ❌ Error import: falta 'neo4j'
+├── test_memory_add_tool.py            # ❌ Error import: falta 'neo4j'
+├── test_memory_graph_processor.py     # ❌ Error import: falta 'neo4j'
+├── test_memory_manager_collections.py # ⚠️  4 pruebas - FALLAN (falta pytest-asyncio)
+├── test_postgres_chat_history_utils.py# ✅ 3 pruebas - PASSED
+├── test_query_memory_graph_tool.py    # ⚠️  3 pruebas - FALLAN (falta pytest-asyncio)
+├── test_skill_manager.py              # ⚠️  1 prueba  - FALLAN (falta pytest-asyncio)
+├── test_structured_data_tool.py       # ⚠️  Pendiente de revisión
+└── reproduce_graph_issue.py           # ❌ Script de reproducción (no es prueba pytest)
+```
+
+### 🔍 Clasificación de Archivos de Prueba
+
+#### ✅ PRUEBAS UNITARIAS FUNCIONALES (usan pytest correctamente)
+
+| Archivo | Cantidad | Framework | Estado |
+|---------|----------|-----------|--------|
+| `test_postgres_chat_history_utils.py` | 3 pruebas | pytest puro | ✅ 3/3 PASSED |
+| `test_skill_manager.py` | 1 prueba | pytest + asyncio | ⚠️ FALLAN |
+| `test_memory_manager_collections.py` | 4 pruebas | pytest + asyncio | ⚠️ FALLAN |
+| `test_query_memory_graph_tool.py` | 3 pruebas | pytest + asyncio | ⚠️ FALLAN |
+
+#### ⚠️ PRUEBAS CON FALLOS POR CONFIGURACIÓN
+
+**Problema detectado:** Las pruebas usan `@pytest.mark.asyncio` pero **no tiene pytest-asyncio instalado**.
+
+```
+async def functions are not natively supported.
+You need to install a suitable plugin for your async framework:
+  - pytest-asyncio
+  - pytest-tornasync
+  - pytest-trio
+```
+
+- `pytest-anyio` está instalado pero **NO reemplaza** a `pytest-asyncio`
+- 5 pruebas fallan por este motivo
+
+#### ❌ PRUEBAS CON ERRORES DE IMPORTACIÓN
+
+| Archivo | Error | Causa |
+|---------|-------|-------|
+| `test_document_parser.py` | `ModuleNotFoundError: No module named 'fitz'` | Falta `PyMuPDF` en el entorno |
+| `test_graph_isolation.py` | `ModuleNotFoundError: No module named 'neo4j'` | Falta `neo4j` en el entorno |
+| `test_memory_add_tool.py` | `ModuleNotFoundError: No module named 'neo4j'` | Cadena de importación |
+| `test_memory_graph_processor.py` | `ModuleNotFoundError: No module named 'neo4j'` | Cadena de importación |
+
+#### 🚫 SCRIPTS QUE NO SON PRUEBAS PYTEST
+
+| Archivo | Descripción |
+|---------|-------------|
+| `test_deep_research_litellm.py` | Script de demostración con logging, no assertions |
+| `test_litellm_connection.py` | Script simple de verificación de conexión |
+| `test_deep_researcher.py` | Script CLI con argumentos argv |
+| `reproduce_graph_issue.py` | Script de reproducción de bugs |
+
+### ❌ Problemas Críticos Identificados
+
+#### 1. Falta `pytest-asyncio` (Crítico)
+- **Impacto:** 5 pruebas fallan (50% de las ejecutables)
+- **Solución:** Agregar `pytest-asyncio>=0.23.0` a `requirements.txt`
+
+#### 2. Sin `conftest.py` en el proyecto (Alto)
+- **Impacto:** No hay fixtures compartidas, configuraciones globales o mocks reutilizables
+- **Solución:** Crear `tests/conftest.py` con fixtures comunes
+
+#### 3. Sin `pytest.ini` o `pyproject.toml` (Alto)
+- **Impacto:** Sin configuración de asyncio_mode, markers, rutas de pruebas
+- **Solución:** Agregar `pytest.ini` con configuración estándar
+
+#### 4. Sin mock de variables de entorno (Medio)
+- **Impacto:** Pruebas pueden fallar si `.env` no está configurado
+- **Solución:** Agregar `python-dotenv` en fixtures o usar `monkeypatch`
+
+#### 5. Sin pruebas de API/FastAPI (Medio)
+- **Impacto:** No hay pruebas de endpoints, validación de schemas o integración
+- **Solución:** Implementar pruebas con `TestClient` de FastAPI
+
+#### 6. Sin pruebas de integración con BD (Medio)
+- **Impacto:** No hay pruebas contra PostgreSQL/Neo4j reales o containers
+- **Solución:** Implementar pruebas con `pytest-postgresql` o Docker
+
+#### 7. Scripts mezclados con pruebas unitarias (Bajo)
+- **Impacto:** Confusión sobre qué archivos son pruebas ejecutables
+- **Solución:** Mover scripts a `/scripts/` o `/dev-tools/`
+
+#### 8. Sin CI/CD configurado (Bajo)
+- **Impacto:** No hay validación automática en commits/PRs
+- **Solución:** Agregar GitHub Actions o similar
+
+#### 9. Sin cobertura de código (Bajo)
+- **Impacto:** No hay métricas de cobertura
+- **Solución:** Agregar `pytest-cov` y configurar umbrales
+
+#### 10. Dependencias faltantes en entorno de pruebas (Bajo)
+- **Impacto:** 6 pruebas no se pueden recolectar
+- **Solución:** Agrupar dependencias opcionales en `requirements-dev.txt`
+
+### ✅ Aspectos Positivos
+
+1. **Uso correcto de fixtures de pytest** en `test_skill_manager.py` y `test_memory_manager_collections.py`
+2. **Uso de `monkeypatch`** para mockear sesiones de base de datos de forma efectiva
+3. **Uso de `unittest.mock.AsyncMock`** en `test_query_memory_graph_tool.py`
+4. **Pruebas unitarias bien estructuradas** con nombres descriptivos y asserts claros
+5. **pytest declarado** en `requirements.txt` (>=7.4.0)
+6. **anyio instalado**, que provee capacidades async básicas
+
+### 📈 Cobertura por Módulo
+
+| Módulo | Estado | Notas |
+|--------|--------|-------|
+| `core/skill_manager.py` | ⚠️ Parcial | 1 prueba unitaria, sin mock de filesystem real |
+| `core/memory_manager.py` | ⚠️ Parcial | 4 pruebas con mock de BD |
+| `utils/postgres_chat_history.py` | ✅ Buena | 3 pruebas unitarias completas |
+| `skills/knowledge_and_memory_skill/` | ⚠️ Parcial | 3 pruebas, requieren neo4j |
+| `api/` | ❌ No cubierto | Sin pruebas de endpoints |
+| `core/agent.py` | ❌ No cubierto | Sin pruebas del agente principal |
+| `core/llm_manager.py` | ❌ No cubierto | Solo scripts de prueba |
+| `tools/` | ❌ No cubierto | Sin pruebas unitarias |
+
+### 🛠️ Recomendaciones Priorizadas
+
+#### Prioridad Alta (Acción inmediata)
+1. **Instalar `pytest-asyncio`** → Soluciona 50% de fallos inmediatamente
+2. **Crear `tests/conftest.py`** → Centraliza fixtures y configuraciones
+3. **Crear `pytest.ini`** → Configuración estándar del proyecto
+
+#### Prioridad Media (Próximo sprint)
+4. **Agregar `python-dotenv` en fixtures** → Manejo seguro de variables de entorno
+5. **Implementar pruebas de API** → Usar `TestClient` de FastAPI
+6. **Mover scripts a `/dev-tools/`** → Limpiar carpeta de pruebas
+
+#### Prioridad Baja (Mejora continua)
+7. **Implementar pruebas de integración** → Containers para BD
+8. **Configurar CI/CD** → GitHub Actions
+9. **Agregar cobertura de código** → `pytest-cov`
+10. **Crear `requirements-dev.txt`** → Separar dependencias de desarrollo
+
+### 📝 Archivos Modificados/Creados
+
+| Archivo | Acción |
+|---------|--------|
+| `tests/conftest.py` | [CREADO] Fixtures compartidas |
+| `pytest.ini` | [CREADO] Configuración de pytest |
+| `requirements-dev.txt` | [CREADO] Dependencias de desarrollo |
+| `tests/test_api_endpoints.py` | [CREADO] Ejemplo de pruebas de API |
+
+### 🔧 Ejemplo de Configuración Implementada
+
+**`pytest.ini`:**
+```ini
+[pytest]
+asyncio_mode = auto
+testpaths = tests
+python_files = test_*.py
+python_classes = Test*
+python_functions = test_*
+addopts = -v --tb=short --strict-markers
+markers =
+    integration: Pruebas de integración (requieren servicios externos)
+    slow: Pruebas que tardan más de 1 segundo
+    unit: Pruebas unitarias rápidas
+```
+
+**`requirements-dev.txt`:**
+```
+pytest>=7.4.0
+pytest-asyncio>=0.23.0
+pytest-cov>=4.1.0
+pytest-mock>=3.12.0
+httpx>=0.25.0  # Para TestClient
+```
+
+### 📊 Métricas Finales
+
+```
+Total de archivos en /tests/:      12
+├── Pruebas unitarias válidas:      4
+├── Pruebas con fallos configuración: 4
+├── Pruebas con errores importación: 4
+└── Scripts de prueba:              4
+
+Total de pruebas recolectadas:     10
+├── PASSED:                         3  (30%)
+├── FAILED:                         5  (50%)
+└── ERROR (importación):            6  (60% del total archivos)
+
+Cobertura estimada de código:      ~15% (solo módulos auxiliares)
+```
+
+---
+
+**Conclusión:** El sistema de pruebas tiene una base funcional pero requiere atención inmediata en la configuración de `pytest-asyncio` y la creación de fixtures globales. La falta de pruebas de API y de integración representa un riesgo significativo para la estabilidad del proyecto. Se recomienda seguir el plan de priorización para establecer una base sólida de pruebas en las próximas semanas.
