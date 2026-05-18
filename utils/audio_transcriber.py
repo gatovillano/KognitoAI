@@ -8,6 +8,7 @@ from typing import Optional
 from io import BytesIO
 from pydub import AudioSegment # Importar pydub
 import os # Importar os para manejar archivos temporales
+import numpy as np
 
 import tempfile
 
@@ -21,28 +22,49 @@ WHISPER_MODEL_SIZE = "small"
 # WHISPER_COMPUTE_TYPE = "int8"
 _whisper_model: Optional[WhisperModel] = None
 
-def load_whisper_model():
+def load_whisper_model(force_cpu=False):
     """Carga el modelo de transcripción de forma síncrona al inicio de la aplicación."""
     global _whisper_model
-    if _whisper_model is None:
+    if _whisper_model is not None and not force_cpu:
+        return
         
-        # Detección de GPU y configuración dinámica
-        use_gpu = torch.cuda.is_available()
-        if use_gpu:
-            device = "cuda"
-            compute_type = "float16"
-            logger.info("✅ GPU detectada. Cargando modelo Whisper en GPU (cuda) con compute_type float16.")
+    # Detección de GPU y configuración dinámica
+    use_gpu = torch.cuda.is_available() and not force_cpu
+    if use_gpu:
+        device = "cuda"
+        compute_type = "float16"
+        logger.info("✅ GPU detectada. Cargando modelo Whisper en GPU (cuda) con compute_type float16.")
+    else:
+        device = "cpu"
+        compute_type = "int8"
+        if force_cpu:
+            logger.warning("⚠️ Forzando carga del modelo Whisper en CPU con compute_type int8 debido a fallos previos con CUDA.")
         else:
-            device = "cpu"
-            compute_type = "int8"
             logger.warning("⚠️ No se detectó GPU. Cargando modelo Whisper en CPU con compute_type int8.")
 
-        logger.info(f"Cargando modelo Faster Whisper: {WHISPER_MODEL_SIZE}...")
-        try:
-            _whisper_model = WhisperModel(WHISPER_MODEL_SIZE, device=device, compute_type=compute_type)
-            logger.info("Modelo Faster Whisper cargado y listo.")
-        except Exception as e:
-            logger.error(f"Error cargando el modelo Faster Whisper: {e}", exc_info=True)
+    logger.info(f"Cargando modelo Faster Whisper: {WHISPER_MODEL_SIZE}...")
+    try:
+        model_instance = WhisperModel(WHISPER_MODEL_SIZE, device=device, compute_type=compute_type)
+        
+        # Si se cargó en GPU, realizar una prueba rápida de transcripción (dry-run)
+        # para garantizar que CUDA y bibliotecas dinámicas como cuBLAS funcionen correctamente.
+        if use_gpu:
+            logger.info("Realizando prueba rápida de GPU (dry-run) para verificar CUDA/cuBLAS...")
+            # 1 segundo de silencio a 16kHz
+            dummy_audio = np.zeros(16000, dtype=np.float32)
+            segments, _ = model_instance.transcribe(dummy_audio, language="es")
+            # Forzar la ejecución del generador consumiéndolo por completo
+            list(segments)
+            logger.info("✅ Prueba de GPU exitosa. GPU y bibliotecas CUDA totalmente funcionales.")
+            
+        _whisper_model = model_instance
+        logger.info("Modelo Faster Whisper cargado y listo.")
+    except Exception as e:
+        logger.error(f"Error cargando o probando el modelo Faster Whisper con device={device}: {e}", exc_info=True)
+        if device == "cuda":
+            logger.warning("Intentando fallback a CPU...")
+            load_whisper_model(force_cpu=True)
+        else:
             _whisper_model = None
 
 async def get_whisper_model() -> Optional[WhisperModel]:
@@ -119,8 +141,6 @@ async def transcribe_audio_file(audio_file: BytesIO, file_format: str) -> Option
                 logger.debug(f"Archivo temporal eliminado: {temp_audio_path}")
             except Exception as cleanup_error:
                 logger.warning(f"No se pudo eliminar el archivo temporal {temp_audio_path}: {cleanup_error}")
-
-import numpy as np
 
 import collections
 

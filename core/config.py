@@ -98,7 +98,18 @@ class Config:
         self.global_force_reasoning: bool = os.getenv("GLOBAL_FORCE_REASONING", "False").lower() in ('true', '1', 't')
 
 
+                # --- Configuración de Directorios ---
+        # Directorio base para almacenamiento de medios (documentos, imágenes, etc.)
+        self.media_root: str = os.getenv("MEDIA_ROOT", "media/documents")
+        # Directorio para almacenamiento de miniaturas (thumbnails)
+        self.thumbnails_root: str = os.getenv("THUMBNAILS_ROOT", "media/thumbnails")
+
+        # Asegurar que los directorios existan
+        os.makedirs(self.media_root, exist_ok=True)
+        os.makedirs(self.thumbnails_root, exist_ok=True)
+
         # --- Configuración de Telegram ---
+
         self.telegram_bot_token: Optional[str] = get_secret("telegram_bot_token", "TELEGRAM_BOT_TOKEN")
         self.bot_username: Optional[str] = os.getenv("BOT_USERNAME")
         
