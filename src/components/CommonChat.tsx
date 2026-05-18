@@ -182,6 +182,23 @@ function LoadingIndicator({
   toolName?: string;
   reactState?: string;
 }) {
+  const [thoughtIndex, setThoughtIndex] = useState(0);
+
+  const thoughts = useMemo(() => [
+    "Descifrando intencionalidad...",
+    "Explorando red semántica...",
+    "Sintetizando vectores de conocimiento...",
+    "Formulando respuesta lógica...",
+    "Verificando consistencia cognitiva..."
+  ], []);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setThoughtIndex((prev) => (prev + 1) % thoughts.length);
+    }, 2500);
+    return () => clearInterval(interval);
+  }, [thoughts.length]);
+
   let text = 'Kognito está pensando';
 
   if (isDeepResearchActive) {
@@ -200,46 +217,164 @@ function LoadingIndicator({
     text += ` - ${reactState}`;
   }
 
-  const dotVariants = {
-    initial: { y: 0 },
-    animate: {
-      y: -8,
-      transition: {
-        duration: 0.6,
-        repeat: Infinity,
-        repeatType: "reverse" as const,
-        ease: "easeInOut" as const
-      }
+  // Define theme colors based on state
+  const getStatusTheme = () => {
+    if (isDeepResearchActive) {
+      return {
+        gradient: 'from-amber-500 via-orange-500 to-red-500',
+        glow: 'shadow-orange-500/20',
+        bgGlow: 'bg-orange-500/5 dark:bg-orange-500/10',
+        border: 'border-orange-500/20 dark:border-orange-500/30',
+        text: 'text-orange-600 dark:text-orange-400',
+        subtext: 'text-orange-500/70 dark:text-orange-300/60',
+        dotColor: 'bg-orange-500',
+        iconColor: 'text-orange-500 dark:text-orange-400'
+      };
     }
+    if (isComprehensiveAnalysisActive) {
+      return {
+        gradient: 'from-emerald-400 via-teal-500 to-cyan-500',
+        glow: 'shadow-emerald-500/20',
+        bgGlow: 'bg-emerald-500/5 dark:bg-emerald-500/10',
+        border: 'border-emerald-500/20 dark:border-emerald-500/30',
+        text: 'text-emerald-600 dark:text-emerald-400',
+        subtext: 'text-emerald-500/70 dark:text-emerald-300/60',
+        dotColor: 'bg-emerald-500',
+        iconColor: 'text-emerald-500 dark:text-emerald-400'
+      };
+    }
+    if (isKnowledgeAnalysisActive) {
+      return {
+        gradient: 'from-cyan-400 via-blue-500 to-indigo-500',
+        glow: 'shadow-cyan-500/20',
+        bgGlow: 'bg-cyan-500/5 dark:bg-cyan-500/10',
+        border: 'border-cyan-500/20 dark:border-cyan-500/30',
+        text: 'text-cyan-600 dark:text-cyan-400',
+        subtext: 'text-cyan-500/70 dark:text-cyan-300/60',
+        dotColor: 'bg-cyan-500',
+        iconColor: 'text-cyan-500 dark:text-cyan-400'
+      };
+    }
+    if (toolName) {
+      return {
+        gradient: 'from-fuchsia-400 via-rose-500 to-violet-500',
+        glow: 'shadow-fuchsia-500/20',
+        bgGlow: 'bg-fuchsia-500/5 dark:bg-fuchsia-500/10',
+        border: 'border-fuchsia-500/20 dark:border-fuchsia-500/30',
+        text: 'text-fuchsia-600 dark:text-fuchsia-400',
+        subtext: 'text-fuchsia-500/70 dark:text-fuchsia-300/60',
+        dotColor: 'bg-fuchsia-500',
+        iconColor: 'text-fuchsia-500 dark:text-fuchsia-400'
+      };
+    }
+    return {
+      gradient: 'from-indigo-500 via-purple-500 to-pink-500',
+      glow: 'shadow-indigo-500/20',
+      bgGlow: 'bg-indigo-500/5 dark:bg-indigo-500/10',
+      border: 'border-indigo-500/20 dark:border-indigo-500/30',
+      text: 'text-indigo-600 dark:text-indigo-400',
+      subtext: 'text-indigo-500/70 dark:text-indigo-300/60',
+      dotColor: 'bg-indigo-500',
+      iconColor: 'text-indigo-500 dark:text-indigo-400'
+    };
   };
 
-  const containerVariants = {
-    initial: { transition: { staggerChildren: 0.15 } },
-    animate: { transition: { staggerChildren: 0.15 } }
-  };
+  const theme = getStatusTheme();
 
   return (
-    <div className="flex flex-col items-center space-y-2 sm:space-y-3 py-2 sm:py-4 w-full">
-      <motion.div
-        className="flex space-x-1.5 sm:space-x-2"
-        variants={containerVariants}
-        initial="initial"
-        animate="animate"
-      >
-        <motion.div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-[#3B82F6] shadow-sm shadow-blue-500/50" variants={dotVariants} />
-        <motion.div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-[#6366F1] shadow-sm shadow-indigo-500/50" variants={dotVariants} />
-        <motion.div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-[#8B5CF6] shadow-sm shadow-violet-500/50" variants={dotVariants} />
-        <motion.div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-[#A855F7] shadow-sm shadow-purple-500/50" variants={dotVariants} />
-      </motion.div>
+    <div className="flex flex-col items-center py-4 w-full px-4">
+      {/* Outer Container with dynamic glow */}
+      <div className="relative group max-w-sm w-full">
+        {/* Glow effect */}
+        <div className={`absolute -inset-1 bg-gradient-to-r ${theme.gradient} opacity-20 blur-lg rounded-2xl animate-pulse transition duration-1000`} />
+        
+        {/* Main Glassmorphic Card */}
+        <div className={`relative flex items-center space-x-4 p-4 rounded-2xl bg-white/40 dark:bg-slate-900/60 backdrop-blur-xl border ${theme.border} shadow-lg shadow-black/5 dark:shadow-black/20 overflow-hidden`}>
+          
+          {/* Orbital Neural Core */}
+          <div className="relative flex items-center justify-center w-14 h-14 flex-shrink-0">
+            {/* Pulsing Back Glow */}
+            <span className={`absolute inline-flex h-10 w-10 rounded-full ${theme.dotColor} opacity-20 animate-ping`} />
+            
+            {/* Outer Spinning Ring (Dashed border) */}
+            <motion.div
+              className={`absolute inset-0 rounded-full border border-dashed border-t-transparent border-r-transparent ${theme.iconColor} opacity-70`}
+              animate={{ rotate: 360 }}
+              transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
+            />
+            
+            {/* Inner Counter-spinning Gradient Ring */}
+            <motion.div
+              className={`absolute inset-1.5 rounded-full border border-t-transparent border-l-transparent bg-gradient-to-tr ${theme.gradient} opacity-25`}
+              animate={{ rotate: -360 }}
+              transition={{ duration: 6, repeat: Infinity, ease: "linear" }}
+            />
+            
+            {/* Floating Cognitive Particles */}
+            {[...Array(3)].map((_, i) => (
+              <motion.div
+                key={i}
+                className={`absolute w-1 h-1 rounded-full bg-gradient-to-tr ${theme.gradient}`}
+                initial={{ x: 0, y: 0, opacity: 0 }}
+                animate={{
+                  x: [0, (i - 1) * 12, (i - 1) * 22, 0],
+                  y: [0, -18 - i * 6, -35 - i * 4, 0],
+                  opacity: [0, 0.9, 0.4, 0],
+                  scale: [0.6, 1.3, 0.7, 0]
+                }}
+                transition={{
+                  duration: 2.5 + i * 0.5,
+                  repeat: Infinity,
+                  ease: "easeInOut",
+                  delay: i * 0.7
+                }}
+              />
+            ))}
+            
+            {/* Core Neural Icon */}
+            <div className={`relative flex items-center justify-center w-9 h-9 rounded-full bg-white dark:bg-slate-950 border border-slate-100 dark:border-slate-800 shadow-inner z-10`}>
+              <motion.div
+                animate={{ scale: [0.95, 1.05, 0.95] }}
+                transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+              >
+                <BrainCircuit className={`w-5 h-5 ${theme.iconColor} stroke-[2.2px]`} />
+              </motion.div>
+            </div>
+          </div>
+          
+          {/* Status Details */}
+          <div className="flex flex-col flex-1 min-w-0 pr-1 select-none">
+            {/* Primary Status Message (with subtle shimmer) */}
+            <h4 className={`text-sm font-semibold tracking-wide ${theme.text} truncate`}>
+              {text}
+            </h4>
+            
+            {/* Secondary Rotating Thought Subtitle */}
+            <div className="h-4 overflow-hidden mt-0.5">
+              <AnimatePresence mode="wait">
+                <motion.p
+                  key={thoughtIndex}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  transition={{ duration: 0.35, ease: "easeOut" }}
+                  className={`text-[10px] sm:text-[11px] font-medium ${theme.subtext} tracking-wider uppercase font-mono`}
+                >
+                  {thoughts[thoughtIndex]}
+                </motion.p>
+              </AnimatePresence>
+            </div>
+          </div>
+          
+          {/* Subtle Activity Grid indicator (far right) */}
+          <div className="flex items-center space-x-0.5 opacity-40">
+            <span className={`w-1 h-3 rounded-full ${theme.dotColor} animate-pulse [animation-delay:0.2s]`} />
+            <span className={`w-1 h-4 rounded-full ${theme.dotColor} animate-pulse [animation-delay:0.4s]`} />
+            <span className={`w-1 h-2 rounded-full ${theme.dotColor} animate-pulse [animation-delay:0.6s]`} />
+          </div>
 
-      <motion.p
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.5 }}
-        className="text-xs sm:text-sm font-medium text-muted-foreground/80 tracking-wide"
-      >
-        {text}
-      </motion.p>
+        </div>
+      </div>
     </div>
   );
 }

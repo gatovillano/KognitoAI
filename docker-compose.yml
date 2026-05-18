@@ -55,7 +55,8 @@ services:
       - ./knowledge_graph:/app/knowledge_graph
       - ./run_api.py:/app/run_api.py
       - ./credentials:/app/credentials:ro
-      - "/media/gato/Almacenamiento/Nueva Fototeca/kognitoalbums:/app/media"
+      - ${MEDIA_HOST_PATH:-./media}:/app/media
+      - ${THUMBNAILS_HOST_PATH:-./thumbnails}:/app/thumbnails
       - ./alembic:/app/alembic
       - ./alembic.ini:/app/alembic.ini
       - ./scripts:/app/scripts

@@ -1658,3 +1658,19 @@ Cobertura estimada de código:      ~15% (solo módulos auxiliares)
 ---
 
 **Conclusión:** El sistema de pruebas tiene una base funcional pero requiere atención inmediata en la configuración de `pytest-asyncio` y la creación de fixtures globales. La falta de pruebas de API y de integración representa un riesgo significativo para la estabilidad del proyecto. Se recomienda seguir el plan de priorización para establecer una base sólida de pruebas en las próximas semanas.
+
+
+---
+
+## 26-02-26 Implementación de Skill `email_retriever` para Recuperación de Correos 📧
+
+Se ha creado una skill profesional y robusta para la interacción con servidores de correo electrónico mediante el protocolo IMAP sobre SSL.
+
+- **Problemática**: Necesidad de una herramienta segura y moderna que permita al agente recuperar, buscar y analizar correos electrónicos sin comprometer la seguridad de las credenciales y manejando la complejidad de los formatos MIME.
+- **Solicitud**: Crear una skill robusta, segura y moderna para recuperar correos electrónicos.
+- **Cambio Aplicado (`email_retriever` skill)**: [NUEVO]
+  - **Protocolo Seguro**: Implementación de conexiones estrictas vía `IMAP4_SSL`.
+  - **Acciones Versátiles**: Soporte para tres acciones principales: `list` (correos recientes), `fetch` (contenido detallado y adjuntos) y `search` (búsqueda avanzada mediante criterios IMAP).
+  - **Parsing Robusto**: Implementación de `decode_mime_header` y `get_email_body` para manejar correctamente diferentes encodings y priorizar texto plano sobre HTML, evitando errores de decodificación comunes.
+  - **Salida Estructurada**: Los datos se retornan en formato JSON limpio, facilitando el procesamiento por parte del LLM.
+- **Fundamentación**: Se eligió IMAP por ser el estándar más compatible entre diversos proveedores (Gmail, Outlook, Yahoo). El uso de SSL y la recomendación de "App Passwords" aseguran que la herramienta sea segura y compatible con los estándares de seguridad modernos de los proveedores de correo.

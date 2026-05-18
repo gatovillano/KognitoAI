@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 from sqlalchemy import select
 from core.database import SessionLocal, Document
+from core.config import settings
 from utils.document_parser import extract_text_and_metadata_from_document
 
 try:
@@ -24,7 +25,12 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_DOCS_ROOT = "/media/gato/Almacenamiento/Nueva Fototeca/kognitoalbums/documents"
+# Intentar importar settings, con fallback si no está disponible
+try:
+    from core.config import settings
+    DEFAULT_DOCS_ROOT = os.path.join(settings.media_root, "documents")
+except ImportError:
+    DEFAULT_DOCS_ROOT = os.path.join(os.getenv("MEDIA_ROOT", "/media/documents"), "documents")
 DOCUMENTS_ROOT = os.environ.get("ONLYOFFICE_DOCS_ROOT", DEFAULT_DOCS_ROOT)
 
 
