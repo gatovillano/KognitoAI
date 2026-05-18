@@ -1290,7 +1290,7 @@ async def create_and_run_agent_streaming(
     from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
     from langchain_community.chat_message_histories import PostgresChatMessageHistory
     from core.config import settings
-    from core.database import LangchainPgEmbedding, ChatThread
+    from core.database import LangchainPgEmbedding
     from sqlalchemy.future import select
     from sqlalchemy.orm import selectinload
     from core.websocket_manager import send_personal_message # Asegurarse de que esté importado aquí también si es necesario
