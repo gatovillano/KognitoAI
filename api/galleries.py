@@ -20,6 +20,7 @@ from sqlalchemy.orm import selectinload
 from typing import List, Optional, Tuple # Added Tuple
 
 from core.database import get_db_session, Album, Account, Photo, SharedAlbumLink, ContactProfile # Added ContactProfile
+from core.config import settings
 from api.auth import get_current_account_id
 from sqlalchemy.future import select
 from sqlalchemy import func # Added func
@@ -111,13 +112,8 @@ class SharedLinkAccess(BaseModel):
     password: Optional[str] = None
 
 # --- Constants ---
-# Usar la ruta original de almacenamiento (funciona en host y docker)
-MEDIA_ROOT = "/media/gato/Almacenamiento/Nueva Fototeca/kognitoalbums"
-THUMBNAIL_ROOT = "/media/gato/Almacenamiento/Nueva Fototeca/kognitoalbums/thumbnails"
-
-# Crear directorios si no existen
-os.makedirs(MEDIA_ROOT, exist_ok=True)
-os.makedirs(THUMBNAIL_ROOT, exist_ok=True)
+MEDIA_ROOT = settings.media_root
+THUMBNAIL_ROOT = settings.thumbnails_root
 
 # --- Helper Functions ---
 async def get_photo_and_verify_ownership(photo_id: uuid.UUID, current_account: Account, db: AsyncSession) -> Photo:

@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 from sqlalchemy.ext.asyncio import AsyncSession
 from core.database import SessionLocal, Document
+from core.config import settings
 from datetime import datetime
 
 # Librerías de procesamiento de documentos (Office)
@@ -35,7 +36,7 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_DOCS_ROOT = "/media/gato/Almacenamiento/Nueva Fototeca/kognitoalbums/documents"
+DEFAULT_DOCS_ROOT = os.path.join(settings.media_root, "documents")
 DOCUMENTS_ROOT = os.environ.get("ONLYOFFICE_DOCS_ROOT", DEFAULT_DOCS_ROOT)
 
 class CreateOnlyOfficeInput(BaseModel):
