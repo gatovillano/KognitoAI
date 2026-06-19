@@ -75,12 +75,34 @@ class ScheduledToolsManager:
     
     async def _schedule_per_account_tools(self):
         """Programa herramientas específicas para cada cuenta activa."""
+        from core.database import CustomHeartbeat
         async with DBSession(SessionLocal) as db:
             # Obtener todas las cuentas activas
             stmt = select(Account).where(Account.is_active == True)
             result = await db.execute(stmt)
             accounts = result.scalars().all()
             
+            # 1. Migrar configuraciones de heartbeat antiguas/legacy a la nueva tabla
+            for account in accounts:
+                if account.custom_heartbeat_instructions:
+                    stmt_check = select(CustomHeartbeat).where(CustomHeartbeat.account_id == account.id)
+                    result_check = await db.execute(stmt_check)
+                    exists = result_check.scalars().first() is not None
+                    if not exists:
+                        new_hb = CustomHeartbeat(
+                            account_id=account.id,
+                            name="Heartbeat Original",
+                            instructions=account.custom_heartbeat_instructions,
+                            schedule_type="interval",
+                            interval_minutes=account.custom_heartbeat_interval_minutes or 60,
+                            allowed_tools=account.custom_heartbeat_allowed_tools or [],
+                            is_active=True
+                        )
+                        db.add(new_hb)
+                        logger.info(f"Migrando configuración de heartbeat legacy para la cuenta {account.id}")
+            await db.commit()
+
+            # 2. Programar heartbeat autónomo si está activado
             for account in accounts:
                 account_id = str(account.id)
 
@@ -97,20 +119,29 @@ class ScheduledToolsManager:
                         logger.warning(f"⚠️ Error al programar heartbeat autónomo para cuenta {account_id}")
                 else:
                     logger.info(f"Heartbeat autónomo deshabilitado para cuenta {account_id} por configuración")
-                    
-                # Programar heartbeat personalizado si está configurado
-                if account.custom_heartbeat_instructions:
-                    interval_minutes = account.custom_heartbeat_interval_minutes or 60
-                    tools = account.custom_heartbeat_allowed_tools or []
-                    success_custom = await schedule_custom_user_heartbeat(
-                        account_id=account_id,
-                        interval_minutes=interval_minutes,
-                        allowed_tools=tools,
-                    )
-                    if success_custom:
-                        logger.info(f"✅ Heartbeat personalizado programado para cuenta {account_id}")
-                    else:
-                        logger.warning(f"⚠️ Error al programar heartbeat personalizado para cuenta {account_id}")
+
+            # 3. Programar todos los heartbeats personalizados activos de la nueva tabla
+            stmt_hb = select(CustomHeartbeat).where(CustomHeartbeat.is_active == True)
+            result_hb = await db.execute(stmt_hb)
+            custom_heartbeats = result_hb.scalars().all()
+
+            for hb in custom_heartbeats:
+                from utils.tool_scheduler import schedule_custom_heartbeat
+                success_custom = await schedule_custom_heartbeat(
+                    heartbeat_id=str(hb.id),
+                    account_id=str(hb.account_id),
+                    schedule_type=hb.schedule_type,
+                    instructions=hb.instructions,
+                    allowed_tools=hb.allowed_tools,
+                    interval_minutes=hb.interval_minutes,
+                    hour=hb.hour,
+                    minute=hb.minute,
+                    day_of_week=hb.day_of_week
+                )
+                if success_custom:
+                    logger.info(f"✅ Heartbeat personalizado '{hb.name}' ({hb.id}) programado para cuenta {hb.account_id}")
+                else:
+                    logger.warning(f"⚠️ Error al programar heartbeat personalizado '{hb.name}' ({hb.id})")
     
     async def _schedule_maintenance_tools(self):
         """Programa herramientas de mantenimiento del sistema."""

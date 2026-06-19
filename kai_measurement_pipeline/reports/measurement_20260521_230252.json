@@ -1,0 +1,67 @@
+{
+  "timestamp": "2026-05-21T23:02:52.825886",
+  "api_base": "http://localhost:8889",
+  "health": true,
+  "endpoint_metrics": {
+    "docs": {
+      "endpoint": "/docs",
+      "status": 200,
+      "time_ms": 8.15,
+      "success": true,
+      "response_snippet": "\n    <!DOCTYPE html>\n    <html>\n    <head>\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n  "
+    },
+    "api_skills_available": {
+      "endpoint": "/api/skills/available",
+      "status": 200,
+      "time_ms": 15.81,
+      "success": true,
+      "response_snippet": "{\"skills\":[{\"id\":\"onlyoffice_skill\",\"description\":\"# ONLYOFFICE_SKILL: Editor de Documentos en la Plataforma KAI\\n\\n> \u26a0\ufe0f"
+    },
+    "api_knowledge-graph_stats": {
+      "endpoint": "/api/knowledge-graph/stats",
+      "status": 200,
+      "time_ms": 63.48,
+      "success": true,
+      "response_snippet": "{\"success\":true,\"data\":{\"success\":true,\"stats\":{\"entity_types\":[],\"total_entities\":0,\"workspace_id\":null,\"account_id\":\"a"
+    },
+    "api_llm_models_openai": {
+      "endpoint": "/api/llm/models/openai",
+      "status": 500,
+      "time_ms": 11.06,
+      "success": false,
+      "response_snippet": "{\"detail\":\"No se pudieron obtener los modelos de openai\"}"
+    }
+  },
+  "chat_test": {
+    "endpoint": "/api/chat",
+    "status": 202,
+    "time_ms": 21.97,
+    "success": true,
+    "response_snippet": "{\"thread_id\":\"1d09c476-e1f2-415c-9200-22febd7dd7b1\",\"taskId\":\"dbecbfdb-d60b-4a7a-878c-c320ab5c70e6\"}",
+    "thread_id_used": "1d09c476-e1f2-415c-9200-22febd7dd7b1"
+  },
+  "business_kpis": {
+    "hallucination_rate_kai": 1.0,
+    "hallucination_rate_kai_source": "medido",
+    "hallucination_rate_rag": 0.137,
+    "hallucination_reduction_pct": 0,
+    "context_token_reduction_pct": 65.0,
+    "avg_input_tokens_rag": 6000,
+    "avg_input_tokens_kai": 2100,
+    "annual_saving_estimate_usd": 12450.0,
+    "coherence_score_kai": 1.52,
+    "coherence_score_kai_source": "medido",
+    "coherence_score_rag": 3.9,
+    "coherence_improvement_pct": -61.0,
+    "tool_success_rate_kai": 100.0,
+    "tool_success_rate_kai_source": "medido",
+    "tool_success_rate_rag": 78.4,
+    "latency_breakdown_ms": {
+      "security_handshake": 15,
+      "memory_retrieval": 85,
+      "ner_extraction": 120,
+      "llm_generation": 21.97,
+      "tool_execution": 280
+    }
+  }
+}

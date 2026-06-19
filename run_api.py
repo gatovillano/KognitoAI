@@ -3,6 +3,7 @@
 import logging
 import uvicorn
 import sys
+import os
 from utils.ascii_logo import print_startup_logo
 
 from api.main import app
@@ -19,7 +20,6 @@ logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(leve
 logger = logging.getLogger(__name__)
 
 if __name__ == "__main__":
-    print_startup_logo("1.0.0")
     logger.info("Iniciando servidor API desde run_api.py...")
 
     # Configurar loggers de Uvicorn para depuración
@@ -37,4 +37,8 @@ if __name__ == "__main__":
     security_logger.setLevel(logging.DEBUG)
     logger.info(f"Nivel de logging para utils.security: {logging.getLevelName(security_logger.level)}")
 
-    uvicorn.run("api.main:app", host="0.0.0.0", port=8000, reload=False)
+    # Obtener puerto de variable de entorno o usar 8889 por defecto (Cloudflare Tunnel)
+    port = int(os.environ.get("API_PORT", 8889))
+    logger.info(f"Escuchando en puerto: {port}")
+    uvicorn.run("api.main:app", host="0.0.0.0", port=port, reload=False)
+

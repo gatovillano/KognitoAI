@@ -16,8 +16,8 @@ import { CSS } from '@dnd-kit/utilities';
 
 export interface Collection {
   id?: string;
-  name: string;
-  topic?: string;
+  name?: string;
+  topic: string;
   document_count: number;
   description?: string;
   team_shared?: boolean;

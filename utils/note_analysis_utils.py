@@ -37,7 +37,21 @@ Responde SOLO con el JSON válido, sin bloques de código markdown adicionales s
 
     try:
         response = await llm.ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)])
-        return safe_json_loads(response.content)
+        content = response.content
+
+        # Intentar cargar JSON con reintentos si falla el parseo
+        max_retries = 2
+        for attempt in range(max_retries + 1):
+            try:
+                return safe_json_loads(content)
+            except Exception as e:
+                if attempt < max_retries:
+                    logger.warning(f"JSON decode error in analyze_single_note (attempt {attempt+1}/{max_retries+1}): {e}. Requesting fix...")
+                    fix_prompt = f"The JSON response you provided is invalid. Error: {e}\n\nOriginal content:\n{content}\n\nPlease fix the JSON and return ONLY the corrected valid JSON."
+                    response = await llm.ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt), HumanMessage(content=fix_prompt)])
+                    content = response.content
+                else:
+                    raise e
     except Exception as e:
         logger.error(f"Error analyzing note: {e}")
         # Retornar estructura de error o parcial
@@ -76,7 +90,21 @@ Responde SOLO con el JSON válido."""
 
     try:
         response = await llm.ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=notes_text)])
-        return safe_json_loads(response.content)
+        content = response.content
+
+        # Intentar cargar JSON con reintentos si falla el parseo
+        max_retries = 2
+        for attempt in range(max_retries + 1):
+            try:
+                return safe_json_loads(content)
+            except Exception as e:
+                if attempt < max_retries:
+                    logger.warning(f"JSON decode error in analyze_note_collection (attempt {attempt+1}/{max_retries+1}): {e}. Requesting fix...")
+                    fix_prompt = f"The JSON response you provided is invalid. Error: {e}\n\nOriginal content:\n{content}\n\nPlease fix the JSON and return ONLY the corrected valid JSON."
+                    response = await llm.ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=notes_text), HumanMessage(content=fix_prompt)])
+                    content = response.content
+                else:
+                    raise e
     except Exception as e:
         logger.error(f"Error analyzing note collection: {e}")
         return {
@@ -110,7 +138,21 @@ Responde SOLO con el JSON válido."""
 
     try:
         response = await llm.ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)])
-        return safe_json_loads(response.content)
+        content = response.content
+
+        # Intentar cargar JSON con reintentos si falla el parseo
+        max_retries = 2
+        for attempt in range(max_retries + 1):
+            try:
+                return safe_json_loads(content)
+            except Exception as e:
+                if attempt < max_retries:
+                    logger.warning(f"JSON decode error in summarize_note (attempt {attempt+1}/{max_retries+1}): {e}. Requesting fix...")
+                    fix_prompt = f"The JSON response you provided is invalid. Error: {e}\n\nOriginal content:\n{content}\n\nPlease fix the JSON and return ONLY the corrected valid JSON."
+                    response = await llm.ainvoke([SystemMessage(content=system_prompt), HumanMessage(content=user_prompt), HumanMessage(content=fix_prompt)])
+                    content = response.content
+                else:
+                    raise e
     except Exception as e:
         logger.error(f"Error summarizing note: {e}")
         return {

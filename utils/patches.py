@@ -13,7 +13,30 @@ def apply_patches():
     """
     print("🛠️ Aplicando parches de estabilidad...")
     patch_postgres_chat_history_del()
+    patch_starlette_multipart_size()
 
+
+def patch_starlette_multipart_size():
+    """
+    Aumenta el tamaño máximo de una parte del form en Starlette.
+    Por defecto es 1MB, lo cual causa errores ("Part exceeded maximum size of 1024KB")
+    al enviar strings Base64 gigantes desde el cliente (p. ej. imágenes).
+    """
+    import starlette.formparsers
+    import functools
+
+    original_init = starlette.formparsers.MultiPartParser.__init__
+
+    @functools.wraps(original_init)
+    def new_init(self, *args, **kwargs):
+        # Override max_part_size to 50MB if not explicitly set to something else,
+        # or just force it to 50MB.
+        kwargs['max_part_size'] = 50 * 1024 * 1024
+        original_init(self, *args, **kwargs)
+
+    starlette.formparsers.MultiPartParser.__init__ = new_init
+    print("✅ Patched Starlette MultiPartParser max_part_size to 50MB (via __init__).")
+    logger.info("✅ Patched Starlette MultiPartParser max_part_size to 50MB.")
 
 def patch_postgres_chat_history_del():
     """

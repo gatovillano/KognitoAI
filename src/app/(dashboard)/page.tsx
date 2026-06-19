@@ -56,6 +56,7 @@ export default function DashboardPage() {
 
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioStreamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
   // Fetch Dashboard Data
@@ -87,6 +88,7 @@ export default function DashboardPage() {
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioStreamRef.current = stream;
       mediaRecorderRef.current = new MediaRecorder(stream);
       audioChunksRef.current = [];
 
@@ -95,7 +97,17 @@ export default function DashboardPage() {
       };
 
       mediaRecorderRef.current.onstop = async () => {
+        await new Promise(resolve => window.setTimeout(resolve, 0));
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+
+        if (audioBlob.size <= 110) {
+          toast.error('La grabación quedó incompleta. Intenta de nuevo.');
+          setIsRecording(false);
+          audioStreamRef.current?.getTracks().forEach(track => track.stop());
+          audioStreamRef.current = null;
+          return;
+        }
+
         const formData = new FormData();
         formData.append('file', audioBlob, 'recording.webm');
 
@@ -109,11 +121,12 @@ export default function DashboardPage() {
           toast.error('Error al transcribir audio');
         } finally {
           setIsRecording(false);
-          stream.getTracks().forEach(track => track.stop());
+          audioStreamRef.current?.getTracks().forEach(track => track.stop());
+          audioStreamRef.current = null;
         }
       };
 
-      mediaRecorderRef.current.start();
+      mediaRecorderRef.current.start(500);
       setIsRecording(true);
     } catch (error) {
       toast.error('Error al acceder al micrófono');
@@ -122,43 +135,37 @@ export default function DashboardPage() {
 
   const stopRecording = () => {
     if (mediaRecorderRef.current?.state === 'recording') {
+      mediaRecorderRef.current.requestData();
       mediaRecorderRef.current.stop();
     }
   };
 
-  const handleChatSubmit = async (e?: React.FormEvent) => {
-    e?.preventDefault();
-    if (!chatInput.trim()) return;
+  const handleChatSubmit = async (e?: React.FormEvent, messageTextFromInput?: string) => {
+    if (e) e.preventDefault();
+    const messageToProcess = messageTextFromInput || chatInput;
+    if (!messageToProcess.trim()) return;
 
     setIsResponding(true);
     try {
       const threadResponse = await apiClient.post('/api/threads', {});
       const newThread = threadResponse.data;
 
-      const mode = isKnowledgeAnalysisActive ? 'knowledgeAnalysis'
-        : isWebSearchActive ? 'webSearch'
-          : isComprehensiveAnalysisActive ? 'comprehensiveAnalysis'
-            : '';
+      const initialMessage = messageToProcess;
+      const initialRagContext = selectedContext.length > 0 ? JSON.stringify(selectedContext) : '';
 
-      await apiClient.post('/api/chat', {
-        thread_id: String(newThread.id),
-        account_id: String(user?.id),
-        user_message: chatInput,
-        mode: mode,
-      });
+      const newSearchParams = new URLSearchParams();
+      if (initialMessage) {
+        newSearchParams.set('initialMessage', initialMessage);
+      }
+      if (initialRagContext) {
+        newSearchParams.set('initialRagContext', initialRagContext);
+      }
 
-      router.push(`/chat/${newThread.id}`);
+      router.push(`/chat/${newThread.id}?${newSearchParams.toString()}`);
     } catch (error) {
+      console.error('Error al iniciar el chat:', error);
       toast.error('Error al iniciar el chat');
-    } finally {
       setIsResponding(false);
-    }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleChatSubmit();
     }
   };
 
@@ -337,7 +344,7 @@ export default function DashboardPage() {
           isWebSearchActive={isWebSearchActive}
           isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
           isDeepResearchActive={isDeepResearchActive}
-          onKeyDown={handleKeyDown}
+          onKeyDown={() => {}}
           onToggleKnowledgeAnalysis={() => setIsKnowledgeAnalysisActive(!isKnowledgeAnalysisActive)}
           onToggleWebSearch={() => setIsWebSearchActive(!isWebSearchActive)}
           onToggleComprehensiveAnalysis={() => setIsComprehensiveAnalysisActive(!isComprehensiveAnalysisActive)}

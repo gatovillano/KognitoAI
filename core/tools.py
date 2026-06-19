@@ -14,6 +14,7 @@ import uuid
 from sqlalchemy import select
 from core.database import SessionLocal, Account
 from core.skill_manager import SkillManager
+from core.mcp_manager import mcp_manager
 # from skills.html_generator_tool import HTMLGeneratorTool # REMOVED: Legacy import is now dynamic
 
 # Configuración del logger para este módulo.
@@ -186,6 +187,18 @@ async def get_all_langchain_tools(
                 seen_names.add(tool.name)
             else:
                 logger.warning(f"Duplicate tool '{tool.name}' ignored during assembly.")
+
+        # --- AÑADIDO: Cargar herramientas de servidores MCP activos ---
+        try:
+            async with SessionLocal() as db:
+                mcp_tools = await mcp_manager.get_tools_for_account(db, account_id)
+                for tool in mcp_tools:
+                    if tool.name not in seen_names:
+                        final_tools.append(tool)
+                        seen_names.add(tool.name)
+                        logger.info(f"🔌 Herramienta MCP cargada: {tool.name}")
+        except Exception as e:
+            logger.error(f"Error cargando herramientas MCP para account_id {account_id}: {e}", exc_info=True)
 
         logger.info(f"--- 🧰 Toolbox Assembled ({len(final_tools)} dynamic skills) ---")
         return final_tools

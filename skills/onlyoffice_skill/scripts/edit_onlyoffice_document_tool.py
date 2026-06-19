@@ -15,21 +15,29 @@ from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 from sqlalchemy import select
 from core.database import SessionLocal, Document
+from core.onlyoffice_storage import resolve_onlyoffice_file_path
 from datetime import datetime
 
 # Librerías de procesamiento de documentos (Office)
+DOCX_IMPORT_ERROR = None
 try:
     import docx
-    from docx.shared import Pt, RGBColor
+    from docx.shared import Pt, RGBColor, Inches, Cm
     from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.enum.section import WD_ORIENT
     from docx.oxml import parse_xml
     from docx.oxml.ns import nsdecls
     DOCX_AVAILABLE = True
-except ImportError:
+except Exception as e:
     DOCX_AVAILABLE = False
+    DOCX_IMPORT_ERROR = str(e)
+
 
 try:
     import openpyxl
+    from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+    from openpyxl.utils import get_column_letter
+    import openpyxl.utils.numbers as numbers
     XLSX_AVAILABLE = True
 except ImportError:
     XLSX_AVAILABLE = False
@@ -358,9 +366,24 @@ SUPPORTED_ACTIONS = [
     "insert_table",      # Insertar una tabla al final
     "apply_bold",        # Poner en negrita las ocurrencias de un texto
     "clear_and_write",   # Borrar todo el contenido y escribir nuevo
-    # xlsx-only
+    # DOCX new actions
+    "edit_paragraph",    # Editar párrafo por índice o búsqueda
+    "insert_image",      # Insertar imagen en el documento
+    "set_page_layout",   # Configurar márgenes y orientación de página
+    "add_header_footer", # Añadir encabezados y pies de página
+    "apply_cell_style",  # Aplicar estilo a celdas de tabla
+    # XLSX new actions
     "xlsx_write_cell",   # Escribir en una celda específica de una hoja Excel
     "xlsx_append_row",   # Añadir una fila al final de una hoja Excel
+    "xlsx_write_range",  # Escribir en un rango de celdas
+    "xlsx_format_cells", # Formatear celdas con estilos
+    "xlsx_insert_row",   # Insertar fila en posición específica
+    "xlsx_insert_column",# Insertar columna en posición específica
+    "xlsx_delete_row",   # Eliminar fila
+    "xlsx_delete_column",# Eliminar columna
+    "xlsx_merge_cells",  # Fusionar celdas
+    "xlsx_set_column_width",  # Establecer ancho de columna
+    "xlsx_set_row_height",    # Establecer altura de fila
 ]
 
 
@@ -378,8 +401,22 @@ class EditOnlyOfficeInput(BaseModel):
             "'insert_table' (insertar tabla - requiere table_data), "
             "'apply_bold' (poner en negrita - requiere search_text), "
             "'clear_and_write' (borrar todo el contenido y escribir nuevo texto/Markdown formateado), "
+            "'edit_paragraph' (editar párrafo por índice o búsqueda - requiere paragraph_index o search_text), "
+            "'insert_image' (insertar imagen - requiere image_path y opcionalmente image_width/image_height), "
+            "'set_page_layout' (configurar márgenes/orientación - requiere page_margins y/o page_orientation), "
+            "'add_header_footer' (añadir encabezado/pie - requiere header_footer_type y content), "
+            "'apply_cell_style' (aplicar estilo a celda - requiere cell_style y cell_coords), "
             "'xlsx_write_cell' (escribir en celda Excel - requiere cell, sheet_name), "
-            "'xlsx_append_row' (añadir fila a Excel - requiere row_data)."
+            "'xlsx_append_row' (añadir fila a Excel - requiere row_data), "
+            "'xlsx_write_range' (escribir en rango - requiere range_address y range_data), "
+            "'xlsx_format_cells' (formatear celdas - requiere range_address y format_options), "
+            "'xlsx_insert_row' (insertar fila - requiere row_index), "
+            "'xlsx_insert_column' (insertar columna - requiere column_index), "
+            "'xlsx_delete_row' (eliminar fila - requiere row_index), "
+            "'xlsx_delete_column' (eliminar columna - requiere column_index), "
+            "'xlsx_merge_cells' (fusionar celdas - requiere range_address), "
+            "'xlsx_set_column_width' (ancho columna - requiere column_index y width), "
+            "'xlsx_set_row_height' (altura fila - requiere row_index y height)."
         ),
     )
     text: Optional[str] = Field(None, description="Texto principal a insertar (soporta Markdown enriquecido) o nuevo texto en 'replace'.")
@@ -391,6 +428,25 @@ class EditOnlyOfficeInput(BaseModel):
     sheet_name: Optional[str] = Field(None, description="Nombre de la hoja de Excel. Si no se indica, se usa la primera hoja.")
     cell: Optional[str] = Field(None, description="Coordenada de celda Excel (ej: 'A1', 'B3'). Usar con 'xlsx_write_cell'.")
     row_data: Optional[List[str]] = Field(None, description="Lista de valores para añadir como fila. Usar con 'xlsx_append_row'.")
+    # Nuevos campos DOCX
+    paragraph_index: Optional[int] = Field(None, description="Índice del párrafo a editar (0-based). Usar con 'edit_paragraph'.")
+    image_path: Optional[str] = Field(None, description="Ruta del archivo de imagen a insertar. Usar con 'insert_image'.")
+    image_width: Optional[float] = Field(None, description="Ancho de la imagen en cm. Por defecto 10cm. Usar con 'insert_image'.")
+    image_height: Optional[float] = Field(None, description="Alto de la imagen en cm. Por defecto autoajustado. Usar con 'insert_image'.")
+    page_margins: Optional[dict] = Field(None, description="Diccionario con márgenes en cm: {'top': 2.5, 'bottom': 2.5, 'left': 2.5, 'right': 2.5}. Usar con 'set_page_layout'.")
+    page_orientation: Optional[str] = Field(None, description="Orientación de página: 'portrait' o 'landscape'. Usar con 'set_page_layout'.")
+    header_footer_type: Optional[str] = Field(None, description="Tipo: 'header' o 'footer'. Usar con 'add_header_footer'.")
+    header_footer_content: Optional[str] = Field(None, description="Contenido del encabezado/pie de página. Usar con 'add_header_footer'.")
+    cell_style: Optional[dict] = Field(None, description="Estilo a aplicar: {'bold': True, 'italic': False, 'font_size': 12, 'font_color': 'FF0000'}. Usar con 'apply_cell_style'.")
+    cell_coords: Optional[str] = Field(None, description="Coordenadas de celda: 'A1'. Usar con 'apply_cell_style'.")
+    # Nuevos campos XLSX
+    range_address: Optional[str] = Field(None, description="Rango de celdas (ej: 'A1:C3'). Usar con 'xlsx_write_range', 'xlsx_format_cells', 'xlsx_merge_cells'.")
+    range_data: Optional[List[List[str]]] = Field(None, description="Datos para escribir en el rango. Usar con 'xlsx_write_range'.")
+    format_options: Optional[dict] = Field(None, description="Opciones de formato: {'bold': True, 'font_size': 12, 'fill_color': 'FFFF00', 'align': 'center'}. Usar con 'xlsx_format_cells'.")
+    row_index: Optional[int] = Field(None, description="Índice de fila (0-based). Usar con 'xlsx_insert_row', 'xlsx_delete_row'.")
+    column_index: Optional[int] = Field(None, description="Índice de columna (0-based). Usar con 'xlsx_insert_column', 'xlsx_delete_column'.")
+    width: Optional[float] = Field(None, description="Ancho en cm. Usar con 'xlsx_set_column_width'.")
+    height: Optional[float] = Field(None, description="Alto en filas. Usar con 'xlsx_set_row_height'.")
 
 
 class EditOnlyOfficeDocumentTool(BaseTool):
@@ -421,6 +477,25 @@ class EditOnlyOfficeDocumentTool(BaseTool):
         sheet_name: Optional[str] = None,
         cell: Optional[str] = None,
         row_data: Optional[List[str]] = None,
+        # Nuevos parámetros DOCX
+        paragraph_index: Optional[int] = None,
+        image_path: Optional[str] = None,
+        image_width: Optional[float] = None,
+        image_height: Optional[float] = None,
+        page_margins: Optional[dict] = None,
+        page_orientation: Optional[str] = None,
+        header_footer_type: Optional[str] = None,
+        header_footer_content: Optional[str] = None,
+        cell_style: Optional[dict] = None,
+        cell_coords: Optional[str] = None,
+        # Nuevos parámetros XLSX
+        range_address: Optional[str] = None,
+        range_data: Optional[List[List[str]]] = None,
+        format_options: Optional[dict] = None,
+        row_index: Optional[int] = None,
+        column_index: Optional[int] = None,
+        width: Optional[float] = None,
+        height: Optional[float] = None,
         **kwargs: Any,
     ) -> str:
         try:
@@ -441,9 +516,10 @@ class EditOnlyOfficeDocumentTool(BaseTool):
                 ext = doc.extension.lower().lstrip(".")
 
                 # Construir ruta física
-                file_path = doc.file_path
-                if not os.path.isabs(file_path):
-                    file_path = os.path.join(DOCUMENTS_ROOT, file_path)
+                try:
+                    file_path = str(resolve_onlyoffice_file_path(doc.file_path))
+                except Exception as exc:
+                    return f"❌ Ruta física inválida para documento: {exc}"
 
                 if not os.path.exists(file_path):
                     return f"❌ El archivo físico '{doc.filename}' no se encuentra en el servidor ({file_path})."
@@ -452,12 +528,17 @@ class EditOnlyOfficeDocumentTool(BaseTool):
                 if ext == "docx":
                     msg = await self._edit_docx(
                         file_path, action, text, search_text,
-                        heading_level, list_items, table_data, doc.filename
+                        heading_level, list_items, table_data,
+                        paragraph_index, image_path, image_width, image_height,
+                        page_margins, page_orientation, header_footer_type, header_footer_content,
+                        cell_style, cell_coords, doc.filename
                     )
                 elif ext in ("xlsx", "xls"):
                     msg = await self._edit_xlsx(
                         file_path, action, text, cell,
-                        sheet_name, row_data, doc.filename
+                        sheet_name, row_data, range_address, range_data,
+                        format_options, row_index, column_index, width, height,
+                        doc.filename
                     )
                 else:
                     return (
@@ -489,10 +570,20 @@ class EditOnlyOfficeDocumentTool(BaseTool):
         heading_level: Optional[int],
         list_items: Optional[List[str]],
         table_data: Optional[List[List[str]]],
+        paragraph_index: Optional[int],
+        image_path: Optional[str],
+        image_width: Optional[float],
+        image_height: Optional[float],
+        page_margins: Optional[dict],
+        page_orientation: Optional[str],
+        header_footer_type: Optional[str],
+        header_footer_content: Optional[str],
+        cell_style: Optional[dict],
+        cell_coords: Optional[str],
         filename: str,
     ) -> str:
         if not DOCX_AVAILABLE:
-            return "❌ La librería 'python-docx' no está instalada. No se puede editar documentos Word."
+            return f"❌ La librería 'python-docx' no está instalada. No se puede editar documentos Word. Error de importación: {DOCX_IMPORT_ERROR}"
 
         try:
             doc_obj = docx.Document(file_path)
@@ -572,6 +663,33 @@ class EditOnlyOfficeDocumentTool(BaseTool):
                 # Escribir el nuevo contenido parsed a partir de Markdown
                 _parse_and_render_markdown(doc_obj, text)
                 msg = f"✅ Documento '{filename}' reescrito con nuevo contenido estructurado."
+
+            elif action == "edit_paragraph":
+                if paragraph_index is None and not search_text:
+                    return "❌ La acción 'edit_paragraph' requiere 'paragraph_index' o 'search_text'."
+                msg = self._handle_edit_paragraph(doc_obj, paragraph_index, search_text, text)
+
+            elif action == "insert_image":
+                if not image_path:
+                    return "❌ La acción 'insert_image' requiere 'image_path'."
+                msg = self._handle_insert_image(doc_obj, image_path, image_width, image_height)
+
+            elif action == "set_page_layout":
+                msg = self._handle_set_page_layout(doc_obj, page_margins, page_orientation)
+
+            elif action == "add_header_footer":
+                if not header_footer_type:
+                    return "❌ La acción 'add_header_footer' requiere 'header_footer_type' ('header' o 'footer')."
+                if not header_footer_content:
+                    return "❌ La acción 'add_header_footer' requiere 'header_footer_content'."
+                msg = self._handle_header_footer(doc_obj, header_footer_type, header_footer_content)
+
+            elif action == "apply_cell_style":
+                if not cell_coords:
+                    return "❌ La acción 'apply_cell_style' requiere 'cell_coords' (ej: 'A1')."
+                if not cell_style:
+                    return "❌ La acción 'apply_cell_style' requiere 'cell_style' (diccionario con estilos)."
+                msg = self._handle_cell_style(doc_obj, cell_coords, cell_style)
 
             else:
                 return (
@@ -660,8 +778,180 @@ class EditOnlyOfficeDocumentTool(BaseTool):
                     count += 1
         return count
 
+    def _handle_edit_paragraph(self, doc_obj, paragraph_index: Optional[int], search_text: Optional[str], new_text: Optional[str]) -> str:
+        """Edita un párrafo por índice o búsqueda."""
+        if new_text is None:
+            return "❌ La acción 'edit_paragraph' requiere 'text' con el nuevo contenido."
+        
+        if paragraph_index is not None:
+            if paragraph_index < 0:
+                return "❌ El índice del párrafo debe ser >= 0."
+            paragraphs = list(doc_obj.paragraphs)
+            # También incluir párrafos de tablas
+            for table in doc_obj.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        paragraphs.extend(cell.paragraphs)
+            
+            if paragraph_index >= len(paragraphs):
+                return f"❌ Índice de párrafo {paragraph_index} fuera de rango (máximo: {len(paragraphs)-1})."
+            
+            paragraph = paragraphs[paragraph_index]
+            p_element = paragraph._p
+            runs_to_remove = list(paragraph.runs)
+            for r in runs_to_remove:
+                p_element.remove(r._r)
+            _add_inline_formatted_text(paragraph, new_text)
+            return f"✅ Párrafo en posición {paragraph_index} actualizado."
+        
+        elif search_text:
+            paragraphs = list(doc_obj.paragraphs)
+            for table in doc_obj.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        paragraphs.extend(cell.paragraphs)
+            
+            for idx, paragraph in enumerate(paragraphs):
+                if search_text in paragraph.text:
+                    p_element = paragraph._p
+                    runs_to_remove = list(paragraph.runs)
+                    for r in runs_to_remove:
+                        p_element.remove(r._r)
+                    _add_inline_formatted_text(paragraph, new_text)
+                    return f"✅ Párrafo encontrado con '{search_text}' actualizado."
+            return f"⚠️ No se encontró ningún párrafo con '{search_text}'."
+        else:
+            return "❌ La acción 'edit_paragraph' requiere 'paragraph_index' o 'search_text'."
+
+    def _handle_insert_image(self, doc_obj, image_path: str, image_width: Optional[float], image_height: Optional[float]) -> str:
+        """Inserta una imagen en el documento."""
+        if not os.path.exists(image_path):
+            return f"❌ La imagen '{image_path}' no existe."
+        
+        try:
+            width_cm = image_width if image_width else 10.0
+            height_cm = image_height
+            
+            if height_cm:
+                # Tamaño fijo especificado
+                run = doc_obj.add_paragraph().add_run()
+                run.add_picture(image_path, width=Cm(width_cm), height=Cm(height_cm))
+            else:
+                # Ancho fijo, alto automático
+                run = doc_obj.add_paragraph().add_run()
+                run.add_picture(image_path, width=Cm(width_cm))
+            
+            return f"✅ Imagen '{os.path.basename(image_path)}' insertada (ancho: {width_cm}cm)."
+        except Exception as e:
+            logger.error(f"Error insertando imagen: {e}")
+            return f"❌ Error al insertar imagen: {str(e)}"
+
+    def _handle_set_page_layout(self, doc_obj, page_margins: Optional[dict], page_orientation: Optional[str]) -> str:
+        """Configura márgenes y orientación de página."""
+        try:
+            sections = doc_obj.sections
+            if not sections:
+                return "❌ No hay secciones en el documento."
+            
+            section = sections[0]  # Modificar la primera sección
+            
+            if page_margins:
+                top = Cm(page_margins.get('top', 2.5))
+                bottom = Cm(page_margins.get('bottom', 2.5))
+                left = Cm(page_margins.get('left', 2.5))
+                right = Cm(page_margins.get('right', 2.5))
+                section.top_margin = top
+                section.bottom_margin = bottom
+                section.left_margin = left
+                section.right_margin = right
+            
+            if page_orientation:
+                if page_orientation.lower() == 'landscape':
+                    section.orientation = WD_ORIENT.LANDSCAPE
+                else:
+                    section.orientation = WD_ORIENT.PORTRAIT
+            
+            return "✅ Configuración de página actualizada."
+        except Exception as e:
+            logger.error(f"Error configurando layout: {e}")
+            return f"❌ Error al configurar la página: {str(e)}"
+
+    def _handle_header_footer(self, doc_obj, header_footer_type: str, content: str) -> str:
+        """Añade encabezado o pie de página."""
+        try:
+            if header_footer_type not in ('header', 'footer'):
+                return "❌ Tipo debe ser 'header' o 'footer'."
+            
+            section = doc_obj.sections[0]
+            
+            if header_footer_type == 'header':
+                header = section.header
+                header_para = header.paragraphs[0] if header.paragraphs else header.add_paragraph()
+                header_para.text = content
+            else:
+                footer = section.footer
+                footer_para = footer.paragraphs[0] if footer.paragraphs else footer.add_paragraph()
+                footer_para.text = content
+            
+            return f"✅ {header_footer_type.capitalize()} añadido con contenido: '{content}'."
+        except Exception as e:
+            logger.error(f"Error añadiendo header/footer: {e}")
+            return f"❌ Error al añadir {header_footer_type}: {str(e)}"
+
+    def _handle_cell_style(self, doc_obj, cell_coords: str, cell_style: dict) -> str:
+        """Aplica estilo a una celda de tabla."""
+        try:
+            # Buscar la primera tabla del documento
+            if not doc_obj.tables:
+                return "❌ No hay tablas en el documento."
+            
+            table = doc_obj.tables[0]
+            
+            # Parsear coordenadas (ej: "A1", "B2")
+            col_letter = ''.join([c for c in cell_coords if c.isalpha()]).upper()
+            row_num = int(''.join([c for c in cell_coords if c.isdigit()]))
+            
+            # Convertir letra a índice (A=0, B=1, etc.)
+            col_idx = 0
+            for c in col_letter:
+                col_idx = col_idx * 26 + (ord(c.upper()) - ord('A') + 1)
+            col_idx -= 1
+            
+            row_idx = row_num - 1  # 1-based a 0-based
+            
+            if row_idx >= len(table.rows) or col_idx >= len(table.columns):
+                return f"❌ Coordenadas {cell_coords} fuera de rango."
+            
+            cell = table.cell(row_idx, col_idx)
+            
+            # Aplicar estilos
+            if cell_style.get('bold'):
+                for run in cell.paragraphs[0].runs:
+                    run.bold = True
+            
+            if cell_style.get('italic'):
+                for run in cell.paragraphs[0].runs:
+                    run.italic = True
+            
+            if cell_style.get('font_size'):
+                for run in cell.paragraphs[0].runs:
+                    run.font.size = Pt(cell_style['font_size'])
+            
+            if cell_style.get('font_color'):
+                color_hex = cell_style['font_color']
+                if color_hex.startswith('#'):
+                    color_hex = color_hex[1:]
+                for run in cell.paragraphs[0].runs:
+                    run.font.color.rgb = RGBColor(int(color_hex[:2], 16), int(color_hex[2:4], 16), int(color_hex[4:6], 16))
+            
+            return f"✅ Estilo aplicado a celda {cell_coords}."
+        except Exception as e:
+            logger.error(f"Error aplicando estilo a celda: {e}")
+            return f"❌ Error al aplicar estilo: {str(e)}"
+
     # ------------------------------------------------------------------ #
     #  XLSX Editing
+    # ------------------------------------------------------------------ #
     # ------------------------------------------------------------------ #
     async def _edit_xlsx(
         self,
@@ -671,6 +961,13 @@ class EditOnlyOfficeDocumentTool(BaseTool):
         cell: Optional[str],
         sheet_name: Optional[str],
         row_data: Optional[List[str]],
+        range_address: Optional[str],
+        range_data: Optional[List[List[str]]],
+        format_options: Optional[dict],
+        row_index: Optional[int],
+        column_index: Optional[int],
+        width: Optional[float],
+        height: Optional[float],
         filename: str,
     ) -> str:
         if not XLSX_AVAILABLE:
@@ -700,10 +997,59 @@ class EditOnlyOfficeDocumentTool(BaseTool):
                 ws.append(row_data)
                 msg = f"✅ Fila añadida a la hoja '{sheet_name}' de '{filename}': {row_data}"
 
+            elif action == "xlsx_write_range":
+                if not range_address:
+                    return "❌ La acción 'xlsx_write_range' requiere 'range_address' (ej: 'A1:C3')."
+                if not range_data:
+                    return "❌ La acción 'xlsx_write_range' requiere 'range_data' (matriz 2D)."
+                msg = self._xlsx_write_range(ws, range_address, range_data, filename, sheet_name)
+
+            elif action == "xlsx_format_cells":
+                if not range_address:
+                    return "❌ La acción 'xlsx_format_cells' requiere 'range_address' (ej: 'A1:C3')."
+                if not format_options:
+                    return "❌ La acción 'xlsx_format_cells' requiere 'format_options'."
+                msg = self._xlsx_format_cells(ws, range_address, format_options, filename, sheet_name)
+
+            elif action == "xlsx_insert_row":
+                if row_index is None:
+                    return "❌ La acción 'xlsx_insert_row' requiere 'row_index'."
+                msg = self._xlsx_insert_row(ws, row_index, filename, sheet_name)
+
+            elif action == "xlsx_insert_column":
+                if column_index is None:
+                    return "❌ La acción 'xlsx_insert_column' requiere 'column_index'."
+                msg = self._xlsx_insert_column(ws, column_index, filename, sheet_name)
+
+            elif action == "xlsx_delete_row":
+                if row_index is None:
+                    return "❌ La acción 'xlsx_delete_row' requiere 'row_index'."
+                msg = self._xlsx_delete_row(ws, row_index, filename, sheet_name)
+
+            elif action == "xlsx_delete_column":
+                if column_index is None:
+                    return "❌ La acción 'xlsx_delete_column' requiere 'column_index'."
+                msg = self._xlsx_delete_column(ws, column_index, filename, sheet_name)
+
+            elif action == "xlsx_merge_cells":
+                if not range_address:
+                    return "❌ La acción 'xlsx_merge_cells' requiere 'range_address' (ej: 'A1:C3')."
+                msg = self._xlsx_merge_cells(ws, range_address, filename, sheet_name)
+
+            elif action == "xlsx_set_column_width":
+                if column_index is None or width is None:
+                    return "❌ La acción 'xlsx_set_column_width' requiere 'column_index' y 'width'."
+                msg = self._xlsx_set_column_width(ws, column_index, width, filename, sheet_name)
+
+            elif action == "xlsx_set_row_height":
+                if row_index is None or height is None:
+                    return "❌ La acción 'xlsx_set_row_height' requiere 'row_index' y 'height'."
+                msg = self._xlsx_set_row_height(ws, row_index, height, filename, sheet_name)
+
             else:
                 return (
                     f"❌ Acción '{action}' no válida para .xlsx. "
-                    "Usa 'xlsx_write_cell' o 'xlsx_append_row'."
+                    f"Acciones disponibles: {', '.join(SUPPORTED_ACTIONS)}"
                 )
 
             self._backup_file(file_path)
@@ -713,6 +1059,114 @@ class EditOnlyOfficeDocumentTool(BaseTool):
         except Exception as e:
             logger.error(f"Error procesando XLSX: {e}")
             return f"❌ Error al procesar el archivo Excel: {str(e)}"
+
+    # ------------------------------------------------------------------ #
+    #  XLSX Helper Methods
+    # ------------------------------------------------------------------ #
+    def _xlsx_write_range(self, ws, range_address: str, range_data: List[List[str]], filename: str, sheet_name: str) -> str:
+        """Escribe datos en un rango de celdas."""
+        try:
+            from openpyxl.utils import coordinate_to_rowcol
+            start_row, start_col = coordinate_to_rowcol(range_address.split(':')[0])
+            
+            for i, row in enumerate(range_data):
+                for j, value in enumerate(row):
+                    ws.cell(row=start_row + i, column=start_col + j, value=value)
+            
+            return f"✅ Rango '{range_address}' en hoja '{sheet_name}' actualizado."
+        except Exception as e:
+            logger.error(f"Error escribiendo rango: {e}")
+            return f"❌ Error al escribir en rango: {str(e)}"
+
+    def _xlsx_format_cells(self, ws, range_address: str, format_options: dict, filename: str, sheet_name: str) -> str:
+        """Formatea celdas con estilos."""
+        try:
+            from openpyxl.utils import coordinate_to_rowcol
+            range_ref = ws.range(range_address)
+            
+            for cell in range_ref:
+                if format_options.get('bold'):
+                    cell.font = Font(bold=True)
+                if format_options.get('italic'):
+                    cell.font = Font(italic=True)
+                if format_options.get('font_size'):
+                    cell.font = Font(size=format_options['font_size'])
+                if format_options.get('fill_color'):
+                    fill = PatternFill(start_color=format_options['fill_color'], end_color=format_options['fill_color'], fill_type='solid')
+                    cell.fill = fill
+                if format_options.get('align'):
+                    align = format_options['align'].lower()
+                    if align in ('center', 'left', 'right'):
+                        cell.alignment = Alignment(horizontal=align)
+            
+            return f"✅ Formato aplicado al rango '{range_address}' en hoja '{sheet_name}'."
+        except Exception as e:
+            logger.error(f"Error formateando celdas: {e}")
+            return f"❌ Error al formatear celdas: {str(e)}"
+
+    def _xlsx_insert_row(self, ws, row_index: int, filename: str, sheet_name: str) -> str:
+        """Inserta una fila en la posición especificada."""
+        try:
+            ws.insert_rows(row_index)
+            return f"✅ Fila insertada en posición {row_index} en hoja '{sheet_name}'."
+        except Exception as e:
+            logger.error(f"Error insertando fila: {e}")
+            return f"❌ Error al insertar fila: {str(e)}"
+
+    def _xlsx_insert_column(self, ws, column_index: int, filename: str, sheet_name: str) -> str:
+        """Inserta una columna en la posición especificada."""
+        try:
+            ws.insert_cols(column_index)
+            return f"✅ Columna insertada en posición {column_index} en hoja '{sheet_name}'."
+        except Exception as e:
+            logger.error(f"Error insertando columna: {e}")
+            return f"❌ Error al insertar columna: {str(e)}"
+
+    def _xlsx_delete_row(self, ws, row_index: int, filename: str, sheet_name: str) -> str:
+        """Elimina una fila en la posición especificada."""
+        try:
+            ws.delete_rows(row_index)
+            return f"✅ Fila eliminada en posición {row_index} en hoja '{sheet_name}'."
+        except Exception as e:
+            logger.error(f"Error eliminando fila: {e}")
+            return f"❌ Error al eliminar fila: {str(e)}"
+
+    def _xlsx_delete_column(self, ws, column_index: int, filename: str, sheet_name: str) -> str:
+        """Elimina una columna en la posición especificada."""
+        try:
+            ws.delete_cols(column_index)
+            return f"✅ Columna eliminada en posición {column_index} en hoja '{sheet_name}'."
+        except Exception as e:
+            logger.error(f"Error eliminando columna: {e}")
+            return f"❌ Error al eliminar columna: {str(e)}"
+
+    def _xlsx_merge_cells(self, ws, range_address: str, filename: str, sheet_name: str) -> str:
+        """Fusiona celdas en un rango."""
+        try:
+            ws.merge_cells(range_address)
+            return f"✅ Celdas fusionadas en rango '{range_address}' de hoja '{sheet_name}'."
+        except Exception as e:
+            logger.error(f"Error fusionando celdas: {e}")
+            return f"❌ Error al fusionar celdas: {str(e)}"
+
+    def _xlsx_set_column_width(self, ws, column_index: int, width: float, filename: str, sheet_name: str) -> str:
+        """Establece el ancho de una columna (en caracteres, no cm)."""
+        try:
+            col_letter = get_column_letter(column_index + 1)
+            ws.column_dimensions[col_letter].width = width
+            return f"✅ Ancho de columna {col_letter} establecido en {width} en hoja '{sheet_name}'."
+        except Exception as e:
+            logger.error(f"Error estableciendo ancho de columna: {e}")
+            return f"❌ Error al establecer ancho de columna: {str(e)}"
+
+    def _xlsx_set_row_height(self, ws, row_index: int, height: float, filename: str, sheet_name: str) -> str:
+        """Establece la altura de una fila."""
+        try:
+            ws.row_dimensions[row_index].height = height
+            return f"✅ Altura de fila {row_index} establecida en {height} en hoja '{sheet_name}'."
+        except Exception as e:
+            logger.error(f"Error estableciendo altura de fila: {e}")
+            return f"❌ Error al establecer altura de fila: {str(e)}"
 
     # ------------------------------------------------------------------ #
     #  Utilidades

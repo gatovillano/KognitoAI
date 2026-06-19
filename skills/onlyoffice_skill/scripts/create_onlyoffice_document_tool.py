@@ -10,10 +10,8 @@ import uuid
 from typing import Any, Type, Optional
 from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
-from sqlalchemy.ext.asyncio import AsyncSession
 from core.database import SessionLocal, Document
-from core.config import settings
-from datetime import datetime
+from core.onlyoffice_storage import build_onlyoffice_relative_path, ensure_onlyoffice_account_dir, get_onlyoffice_docs_root
 
 # Librerías de procesamiento de documentos (Office)
 try:
@@ -36,8 +34,9 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_DOCS_ROOT = os.path.join(settings.media_root, "documents")
-DOCUMENTS_ROOT = os.environ.get("ONLYOFFICE_DOCS_ROOT", DEFAULT_DOCS_ROOT)
+# Directorio para los documentos de OnlyOffice
+DOCUMENTS_ROOT = str(get_onlyoffice_docs_root())
+os.makedirs(DOCUMENTS_ROOT, exist_ok=True)
 
 class CreateOnlyOfficeInput(BaseModel):
     name: str = Field(..., description="Nombre del archivo (con o sin extensión).")
@@ -51,9 +50,13 @@ class CreateOnlyOfficeInput(BaseModel):
 class CreateOnlyOfficeDocumentTool(BaseTool):
     name: str = "create_onlyoffice_document"
     description: str = (
-        "Crea un nuevo documento vacío en OnlyOffice. "
-        "Soporta Word, Excel, PowerPoint y Texto plano. "
-        "Úsala cuando el usuario quiera empezar un nuevo documento desde cero."
+        "[MÓDULO ONLYOFFICE DE KAI] Crea un nuevo documento en el módulo de documentos de la plataforma KAI. "
+        "El archivo resultante aparecerá en la sección 'Documentos' de la interfaz de KAI y podrá abrirse "
+        "con el editor online de OnlyOffice. Soporta: Word (.docx), Excel (.xlsx), PowerPoint (.pptx) y Texto (.txt). "
+        "ÚSALA SOLO SI el usuario quiere un documento editable en KAI (Word/Excel/PPT). "
+        "NO uses esta herramienta para: crear archivos en el disco local del usuario o servidor "
+        "(usa developer_tools_skill), generar PDFs descargables (usa create_pdf_tool), "
+        "ni guardar información en la memoria/base de conocimientos de KAI (usa knowledge_and_memory_skill)."
     )
     args_schema: Type[BaseModel] = CreateOnlyOfficeInput
     
@@ -98,9 +101,8 @@ class CreateOnlyOfficeDocumentTool(BaseTool):
 
             # Generar ruta física
             unique_filename = f"{uuid.uuid4()}.{extension}"
-            user_dir = os.path.join(DOCUMENTS_ROOT, self.account_id)
-            os.makedirs(user_dir, exist_ok=True)
-            file_path = os.path.join(user_dir, unique_filename)
+            user_dir = ensure_onlyoffice_account_dir(self.account_id)
+            file_path = user_dir / unique_filename
 
             # Crear archivo físico
             try:
@@ -128,7 +130,7 @@ class CreateOnlyOfficeDocumentTool(BaseTool):
                     folder_id=uuid.UUID(folder_id) if folder_id and folder_id != "null" else None,
                     filename=full_filename,
                     extension=extension,
-                    file_path=os.path.join(self.account_id, unique_filename)
+                    file_path=build_onlyoffice_relative_path(self.account_id, unique_filename)
                 )
                 db.add(new_doc)
                 await db.commit()

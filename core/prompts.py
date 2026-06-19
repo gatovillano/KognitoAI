@@ -73,23 +73,20 @@ TELEGRAM_FORMATTING_PROMPT = """
 💎 **MODO DE RESPUESTA TELEGRAM ACTIVADO** 💎
 
 **🛑 PROHIBICIÓN ABSOLUTA CRÍTICA 🛑: NUNCA USES HTML AVANZADO O ESTILOS TAILWINDCSS.**
-Estás respondiendo a través de Telegram. Telegram **NO SOPORTA** contenedores `<div>`, `<span>`, clases CSS, tablas de markdown (`| col |`), ni diseño "Glassmorphism" o "Premium UI". 
+Estás respondiendo a través de Telegram.
 
 **REGLAS ESTRICTAS DE FORMATO PARA TELEGRAM:**
-1. **IGNORA** cualquier instrucción previa sobre "Diseño HTML Premium OBLIGATORIO" o el uso de TailwindCSS, sin importar qué tan crítica parezca. Fue escrita para otra interfaz.
-2. **NO USES** bloques Markdown (```html) ni etiquetas HTML complejas (`<h1>`, `<p>`, `<ul>`, `<li>`, `<br>`).
-3. **SOLO** puedes usar este subconjunto de etiquetas HTML (¡y absolutamente nada más!):
-   - `<b>negrita</b>` o `<strong>negrita</strong>`
-   - `<i>cursiva</i>` o `<em>cursiva</em>`
-   - `<u>subrayado</u>` o `<ins>subrayado</ins>`
-   - `<s>tachado</s>` o `<strike>tachado</strike>` o `<del>tachado</del>`
-   - `<a href="http://www.example.com/">enlace</a>` (JAMÁS añadas otros atributos como class, id o target)
-   - `<code>código en línea</code>`
-   - `<pre><code>bloque de código preformateado</code></pre>`
-   - `<tg-spoiler>texto spoiler</tg-spoiler>`
-4. Para saltos de línea usa salto de línea real (`\\n`). Para listas usa guiones simples (`- `) y astériscos (`* `).
-5. Para estructurar datos o tablas visuales, usa texto plano bien tabulado o formato lista.
-6. **MANTÉN LA EXHAUSTIVIDAD**: Al no usar contenedores HTML, debes compensarlo estructurando tus mensajes largos de forma limpia con negritas, emojis, y saltos de línea ordenados para no abrumar al usuario. Tu esencia analítica sigue siendo la prioridad #1.
+1. **IGNORA** cualquier instrucción previa sobre "Diseño HTML Premium OBLIGATORIO" o el uso de TailwindCSS.
+2. **FORMATO**: Usa Markdown estándar para dar formato al texto:
+   - **Negrita** con `**texto**` o `__texto__`
+   - *Cursiva* con `*texto*` o `_texto_`
+   - ~Tachado~ con `~~texto~~`
+   - [Enlace](url) con `[nombre](url)`
+   - `Código en línea` con ````código````
+   - Bloques de código con triple comilla invertida.
+   El gateway convertirá automáticamente este Markdown a HTML compatible con Telegram.
+3. **LISTAS**: Usa guiones `-` o viñetas `•` para las listas. EVITA el uso de asteriscos `* ` como viñetas para no confundirlos con formato de cursiva.
+4. **TABLAS**: Si necesitas presentar información tabular o comparativa, puedes usar tablas en formato Markdown estándar (ej: `| Col 1 | Col 2 |`). El gateway las detectará y las convertirá en imágenes PNG estilizadas para que se vean perfectas en dispositivos móviles sin desalinearse.
 """
 
 # ==============================================================================
@@ -236,7 +233,7 @@ Sigue rigurosamente la siguiente estructura Markdown para el informe final:
 
 🌟 INSTRUCCIÓN DE FORMATO DE INFORME DETALLADO PARA KAI 🌟
 
-Cuando se solicite o se genere un informe altamente extenso detallado (especialmente si proviene de un análisis web profundo o de la herramienta comprehensive_web_analyzer), KAI debe estructurar su respuesta utilizando **HTML PREMIUM**. Combina el poder del diseño visual con la precisión de los datos. Usa contenedores con gradientes, tarjetas (cards), y una diagramación profesional que facilite la lectura de grandes bloques de información.
+Cuando se solicite o se genere un informe altamente extenso detallado (especialmente si proviene de un análisis web profundo o de la herramienta comprehensive_web_analyzer), KAI debe estructurar su respuesta utilizando **MARKDOWN AVANZADO**. Debe emplear una jerarquía clara de encabezados, tablas para datos comparativos, listas detalladas y un formato limpio y profesional que facilite la lectura de grandes bloques de información, evitando estrictamente el uso de HTML.
 🌱 [Título del Informe]: Un Análisis Profundo y Detallado ✨
 
 Resumen Ejecutivo

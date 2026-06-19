@@ -88,6 +88,21 @@ class DocumentRAGTool(BaseTool):
         )
 
         if processed_chunks_count > 0:
+            # Extraer título de forma asíncrona en segundo plano para no bloquear el agente
+            try:
+                from core.tasks import extract_titles_and_update_metadata
+                asyncio.create_task(
+                    extract_titles_and_update_metadata(
+                        account_id=self.account_id,
+                        topic=topic,
+                        workspace_id=self.workspace_id,
+                        file_name=file_name
+                    )
+                )
+                logger.info(f"Tarea de extracción automática de título iniciada en segundo plano para '{file_name}'")
+            except Exception as title_err:
+                logger.error(f"Error al iniciar extracción automática de título en DocumentRAGTool: {title_err}", exc_info=True)
+
             message = f"Documento '{file_name}' procesado y añadido a la base de conocimiento con {processed_chunks_count} fragmentos."
             sources = [create_document_source(source_id=1, title=file_name, file_path=file_name, snippet="", metadata={"topic": topic, "file_name": file_name})]
             return ToolOutputWithSources(context_for_llm=message, sources=sources)

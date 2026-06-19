@@ -33,7 +33,8 @@ from utils.image_generation import generar_imagen_vertex_ai_binario
 # La clave donde se almacenará la imagen generada
 from utils.image_generation import GENERATED_IMAGE_KEY 
 # El gestor de estado de la sesión de Telegram
-from telegram_client.bot_manager import bot_manager
+from utils.telegram_api import store_telegram_user_data, send_telegram_message
+from core.config import settings
 
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)
@@ -92,47 +93,33 @@ class ImageGenerationTool(BaseTool):
 
             if isinstance(image_result, BytesIO):
                 # Si la generación fue exitosa, el resultado es un objeto BytesIO.
-                # Enviamos la imagen al endpoint del contenedor telegram_client para almacenarla en user_data.
                 import base64
-                import httpx
-                from core.config import settings
-                
                 image_data = base64.b64encode(image_result.getvalue()).decode('utf-8')
-                payload = {
-                    "user_id": self.telegram_id,
-                    "key": GENERATED_IMAGE_KEY,
-                    "data": image_data
-                }
                 
                 try:
-                    async with httpx.AsyncClient() as client:
-                        response = await client.post(
-                            "http://telegram_client:9090/internal/store-user-data",
-                            json=payload,
-                            timeout=10
-                        )
-                        response.raise_for_status()
-                        logger.info(f"✅ Imagen enviada al endpoint de telegram_client para el usuario {self.telegram_id}.")
+                    success = await store_telegram_user_data(
+                        telegram_id=int(self.telegram_id),
+                        key=GENERATED_IMAGE_KEY,
+                        data=image_data
+                    )
+                    if not success:
+                        raise ValueError("Failed to store image on Telegram gateway.")
                         
-                        # Enviar un mensaje de seguimiento al chat de Telegram para activar el envío de la imagen.
-                        follow_up_payload = {
-                            "chat_id": self.telegram_id,
-                            "text": "¡Hecho! He generado la imagen y te la enviaré en un momento."
-                        }
-                        follow_up_response = await client.post(
-                            "http://telegram_client:9090/internal/send-message",
-                            json=follow_up_payload,
-                            timeout=5
-                        )
-                        follow_up_response.raise_for_status()
-                        logger.info(f"✅ Mensaje de seguimiento enviado al chat de Telegram para el usuario {self.telegram_id}.")
-                        return "¡Hecho! He generado la imagen y te la enviaré en un momento."
+                    logger.info(f"✅ Imagen enviada al gateway de Telegram para el usuario {self.telegram_id}.")
+                    
+                    # Enviar un mensaje de seguimiento al chat de Telegram para activar el envío de la imagen.
+                    await send_telegram_message(
+                        telegram_id=int(self.telegram_id),
+                        text="¡Hecho! He generado la imagen y te la enviaré en un momento."
+                    )
+                    logger.info(f"✅ Mensaje de seguimiento enviado al chat de Telegram para el usuario {self.telegram_id}.")
+                    return "¡Hecho! He generado la imagen y te la enviaré en un momento."
                 except Exception as e:
-                    logger.error(f"Error al enviar imagen al endpoint de telegram_client: {e}", exc_info=True)
+                    logger.error(f"Error al enviar imagen al gateway de Telegram: {e}", exc_info=True)
                     # Si falla, guardamos en archivo temporal como respaldo.
                     import os
                     import datetime
-                    temp_dir = "/media/gato/Almacenamiento/Nueva Fototeca/kognitoalbums/tmp"
+                    temp_dir = settings.temp_root
                     os.makedirs(temp_dir, exist_ok=True)
                     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                     temp_filename = f"{temp_dir}/imagen_{self.account_id}_{timestamp}.png"

@@ -5,16 +5,54 @@ from typing import List, Dict, Any, Optional
 import uuid
 
 # Importaciones necesarias para las tareas
-from core.database import SessionLocal, UploadTask, DBSession, AnalysisTask, Document
-from sqlalchemy import update
+# Importaciones necesarias para las tareas
+from core.database import SessionLocal, UploadTask, DBSession, AnalysisTask, Document, DocumentFolder
+from sqlalchemy import update, select, text
 from utils.document_parser import extract_text_and_metadata_from_document
 from core.memory_manager import process_document_for_rag, process_multiple_documents_for_rag, list_user_documents, update_document_metadata
 from core.websocket_manager import send_personal_message # Importar send_personal_message
 from skills.knowledge_and_memory_skill.scripts.knowledge_graph_tool import KnowledgeGraphTool
 from core.config import settings
+from core.onlyoffice_storage import build_onlyoffice_relative_path, ensure_onlyoffice_account_dir
 from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
+
+
+async def get_or_create_onlyoffice_folder(
+    db_session,
+    account_id: str,
+    topic: str,
+    workspace_id: Optional[str] = None
+) -> uuid.UUID:
+    acc_id = uuid.UUID(account_id)
+    ws_id = uuid.UUID(workspace_id) if workspace_id else None
+    
+    stmt = select(DocumentFolder).where(
+        DocumentFolder.account_id == acc_id,
+        DocumentFolder.name == topic,
+        DocumentFolder.parent_id == None
+    )
+    if ws_id:
+        stmt = stmt.where(DocumentFolder.workspace_id == ws_id)
+    else:
+        stmt = stmt.where(DocumentFolder.workspace_id == None)
+        
+    result = await db_session.execute(stmt)
+    folder = result.scalars().first()
+    
+    if not folder:
+        folder = DocumentFolder(
+            account_id=acc_id,
+            workspace_id=ws_id,
+            name=topic,
+            parent_id=None
+        )
+        db_session.add(folder)
+        await db_session.flush()
+        
+    return folder.id
+
 
 async def process_upload_task(task_id: str, account_id: str, file_data_list: List[Dict], topic: str, workspace_id: Optional[str] = None):
     """
@@ -47,9 +85,23 @@ async def process_upload_task(task_id: str, account_id: str, file_data_list: Lis
             
             extracted_results = await asyncio.gather(*extraction_tasks, return_exceptions=True)
 
-            # Directorio base para documentos físicos
-            DOCUMENTS_ROOT = os.path.join(settings.media_root, "documents")
+            # Directorio base para documentos físicos.
+            # Debe ser idéntico al que usa api/onlyoffice.py (settings.onlyoffice_docs_root)
+            # para que el servidor de OnlyOffice pueda leer los archivos subidos desde RAG.
+            DOCUMENTS_ROOT = settings.onlyoffice_docs_root
             os.makedirs(DOCUMENTS_ROOT, exist_ok=True)
+
+            # Obtener o crear la carpeta OnlyOffice para la colección
+            folder_id = None
+            try:
+                folder_id = await get_or_create_onlyoffice_folder(
+                    db_session,
+                    account_id,
+                    topic,
+                    workspace_id
+                )
+            except Exception as folder_err:
+                logger.error(f"Error al obtener/crear carpeta OnlyOffice para la colección '{topic}': {folder_err}")
 
             for i, result in enumerate(extracted_results):
                 file_name_str = file_data_list[i].get('filename', 'unknown_file')
@@ -70,14 +122,18 @@ async def process_upload_task(task_id: str, account_id: str, file_data_list: Lis
                 
                 extracted_text, metadata = result
                 
-                # --- GUARDADO FÍSICO DEL ARCHIVO (Nuevo) ---
-                # Esto permite que herramientas como 'read_onlyoffice_document' encuentren el archivo físico
+                # --- GUARDADO FÍSICO DEL ARCHIVO (OnlyOffice) ---
+                # Usamos settings.onlyoffice_docs_root para que el archivo quede en la
+                # misma raíz que usa api/onlyoffice.py al servir/descargar documentos.
                 extension = file_name_str.split('.')[-1].lower() if '.' in file_name_str else ""
                 unique_filename = f"{uuid.uuid4()}.{extension}"
-                user_dir = os.path.join(DOCUMENTS_ROOT, account_id)
-                os.makedirs(user_dir, exist_ok=True)
+                user_dir = ensure_onlyoffice_account_dir(account_id)
                 
-                physical_file_path = os.path.join(user_dir, unique_filename)
+                clean_topic = topic.replace("/", "_").replace("\\", "_")
+                collection_dir = user_dir / clean_topic
+                collection_dir.mkdir(parents=True, exist_ok=True)
+                
+                physical_file_path = collection_dir / unique_filename
                 try:
                     with open(physical_file_path, "wb") as f:
                         f.write(file_content)
@@ -85,29 +141,31 @@ async def process_upload_task(task_id: str, account_id: str, file_data_list: Lis
                 except Exception as save_err:
                     logger.error(f"Error al guardar archivo físico {file_name_str}: {save_err}")
                 
-                # Registrar en la tabla Document para que sea visible en OnlyOffice y herramientas
+                # Registrar en la tabla Document para que sea visible en OnlyOffice
                 new_doc = Document(
                     account_id=uuid.UUID(account_id),
                     workspace_id=uuid.UUID(workspace_id) if workspace_id else None,
                     filename=file_name_str,
                     extension=extension,
-                    file_path=os.path.join(account_id, unique_filename), # Ruta relativa al DOCUMENTS_ROOT
+                    file_path=build_onlyoffice_relative_path(account_id, f"{clean_topic}/{unique_filename}"),  # Ruta relativa a DOCUMENTS_ROOT
+                    folder_id=folder_id
                 )
-                db_session.add(new_doc) # <--- AGREGADO: Necesario para que el flush() funcione
-                await db_session.flush() # Para obtener el ID del documento
+                db_session.add(new_doc)
+                await db_session.flush()  # Para obtener el ID antes del commit final
                 
                 document_id = str(new_doc.id)
+                logger.info(f"Documento '{file_name_str}' registrado en OnlyOffice con ID {document_id}")
                 # ------------------------------------------
 
                 if not extracted_text:
-                    logger.warning(f"No se pudo extraer texto del archivo '{file_name_str}'. Omitiendo RAG.")
+                    logger.warning(f"No se pudo extraer texto del archivo '{file_name_str}'. Solo guardado en OnlyOffice.")
                     await send_personal_message(
                         account_id,
                         {
                             "type": "upload_progress",
                             "task_id": task_id,
                             "progress": 5 + int(((i + 1) / total_files) * 90),
-                            "message": f"Archivo {file_name_str} guardado pero sin texto extraíble para RAG."
+                            "message": f"Archivo {file_name_str} guardado en OnlyOffice (sin texto para RAG)."
                         }
                     )
                     continue
@@ -120,17 +178,45 @@ async def process_upload_task(task_id: str, account_id: str, file_data_list: Lis
                     "metadata": {
                         "original_filename": file_name_str, 
                         "task_id": task_id,
-                        "document_id": document_id # Vincular con el documento físico
+                        "document_id": document_id
                     },
                     "workspace_id": workspace_id
                 })
             
-            if not documents_to_process:
-                raise Exception("No se pudieron extraer textos de ningún archivo para procesar.")
+            # Commit de todos los documentos físicos registrados en OnlyOffice
+            await db_session.commit()
 
-            # Procesar todos los documentos extraídos simultáneamente
-            processed_chunks_counts = await process_multiple_documents_for_rag(documents_to_process)
-            processed_files_count = sum(1 for count in processed_chunks_counts if count > 0)
+            if not documents_to_process:
+                # Los archivos se guardaron físicamente pero no tienen texto para RAG (ej. binarios)
+                logger.warning("No se encontró texto extraíble en ningún archivo. Los archivos quedan disponibles en OnlyOffice.")
+                processed_files_count = 0
+            else:
+                # Procesar todos los documentos extraídos simultáneamente para RAG
+                processed_chunks_counts = await process_multiple_documents_for_rag(documents_to_process)
+                processed_files_count = sum(1 for count in processed_chunks_counts if count > 0)
+
+                # Extraer títulos automáticamente para los archivos procesados
+                try:
+                    title_tasks = []
+                    for idx, doc_data in enumerate(documents_to_process):
+                        if idx < len(processed_chunks_counts) and processed_chunks_counts[idx] > 0:
+                            file_name_str = doc_data.get("file_name")
+                            if file_name_str:
+                                logger.info(f"Programando extracción automática de título para '{file_name_str}'...")
+                                title_tasks.append(
+                                    extract_titles_and_update_metadata(
+                                        account_id=account_id,
+                                        topic=topic,
+                                        workspace_id=workspace_id,
+                                        file_name=file_name_str
+                                    )
+                                )
+                    if title_tasks:
+                        logger.info(f"Ejecutando extracción automática de títulos para {len(title_tasks)} archivos en paralelo...")
+                        await asyncio.gather(*title_tasks, return_exceptions=True)
+                        logger.info("Finalizada extracción automática de títulos.")
+                except Exception as title_err:
+                    logger.error(f"Error al extraer títulos automáticamente en process_upload_task: {title_err}", exc_info=True)
 
             result_message = f"{processed_files_count}/{total_files} archivo(s) procesado(s) y añadido(s) a la colección '{topic}'."
             result_payload = {

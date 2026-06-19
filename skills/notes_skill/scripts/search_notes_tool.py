@@ -64,6 +64,7 @@ class SearchNotesTool(BaseTool):
                         (embedding <-> CAST(:query_embedding AS vector)) AS similarity_score
                     FROM notas
                     WHERE account_id = :account_id
+                    AND is_agent_message = false
                 """)
                 
                 params = {
@@ -89,6 +90,7 @@ class SearchNotesTool(BaseTool):
                             (embedding <-> CAST(:query_embedding AS vector)) AS similarity_score
                         FROM notas
                         WHERE account_id = :account_id
+                        AND is_agent_message = false
                         AND {" AND ".join(filter_clauses)}
                     """)
 
