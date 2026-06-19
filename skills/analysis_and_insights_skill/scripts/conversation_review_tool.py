@@ -193,6 +193,7 @@ class ConversationReviewTool(BaseTool):
                 .where(
                     ChatThread.account_id == account_uuid,
                     ChatThread.created_at >= cutoff,
+                    ChatThread.platform != "heartbeat",
                 )
                 .order_by(ChatThread.created_at.desc())
                 .limit(max_threads)

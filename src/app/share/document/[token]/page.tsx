@@ -30,7 +30,7 @@ export default function SharedOnlyOfficeDocumentPage() {
       if (!token) return;
 
       try {
-        const apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+        const apiBase = process.env.NEXT_PUBLIC_API_URL || 'https://apibase.cuerpolibre.cl';
         const response = await fetch(`${apiBase}/api/onlyoffice/share/${token}/config`);
 
         if (!response.ok) {

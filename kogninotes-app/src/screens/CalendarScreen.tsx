@@ -21,7 +21,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { agendaService, AgendaEvent, Task } from '../api/agendaService';
 import { colors, lightColors, spacing, borderRadius } from '../theme/colors';
-import { ChevronLeft, Calendar as CalendarIcon, MapPin, Clock, Info, User, Layout, Filter, Sun, Moon, Plus, CheckCircle2, Circle, X, Menu, FileText, MessageSquare, LogOut } from 'lucide-react-native';
+import { ChevronLeft, Calendar as CalendarIcon, MapPin, Clock, Info, User, Layout, Filter, Sun, Moon, Plus, CheckCircle2, Circle, X, Menu, FileText, MessageSquare, LogOut, Inbox } from 'lucide-react-native';
 import { format, isToday, isTomorrow, parseISO, startOfDay, addDays, isValid } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -502,6 +502,12 @@ export const CalendarScreen = ({ navigation }: any) => {
                       <View style={styles.dropdownIconText}>
                         <FileText size={16} color={theme.primary} style={{ marginRight: 10 }} />
                         <Text style={[styles.dropdownText, { color: theme.text }]}>Notas</Text>
+                      </View>
+                   </TouchableOpacity>
+                   <TouchableOpacity onPress={() => { setShowAppMenu(false); navigation.navigate('Inbox'); }} style={[styles.dropdownItem, { borderBottomWidth: 0 }]}>
+                      <View style={styles.dropdownIconText}>
+                        <Inbox size={16} color={theme.primary} style={{ marginRight: 10 }} />
+                        <Text style={[styles.dropdownText, { color: theme.text }]}>Bandeja</Text>
                       </View>
                    </TouchableOpacity>
                 </View>

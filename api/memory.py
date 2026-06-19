@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import uuid
 import datetime # Importar datetime
 
-from core.memory_manager import get_relevant_memories, add_memory_to_vector_db, get_all_user_memories
+from core.memory_manager import get_relevant_memories, add_memory_to_vector_db, get_all_user_memories, delete_memory_from_vector_db
 from utils.security import get_current_account_id
 from core.dependencies import get_db_session
 
@@ -110,3 +110,20 @@ async def add_user_vector_memory(
     except Exception as e:
         logger.error(f"Error al añadir memoria para el usuario {current_account_id}: {e}", exc_info=True) # Log de error
         raise HTTPException(status_code=500, detail=f"Error al añadir memoria: {str(e)}")
+
+@router.delete("/memories/{memory_id}", summary="Eliminar una memoria vectorial")
+async def delete_user_vector_memory(
+    memory_id: str,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Elimina una memoria específica por su ID.
+    """
+    logger.info(f"Solicitud DELETE /api/memories/{memory_id} recibida para el usuario: {current_account_id}")
+    success = await delete_memory_from_vector_db(account_id=current_account_id, memory_id=memory_id)
+    if not success:
+        logger.warning(f"No se pudo encontrar o eliminar la memoria con ID {memory_id} para el usuario {current_account_id}")
+        raise HTTPException(status_code=404, detail="No se pudo encontrar la memoria o no tienes permisos para eliminarla.")
+    logger.info(f"Memoria con ID {memory_id} eliminada exitosamente para el usuario: {current_account_id}")
+    return {"message": "Memoria eliminada exitosamente."}

@@ -1,0 +1,36 @@
+# KAI-Ethno Dependencies
+# Instalar con: pip install -r requirements.txt
+
+# HTTP asíncrono para APIs
+aiohttp>=3.9.0
+
+# Orquestación de agentes
+langgraph>=0.2.0
+
+# Validación de datos
+pydantic>=2.0.0
+
+# Visualizaciones
+matplotlib>=3.7.0
+wordcloud>=1.9.0
+
+# Grafos y redes
+networkx>=3.0
+
+# Machine Learning
+scikit-learn>=1.3.0
+
+# Procesamiento de lenguaje natural
+nltk>=3.8.0
+
+# Utilidades
+python-dotenv>=1.0.0
+requests>=2.31.0
+tqdm>=4.66.0
+
+# Testing (opcional)
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+
+# Formato (opcional)
+bibtexparser>=1.4.0

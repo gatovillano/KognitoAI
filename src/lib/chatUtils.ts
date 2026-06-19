@@ -17,11 +17,10 @@ const getNormalizedSourceId = (rawSource: any, fallbackIndex: number): string | 
 };
 
 export const getSourceIdentityKey = (source: Source): string => {
-  // Use url+title for dedup: snippet varies per chunk but same document should collapse
+  // Use url+title for dedup, but always include snippet prefix to distinguish different chunks/excerpts
   const urlKey = source.url || '';
   const titleKey = (source.title || source.name || '').toLowerCase().trim();
-  // For types without URL (memory, graph, note), include snippet prefix to distinguish chunks
-  const snippetKey = !urlKey ? (source.snippet || '').slice(0, 80) : '';
+  const snippetKey = (source.snippet || '').slice(0, 80).replace(/\s+/g, ' ');
   return [source.type || 'document', urlKey, titleKey, snippetKey].join('::');
 };
 
@@ -149,9 +148,10 @@ export const processMessageWithCitations = (text: string | any[], allSources: So
     // Resolver todas las fuentes del grupo
     const resolvedGroup: Array<{ source: Source; citationNumber: number; sourceIndex: number }> = [];
     for (const citationNumber of nums) {
-      const sourceIndex = citationNumber - 1 < allSources.length
-        ? citationNumber - 1
-        : numericIdToIndex.get(citationNumber);
+      // Priorizar búsqueda por ID numérico exacto para evitar colisiones/desplazamientos de índice, y usar fallback de posición
+      const sourceIndex = numericIdToIndex.has(citationNumber)
+        ? numericIdToIndex.get(citationNumber)
+        : (citationNumber - 1 < allSources.length ? citationNumber - 1 : undefined);
       const source = sourceIndex !== undefined ? allSources[sourceIndex] : undefined;
       if (source && sourceIndex !== undefined) {
         resolvedGroup.push({ source, citationNumber, sourceIndex });

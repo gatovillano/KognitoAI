@@ -65,6 +65,7 @@ interface Collection {
   document_count?: number;
   workspace_name?: string; // Añadido para consistencia
   workspace_color?: string; // Nuevo campo
+  subcollection_count?: number;
 }
 
 interface OnlyOfficeDocument {

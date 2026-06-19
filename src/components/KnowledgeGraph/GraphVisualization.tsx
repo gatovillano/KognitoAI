@@ -9,13 +9,23 @@ import { GraphMetadata } from '@/types/graph';
 
 export interface GraphVisualizationRef {
   fitView: () => void;
+  focusNode: (nodeId: string | number) => void;
 }
+
+const normalizeGraphId = (value: string | number | null | undefined) => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  return String(value);
+};
 
 // Interfaces locales para mayor claridad y control
 interface VisGraphNode {
   id: string | number;
   label: string;
   title?: string;
+  hidden?: boolean;
   color?: string | {
     background?: string;
     border?: string;
@@ -31,6 +41,7 @@ interface VisGraphEdge {
   id?: string | number;
   from: string | number;
   to: string | number;
+  hidden?: boolean;
   arrows?: string;
   label?: string;
   title?: string;
@@ -51,6 +62,7 @@ interface GraphVisualizationProps {
   onNodeDoubleClick?: (nodeId: string | number) => void; // Nuevo prop para doble clic
   onEdgeClick?: (edge: VisGraphEdge) => void; // Handler para clic en aristas
   savedNodeIds?: Set<string | number>; // IDs de nodos guardados
+  focusedNodeId?: string | number | null;
 }
 
 export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisualizationProps>(({
@@ -62,6 +74,7 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
   onNodeDoubleClick, // Desestructurar el nuevo prop
   onEdgeClick, // Desestructurar el prop para aristas
   savedNodeIds = new Set(),
+  focusedNodeId = null,
 }, ref) => {
   const nodes = React.useMemo(() => graphData?.nodes || [], [graphData?.nodes]);
   const edges = React.useMemo(() => graphData?.edges || [], [graphData?.edges]);
@@ -69,6 +82,31 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
   const networkRef = useRef<Network | null>(null);
   const nodesDatasetRef = useRef<DataSet<VisGraphNode> | null>(null);
   const edgesDatasetRef = useRef<DataSet<VisGraphEdge> | null>(null);
+  const focusedNodeIdRef = useRef<string | number | null>(focusedNodeId);
+
+  useEffect(() => {
+    focusedNodeIdRef.current = focusedNodeId;
+  }, [focusedNodeId]);
+
+  const resolveDatasetNodeId = useCallback((nodeId: string | number) => {
+    if (!nodesDatasetRef.current) {
+      return null;
+    }
+
+    const candidateIds = [nodeId];
+    const normalizedNodeId = normalizeGraphId(nodeId);
+
+    if (normalizedNodeId !== null && normalizedNodeId !== nodeId) {
+      candidateIds.push(normalizedNodeId);
+    }
+
+    const numericNodeId = Number(nodeId);
+    if (!Number.isNaN(numericNodeId) && numericNodeId !== nodeId) {
+      candidateIds.push(numericNodeId);
+    }
+
+    return candidateIds.find(candidateId => nodesDatasetRef.current?.get(candidateId)) ?? null;
+  }, []);
 
   // Función para truncar texto largo
   const truncateText = (text: string, maxLength: number = 30) => {
@@ -296,7 +334,9 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
       // Detener física después del cálculo estático bloqueante
       networkRef.current.on("stabilizationIterationsDone", () => {
         networkRef.current?.setOptions({ physics: { enabled: false } });
-        networkRef.current?.fit();
+        if (focusedNodeIdRef.current === null) {
+          networkRef.current?.fit();
+        }
       });
     }
 
@@ -349,13 +389,91 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
 
   }, [nodes, edges, isLoading, error, onNodeClick, onNodeDoubleClick, onEdgeClick, convertNodesToVis]);
 
+  useEffect(() => {
+    if (!nodesDatasetRef.current || !edgesDatasetRef.current) {
+      return;
+    }
+
+    const allNodes = nodesDatasetRef.current.get();
+    const allEdges = edgesDatasetRef.current.get();
+
+    if (focusedNodeId === null) {
+      nodesDatasetRef.current.update(allNodes.map(node => ({ id: node.id, hidden: false })));
+      edgesDatasetRef.current.update(allEdges.map(edge => ({ id: edge.id, hidden: false })));
+      return;
+    }
+
+    const normalizedFocusedNodeId = normalizeGraphId(focusedNodeId);
+    const visibleNodeIds = new Set<string>();
+    const visibleEdgeIds = new Set<string>();
+
+    if (normalizedFocusedNodeId !== null) {
+      visibleNodeIds.add(normalizedFocusedNodeId);
+    }
+
+    allEdges.forEach(edge => {
+      const normalizedSource = normalizeGraphId(edge.from);
+      const normalizedTarget = normalizeGraphId(edge.to);
+
+      if (normalizedSource === normalizedFocusedNodeId || normalizedTarget === normalizedFocusedNodeId) {
+        if (normalizedSource !== null) visibleNodeIds.add(normalizedSource);
+        if (normalizedTarget !== null) visibleNodeIds.add(normalizedTarget);
+        if (edge.id !== undefined && edge.id !== null) {
+          visibleEdgeIds.add(String(edge.id));
+        }
+      }
+    });
+
+    nodesDatasetRef.current.update(allNodes.map(node => ({
+      id: node.id,
+      hidden: !visibleNodeIds.has(String(node.id))
+    })));
+
+    edgesDatasetRef.current.update(allEdges.map(edge => ({
+      id: edge.id,
+      hidden: edge.id === undefined || edge.id === null ? true : !visibleEdgeIds.has(String(edge.id))
+    })));
+  }, [focusedNodeId, nodes, edges]);
+
   useImperativeHandle(ref, () => ({
     fitView: () => {
       if (networkRef.current) {
         networkRef.current.fit();
       }
+    },
+    focusNode: (nodeId: string | number) => {
+      const resolvedNodeId = resolveDatasetNodeId(nodeId);
+      if (networkRef.current && resolvedNodeId !== null) {
+        networkRef.current.focus(resolvedNodeId, {
+          scale: 1.1,
+          animation: {
+            duration: 400,
+            easingFunction: 'easeInOutQuad'
+          }
+        });
+      }
     }
   }));
+
+  useEffect(() => {
+    if (focusedNodeId === null || !networkRef.current || !nodesDatasetRef.current) {
+      return;
+    }
+
+    const resolvedNodeId = resolveDatasetNodeId(focusedNodeId);
+    if (resolvedNodeId === null) {
+      return;
+    }
+
+    networkRef.current.selectNodes([resolvedNodeId]);
+    networkRef.current.focus(resolvedNodeId, {
+      scale: 1.1,
+      animation: {
+        duration: 400,
+        easingFunction: 'easeInOutQuad'
+      }
+    });
+  }, [focusedNodeId, nodes, edges, resolveDatasetNodeId]);
 
   // Cleanup effect
   useEffect(() => {

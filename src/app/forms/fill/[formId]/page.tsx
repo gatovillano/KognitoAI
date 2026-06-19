@@ -235,7 +235,7 @@ export default function PublicFormPage() {
             </form>
 
             <footer className="text-center py-12 mt-8">
-                <a href="https://kognito.cuerpolibre.cl" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
+                <a href="https://kognitoai.cloud" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
                     Powered by 
                     <Image src="/logo-simple.png" alt="Kognito Logo" width={20} height={20} />
                     <span className="font-semibold">Kognito AI</span>

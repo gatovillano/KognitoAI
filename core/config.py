@@ -80,6 +80,7 @@ class Config:
         self.ollama_embedding_model: str = os.getenv("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text:q4_K_M") # Modelo de embedding de Ollama cuantizado
         self.ollama_api_url: str = os.getenv("OLLAMA_API_URL", "http://host.docker.internal:11434") # URL por defecto para acceder al host desde Docker
         self.ollama_direct_api_url: Optional[str] = os.getenv("OLLAMA_DIRECT_API_URL") # URL directa sin proxy (recomendado para evitar 524 de Cloudflare)
+        self.embedding_device: Optional[str] = os.getenv("EMBEDDING_DEVICE") # Dispositivo para SentenceTransformer local (ej. cpu, cuda)
         self.llm_request_timeout: int = int(os.getenv("LLM_REQUEST_TIMEOUT", 300)) # Nuevo: Tiempo de espera para las solicitudes al LLM en segundos
         self.llm_max_retries: int = int(os.getenv("LLM_MAX_RETRIES", 3)) # Nuevo: Número máximo de reintentos para llamadas al LLM
         self.max_agent_loops: int = int(os.getenv("MAX_AGENT_LOOPS", 20)) # Nuevo: Límite de iteraciones para el agente de herramientas
@@ -98,15 +99,53 @@ class Config:
         self.global_force_reasoning: bool = os.getenv("GLOBAL_FORCE_REASONING", "False").lower() in ('true', '1', 't')
 
 
-                # --- Configuración de Directorios ---
+        # --- Configuración de Directorios ---
         # Directorio base para almacenamiento de medios (documentos, imágenes, etc.)
         self.media_root: str = os.getenv("MEDIA_ROOT", "media/documents")
         # Directorio para almacenamiento de miniaturas (thumbnails)
         self.thumbnails_root: str = os.getenv("THUMBNAILS_ROOT", "media/thumbnails")
+        # Directorio para documentos de OnlyOffice
+        self.onlyoffice_docs_root: str = os.getenv("ONLYOFFICE_DOCS_ROOT", "storage/onlyoffice/documents")
+        # Directorio para archivos temporales
+        self.temp_root: str = os.getenv("TEMP_ROOT", ".kognito_tmp")
 
-        # Asegurar que los directorios existan
-        os.makedirs(self.media_root, exist_ok=True)
-        os.makedirs(self.thumbnails_root, exist_ok=True)
+        # Asegurar que los directorios existan y sean escribibles
+        def ensure_writable_dir(path: str, default_fallback: str) -> str:
+            import uuid
+            try:
+                os.makedirs(path, exist_ok=True)
+                # Test write permission by writing a temporary hidden file
+                test_file = os.path.join(path, f".write_test_{uuid.uuid4().hex}")
+                with open(test_file, "w") as f:
+                    f.write("test")
+                os.remove(test_file)
+                return path
+            except OSError as e:
+                logger.warning(f"⚠️ El directorio '{path}' no es escribible o no se pudo crear: {e}. Usando fallback local '{default_fallback}'.")
+                try:
+                    os.makedirs(default_fallback, exist_ok=True)
+                    # Test write on the fallback too
+                    test_file = os.path.join(default_fallback, f".write_test_{uuid.uuid4().hex}")
+                    with open(test_file, "w") as f:
+                        f.write("test")
+                    os.remove(test_file)
+                    return default_fallback
+                except OSError as fe:
+                    logger.warning(f"⚠️ El fallback local '{default_fallback}' tampoco es escribible: {fe}. Buscando alternativas.")
+                    # En última instancia, intentar usar un directorio temporal diferente localmente
+                    local_tmp = ".kognito_tmp"
+                    try:
+                        os.makedirs(local_tmp, exist_ok=True)
+                        return local_tmp
+                    except OSError as fe2:
+                        logger.warning(f"⚠️ El directorio '{local_tmp}' tampoco se pudo crear. Usando /tmp.")
+                        return "/tmp"
+
+        self.media_root = ensure_writable_dir(self.media_root, "media/documents")
+        self.thumbnails_root = ensure_writable_dir(self.thumbnails_root, "media/thumbnails")
+        self.onlyoffice_docs_root = ensure_writable_dir(self.onlyoffice_docs_root, "storage/onlyoffice/documents")
+        self.temp_root = ensure_writable_dir(os.getenv("TEMP_ROOT", ".kognito_tmp"), ".kognito_tmp")
+
 
         # --- Configuración de Telegram ---
 
@@ -146,6 +185,8 @@ class Config:
         self.ollama_api_key: Optional[str] = get_secret("ollama_api_key", "OLLAMA_API_KEY")
         # ¡NUEVA LÍNEA! Clave de API para Kilocode Gateway.
         self.kilocode_api_key: Optional[str] = get_secret("kilocode_api_key", "KILOCODE_API_KEY")
+        # ¡NUEVA LÍNEA! Clave de API para LLM7.io.
+        self.llm7_api_key: Optional[str] = get_secret("llm7_api_key", "LLM7_API_KEY")
 
         # ¡NUEVA LÍNEA! La URL de nuestro servidor API para que los clientes sepan a dónde llamar.
         self.api_server_url: str = os.getenv("API_SERVER_URL", "https://apibase.cuerpolibre.cl")
@@ -162,7 +203,7 @@ class Config:
         self.admin_secret: str = get_secret("admin_secret", "ADMIN_SECRET", "default-admin-secret")
         
         # Clave maestra para el cifrado de datos en la base de datos (pgcrypto)
-        self.db_encryption_key: str = get_secret("db_encryption_key", "DB_ENCRYPTION_KEY", "super-secret-db-encryption-key")
+        self.db_encryption_key: Optional[str] = get_secret("db_encryption_key", "DB_ENCRYPTION_KEY")
 
         # --- Configuración de la Base de Datos (PostgreSQL) ---
         self.postgres_user: Optional[str] = os.getenv("POSTGRES_USER")
@@ -333,7 +374,7 @@ class Config:
         )
 
         # --- Configuración de JWT ---
-        self.jwt_secret_key: str = get_secret("jwt_secret_key", "JWT_SECRET_KEY", "supersecretkey")
+        self.jwt_secret_key: Optional[str] = get_secret("jwt_secret_key", "JWT_SECRET_KEY")
         self.jwt_expiry_days: int = int(os.getenv("JWT_EXPIRY_DAYS", 7))
         self.debug_mode: bool = os.getenv("DEBUG_MODE", "False").lower() in ('true', '1', 't')
         self.log_level: str = os.getenv("LOG_LEVEL", "INFO").upper() # Nuevo: Nivel de logging configurable
@@ -352,6 +393,27 @@ class Config:
             raise ValueError("ERROR CRÍTICO: TELEGRAM_BOT_TOKEN no está definido en el archivo .env.")
         if not self.database_url:
             raise ValueError("ERROR CRÍTICO: DATABASE_URL no está definido. La persistencia no funcionará.")
+
+        # Validar claves de seguridad críticas
+        if not self.jwt_secret_key or self.jwt_secret_key == "supersecretkey":
+            if not self.debug_mode:
+                raise ValueError(
+                    "ERROR CRÍTICO DE SEGURIDAD: JWT_SECRET_KEY no está configurada o usa el valor por defecto inseguro en producción. "
+                    "Configure un JWT_SECRET_KEY seguro."
+                )
+            else:
+                logger.warning("⚠️ ADVERTENCIA DE SEGURIDAD: JWT_SECRET_KEY no está configurada o usa el valor por defecto inseguro. Se usará 'supersecretkey' para desarrollo.")
+                self.jwt_secret_key = "supersecretkey"
+
+        if not self.db_encryption_key or self.db_encryption_key == "super-secret-db-encryption-key":
+            if not self.debug_mode:
+                raise ValueError(
+                    "ERROR CRÍTICO DE SEGURIDAD: DB_ENCRYPTION_KEY no está configurada o usa el valor por defecto inseguro en producción. "
+                    "Configure un DB_ENCRYPTION_KEY seguro."
+                )
+            else:
+                logger.warning("⚠️ ADVERTENCIA DE SEGURIDAD: DB_ENCRYPTION_KEY no está configurada o usa el valor por defecto inseguro. Se usará 'super-secret-db-encryption-key' para desarrollo.")
+                self.db_encryption_key = "super-secret-db-encryption-key"
 
         # Esenciales para la IA de Google.
         # Esenciales para la IA (LiteLLM maneja las keys internamente, pero advertimos si faltan las comunes)

@@ -397,12 +397,36 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
         progress_percent: 0,
         is_complete: false,
         has_error: false,
+        file_name: doc.file_name,
         topic: topic,
         type: 'document'
       });
       toast.info(`Análisis para "${doc.file_name}" iniciado.`);
     } catch (error) { toast.error("No se pudo iniciar el análisis del documento."); }
-  }, [docPollingId, collectionPollingId, workspaceId]);
+  }, [docPollingId, collectionPollingId, workspaceId, topic, addAnalysisTask]);
+
+  const handleSummarizeDocument = useCallback(async (doc: Document) => {
+    if (docPollingId || collectionPollingId) { toast.info("Ya hay un análisis o resumen en progreso."); return; }
+    setDocumentToAnalyze(doc);
+    setCurrentAnalysisType('document_summary' as any);
+    try {
+      const response = await apiClient.post('/api/start-document-summary', { file_name: doc.file_name, ...(workspaceId && { workspace_id: workspaceId }) });
+      const taskId = response.data.task_id;
+      setDocPollingId(taskId);
+      addAnalysisTask({
+        task_id: taskId,
+        phase: 'initializing',
+        message: `Iniciando resumen de "${doc.file_name}"...`,
+        progress_percent: 0,
+        is_complete: false,
+        has_error: false,
+        file_name: doc.file_name,
+        topic: topic,
+        type: 'document'
+      });
+      toast.info(`Generación de resumen para "${doc.file_name}" iniciada.`);
+    } catch (error) { toast.error("No se pudo iniciar el resumen del documento."); }
+  }, [docPollingId, collectionPollingId, workspaceId, topic, addAnalysisTask]);
 
   const handleAnalyzeCollection = async () => {
     if (docPollingId || collectionPollingId) { toast.info("Ya hay un análisis en progreso."); return; }
@@ -430,7 +454,7 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
     if (!docPollingId) return;
 
     const docName = documentToAnalyze?.file_name || 'el documento';
-    setAnalysisText(`Analizando ${docName}...`);
+    setAnalysisText(currentAnalysisType === 'document_summary' ? `Generando resumen de ${docName}...` : `Analizando ${docName}...`);
     setAnalysisProgress(null);
 
     const poller = setInterval(async () => {
@@ -448,8 +472,10 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
 
           const newAnalysis: Analysis = {
             id: docPollingId,
-            type: 'document',
-            title: `Análisis: ${documentToAnalyze?.file_name || "Documento"}`,
+            type: currentAnalysisType === 'document_summary' ? ('document_summary' as any) : 'document',
+            title: currentAnalysisType === 'document_summary'
+              ? `Resumen de: ${documentToAnalyze?.file_name || "Documento"}`
+              : `Análisis: ${documentToAnalyze?.file_name || "Documento"}`,
             created_at: new Date().toISOString(),
             result: result,
             full_data: result,
@@ -457,17 +483,17 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
           };
 
           setSelectedAnalysis(newAnalysis);
-          toast.success("¡Análisis de documento completado!");
+          toast.success(currentAnalysisType === 'document_summary' ? "¡Resumen de documento completado!" : "¡Análisis de documento completado!");
           fetchPageData();
           setAnalysisProgress(null);
         } else if (status === 'failed') {
-          clearInterval(poller); setDocPollingId(null); toast.error("El análisis del documento falló: " + error);
+          clearInterval(poller); setDocPollingId(null); toast.error((currentAnalysisType === 'document_summary' ? "El resumen" : "El análisis") + " del documento falló: " + error);
           setAnalysisProgress(null);
         }
-      } catch (err) { clearInterval(poller); setDocPollingId(null); toast.error("Error al consultar el análisis."); setAnalysisProgress(null); }
+      } catch (err) { clearInterval(poller); setDocPollingId(null); toast.error("Error al consultar el resultado."); setAnalysisProgress(null); }
     }, 5000);
     return () => clearInterval(poller);
-  }, [docPollingId, fetchPageData, documentToAnalyze]);
+  }, [docPollingId, fetchPageData, documentToAnalyze, currentAnalysisType]);
 
   // --- Polling para Análisis de Colección ---
   useEffect(() => {
@@ -680,8 +706,9 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
     (doc) => {
       setDocumentToMove(doc);
       setIsMoveOpen(true);
-    }
-  ), [handleAnalyzeDocument, handleExtractTitleForDocument]);
+    },
+    handleSummarizeDocument
+  ), [handleAnalyzeDocument, handleExtractTitleForDocument, handleSummarizeDocument]);
 
   const router = useRouter();
 
@@ -822,6 +849,7 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
                     onEdit={(doc) => setDocumentToEdit(doc)}
                     onDelete={(doc) => setDocumentToDelete(doc)}
                     onAnalyze={handleAnalyzeDocument}
+                    onSummarize={handleSummarizeDocument}
                     onShare={(doc) => {
                       setDocumentToShare(doc);
                       setIsShareOpen(true);
@@ -877,7 +905,7 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
                     name: sc.name || sc.topic || 'Sin nombre',
                     document_count: sc.document_count ?? 0,
                     subcollection_count: sc.subcollection_count ?? 0,
-                    description: typeof sc.description === 'string' ? sc.description : (typeof sc.description === 'object' && sc.description !== null && 'description' in sc.description ? String(sc.description.description) : (sc.description ? JSON.stringify(sc.description) : 'Sin descripción')),
+                    description: typeof sc.description === 'string' ? sc.description : (typeof (sc.description as any) === 'object' && sc.description !== null && 'description' in (sc.description as any) ? String((sc.description as any).description) : (sc.description ? JSON.stringify(sc.description) : 'Sin descripción')),
                     workspace_id: sc.workspace_id,
                     workspace_name: sc.workspace_name,
                     workspace_color: sc.workspace_color,
@@ -929,6 +957,11 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
                   icon = <Brain className="h-5 w-5 text-indigo-500" />;
                   badgeColor = 'bg-indigo-100 text-indigo-800 border-indigo-200';
                   typeLabel = 'Resumen Semántico';
+                } else if (analysis.analysis_type === 'document_summary') {
+                  analysisType = 'document_summary' as any;
+                  icon = <Sparkles className="h-5 w-5 text-teal-500" />;
+                  badgeColor = 'bg-teal-100 text-teal-800 border-teal-200';
+                  typeLabel = 'Resumen de Documento';
                 } else if (fileName.startsWith('Colección:')) {
                   analysisType = 'collection';
                   icon = <FolderKanban className="h-5 w-5 text-green-500" />;
@@ -959,6 +992,8 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
                   summary = analysis.result_payload.resumen_semantico;
                 } else if (analysis.result_payload?.graph_summary) {
                   summary = analysis.result_payload.graph_summary;
+                } else if (analysis.result_payload?.executive_summary) {
+                  summary = analysis.result_payload.executive_summary;
                 } else if (analysis.result_payload?.resumen_ejecutivo) {
                   summary = analysis.result_payload.resumen_ejecutivo;
                 } else if (analysis.result_payload?.analysis_result) {
@@ -985,10 +1020,11 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
                         try { payload = JSON.parse(payload); } catch (e) {}
                       }
 
+                      const isDocSummary = (analysis.analysis_type === 'document_summary' || analysisType === 'document_summary');
                       const newAnalysis: Analysis = {
                         id: analysis.id,
                         type: analysis.analysis_type || analysisType,
-                        title: fileName,
+                        title: isDocSummary ? `Resumen de: ${fileName}` : fileName,
                         created_at: analysis.created_at,
                         result: payload,
                         result_payload: payload,

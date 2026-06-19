@@ -64,6 +64,8 @@ class ListNotesRequest(BaseModel):
     category: Optional[str] = None
     skip: int = 0
     limit: int = 10
+    include_agent_messages: bool = False
+    only_agent_messages: bool = False
 
 class NoteResponse(BaseModel):
     id: int
@@ -71,6 +73,7 @@ class NoteResponse(BaseModel):
     content: str
     category: Optional[str]
     is_starred: bool = False
+    is_agent_message: bool = False
     created_at: datetime
     updated_at: datetime
     workspace_id: Optional[str]
@@ -83,6 +86,7 @@ class NoteRequest(BaseModel):
     content: str
     category: Optional[str] = None
     workspace_id: Optional[str] = None
+    is_agent_message: bool = False
 
 class NoteUpdateRequest(BaseModel):
     note_id: int
@@ -94,6 +98,15 @@ class NoteUpdateRequest(BaseModel):
 
 class NoteDeleteRequest(BaseModel):
     note_id: int
+
+class BulkDeleteRequest(BaseModel):
+    note_ids: List[int]
+
+class BulkUpdateRequest(BaseModel):
+    note_ids: List[int]
+    category: Optional[str] = None
+    workspace_id: Optional[str] = None
+    is_starred: Optional[bool] = None
 
 class PaginatedNotesResponse(BaseModel):
     total: int
@@ -468,7 +481,9 @@ async def list_notes_endpoint(
         workspace_id=request.workspace_id, 
         category=request.category,
         skip=request.skip, 
-        limit=request.limit
+        limit=request.limit,
+        include_agent_messages=request.include_agent_messages,
+        only_agent_messages=request.only_agent_messages,
     )
     
     return PaginatedNotesResponse(total=total, notes=[NoteResponse(**note) for note in notes])
@@ -559,7 +574,8 @@ async def add_note_endpoint(
         title=note.title or "",\
         content=note.content,\
         category=note.category or "",\
-        workspace_id=note.workspace_id\
+        workspace_id=note.workspace_id,\
+        is_agent_message=note.is_agent_message,\
     )
     return new_note
 
@@ -615,6 +631,33 @@ async def delete_note_endpoint(
         raise HTTPException(status_code=404, detail="Nota no encontrada o no pertenece al usuario.")
     return {"message": f"Nota con ID {note.note_id} eliminada."}
 
+@router.post("/notes/bulk-delete", summary="Eliminar notas por lote")
+async def bulk_delete_notes_endpoint(
+    request: BulkDeleteRequest,
+    current_account_id: str = Depends(get_current_account_id),
+    notes_manager: NotesManager = Depends(get_notes_manager)
+):
+    """Elimina múltiples notas del usuario."""
+    deleted_count = await notes_manager.bulk_delete_notes(current_account_id, request.note_ids)
+    return {"message": f"Se eliminaron {deleted_count} de {len(request.note_ids)} notas.", "deleted_count": deleted_count}
+
+@router.post("/notes/bulk-update", summary="Actualizar notas por lote")
+async def bulk_update_notes_endpoint(
+    request: BulkUpdateRequest,
+    current_account_id: str = Depends(get_current_account_id),
+    notes_manager: NotesManager = Depends(get_notes_manager)
+):
+    """Actualiza múltiples notas del usuario (categoría, workspace o destacada)."""
+    updated_count = await notes_manager.bulk_update_notes(
+        account_id=current_account_id,
+        note_ids=request.note_ids,
+        new_category=request.category,
+        new_workspace_id=request.workspace_id,
+        is_starred=request.is_starred
+    )
+    return {"message": f"Se actualizaron {updated_count} de {len(request.note_ids)} notas.", "updated_count": updated_count}
+
+
 
 @router.post("/notes/delete-all-embeddings", summary="Delete all note embeddings")
 async def delete_all_note_embeddings_endpoint(
@@ -653,11 +696,11 @@ async def upload_image(
     if file.content_type not in allowed_types:
         raise HTTPException(status_code=400, detail="Tipo de archivo no permitido. Solo imágenes JPEG, PNG, GIF y WebP.")
 
-    # Validar tamaño del archivo (máximo 5MB)
-    max_size = 5 * 1024 * 1024  # 5MB
+    # Validar tamaño del archivo (máximo 500MB)
+    max_size = 500 * 1024 * 1024  # 500MB
     file_content = await file.read()
     if len(file_content) > max_size:
-        raise HTTPException(status_code=400, detail="El archivo es demasiado grande. Máximo 5MB.")
+        raise HTTPException(status_code=400, detail="El archivo es demasiado grande. Máximo 500MB.")
 
     # Crear directorio si no existe
     upload_dir = Path("media/uploads/notes")
@@ -721,5 +764,4 @@ async def convert_note_to_word(
     doc.save(file_path)
 
     return {"message": "Nota convertida a Word correctamente", "file_path": file_path}
-
 

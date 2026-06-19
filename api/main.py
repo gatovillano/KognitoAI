@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 from core.middleware.audit import AuditMiddleware
 import json
 import os
+import uuid
 from utils.patches import apply_patches
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -47,7 +48,7 @@ from api.users import get_current_admin_account # Importar dependencias de users
 from core.dependencies import get_db_session # Importar get_db_session
 from utils.tool_scheduler import tool_scheduler # Importar tool_scheduler
 from utils.scheduled_tools_manager import scheduled_tools_manager # Importar scheduled_tools_manager
-from telegram_client.bot_manager import bot_manager # Importar bot_manager
+from core.reminders_manager import reschedule_simple_reminders # Importar reschedule_simple_reminders
 from typing import Optional
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func # Importar func
@@ -119,8 +120,9 @@ allowed_origins = [
     "http://192.168.1.7:3001",
     "https://kognito.gatoslibres.art",
     "https://apibase.gatoslibres.art",
-    "https://kognito.cuerpolibre.cl",
     "https://apibase.cuerpolibre.cl",
+    "https://kognitoai.digital",
+    "https://kognitoai.cloud",
     "http://localhost:8081",
 ]
 
@@ -144,10 +146,13 @@ app.add_middleware(
 
 from api.galleries import router as galleries_router, MEDIA_ROOT, THUMBNAIL_ROOT
 
-# Montar la carpeta 'telegram_panel' para servir archivos estáticos
-app.mount("/telegram_panel", StaticFiles(directory="telegram_panel"), name="telegram_panel")
 app.mount("/media", StaticFiles(directory=MEDIA_ROOT), name="media")
+
 app.mount("/thumbnails", StaticFiles(directory=THUMBNAIL_ROOT), name="thumbnails")
+
+# Montar la carpeta de imágenes temporales de Pollinations
+os.makedirs("/tmp/pollinations_images", exist_ok=True)
+app.mount("/tmp/pollinations_images", StaticFiles(directory="/tmp/pollinations_images"), name="tmp_pollinations_images")
 
 
 @app.on_event("startup")
@@ -167,11 +172,10 @@ async def startup_event():
         logger.info("Modelo de embeddings inicializado.")
         load_whisper_model()
         await ws_startup()
-        # La inicialización de bot_manager y su JobQueue debe ocurrir en el proceso del bot de Telegram.
-        # Si el bot de Telegram no está corriendo y no inicializa bot_manager, job_queue será None.
-        # Se asume que el bot de Telegram se ejecuta como un proceso separado y se encarga de esto.
         await scheduled_tools_manager.initialize_scheduled_tools() # Inicializar el programador de herramientas
         tool_scheduler.start() # Iniciar el nuevo scheduler de APScheduler
+        await reschedule_simple_reminders() # Re-programar recordatorios simples en APScheduler
+
         
         # 🧹 Limpieza de archivos generados al arrancar
         try:
@@ -298,12 +302,10 @@ async def websocket_transcribe(websocket: WebSocket, account_id: str):
 
 
 @app.get("/", include_in_schema=False)
-async def serve_telegram_panel():
-    """Sirve el archivo HTML del panel de control de Telegram WebApp."""
-    panel_path = os.path.join("telegram_panel", "index.html")
-    if not os.path.exists(panel_path):
-        raise HTTPException(status_code=404, detail="Panel de control no encontrado.")
-    return FileResponse(panel_path)
+async def root_status():
+    """Retorna el estado del servidor central."""
+    return {"status": "running", "service": "Kognito AI Central API"}
+
 
 @app.api_route("/.well-known/caldav", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PROPFIND", "PROPPATCH", "REPORT"], include_in_schema=False)
 async def well_known_caldav(request: Request):
@@ -336,26 +338,37 @@ app.include_router(analysis_router, prefix="/api", tags=["analysis"])
 from api.analysis_share import router as analysis_share_router
 app.include_router(analysis_share_router, prefix="/api/analysis/share", tags=["analysis-share"])
 from api.github import router as github_router
+from api.slack import router as slack_router # NUEVO: Importar router de Slack
+from api.notion import router as notion_router # NUEVO: Importar router de Notion
 from api.local_files import router as local_files_router # NUEVO: Importar router de archivos locales
 from api.telegram import router as telegram_router
 from api.logs import router as logs_router
+from api.analytics import router as analytics_router
 from api.scheduled_tools import router as scheduled_tools_router
 from api.tasks import router as tasks_router # Importar el router de tasks
 from api.caldav import router as caldav_router # Importar el router de caldav
 from api.llm import router as llm_router # Importar el router de llm
+from api.admin_llm import router as admin_llm_router
+from api.admin_pipeline import router as admin_pipeline_router
 
 from api.galleries import router as galleries_router, MEDIA_ROOT
 from api.graph import router as graph_router
 from api.memory import router as memory_router # NUEVO: Importar el router de memory
+from api.routers.mcp import router as mcp_router # NUEVO: Importar router de MCP
 
 app.include_router(github_router, prefix="/api/github", tags=["github"])
+app.include_router(slack_router, prefix="/api/slack", tags=["slack"]) # NUEVO: Incluir router de Slack
+app.include_router(notion_router, prefix="/api/notion", tags=["notion"]) # NUEVO: Incluir router de Notion
 app.include_router(local_files_router, prefix="/api/files", tags=["local-files"]) # NUEVO: Incluir router de archivos locales
 app.include_router(telegram_router, prefix="", tags=["telegram"])
 app.include_router(logs_router, prefix="/api", tags=["logs"])
+app.include_router(analytics_router, prefix="/api", tags=["analytics"])
 app.include_router(scheduled_tools_router, prefix="/api", tags=["scheduled-tools"])
 app.include_router(tasks_router, prefix="/api", tags=["tasks"]) # Incluir el router de tasks
 app.include_router(caldav_router, prefix="/api", tags=["caldav"]) # Incluir el router de caldav
 app.include_router(llm_router, prefix="/api", tags=["llm"]) # Incluir el router de llm
+app.include_router(admin_llm_router, prefix="/api", tags=["admin-llm"])
+app.include_router(admin_pipeline_router, prefix="/api", tags=["admin-pipeline"])
 app.include_router(knowledge_graph_router, prefix="/api/knowledge-graph", tags=["knowledge-graph"])
 app.include_router(graph_router, prefix="/api", tags=["graph"])
 app.include_router(search_router, prefix="/api", tags=["search"])
@@ -365,8 +378,10 @@ app.include_router(collections_router, prefix="/api", tags=["collections"])
 app.include_router(universal_search_router, prefix="/api", tags=["universal-search"])
 app.include_router(collection_search_router, prefix="/api", tags=["collection-search"])
 app.include_router(memory_router, prefix="/api", tags=["memory"]) # NUEVO: Incluir el router de memory
+app.include_router(mcp_router) # NUEVO: Incluir el router de MCP
 app.include_router(tables_router, prefix="/api/tables", tags=["tables"])
 
+from api.terminal import router as terminal_router  # PTY terminal interactiva
 from api.skills import router as skills_router
 from api.deep_research import router as deep_research_router
 from api.gap_development import router as gap_development_router
@@ -376,7 +391,9 @@ from api.openai import router as openai_router # IMPORTAR OPENAI COMPATIVEL
 from skills.media_and_generation_skill.scripts.html_generator_tool import HTMLGeneratorTool # Importar la herramienta HTMLGeneratorTool desde skills
 from utils.security import get_current_account_id # Importar get_current_account_id
 
+app.include_router(terminal_router, tags=["terminal"])  # PTY terminal interactiva (WS)
 app.include_router(skills_router, prefix="/api/skills", tags=["skills"])
+app.include_router(skills_router, prefix="/api/tools", tags=["skills"]) # Alias para retrocompatibilidad
 app.include_router(onlyoffice_router, prefix="/api/onlyoffice", tags=["onlyoffice"]) # INCLUIR ONLYOFFICE
 app.include_router(deep_research_router, prefix="/api", tags=["deep-research"])
 app.include_router(gap_development_router, prefix="/api", tags=["gap-development"])

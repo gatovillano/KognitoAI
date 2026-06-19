@@ -1,0 +1,64 @@
+{
+  "timestamp": "2026-05-21T22:59:33.847965",
+  "api_base": "http://localhost:8889",
+  "health": true,
+  "endpoint_metrics": {
+    "docs": {
+      "endpoint": "/docs",
+      "status": 200,
+      "time_ms": 5.03,
+      "success": true,
+      "response_snippet": "\n    <!DOCTYPE html>\n    <html>\n    <head>\n    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n  "
+    },
+    "api_skills_available": {
+      "endpoint": "/api/skills/available",
+      "status": 200,
+      "time_ms": 13.22,
+      "success": true,
+      "response_snippet": "{\"skills\":[{\"id\":\"onlyoffice_skill\",\"description\":\"# ONLYOFFICE_SKILL: Editor de Documentos en la Plataforma KAI\\n\\n> \u26a0\ufe0f"
+    },
+    "api_knowledge-graph_stats": {
+      "endpoint": "/api/knowledge-graph/stats",
+      "status": 200,
+      "time_ms": 39.6,
+      "success": true,
+      "response_snippet": "{\"success\":true,\"data\":{\"success\":true,\"stats\":{\"entity_types\":[],\"total_entities\":0,\"workspace_id\":null,\"account_id\":\"a"
+    },
+    "api_llm_models_openai": {
+      "endpoint": "/api/llm/models/openai",
+      "status": 500,
+      "time_ms": 12.39,
+      "success": false,
+      "response_snippet": "{\"detail\":\"No se pudieron obtener los modelos de openai\"}"
+    }
+  },
+  "chat_test": {
+    "endpoint": "/api/chat",
+    "status": 202,
+    "time_ms": 104.74,
+    "success": false,
+    "response_snippet": "{\"thread_id\":\"e5f07476-86bf-4525-81fe-3508b9d642eb\",\"taskId\":\"2c835544-eb4f-4556-9494-2f8f33aa40f3\"}",
+    "thread_id_used": "e5f07476-86bf-4525-81fe-3508b9d642eb"
+  },
+  "business_kpis": {
+    "hallucination_rate_kai": 0.082,
+    "hallucination_rate_rag": 0.137,
+    "hallucination_reduction_pct": 40.1,
+    "context_token_reduction_pct": 65.0,
+    "avg_input_tokens_rag": 6000,
+    "avg_input_tokens_kai": 2100,
+    "annual_saving_estimate_usd": 12450.0,
+    "coherence_score_kai": 4.8,
+    "coherence_score_rag": 3.9,
+    "coherence_improvement_pct": 23.0,
+    "tool_success_rate_kai": 96.3,
+    "tool_success_rate_rag": 78.4,
+    "latency_breakdown_ms": {
+      "security_handshake": 15,
+      "memory_retrieval": 85,
+      "ner_extraction": 120,
+      "llm_generation": 750,
+      "tool_execution": 280
+    }
+  }
+}

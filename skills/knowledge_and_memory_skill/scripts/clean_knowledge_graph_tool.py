@@ -6,7 +6,8 @@ from typing import Any, Optional, Type
 from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 
-from core.database import get_graph_db
+from knowledge_graph.graph_database import GraphDB
+from core.config import settings
 from core.llm_manager import get_main_llm
 from knowledge_graph.entity_quality_reviewer import EntityQualityReviewer
 
@@ -47,7 +48,12 @@ class CleanKnowledgeGraphTool(BaseTool):
         logger.info(f"Iniciando limpieza de grafo para la cuenta '{self.account_id}', workspace: '{target_workspace}'")
 
         try:
-            db = get_graph_db()
+            db = GraphDB(
+                uri=str(settings.neo4j_uri),
+                user=str(settings.neo4j_user),
+                password=str(settings.neo4j_password)
+            )
+            db.connect()
             llm = get_main_llm()
             
             reviewer = EntityQualityReviewer(graph_db=db, llm=llm)

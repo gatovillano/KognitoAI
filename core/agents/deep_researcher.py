@@ -8,6 +8,15 @@ import os
 import re
 from typing import Any, Dict, Literal, Sequence, cast
 
+try:
+    from litellm.exceptions import MidStreamFallbackError
+except ImportError:
+    MidStreamFallbackError = None  # type: ignore
+try:
+    from litellm.exceptions import Timeout as LiteLLMTimeout
+except ImportError:
+    LiteLLMTimeout = None  # type: ignore
+
 from langchain_core.messages import (
     AIMessage,
     BaseMessage,
@@ -784,13 +793,26 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig, resea
     # 2. Execute parallel research tasks if any
     if conduct_research_tasks:
         logger.debug(f"🚀 [Supervisor Tools] Starting {len(conduct_research_tasks)} parallel research tasks.")
-        parallel_results = await asyncio.gather(*conduct_research_tasks)
-        logger.debug("✅ [Supervisor Tools] All parallel research tasks completed.")
+        # return_exceptions=True prevents one failing task from aborting all others
+        parallel_results = await asyncio.gather(*conduct_research_tasks, return_exceptions=True)
+        logger.debug("✅ [Supervisor Tools] All parallel research tasks settled.")
         
         # Store parallel results in the map
         for idx, result in zip(conduct_research_indices, parallel_results):
-            compressed_result = result.get("compressed_research", "Error: No compressed research found.")
-            
+            topic = tool_calls[idx]["args"].get("research_topic", "unknown topic")
+
+            if isinstance(result, BaseException):
+                logger.error(
+                    f"❌ [Supervisor Tools] Research task for topic '{topic}' failed: "
+                    f"{type(result).__name__}: {result}"
+                )
+                compressed_result = (
+                    f"[Error] Research for topic '{topic}' could not be completed due to a "
+                    f"transient error ({type(result).__name__}). Partial results may be unavailable."
+                )
+            else:
+                compressed_result = result.get("compressed_research", "Error: No compressed research found.")
+
             # Ensure tool_call_id is never None
             tool_call_id = tool_calls[idx].get("id")
             if tool_call_id is None:
@@ -803,26 +825,39 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig, resea
                 tool_call_id=tool_call_id,
             )
             
-            # Collect notes and sources
-            if "raw_notes" in result:
-                if "raw_notes" not in update_payload: update_payload["raw_notes"] = []
-                update_payload["raw_notes"].extend(result["raw_notes"])
-            if "notes" in result:
-                if "notes" not in update_payload: update_payload["notes"] = []
-                update_payload["notes"].extend(result["notes"])
-            if "sources" in result:
-                if "sources" not in update_payload: update_payload["sources"] = []
-                update_payload["sources"].extend(result["sources"])
+            # Collect notes and sources (only if result is not an exception)
+            if not isinstance(result, BaseException):
+                if "raw_notes" in result:
+                    if "raw_notes" not in update_payload: update_payload["raw_notes"] = []
+                    update_payload["raw_notes"].extend(result["raw_notes"])
+                if "notes" in result:
+                    if "notes" not in update_payload: update_payload["notes"] = []
+                    update_payload["notes"].extend(result["notes"])
+                if "sources" in result:
+                    if "sources" not in update_payload: update_payload["sources"] = []
+                    update_payload["sources"].extend(result["sources"])
 
     # 2.5 Execute parallel expert agent tasks if any
     if expert_agent_tasks:
         logger.debug(f"🚀 [Supervisor Tools] Starting {len(expert_agent_tasks)} parallel expert agent tasks.")
-        expert_results = await asyncio.gather(*expert_agent_tasks)
-        logger.debug("✅ [Supervisor Tools] All expert agent tasks completed.")
+        # return_exceptions=True prevents one failing task from aborting all others
+        expert_results = await asyncio.gather(*expert_agent_tasks, return_exceptions=True)
+        logger.debug("✅ [Supervisor Tools] All expert agent tasks settled.")
         
         for idx, result in zip(expert_agent_indices, expert_results):
-            expert_compressed = result.get("compressed_research", "Error: No expert research found.")
-            expert_name = result.get("expert_name", "Expert")
+            if isinstance(result, BaseException):
+                expert_name = tool_calls[idx]["args"].get("expert_name", "Expert")
+                logger.error(
+                    f"❌ [Supervisor Tools] Expert agent '{expert_name}' failed: "
+                    f"{type(result).__name__}: {result}"
+                )
+                expert_compressed = (
+                    f"[Error] Expert agent '{expert_name}' could not complete research due to a "
+                    f"transient error ({type(result).__name__}). Results unavailable."
+                )
+            else:
+                expert_compressed = result.get("compressed_research", "Error: No expert research found.")
+                expert_name = result.get("expert_name", "Expert")
             
             # Ensure tool_call_id is never None
             tool_call_id = tool_calls[idx].get("id")
@@ -836,19 +871,20 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig, resea
                 tool_call_id=tool_call_id,
             )
             
-            # Collect notes, sources, and recommendations from expert agents
-            if "raw_notes" in result:
-                if "raw_notes" not in update_payload: update_payload["raw_notes"] = []
-                update_payload["raw_notes"].extend(result["raw_notes"])
-            if "notes" in result:
-                if "notes" not in update_payload: update_payload["notes"] = []
-                update_payload["notes"].extend(result["notes"])
-            if "sources" in result:
-                if "sources" not in update_payload: update_payload["sources"] = []
-                update_payload["sources"].extend(result["sources"])
-            if "recommendations" in result:
-                if "recommendations" not in update_payload: update_payload["recommendations"] = []
-                update_payload["recommendations"].extend(result["recommendations"])
+            # Collect notes, sources, and recommendations from expert agents (only if not an exception)
+            if not isinstance(result, BaseException):
+                if "raw_notes" in result:
+                    if "raw_notes" not in update_payload: update_payload["raw_notes"] = []
+                    update_payload["raw_notes"].extend(result["raw_notes"])
+                if "notes" in result:
+                    if "notes" not in update_payload: update_payload["notes"] = []
+                    update_payload["notes"].extend(result["notes"])
+                if "sources" in result:
+                    if "sources" not in update_payload: update_payload["sources"] = []
+                    update_payload["sources"].extend(result["sources"])
+                if "recommendations" in result:
+                    if "recommendations" not in update_payload: update_payload["recommendations"] = []
+                    update_payload["recommendations"].extend(result["recommendations"])
 
     # 3. Construct the final list of ToolMessages in the ORIGINAL order
     for i in range(len(tool_calls)):
@@ -1230,7 +1266,48 @@ async def compress_research(state: ResearcherState, config: RunnableConfig) -> d
     messages = [SystemMessage(content=compression_prompt)] + researcher_messages
 
     logger.info(f"📚 [Compress Research] Compressing {len(researcher_messages)} messages.")
-    response = await synthesizer_model.ainvoke(messages)
+
+    # Retry loop: handle transient LLM timeout / mid-stream fallback errors
+    _max_retries = 3
+    _retry_delay = 10  # seconds — doubles each attempt
+    response = None
+    _retryable = tuple(filter(None, [MidStreamFallbackError, LiteLLMTimeout, TimeoutError]))
+    for _attempt in range(1, _max_retries + 1):
+        try:
+            response = await synthesizer_model.ainvoke(messages)
+            break
+        except Exception as _exc:
+            _exc_name = type(_exc).__name__
+            # Treat as retryable if it matches known timeout types OR its name/message contains hint
+            _is_retryable = (
+                (_retryable and isinstance(_exc, _retryable))
+                or "Timeout" in _exc_name
+                or "MidStream" in _exc_name
+                or "timeout" in str(_exc).lower()
+            )
+            if _is_retryable and _attempt < _max_retries:
+                logger.warning(
+                    f"⏱️ [Compress Research] LLM timeout on attempt {_attempt}/{_max_retries} "
+                    f"for topic '{state.get('research_topic', '')}'. "
+                    f"Retrying in {_retry_delay}s... ({_exc_name})"
+                )
+                await asyncio.sleep(_retry_delay)
+                _retry_delay *= 2
+                # On 2nd+ retry, try with a shorter message window to reduce load
+                if _attempt >= 2:
+                    shortened = researcher_messages[-min(10, len(researcher_messages)):]
+                    messages = [SystemMessage(content=compression_prompt)] + shortened
+                    logger.warning(
+                        f"🔁 [Compress Research] Shortened to {len(shortened)} messages for retry {_attempt + 1}."
+                    )
+            else:
+                logger.error(
+                    f"❌ [Compress Research] LLM failed after {_attempt} attempt(s) for topic "
+                    f"'{state.get('research_topic', '')}': {_exc_name}: {_exc}"
+                )
+                raise
+    if response is None:
+        raise RuntimeError("[Compress Research] No response received after retries.")
 
     raw_notes_content = "\n".join([str(m.content) for m in filter_messages(researcher_messages, include_types=["tool", "ai"])])
 

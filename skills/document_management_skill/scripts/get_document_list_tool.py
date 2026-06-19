@@ -25,7 +25,7 @@ from langchain_core.tools import BaseTool
 
 # Importaciones de la lógica de negocio y gestión de estado
 from core.memory_manager import list_user_documents
-from telegram_client.bot_manager import bot_manager
+from utils.telegram_api import store_telegram_user_data
 
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)
@@ -80,9 +80,11 @@ class GetDocumentListTool(BaseTool):
             documents_list = await list_user_documents(account_id=self.account_id, workspace_id=self.workspace_id, topic=actual_topic)
 
             if self.telegram_id is not None:
-                user_data = bot_manager.get_user_data(self.telegram_id)
-                user_data[RAW_DOCUMENT_LIST_KEY] = documents_list
-                await bot_manager.flush_persistence()
+                await store_telegram_user_data(
+                    telegram_id=int(self.telegram_id),
+                    key=RAW_DOCUMENT_LIST_KEY,
+                    data=documents_list
+                )
             
             if not documents_list:
                 if actual_topic and self.workspace_id:

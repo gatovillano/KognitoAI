@@ -13,10 +13,10 @@ import litellm
 from litellm.exceptions import RateLimitError, ServiceUnavailableError
 import httpx
 
-# Nuevas importaciones para el sistema de citas
 from core.citation_models import ToolOutputWithSources, Source, SourceType
 from core.database import SessionLocal, AnalysisTask
 from utils.db_session import DBSession
+from core.websocket_manager import manager as websocket_manager
 import uuid
 from datetime import datetime
 
@@ -210,5 +210,106 @@ class DeepResearchTool(BaseTool):
             return ToolOutputWithSources(context_for_llm=error_message, sources=[]).model_dump()
 
     async def _arun(self, query: str) -> Dict[str, Any]:
-        """Use the tool asynchronously."""
-        return await self._run(query)
+        """Use the tool asynchronously in background."""
+        logger.info(f"Executing Async Deep Research tool for query: '{query}' for account: {self.account_id}")
+        run_id = str(uuid.uuid4())
+        
+        async def _background_research():
+            try:
+                # Notify start via websocket
+                await websocket_manager.send_personal_message({
+                    "type": "tool_start",
+                    "tool_name": "deep_research",
+                    "taskId": run_id,
+                    "message": f"Iniciando investigación profunda en segundo plano para: '{query}'"
+                }, self.account_id)
+                        
+                graph = compile_deep_researcher_graph()
+                config = {"configurable": {"account_id": self.account_id}}
+                if hasattr(self, 'progress_callback') and self.progress_callback:
+                    config["configurable"]["progress_callback"] = self.progress_callback
+                
+                inputs = {
+                    "messages": [HumanMessage(content=query)],
+                    "account_id": self.account_id,
+                    "sources": [],
+                }
+                
+                final_state = await graph.ainvoke(inputs, config=config)
+                
+                # Check for completion
+                if final_state and "final_report" in final_state:
+                    report = final_state["final_report"]
+                    raw_sources = final_state.get("sources", [])
+                    final_sources = raw_sources
+                    if isinstance(final_sources, dict) and final_sources.get("type") == "override":
+                        final_sources = final_sources.get("value", [])
+                    
+                    sources_list = []
+                    if isinstance(final_sources, list):
+                        for i, raw_source in enumerate(final_sources, start=1):
+                            if isinstance(raw_source, dict):
+                                source_type = SourceType.WEB
+                                sources_list.append({
+                                    "id": i,
+                                    "title": raw_source.get("title", "Fuente Desconocida"),
+                                    "url": raw_source.get("url", ""),
+                                    "snippet": str(raw_source.get("snippet") or raw_source.get("content") or ""),
+                                    "type": source_type.value
+                                })
+
+                    try:
+                        async with DBSession(SessionLocal) as db_session:
+                            title = f"Investigación Profunda: {query[:50]}..."
+                            result_payload = {
+                                "final_report": report,
+                                "sources": sources_list,
+                                "recommendations": final_state.get("recommendations", []),
+                                "visual_schema": final_state.get("visual_schema"),
+                                "tool_used": "deep_research_tool.py"
+                            }
+                            new_task = AnalysisTask(
+                                account_id=uuid.UUID(self.account_id),
+                                file_name=title,
+                                analysis_type="gap_development",
+                                status="completed",
+                                result_payload=result_payload
+                            )
+                            db_session.add(new_task)
+                            await db_session.commit()
+                    except Exception as e:
+                        logger.error(f"Error saving Deep Research to DB: {e}")
+
+                    # Notify completion
+                    msg = {
+                        "type": "tool_end",
+                        "tool_name": "deep_research",
+                        "status": "completed",
+                        "taskId": run_id,
+                        "message": "Investigación profunda completada. Por favor, pide al agente que analice los resultados.",
+                        "background_completion": True
+                    }
+                    await websocket_manager.send_personal_message(msg, self.account_id)
+
+            except Exception as e:
+                logger.error(f"Background deep research error: {e}", exc_info=True)
+                msg = {
+                    "type": "tool_error",
+                    "tool_name": "deep_research",
+                    "status": "failed",
+                    "taskId": run_id,
+                    "error": str(e),
+                    "background_completion": True
+                }
+                await websocket_manager.send_personal_message(msg, self.account_id)
+                        
+        # Lanza el task sin bloquear
+        asyncio.create_task(_background_research())
+        
+        # Devuelve inmediatamente al agente principal
+        inmediate_response = (
+            f"He iniciado la investigación profunda en segundo plano con ID de tarea: {run_id}. "
+            f"Dile al usuario que estás investigando el tema '{query}' y que le notificarás cuando esté listo. "
+            f"PUEDES SEGUIR RESPONDIENDO OTRAS PREGUNTAS MIENTRAS TANTO."
+        )
+        return ToolOutputWithSources(context_for_llm=inmediate_response, sources=[]).model_dump()

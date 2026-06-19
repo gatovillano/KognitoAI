@@ -1,0 +1,24 @@
+{
+  "api_url": "http://localhost:8889",
+  "api_key": "bac65afb5234660a6490aefe3a01923713a904418e4f59b5fbb81d888e2d76cc",
+  "measurement_queries": [
+    {
+      "id": "query_001",
+      "text": "¿Cuál es la capital de Francia?",
+      "expected_answer": "París",
+      "category": "factual"
+    },
+    {
+      "id": "query_002",
+      "text": "¿Qué significa alucinación en el contexto de IA?",
+      "expected_answer": "Falsificación o error en la información generada",
+      "category": "conceptual"
+    },
+    {
+      "id": "query_003",
+      "text": "¿Cuánto es 2 más 2?",
+      "expected_answer": "4",
+      "category": "matemática"
+    }
+  ]
+}

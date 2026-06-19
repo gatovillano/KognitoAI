@@ -21,10 +21,11 @@ interface AutocompleteState {
 
 interface SelectedContextItem {
   id: string;
-  type: 'document' | 'collection';
+  type: 'document' | 'collection' | 'repository';
   name: string;
   title?: string;
   topic?: string;
+  content?: string;
   file_name?: string;
 }
 
@@ -471,29 +472,33 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
             )}
             
             {autocomplete.isVisible && autocomplete.options.length > 0 && (
-              <div className="absolute z-50 bottom-full mb-2 bg-popover text-popover-foreground border border-border shadow-lg rounded-md w-64 max-h-48 overflow-y-auto">
-                <div className="p-1">
-                  <div className="text-[10px] font-bold text-muted-foreground uppercase px-2 py-1">
-                    {autocomplete.trigger === '#' ? 'Archivos del Repositorio' : 'Archivos Locales'}
+              <div className="absolute z-50 bottom-full left-0 right-0 mb-3 bg-popover/95 backdrop-blur-md text-popover-foreground border border-border shadow-xl rounded-2xl w-full max-h-72 overflow-y-auto transition-all duration-200">
+                <div className="p-2">
+                  <div className="text-[10px] font-bold text-muted-foreground/80 tracking-wider uppercase px-3 py-2 border-b border-border/40 mb-1.5 flex items-center justify-between">
+                    <span>{autocomplete.trigger === '#' ? 'Archivos del Repositorio' : 'Archivos Locales'}</span>
+                    <span className="text-[9px] font-normal lowercase bg-muted px-1.5 py-0.5 rounded-full">{autocomplete.options.length} sugerencias</span>
                   </div>
-                  {autocomplete.options.map((option, index) => (
-                    <div 
-                      key={option}
-                      className={`px-2 py-1.5 text-sm cursor-pointer rounded-sm flex items-center gap-2 ${index === autocomplete.activeIndex ? 'bg-primary/20 text-primary' : 'hover:bg-muted'}`}
-                      onMouseDown={(evt) => {
-                        evt.preventDefault(); // prevent input blur
-                        const selectedOption = option;
-                        const before = newMessage.slice(0, autocomplete.wordStartIndex);
-                        const after = newMessage.slice(textAreaRef.current?.selectionStart || newMessage.length);
-                        const insertText = `${autocomplete.trigger}${selectedOption} `;
-                        setNewMessage(before + insertText + after);
-                        setAutocomplete(prev => ({ ...prev, isVisible: false }));
-                      }}
-                    >
-                      <Paperclip className="h-3 w-3 shrink-0" />
-                      <span className="truncate">{option}</span>
-                    </div>
-                  ))}
+                  <div className="grid grid-cols-1 gap-0.5">
+                    {autocomplete.options.map((option, index) => (
+                      <div 
+                        key={option}
+                        className={`px-3 py-2 text-sm cursor-pointer rounded-xl flex items-center gap-3 transition-all duration-150 ${index === autocomplete.activeIndex ? 'bg-primary/15 text-primary font-medium' : 'hover:bg-muted/70 text-muted-foreground hover:text-foreground'}`}
+                        title={option}
+                        onMouseDown={(evt) => {
+                          evt.preventDefault(); // prevent input blur
+                          const selectedOption = option;
+                          const before = newMessage.slice(0, autocomplete.wordStartIndex);
+                          const after = newMessage.slice(textAreaRef.current?.selectionStart || newMessage.length);
+                          const insertText = `${autocomplete.trigger}${selectedOption} `;
+                          setNewMessage(before + insertText + after);
+                          setAutocomplete(prev => ({ ...prev, isVisible: false }));
+                        }}
+                      >
+                        <Paperclip className="h-4 w-4 shrink-0 opacity-70" />
+                        <span className="truncate font-mono text-xs sm:text-sm">{option}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}

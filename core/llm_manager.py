@@ -21,28 +21,177 @@ from core.config import settings
 from core.database import SessionLocal, Account, UserSecret
 from core.repositories.secret_repository import SecretRepository
 import uuid
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+SYSTEM_ACCOUNT_ID = uuid.UUID("00000000-0000-0000-0000-000000000000")
+
+async def ensure_system_account(db: AsyncSession) -> Account:
+    account = await db.get(Account, SYSTEM_ACCOUNT_ID)
+    if not account:
+        account = Account(
+            id=SYSTEM_ACCOUNT_ID,
+            name="System Global",
+            username="system_global",
+            email="system@kognito.ai",
+            is_admin=True,
+            is_active=False
+        )
+        db.add(account)
+        await db.commit()
+    return account
+
+async def get_global_llm_settings(db: AsyncSession) -> dict:
+    from core.database import SystemSettings
+    result = await db.execute(select(SystemSettings).where(SystemSettings.key == "global_llm_settings"))
+    row = result.scalar_one_or_none()
+    if row and row.value:
+        try:
+            import json
+            return json.loads(row.value)
+        except Exception as e:
+            logger.error(f"Error parsing global_llm_settings JSON: {e}")
+    return {}
+
+async def get_global_api_key(db: AsyncSession, provider: str) -> Optional[str]:
+    secret_repo = SecretRepository(db)
+    api_key_name = None
+    if provider.lower().replace("_", "-") in ["gemini", "google"]:
+        api_key_name = "GEMINI_API_KEY"
+    elif provider.lower().replace("_", "-") == "ollama-cloud":
+        api_key_name = "OLLAMA_API_KEY"
+
+    key_to_search = (
+        api_key_name
+        or f"{provider.upper().replace('-', '_')}_API_KEY"
+    )
+    await ensure_system_account(db)
+    api_key = await secret_repo.get_decrypted_secret(SYSTEM_ACCOUNT_ID, key_to_search)
+    if not api_key and provider.lower() in ["gemini", "google"]:
+        api_key = await secret_repo.get_decrypted_secret(SYSTEM_ACCOUNT_ID, "GOOGLE_API_KEY")
+    return api_key
 
 # Asegúrate de que litellm elimine parámetros no soportados globalmente
 litellm.drop_params = True
 
 # --- Registro de Proveedores Custom ---
-# Esto permite que LiteLLM reconozca el prefijo kilocode/ sin lanzar BadRequestError
+# Esto permite que LiteLLM reconozca el prefijo kilocode/ y llm7/ sin lanzar BadRequestError
 def _register_custom_providers():
     try:
-        # Añadir kilocode a la lista de proveedores conocidos como compatible con OpenAI
+        # Añadir kilocode y llm7 a la lista de proveedores conocidos como compatible con OpenAI
         if "kilocode" not in litellm.provider_list:
             litellm.provider_list.append("kilocode")
-        
-        # Mapear dinámicamente modelos de kilocode a la lógica de openai
+        if "llm7" not in litellm.provider_list:
+            litellm.provider_list.append("llm7")
+
+        # Mapear dinámicamente modelos de kilocode y llm7 a la lógica de openai
         # LiteLLM usa esto para determinar qué clase de cliente instanciar
         litellm.custom_provider_map = getattr(litellm, "custom_provider_map", [])
+
         kilocode_map = {"provider": "kilocode", "custom_handler": "openai"}
         if kilocode_map not in litellm.custom_provider_map:
             litellm.custom_provider_map.append(kilocode_map)
-            
-        logger.info("📡 Proveedor KiloCode registrado globalmente en LiteLLM")
+
+        llm7_map = {"provider": "llm7", "custom_handler": "openai"}
+        if llm7_map not in litellm.custom_provider_map:
+            litellm.custom_provider_map.append(llm7_map)
+
+        logger.info("📡 Proveedores KiloCode y LLM7 registrados globalmente en LiteLLM")
     except Exception as e:
-        logger.warning(f"⚠️ No se pudo registrar el proveedor custom kilocode: {e}")
+        logger.warning(f"⚠️ No se pudo registrar los proveedores custom: {e}")
+
+
+def detect_provider_from_model(model_name: str) -> str:
+    """
+    Detecta el proveedor basándose en el nombre del modelo, incluso sin prefijo.
+
+    Args:
+        model_name: Nombre del modelo (ej: "gemini-2.0-flash", "gpt-4o", "claude-3-opus")
+
+    Returns:
+        Proveedor detectado (ej: "gemini", "openai", "anthropic", etc.)
+    """
+    if not model_name:
+        return "openai"
+
+    model_lower = model_name.lower()
+
+    # Modelos de Gemini/Google
+    if any(x in model_lower for x in ["gemini", "google"]):
+        return "gemini"
+
+    # Modelos de OpenAI
+    if any(x in model_lower for x in ["gpt-", "o1-", "o3-", "openai"]):
+        return "openai"
+
+    # Modelos de Anthropic
+    if any(x in model_lower for x in ["claude", "anthropic"]):
+        return "anthropic"
+
+    # Modelos de Groq
+    if any(x in model_lower for x in ["groq", "llama-", "mixtral", "gemma-"]):
+        return "groq"
+
+    # Modelos de DeepSeek
+    if any(x in model_lower for x in ["deepseek"]):
+        return "deepseek"
+
+    # Modelos de Mistral
+    if any(x in model_lower for x in ["mistral", "pixtral"]):
+        return "mistral"
+
+    # Modelos de Cerebras
+    if any(x in model_lower for x in ["cerebras"]):
+        return "cerebras"
+
+    # Modelos de Ollama (locales)
+    if any(x in model_lower for x in ["ollama", "llama3", "phi3", "qwen", "nomic-embed"]):
+        return "ollama"
+
+    # Modelos de OpenRouter (tienen formato org/modelo)
+    if "/" in model_name and not model_lower.startswith(("gemini/", "openai/", "anthropic/", "groq/", "deepseek/", "mistral/", "cerebras/")):
+        return "openrouter"
+
+    # Modelos de Kilocode
+    if model_lower.startswith("kilocode/"):
+        return "kilocode"
+
+    # Modelos de LLM7
+    if model_lower.startswith("llm7/"):
+        return "llm7"
+
+    # Por defecto, asumir OpenAI compatible
+    return "openai"
+
+
+def get_provider_from_model_or_fallback(model_name: str, explicit_provider: str = None) -> str:
+    """
+    Obtiene el proveedor del modelo, usando el explícito si existe,
+    o detectándolo del nombre del modelo.
+
+    Args:
+        model_name: Nombre del modelo
+        explicit_provider: Proveedor configurado explícitamente (opcional)
+
+    Returns:
+        Proveedor a utilizar
+    """
+    if explicit_provider:
+        return explicit_provider.lower()
+
+    # Si el modelo tiene prefijo de proveedor (ej: "gemini/gemini-2.0-flash"), usarlo
+    if model_name and "/" in model_name:
+        prefix = model_name.split("/")[0].lower()
+        # Validar que sea un proveedor conocido
+        known_providers = ["gemini", "google", "openai", "anthropic", "groq", "deepseek",
+                          "mistral", "cerebras", "openrouter", "kilocode", "llm7", "ollama",
+                          "vertex_ai", "azure", "google_ai_studio"]
+        if prefix in known_providers:
+            return prefix
+
+    # Detectar por nombre del modelo
+    return detect_provider_from_model(model_name)
+
 
 # --- Configuración del Logger ---
 from core.utils.logging_utils import AgentLogger
@@ -193,6 +342,39 @@ def get_vision_llm() -> Optional[ChatLiteLLM]:
     return _vision_llm_instance or _main_agent_llm_instance
 
 
+def _get_llm_signature(llm: Optional[ChatLiteLLM]) -> tuple[Optional[str], Optional[str]]:
+    """Obtiene una firma simple para comparar dos configuraciones de LLM."""
+    if llm is None:
+        return (None, None)
+
+    model_name = getattr(llm, "model_name", None) or getattr(llm, "model", None)
+    provider = getattr(llm, "provider", None) or getattr(
+        llm, "custom_llm_provider", None
+    )
+    return (
+        str(model_name) if model_name is not None else None,
+        str(provider) if provider is not None else None,
+    )
+
+
+def _is_distinct_llm(
+    primary_llm: Optional[ChatLiteLLM], candidate_llm: Optional[ChatLiteLLM]
+) -> bool:
+    """Indica si el candidato representa una configuración diferente al LLM primario."""
+    if candidate_llm is None:
+        return False
+    return _get_llm_signature(primary_llm) != _get_llm_signature(candidate_llm)
+
+
+def _get_global_llm_for_purpose(purpose: str) -> Optional[ChatLiteLLM]:
+    """Devuelve el LLM global correspondiente al propósito solicitado."""
+    if purpose == "fast":
+        return get_fast_llm()
+    if purpose == "vision":
+        return get_vision_llm()
+    return get_main_llm()
+
+
 def normalize_openrouter_model_name(model_name: str) -> str:
     """
     Normaliza el nombre del modelo para OpenRouter.
@@ -289,6 +471,33 @@ def apply_openrouter_model_specific_logic(model_name: str, llm_kwargs: dict):
         logger.info(f"⚙️ OpenRouter extra_body final: {llm_kwargs['extra_body']}")
 
 
+def _sanitize_ascii(value: Any) -> Any:
+    """
+    Ensures that a value is a strictly ASCII string.
+    If it's a string, it strips any non-ASCII characters.
+    This prevents UnicodeEncodeError when values are used in HTTP headers.
+    """
+    if isinstance(value, str):
+        return value.encode("ascii", "ignore").decode("ascii")
+    return value
+
+
+def _sanitize_llm_kwargs(kwargs: dict) -> dict:
+    """
+    Sanitizes common LLM kwargs that end up in HTTP headers.
+    """
+    if "api_key" in kwargs:
+        kwargs["api_key"] = _sanitize_ascii(kwargs["api_key"])
+
+    if "headers" in kwargs and isinstance(kwargs["headers"], dict):
+        kwargs["headers"] = {k: _sanitize_ascii(v) for k, v in kwargs["headers"].items()}
+
+    if "extra_headers" in kwargs and isinstance(kwargs["extra_headers"], dict):
+        kwargs["extra_headers"] = {k: _sanitize_ascii(v) for k, v in kwargs["extra_headers"].items()}
+
+    return kwargs
+
+
 async def get_llm_for_user(
     account_id: str, purpose: str = "main"
 ) -> Optional[ChatLiteLLM]:
@@ -326,6 +535,11 @@ async def get_llm_for_user(
                 logger.info(f"Detectado modelo Kilocode: {model_target}. Forzando provider a 'kilocode'.")
                 provider_target = "kilocode"
 
+            # Si el usuario no tiene proveedor configurado, detectarlo del nombre del modelo
+            if not provider_target and model_target:
+                provider_target = detect_provider_from_model(model_target)
+                logger.info(f"🔍 Proveedor detectado automáticamente para modelo '{model_target}': {provider_target}")
+
             # Si el usuario no tiene proveedor o modelo configurado, usar global
             if not provider_target or not model_target:
                 if purpose == "fast":
@@ -346,21 +560,35 @@ async def get_llm_for_user(
                 api_key_name
                 or f"{provider_target.upper().replace('-', '_')}_API_KEY"
             )
+            
+            # Intentar obtener la API key del usuario
             api_key = await secret_repo.get_decrypted_secret(account.id, key_to_search)
             if api_key:
                 logger.info(
                     f"🔑 Clave encontrada para {key_to_search}: {api_key[:4]}...{api_key[-4:] if len(api_key) > 8 else ''}"
                 )
             else:
-                logger.warning(
-                    f"⚠️ No se encontró clave para {key_to_search} en la cuenta del usuario."
-                )
+                # Si no está en el usuario, intentar en los secretos globales del sistema
+                await ensure_system_account(db)
+                api_key = await secret_repo.get_decrypted_secret(SYSTEM_ACCOUNT_ID, key_to_search)
+                if api_key:
+                    logger.info(
+                        f"🔑 Clave GLOBAL encontrada para {key_to_search}: {api_key[:4]}...{api_key[-4:] if len(api_key) > 8 else ''}"
+                    )
+                else:
+                    logger.warning(
+                        f"⚠️ No se encontró clave para {key_to_search} en la cuenta del usuario ni en los secretos globales."
+                    )
 
-            # Fallback para Google AI Studio: buscar GOOGLE_API_KEY si no se encuentra GEMINI_API_KEY
+            # Fallback para Google AI Studio: buscar GOOGLE_API_KEY
             if not api_key and provider_target.lower() in ["gemini", "google"]:
                 api_key = await secret_repo.get_decrypted_secret(
                     account.id, "GOOGLE_API_KEY"
                 )
+                if not api_key:
+                    api_key = await secret_repo.get_decrypted_secret(
+                        SYSTEM_ACCOUNT_ID, "GOOGLE_API_KEY"
+                    )
                 # Último fallback: usar variable de entorno global
                 if not api_key and settings.google_api_key:
                     api_key = settings.google_api_key
@@ -375,8 +603,24 @@ async def get_llm_for_user(
                 if settings.kilocode_api_key:
                     api_key = settings.kilocode_api_key
 
-            # Si no hay API key y el proveedor requiere una (casi todos menos ollama),
-            # podríamos intentar usar la global o fallar. Usaremos la global como fallback.
+            # Fallbacks genéricos para otros proveedores desde variables de entorno
+            if not api_key:
+                if provider_target.lower() == "openai":
+                    api_key = settings.openai_api_key
+                elif provider_target.lower() == "openrouter":
+                    api_key = settings.openrouter_api_key
+                elif provider_target.lower() == "groq":
+                    api_key = os.getenv("GROQ_API_KEY")
+                elif provider_target.lower() == "anthropic":
+                    api_key = os.getenv("ANTHROPIC_API_KEY")
+                elif provider_target.lower() == "deepseek":
+                    api_key = os.getenv("DEEPSEEK_API_KEY")
+                elif provider_target.lower() == "mistral":
+                    api_key = os.getenv("MISTRAL_API_KEY")
+                elif provider_target.lower() == "cerebras":
+                    api_key = os.getenv("CEREBRAS_API_KEY")
+
+            api_key = _sanitize_ascii(api_key) if api_key else None
 
             # 3. Construir instancia personalizada
             llm_kwargs = {
@@ -551,12 +795,15 @@ async def get_llm_for_user(
             if (
                 "gemini" in model_target.lower()
                 or provider_target.lower() in ["gemini", "google"]
-            ) and account.llm_provider.lower() != "openrouter":
+            ) and provider_target.lower() != "openrouter":
                 llm_kwargs["provider"] = "google_ai_studio"
 
             logger.info(
-                f"🛠️ Creando LLM personalizado para usuario {account_id}: {llm_kwargs['model_name']} ({account.llm_provider})"
+                f"🛠️ Creando LLM personalizado para usuario {account_id}: {llm_kwargs['model_name']} ({provider_target})"
             )
+
+            # --- FIX: Sanitize kwargs to prevent UnicodeEncodeError in headers ---
+            llm_kwargs = _sanitize_llm_kwargs(llm_kwargs)
 
             # Nota: ChatLiteLLM pasará extra_body a la API de OpenRouter
             llm_instance = ChatLiteLLM(**llm_kwargs)
@@ -572,26 +819,63 @@ async def get_llm_for_user(
         return get_main_llm()  # Fallback a global en caso de error
 
 
-def get_fallback_llm() -> Optional[ChatLiteLLM]:
-    """Returns a fallback LLM instance using a different provider when OpenRouter fails."""
-    try:
-        # Try to use Gemini as fallback if the main model is OpenRouter
-        if "openrouter" in settings.llm_model.lower():
+async def get_configured_fallback_llm(
+    account_id: Optional[str] = None, failed_purpose: str = "main"
+) -> Optional[ChatLiteLLM]:
+    """
+    Devuelve un fallback respetando la configuración efectiva del usuario.
+
+    Nunca fuerza Gemini ni otro proveedor no configurado; solo reutiliza otros
+    LLMs ya disponibles en la configuración del usuario o en la global.
+    """
+    primary_llm = (
+        await get_llm_for_user(account_id, purpose=failed_purpose)
+        if account_id
+        else _get_global_llm_for_purpose(failed_purpose)
+    )
+
+    candidate_purposes = ["main"] if failed_purpose in {"fast", "vision"} else ["fast"]
+
+    if account_id:
+        for purpose in candidate_purposes:
+            candidate_llm = await get_llm_for_user(account_id, purpose=purpose)
+            if _is_distinct_llm(primary_llm, candidate_llm):
+                logger.info(
+                    "🔄 Usando fallback configurado del usuario | account_id=%s | from=%s | to=%s",
+                    account_id,
+                    failed_purpose,
+                    purpose,
+                )
+                return candidate_llm
+
+    for purpose in candidate_purposes:
+        candidate_llm = _get_global_llm_for_purpose(purpose)
+        if _is_distinct_llm(primary_llm, candidate_llm):
             logger.info(
-                "🔄 Switching to Gemini as fallback for OpenRouter context limit issues."
+                "🔄 Usando fallback global configurado | from=%s | to=%s",
+                failed_purpose,
+                purpose,
             )
-            fallback_llm = ChatLiteLLM(
-                model_name="gemini/gemini-2.0-flash-exp",
-                temperature=0.0,
-                streaming=True,
-                verbose=False,
-                max_retries=0,
-                rate_limiter=gemini_rate_limiter,
-            )
+            return candidate_llm
+
+    logger.warning(
+        "⚠️ No hay un fallback LLM alternativo configurado | account_id=%s | failed_purpose=%s",
+        account_id,
+        failed_purpose,
+    )
+    return None
+
+
+def get_fallback_llm() -> Optional[ChatLiteLLM]:
+    """Returns a global fallback LLM without forcing a provider not configured."""
+    try:
+        primary_llm = get_main_llm()
+        fallback_llm = get_fast_llm()
+        if _is_distinct_llm(primary_llm, fallback_llm):
+            logger.info("🔄 Using configured global fast LLM as fallback.")
             return fallback_llm
-        else:
-            # If main model is not OpenRouter, use it as fallback
-            return get_main_llm()
+        logger.warning("⚠️ No hay fallback global alternativo configurado.")
+        return None
     except Exception as e:
         logger.error(f"❌ Failed to create fallback LLM: {e}")
         return None
@@ -631,12 +915,134 @@ async def initialize_llms():
     else:
         logger.warning("No se detectó GPU. Cargando modelos en CPU.")
 
+    # 1. Cargar configuraciones globales desde la base de datos (SystemSettings)
+    global_llm_provider = None
+    global_llm_model = None
+    global_llm_temperature = None
+    global_llm_api_base = None
+    global_fast_llm_model = None
+    global_fast_llm_provider = None
+    global_vision_llm_model = None
+    global_vision_llm_provider = None
+    global_use_prompt_tooling = None
+
     try:
-        logger.info(f"Inicializando LLM Principal: {settings.llm_model}")
+        async with SessionLocal() as db:
+            db_settings = await get_global_llm_settings(db)
+            global_llm_provider = db_settings.get("llm_provider")
+            global_llm_model = db_settings.get("llm_model")
+            global_llm_temperature = db_settings.get("llm_temperature")
+            global_llm_api_base = db_settings.get("llm_api_base")
+            global_fast_llm_model = db_settings.get("fast_llm_model")
+            global_fast_llm_provider = db_settings.get("fast_llm_provider")
+            global_vision_llm_model = db_settings.get("vision_llm_model")
+            global_vision_llm_provider = db_settings.get("vision_llm_provider")
+            global_use_prompt_tooling = db_settings.get("use_prompt_tooling")
+    except Exception as e:
+        logger.error(f"Error loading global LLM settings from DB in initialize_llms: {e}")
+
+    eff_llm_model = global_llm_model or settings.llm_model
+    eff_llm_provider = get_provider_from_model_or_fallback(eff_llm_model, global_llm_provider)
+    eff_llm_temperature = global_llm_temperature if global_llm_temperature is not None else settings.llm_temperature
+    eff_llm_api_base = global_llm_api_base or settings.llm_api_base
+
+    eff_fast_llm_model = global_fast_llm_model or settings.fast_llm_model
+    eff_fast_llm_provider = get_provider_from_model_or_fallback(eff_fast_llm_model, global_fast_llm_provider)
+
+    eff_vision_llm_model = global_vision_llm_model or settings.vision_model
+    eff_vision_llm_provider = get_provider_from_model_or_fallback(eff_vision_llm_model, global_vision_llm_provider)
+
+    # 2. Cargar API Keys globales desde los secretos de la base de datos
+    main_api_key = None
+    fast_api_key = None
+    vision_api_key = None
+
+    try:
+        async with SessionLocal() as db:
+            if eff_llm_provider:
+                main_api_key = await get_global_api_key(db, eff_llm_provider)
+            if eff_fast_llm_provider:
+                fast_api_key = await get_global_api_key(db, eff_fast_llm_provider)
+            if eff_vision_llm_provider:
+                vision_api_key = await get_global_api_key(db, eff_vision_llm_provider)
+    except Exception as e:
+        logger.error(f"Error loading global API keys from DB in initialize_llms: {e}")
+
+    # Fallback to environment variables if no database API key was found
+    if not main_api_key and eff_llm_provider:
+        p = eff_llm_provider.lower()
+        if p == "openai":
+            main_api_key = settings.openai_api_key
+        elif p == "openrouter":
+            main_api_key = settings.openrouter_api_key
+        elif p in ["gemini", "google"]:
+            main_api_key = settings.google_api_key
+        elif p == "kilocode":
+            main_api_key = settings.kilocode_api_key
+        elif p == "groq":
+            main_api_key = os.getenv("GROQ_API_KEY")
+        elif p == "anthropic":
+            main_api_key = os.getenv("ANTHROPIC_API_KEY")
+        elif p == "deepseek":
+            main_api_key = os.getenv("DEEPSEEK_API_KEY")
+        elif p == "mistral":
+            main_api_key = os.getenv("MISTRAL_API_KEY")
+        elif p == "cerebras":
+            main_api_key = os.getenv("CEREBRAS_API_KEY")
+
+    if not fast_api_key and eff_fast_llm_provider:
+        p = eff_fast_llm_provider.lower()
+        if p == "openai":
+            fast_api_key = settings.openai_api_key
+        elif p == "openrouter":
+            fast_api_key = settings.openrouter_api_key
+        elif p in ["gemini", "google"]:
+            fast_api_key = settings.google_api_key
+        elif p == "kilocode":
+            fast_api_key = settings.kilocode_api_key
+        elif p == "groq":
+            fast_api_key = os.getenv("GROQ_API_KEY")
+        elif p == "anthropic":
+            fast_api_key = os.getenv("ANTHROPIC_API_KEY")
+        elif p == "deepseek":
+            fast_api_key = os.getenv("DEEPSEEK_API_KEY")
+        elif p == "mistral":
+            fast_api_key = os.getenv("MISTRAL_API_KEY")
+        elif p == "cerebras":
+            fast_api_key = os.getenv("CEREBRAS_API_KEY")
+
+    if not vision_api_key and eff_vision_llm_provider:
+        p = eff_vision_llm_provider.lower()
+        if p == "openai":
+            vision_api_key = settings.openai_api_key
+        elif p == "openrouter":
+            vision_api_key = settings.openrouter_api_key
+        elif p in ["gemini", "google", "google_ai_studio"]:
+            vision_api_key = settings.google_api_key
+        elif p == "kilocode":
+            vision_api_key = settings.kilocode_api_key
+        elif p == "groq":
+            vision_api_key = os.getenv("GROQ_API_KEY")
+        elif p == "anthropic":
+            vision_api_key = os.getenv("ANTHROPIC_API_KEY")
+        elif p == "deepseek":
+            vision_api_key = os.getenv("DEEPSEEK_API_KEY")
+        elif p == "mistral":
+            vision_api_key = os.getenv("MISTRAL_API_KEY")
+        elif p == "cerebras":
+            vision_api_key = os.getenv("CEREBRAS_API_KEY")
+
+    main_api_key = _sanitize_ascii(main_api_key) if main_api_key else None
+    fast_api_key = _sanitize_ascii(fast_api_key) if fast_api_key else None
+    vision_api_key = _sanitize_ascii(vision_api_key) if vision_api_key else None
+
+    # --- INICIALIZACIÓN DE MODELOS ---
+    try:
+        logger.info(f"Inicializando LLM Principal: {eff_llm_model}")
 
         llm_kwargs = {
-            "model_name": settings.llm_model,
-            "temperature": settings.llm_temperature,
+            "model_name": eff_llm_model,
+            "temperature": eff_llm_temperature,
             "streaming": True,
             "verbose": False,
             "max_retries": 0,  # We handle rate limiting, so disable litellm's retries for this
@@ -651,18 +1057,21 @@ async def initialize_llms():
                 True  # Forzar la descarga para asegurar la compatibilidad de la GPU
             )
 
-        if settings.llm_api_base:
-            llm_kwargs["api_base"] = settings.llm_api_base
+        if eff_llm_api_base:
+            llm_kwargs["api_base"] = eff_llm_api_base
+
+        if main_api_key:
+            llm_kwargs["api_key"] = main_api_key
 
         # Configurar proveedor específico según el formato del modelo
-        model_lower = settings.llm_model.lower()
+        model_lower = eff_llm_model.lower()
 
         if "openrouter" in model_lower:
             logger.info("🔧 Applying OpenRouter specific config for main LLM.")
             llm_kwargs["api_base"] = "https://openrouter.ai/api/v1"
 
             # Normalizar el nombre del modelo - eliminar prefijo openrouter/ para evitar duplicados
-            actual_id = normalize_openrouter_model_name(settings.llm_model)
+            actual_id = normalize_openrouter_model_name(eff_llm_model)
 
             # Configurar el nombre del modelo con el prefijo openrouter/ necesario para LiteLLM
             llm_kwargs["model_name"] = f"openrouter/{actual_id}"
@@ -713,18 +1122,21 @@ async def initialize_llms():
             kilocode_base = "https://api.kilo.ai/api/gateway"
             llm_kwargs["api_base"] = kilocode_base
             
-            # Autenticación: Usar KILOCODE_API_KEY de settings si existe
-            if settings.kilocode_api_key:
-                llm_kwargs["api_key"] = settings.kilocode_api_key
+            # Autenticación: Usar API key
+            if main_api_key:
+                llm_kwargs["api_key"] = main_api_key
             
             # Normalizar el nombre del modelo
-            actual_model = settings.llm_model
+            actual_model = eff_llm_model
             if actual_model.startswith("kilocode/"):
                 actual_model = actual_model[len("kilocode/"):]
             
             # Asegurarnos de que el model_name tenga prefijo openai/ para LiteLLM
             llm_kwargs["model_name"] = f"openai/{actual_model}"
             llm_kwargs["custom_llm_provider"] = "openai"
+
+        # --- FIX: Sanitize kwargs to prevent UnicodeEncodeError in headers ---
+        llm_kwargs = _sanitize_llm_kwargs(llm_kwargs)
 
         main_llm = ChatLiteLLM(**llm_kwargs)
         # Patch the instance explicitly if LiteLLM didn't pick it up
@@ -738,9 +1150,9 @@ async def initialize_llms():
         raise
 
     try:
-        logger.info(f"Inicializando LLM Rápido: {settings.fast_llm_model}")
+        logger.info(f"Inicializando LLM Rápido: {eff_fast_llm_model}")
         fast_llm_kwargs = {
-            "model_name": settings.fast_llm_model,
+            "model_name": eff_fast_llm_model,
             "temperature": 0.0,
             "streaming": True,
             "verbose": False,
@@ -752,16 +1164,19 @@ async def initialize_llms():
         if use_gpu:
             fast_llm_kwargs["device"] = "cuda"
 
-        if settings.llm_api_base:
-            fast_llm_kwargs["api_base"] = settings.llm_api_base
+        if eff_llm_api_base:
+            fast_llm_kwargs["api_base"] = eff_llm_api_base
+
+        if fast_api_key:
+            fast_llm_kwargs["api_key"] = fast_api_key
 
         # Configurar proveedor específico según el formato del modelo
-        fast_model_lower = settings.fast_llm_model.lower()
+        fast_model_lower = eff_fast_llm_model.lower()
 
         if "openrouter" in fast_model_lower:
             logger.info("🔧 Applying OpenRouter specific config for fast LLM.")
             fast_llm_kwargs["api_base"] = "https://openrouter.ai/api/v1"
-            actual_id = normalize_openrouter_model_name(settings.fast_llm_model)
+            actual_id = normalize_openrouter_model_name(eff_fast_llm_model)
             fast_llm_kwargs["model_name"] = f"openrouter/{actual_id}"
             fast_llm_kwargs["provider"] = "openai"
             apply_openrouter_model_specific_logic(actual_id, fast_llm_kwargs)
@@ -787,17 +1202,20 @@ async def initialize_llms():
             kilocode_base = "https://api.kilo.ai/api/gateway"
             fast_llm_kwargs["api_base"] = kilocode_base
             
-            # Autenticación: Usar KILOCODE_API_KEY de settings si existe
-            if settings.kilocode_api_key:
-                fast_llm_kwargs["api_key"] = settings.kilocode_api_key
+            # Autenticación
+            if fast_api_key:
+                fast_llm_kwargs["api_key"] = fast_api_key
             
             # Normalizar el nombre del modelo
-            actual_model = settings.fast_llm_model
+            actual_model = eff_fast_llm_model
             if actual_model.startswith("kilocode/"):
                 actual_model = actual_model[len("kilocode/"):]
             
             # Asegurarnos de que el model_name tenga prefijo openai/ para LiteLLM
             fast_llm_kwargs["model_name"] = f"openai/{actual_model}"
+
+        # --- FIX: Sanitize kwargs to prevent UnicodeEncodeError in headers ---
+        fast_llm_kwargs = _sanitize_llm_kwargs(fast_llm_kwargs)
 
         fast_llm = ChatLiteLLM(**fast_llm_kwargs)
         # Patch the instance explicitly if LiteLLM didn't pick it up
@@ -812,9 +1230,9 @@ async def initialize_llms():
         _fast_task_llm_instance = _main_agent_llm_instance
 
     try:
-        logger.info(f"Inicializando LLM Visión: {settings.vision_model}")
+        logger.info(f"Inicializando LLM Visión: {eff_vision_llm_model}")
         vision_llm_kwargs = {
-            "model_name": settings.vision_model,
+            "model_name": eff_vision_llm_model,
             "temperature": 0.0,
             "streaming": True,
             "verbose": False,
@@ -826,13 +1244,16 @@ async def initialize_llms():
         if use_gpu:
             vision_llm_kwargs["device"] = "cuda"
 
+        if vision_api_key:
+            vision_llm_kwargs["api_key"] = vision_api_key
+
         # Configurar proveedor específico según el formato del modelo
-        vision_model_lower = settings.vision_model.lower()
+        vision_model_lower = eff_vision_llm_model.lower()
 
         if "openrouter" in vision_model_lower:
             logger.info("🔧 Applying OpenRouter specific config for vision LLM.")
             vision_llm_kwargs["api_base"] = "https://openrouter.ai/api/v1"
-            actual_id = normalize_openrouter_model_name(settings.vision_model)
+            actual_id = normalize_openrouter_model_name(eff_vision_llm_model)
             vision_llm_kwargs["model_name"] = f"openrouter/{actual_id}"
             vision_llm_kwargs["provider"] = "openai"
             apply_openrouter_model_specific_logic(actual_id, vision_llm_kwargs)
@@ -852,17 +1273,20 @@ async def initialize_llms():
             kilocode_base = "https://api.kilo.ai/api/gateway"
             vision_llm_kwargs["api_base"] = kilocode_base
             
-            # Autenticación: Usar KILOCODE_API_KEY de settings si existe
-            if settings.kilocode_api_key:
-                vision_llm_kwargs["api_key"] = settings.kilocode_api_key
+            # Autenticación
+            if vision_api_key:
+                vision_llm_kwargs["api_key"] = vision_api_key
             
             # Normalizar el nombre del modelo
-            actual_model = settings.vision_model
+            actual_model = eff_vision_llm_model
             if actual_model.startswith("kilocode/"):
                 actual_model = actual_model[len("kilocode/"):]
             
             # Asegurarnos de que el model_name tenga prefijo openai/ para LiteLLM
             vision_llm_kwargs["model_name"] = f"openai/{actual_model}"
+
+        # --- FIX: Sanitize kwargs to prevent UnicodeEncodeError in headers ---
+        vision_llm_kwargs = _sanitize_llm_kwargs(vision_llm_kwargs)
 
         vision_llm = ChatLiteLLM(**vision_llm_kwargs)
         # Patch the instance explicitly if LiteLLM didn't pick it up

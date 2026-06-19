@@ -2,15 +2,15 @@
 
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional, AsyncGenerator
-import uuid
 
 from fastapi import APIRouter, HTTPException, Depends, status
 from pydantic import BaseModel, Field
+from sqlalchemy import select, or_, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.database import SessionLocal, Task # Importar SessionLocal y el modelo Task
+from core.database import SessionLocal, Task, ProactiveInsight # Importar modelos
 from core.tasks_manager import TasksManager # Importar el TasksManager
 from utils.security import get_current_account_id # Para obtener el account_id del usuario autenticado
 from core.dependencies import get_db_session # Importar dependencia centralizada
@@ -50,18 +50,22 @@ class TaskResponse(BaseModel):
 
 class TaskCreateRequest(BaseModel):
     """Define la estructura de datos para crear una nueva tarea."""
-    description: str = Field(..., min_length=1, max_length=500)
+    description: str = Field(..., min_length=1, max_length=2000)
     start_date: Optional[datetime] = None # Nuevo campo
     end_date: Optional[datetime] = None # due_date ahora es end_date
     workspace_id: Optional[str] = None
 
 class TaskUpdateRequest(BaseModel):
     """Define la estructura de datos para actualizar una tarea existente."""
-    description: Optional[str] = Field(None, min_length=1, max_length=500)
+    description: Optional[str] = Field(None, min_length=1, max_length=2000)
     start_date: Optional[datetime] = None # Nuevo campo
     end_date: Optional[datetime] = None # due_date ahora es end_date
     is_completed: Optional[bool] = None
     status: Optional[str] = None  # Añadido campo status
+
+class TaskCancelRequest(BaseModel):
+    """Define la estructura de datos para cancelar una tarea del tablero de resolución."""
+    justification: Optional[str] = None
 
 class ProfileLinkRequest(BaseModel):
     profile_id: uuid.UUID
@@ -241,3 +245,141 @@ async def delete_task(
     except Exception as e:
         logger.error(f"Error al eliminar tarea {task_id} para account {current_account_id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error al eliminar la tarea.")
+
+
+@router.get("/resolution-board", summary="Obtener datos para el Tablero de Resolución")
+async def get_resolution_board(
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Obtiene todas las tareas y los insights/alertas del Tablero de Resolución.
+    """
+    try:
+        account_uuid = uuid.UUID(current_account_id)
+        
+        # 1. Obtener todas las tareas del Tablero de Resolución
+        tasks_stmt = (
+            select(Task)
+            .where(
+                Task.account_id == account_uuid,
+                Task.description.like("[Tablero de Resolución]%")
+            )
+            .order_by(desc(Task.created_at))
+        )
+        tasks_result = await db.execute(tasks_stmt)
+        board_tasks = tasks_result.scalars().all()
+        
+        # 2. Obtener insights proactivos tipo 'alert' o relacionados
+        insights_stmt = (
+            select(ProactiveInsight)
+            .where(
+                ProactiveInsight.account_id == account_uuid,
+                or_(
+                    ProactiveInsight.type == "alert",
+                    ProactiveInsight.insight_message.like("%Tablero de Resolución%")
+                )
+            )
+            .order_by(desc(ProactiveInsight.created_at))
+        )
+        insights_result = await db.execute(insights_stmt)
+        board_insights = insights_result.scalars().all()
+        
+        return {
+            "tasks": [
+                {
+                    "id": str(task.id),
+                    "description": task.description,
+                    "is_completed": task.is_completed,
+                    "start_date": task.start_date.isoformat() if task.start_date else None,
+                    "end_date": task.end_date.isoformat() if task.end_date else None,
+                    "status": task.status,
+                    "created_at": task.created_at.isoformat(),
+                    "updated_at": task.updated_at.isoformat(),
+                    "workspace_id": str(task.workspace_id) if task.workspace_id else None
+                }
+                for task in board_tasks
+            ],
+            "insights": [
+                {
+                    "id": insight.id,
+                    "type": insight.type,
+                    "title": insight.title,
+                    "insight_message": insight.insight_message,
+                    "confidence_score": insight.confidence_score,
+                    "action_suggestion": insight.action_suggestion,
+                    "created_at": insight.created_at.isoformat(),
+                    "related_items": insight.related_items
+                }
+                for insight in board_insights
+            ]
+        }
+    except Exception as e:
+        logger.error(f"Error al obtener el Tablero de Resolución: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Error interno al cargar el Tablero de Resolución.")
+
+
+@router.post("/tasks/{task_id}/postpone", summary="Postergación explícita de una tarea escalada")
+async def postpone_task(
+    task_id: str,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Extiende la fecha límite de la tarea 48 horas y restablece su estado a 'Pendiente'.
+    """
+    try:
+        task_uuid = uuid.UUID(task_id)
+        account_uuid = uuid.UUID(current_account_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="ID de tarea inválido.")
+        
+    task = await db.get(Task, task_uuid)
+    if not task or task.account_id != account_uuid:
+        raise HTTPException(status_code=404, detail="Tarea no encontrada o no autorizada.")
+        
+    # Extender plazo 48 horas y poner de vuelta en Pendiente
+    task.end_date = datetime.now(task.end_date.tzinfo or None) + timedelta(hours=48)
+    task.status = "Pendiente"
+    task.updated_at = datetime.now()
+    
+    await db.commit()
+    return {
+        "message": "Tarea postergada por 48 horas.",
+        "new_due_date": task.end_date.isoformat(),
+        "status": task.status
+    }
+
+
+@router.post("/tasks/{task_id}/cancel", summary="Cancelación explícita de una tarea escalada")
+async def cancel_task(
+    task_id: str,
+    request: Optional[TaskCancelRequest] = None,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Cancela explícitamente la tarea del Tablero de Resolución, marcándola como completada y cancelada.
+    """
+    try:
+        task_uuid = uuid.UUID(task_id)
+        account_uuid = uuid.UUID(current_account_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="ID de tarea inválido.")
+        
+    task = await db.get(Task, task_uuid)
+    if not task or task.account_id != account_uuid:
+        raise HTTPException(status_code=404, detail="Tarea no encontrada o no autorizada.")
+        
+    # Cancelar la tarea y marcar como completada
+    task.status = "Cancelada"
+    task.is_completed = True
+    if request and request.justification:
+        task.description = f"{task.description} [Justificación: {request.justification}]"
+    task.updated_at = datetime.now()
+    
+    await db.commit()
+    return {
+        "message": "Tarea cancelada explícitamente.",
+        "status": task.status
+    }

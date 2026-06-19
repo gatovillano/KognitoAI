@@ -21,7 +21,15 @@ class NotesManager:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def add_note(self, account_id: str, title: Optional[str], content: str, category: Optional[str] = None, workspace_id: Optional[str] = None) -> Dict[str, Any]:
+    async def add_note(
+        self,
+        account_id: str,
+        title: Optional[str],
+        content: str,
+        category: Optional[str] = None,
+        workspace_id: Optional[str] = None,
+        is_agent_message: bool = False,
+    ) -> Dict[str, Any]:
         """
         Añade una nueva nota a la base de datos para una cuenta o workspace.
         """
@@ -66,7 +74,8 @@ class NotesManager:
             content=content,
             category=effective_category,
             embedding=note_embedding,
-            workspace_id=workspace_uuid
+            workspace_id=workspace_uuid,
+            is_agent_message=is_agent_message,
         )
         self.db.add(new_note)
         await self.db.commit()
@@ -79,11 +88,22 @@ class NotesManager:
             "content": new_note.content,
             "category": new_note.category,
             "is_starred": new_note.is_starred,
+            "is_agent_message": new_note.is_agent_message,
             "created_at": new_note.created_at.isoformat(),
             "workspace_id": str(new_note.workspace_id) if new_note.workspace_id else None,
         }
 
-    async def get_notes_as_dicts(self, account_id: str, search_query: Optional[str] = None, workspace_id: Optional[str] = None, category: Optional[str] = None, skip: int = 0, limit: int = 10) -> tuple[int, List[Dict[str, Any]]]:
+    async def get_notes_as_dicts(
+        self,
+        account_id: str,
+        search_query: Optional[str] = None,
+        workspace_id: Optional[str] = None,
+        category: Optional[str] = None,
+        skip: int = 0,
+        limit: int = 10,
+        include_agent_messages: bool = False,
+        only_agent_messages: bool = False,
+    ) -> tuple[int, List[Dict[str, Any]]]:
         """
         Recupera notas como una lista de diccionarios, incluyendo perfiles vinculados, con paginación.
         Devuelve una tupla (total_notas, lista_de_notas_paginadas).
@@ -136,6 +156,11 @@ class NotesManager:
 
         if category:
             base_stmt = base_stmt.where(Nota.category.ilike(f"%{category}%"))
+
+        if only_agent_messages:
+            base_stmt = base_stmt.where(Nota.is_agent_message.is_(True))
+        elif not include_agent_messages:
+            base_stmt = base_stmt.where(Nota.is_agent_message.is_(False))
         
         # Contar el total de notas sin paginación
         total_stmt = select(func.count()).select_from(base_stmt.subquery())
@@ -160,6 +185,7 @@ class NotesManager:
                 "category": note.category, "created_at": note.created_at.isoformat(),
                 "updated_at": note.updated_at.isoformat(),
                 "is_starred": note.is_starred,
+                "is_agent_message": note.is_agent_message,
                 "workspace_id": str(note.workspace_id) if note.workspace_id else None,
                 "workspace_name": note.workspace.name if note.workspace else None,
                 "workspace_color": note.workspace.color if note.workspace else None,
@@ -266,6 +292,43 @@ class NotesManager:
         await self.db.commit()
         logger.info(f"Nota {note_id} eliminada para la cuenta {account_id}.")
         return True
+
+    async def bulk_delete_notes(self, account_id: str, note_ids: List[int]) -> int:
+        """
+        Elimina múltiples notas por lote. Devuelve la cantidad de notas eliminadas exitosamente.
+        """
+        logger.info(f"Eliminando por lote {len(note_ids)} notas para la cuenta {account_id}")
+        deleted_count = 0
+        for note_id in note_ids:
+            if await self.delete_note(account_id, note_id):
+                deleted_count += 1
+        return deleted_count
+
+    async def bulk_update_notes(
+        self,
+        account_id: str,
+        note_ids: List[int],
+        new_category: Optional[str] = None,
+        new_workspace_id: Optional[str] = None,
+        is_starred: Optional[bool] = None
+    ) -> int:
+        """
+        Actualiza múltiples notas por lote (categoría, workspace, o estrella).
+        Devuelve la cantidad de notas actualizadas exitosamente.
+        """
+        logger.info(f"Actualizando por lote {len(note_ids)} notas para la cuenta {account_id}")
+        updated_count = 0
+        for note_id in note_ids:
+            if await self.update_note(
+                account_id=account_id,
+                note_id=note_id,
+                new_category=new_category,
+                new_workspace_id=new_workspace_id,
+                is_starred=is_starred
+            ):
+                updated_count += 1
+        return updated_count
+
 
     async def unshare_note_from_workspace(self, account_id: str, note_id: int) -> bool:
         """
@@ -472,6 +535,7 @@ class NotesManager:
             "content": note.content,
             "category": note.category,
             "is_starred": note.is_starred,
+            "is_agent_message": note.is_agent_message,
             "created_at": note.created_at.isoformat(),
             "updated_at": note.updated_at.isoformat(),
             "workspace_id": str(note.workspace_id) if note.workspace_id else None,

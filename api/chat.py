@@ -21,7 +21,13 @@ from datetime import datetime, timezone # Importar datetime y timezone
 from sqlalchemy import update, Integer, cast, func, text
 
 
-from utils.audio_transcriber import transcribe_audio_file, StreamingTranscriber, get_whisper_model
+from utils.audio_transcriber import (
+    transcribe_audio_file,
+    StreamingTranscriber,
+    get_whisper_model,
+    AudioTranscriptionError,
+    InvalidAudioFileError,
+)
 from core.tts_manager import generate_speech_streaming, get_tts_client # Importar desde el nuevo módulo
 from utils.security import get_current_account_id, get_current_user, get_current_user_from_websocket_query_param, decode_access_token # Añadido decode_access_token
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -94,6 +100,8 @@ class Message(BaseModel):
     sources: Optional[List[Source]] = None # Añadido para incluir las fuentes
     reasoning: Optional[str] = None # Añadido para persistir el pensamiento del LLM
     model_name: Optional[str] = None
+    content_parts: Optional[List[Dict[str, Any]]] = None
+    pty_session: Optional[Dict[str, Any]] = None
 
 class PaginatedChatMessagesResponse(BaseModel):
     total: int
@@ -138,6 +146,7 @@ class ChatThreadResponse(BaseModel):
     platform: Optional[str]
     workspace_id: Optional[str]
     created_at: Optional[datetime]
+    hidden_from_sidebar: Optional[bool] = False
 
 class PaginatedThreadsResponse(BaseModel):
     total: int
@@ -167,17 +176,9 @@ async def create_thread(
         await db.commit()
         await db.refresh(new_thread)
         logger.info(f"Nuevo hilo creado: {new_thread.id} para la cuenta {current_account_id}")
-
-        # Lanzar generación automática de título en background si el título es el default
-        if request.title == "Nuevo Chat":
-            try:
-                import asyncio
-                from core.agent import force_update_thread_title
-                # Lanzar en background, no bloquear respuesta
-                asyncio.create_task(force_update_thread_title(str(new_thread.id)))
-            except Exception as e:
-                logger.warning(f"No se pudo lanzar la generación automática de título para el hilo {new_thread.id}: {e}")
-
+        # Nota: NO lanzamos generación de título aquí porque el thread recién creado
+        # no tiene mensajes. El título se generará automáticamente tras el primer
+        # intercambio de mensajes (condición: título == 'Nuevo Chat' y message_count >= 3).
         return {"id": str(new_thread.id), "title": new_thread.title, "isPinned": new_thread.is_pinned, "platform": new_thread.platform, "workspace_id": str(new_thread.workspace_id) if new_thread.workspace_id else None}
     except ValueError:
         logger.error(f"El account_id o workspace_id proporcionado no es un UUID válido.")
@@ -197,15 +198,17 @@ async def get_threads(
 ):
     """
     Endpoint para obtener la lista de hilos de chat del usuario autenticado,
-    con opción de filtrar por workspace y con paginación.
+    con opción de filtrar por workspace y con paginación. Excluye hilos ocultos y del sistema.
     """
     try:
         account_uuid = uuid.UUID(current_account_id)
         
-        # Base query — excluir hilos de sistema (heartbeat) del sidebar
+        # Base query — excluir hilos de sistema (heartbeat/system) y ocultos del sidebar
         base_query = select(ChatThread).where(
             ChatThread.account_id == account_uuid,
             ChatThread.platform != "heartbeat",
+            ChatThread.platform != "system",
+            ChatThread.hidden_from_sidebar == False
         )
         
         # Filter by workspace_id if provided
@@ -233,7 +236,8 @@ async def get_threads(
                 isPinned=thread.is_pinned,
                 platform=thread.platform,
                 workspace_id=str(thread.workspace_id) if thread.workspace_id else None,
-                created_at=thread.created_at
+                created_at=thread.created_at,
+                hidden_from_sidebar=thread.hidden_from_sidebar
             ) for thread in thread_list
         ]
 
@@ -244,6 +248,58 @@ async def get_threads(
     except Exception as e:
         logger.error(f"Error al obtener la lista de hilos para la cuenta {current_account_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Ocurrió un error al obtener la lista de hilos de chat.")
+
+
+@router.get("/threads/system", response_model=PaginatedThreadsResponse, summary="Obtener hilos de sistema (heartbeats) con paginación")
+async def get_system_threads(
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session),
+    skip: int = Query(0, ge=0, description="Número de hilos a omitir"),
+    limit: int = Query(20, ge=1, le=100, description="Número máximo de hilos a devolver")
+):
+    """
+    Endpoint para obtener la lista de hilos de sistema (heartbeats) del usuario autenticado,
+    con paginación.
+    """
+    try:
+        account_uuid = uuid.UUID(current_account_id)
+        
+        # Base query — obtener solo hilos de sistema (heartbeats)
+        base_query = select(ChatThread).where(
+            ChatThread.account_id == account_uuid,
+            ChatThread.platform == "system",
+        )
+        
+        # Consulta para el total de hilos
+        total_stmt = select(func.count(ChatThread.id)).select_from(base_query.alias())
+        total_result = await db.execute(total_stmt)
+        total_threads = total_result.scalar_one()
+
+        # Consulta para los hilos paginados
+        threads_stmt = base_query.order_by(ChatThread.created_at.desc()).offset(skip).limit(limit)
+        result = await db.execute(threads_stmt)
+        thread_list = result.scalars().all()
+        
+        # Format response
+        threads_response = [
+            ChatThreadResponse(
+                id=str(thread.id),
+                title=thread.title,
+                isPinned=thread.is_pinned,
+                platform=thread.platform,
+                workspace_id=str(thread.workspace_id) if thread.workspace_id else None,
+                created_at=thread.created_at,
+                hidden_from_sidebar=thread.hidden_from_sidebar
+            ) for thread in thread_list
+        ]
+
+        return PaginatedThreadsResponse(total=total_threads, threads=threads_response)
+
+    except ValueError:
+        raise HTTPException(status_code=400, detail="El ID de la cuenta no es un UUID válido.")
+    except Exception as e:
+        logger.error(f"Error al obtener la lista de hilos de sistema para la cuenta {current_account_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Ocurrió un error al obtener la lista de hilos de sistema.")
 
 @router.get("/threads/{thread_id}/messages", response_model=PaginatedChatMessagesResponse, summary="Obtener mensajes de un hilo de chat con paginación")
 async def get_messages_for_thread(
@@ -308,6 +364,8 @@ async def get_messages_for_thread(
                 # Extraer sources si existen en additional_kwargs
                 message_sources = msg.additional_kwargs.get("sources", [])
                 message_model_name = msg.additional_kwargs.get("model_name")
+                message_content_parts = msg.additional_kwargs.get("content_parts")
+                message_pty_session = msg.additional_kwargs.get("pty_session")
                 
                 real_messages.append(Message(
                     text=text_content,
@@ -317,7 +375,9 @@ async def get_messages_for_thread(
                     images_base64=image_contents if len(image_contents) > 1 else None,
                     sources=message_sources, # Asignar las fuentes extraídas
                     reasoning=msg.additional_kwargs.get("reasoning") or msg.additional_kwargs.get("think"), # Extraer razonamiento
-                    model_name=message_model_name
+                    model_name=message_model_name,
+                    content_parts=message_content_parts,
+                    pty_session=message_pty_session
                 ))
 
         # Sort messages by created_at in ascending order
@@ -1017,13 +1077,15 @@ async def transcribe_audio(file: UploadFile = File(...)):
         file_format = file.filename.split('.')[-1] if file.filename else "webm"
         
         logger.info(f"Recibida solicitud para transcribir el archivo: {file.filename}")
-        
         transcription = await transcribe_audio_file(audio_file_io, file_format)
 
-        if transcription is None:
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="No se pudo transcribir el audio.")
-
         return {"transcription": transcription}
+    except InvalidAudioFileError as e:
+        logger.warning(f"Archivo de audio inválido recibido para transcripción: {e}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except AudioTranscriptionError as e:
+        logger.error(f"Error controlado en la transcripción de audio: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="No se pudo transcribir el audio.")
     except Exception as e:
         logger.error(f"Error en la transcripción de audio: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Error interno del servidor: {e}")
@@ -1500,38 +1562,118 @@ async def create_and_run_agent_streaming(
 
         # Guardar el AIMessage final completo en el historial
         logger.info(f"DEBUG (create_and_run_agent_streaming): Guardando respuesta final en historial. thread_id: {thread_id}, task_id: {task_id}")
+        
+        # Reconstruir content_parts para persistencia en base de datos
+        ai_content_parts: List[Dict[str, Any]] = []
+        
+        # 1. Extraer razonamiento si existe
+        reasoning_text = final_ai_message.additional_kwargs.get("reasoning") or final_ai_message.additional_kwargs.get("think")
+        if reasoning_text:
+            ai_content_parts.append({
+                "type": "reasoning",
+                "content": reasoning_text
+            })
+            
+        # 2. Identificar el último HumanMessage para procesar solo el turno actual
+        last_human_idx = -1
+        for idx in range(len(final_messages) - 1, -1, -1):
+            if isinstance(final_messages[idx], HumanMessage):
+                last_human_idx = idx
+                break
+                
+        # 3. Extraer mensajes intermedios del turno actual
+        intermediate_messages = []
+        if last_human_idx != -1:
+            intermediate_messages = final_messages[last_human_idx + 1 : -1]
+            
+        # 4. Agrupar resultados de herramientas
+        tool_results = {}
+        for msg in intermediate_messages:
+            if isinstance(msg, ToolMessage):
+                tool_results[msg.tool_call_id] = msg
+                
+        # 5. Parsear llamadas de herramientas
+        for msg in intermediate_messages:
+            if isinstance(msg, AIMessage) and msg.tool_calls:
+                for tool_call in msg.tool_calls:
+                    tool_call_id = tool_call.get("id")
+                    tool_name = tool_call.get("name")
+                    
+                    tool_msg = tool_results.get(tool_call_id)
+                    status = "end"
+                    content = f"Usando {tool_name}..."
+                    pty_session = None
+                    
+                    if tool_msg:
+                        content = str(tool_msg.content)
+                        if tool_name == "terminal_executor":
+                            import re
+                            match = re.search(r'data-session-id="([^"]+)"', content)
+                            if match:
+                                pty_session = {"session_id": match.group(1)}
+                    else:
+                        status = "error"
+                        
+                    ai_content_parts.append({
+                        "type": "tool_call",
+                        "content": content,
+                        "tool_name": tool_name,
+                        "status": status,
+                        "pty_session": pty_session,
+                        "id": tool_call_id
+                    })
+                    
+        # 6. Extraer texto final del AI
+        final_text = _extract_text_content(final_ai_message)
+        if final_text:
+            ai_content_parts.append({
+                "type": "text",
+                "content": final_text
+            })
+            
+        # 7. Obtener la sesión PTY para el nivel raíz si aplica
+        root_pty_session = None
+        for part in ai_content_parts:
+            if part.get("type") == "tool_call" and part.get("pty_session"):
+                root_pty_session = part["pty_session"]
+                break
+                
+        # 8. Modificar additional_kwargs
+        additional_kwargs = dict(final_ai_message.additional_kwargs)
+        additional_kwargs["content_parts"] = ai_content_parts
+        if root_pty_session:
+            additional_kwargs["pty_session"] = root_pty_session
+
         # Sanitizar el contenido del mensaje antes de guardarlo
         sanitized_ai_message = AIMessage(
             content=sanitize_json_content(final_ai_message.content),
             tool_calls=final_ai_message.tool_calls,
-            additional_kwargs=final_ai_message.additional_kwargs
+            additional_kwargs=additional_kwargs
         )
         await chat_message_history.aadd_messages([sanitized_ai_message])
 
         # El resto de la lógica para actualizar el título y enviar el evento final
         # Optimization: Calculate message count locally to avoid fetching all messages again
-        if background_tasks:
-            # updated_history = await chat_message_history.aget_messages() # Removed
-            # real_messages = [m for m in updated_history if not (hasattr(m, 'additional_kwargs') and m.additional_kwargs.get("role") == "summary")]
-            
-            # Estimate count: previous history + user message + AI message
-            # We filter summary messages from history_messages first
-            previous_real_messages = [m for m in history_messages if not (hasattr(m, 'additional_kwargs') and m.additional_kwargs.get("role") == "summary")]
-            message_count = len(previous_real_messages) + 2 # +1 User, +1 AI
+        # Calcular si corresponde renombrar el hilo (aplica siempre, con o sin background_tasks)
+        previous_real_messages = [m for m in history_messages if not (hasattr(m, 'additional_kwargs') and m.additional_kwargs.get("role") == "summary")]
+        message_count = len(previous_real_messages) + 2  # +1 User, +1 AI
 
-            async with DBSession(SessionLocal) as db:
-                thread = await db.get(ChatThread, uuid.UUID(thread_id))
-                current_title = thread.title if thread else ""
+        async with DBSession(SessionLocal) as db:
+            thread = await db.get(ChatThread, uuid.UUID(thread_id))
+            current_title = thread.title if thread else ""
 
-            should_rename = (
-                (current_title == "Nuevo Chat" and message_count >= 3) or
-                (message_count >= 10 and message_count % 10 == 0)
-            )
+        should_rename = (
+            (current_title == "Nuevo Chat" and message_count >= 2) or
+            (message_count >= 10 and message_count % 10 == 0)
+        )
 
-            if should_rename:
-                from core.agent import force_update_thread_title
-                logger.info(f"[AUTO-TÍTULO] Hilo {thread_id} cumple condición para nombrar/renombrar con {message_count} mensajes. Título actual: '{current_title}'")
-                background_tasks.add_task(force_update_thread_title, thread_id)
+        if should_rename:
+            from core.agent import force_update_thread_title
+            logger.info(f"[AUTO-TÍTULO] Hilo {thread_id} cumple condición para nombrar/renombrar con {message_count} mensajes. Título actual: '{current_title}'")
+            # Siempre usar asyncio.create_task ya que esta función corre dentro de un asyncio.Task
+            # (background_tasks de FastAPI puede no ser válido en este contexto)
+            import asyncio as _asyncio
+            _asyncio.create_task(force_update_thread_title(thread_id))
         
         # --- Lógica de Extracción de Fuentes Finales ---
         # Las fuentes ya deberían estar correctamente priorizadas y procesadas en el AIMessage final

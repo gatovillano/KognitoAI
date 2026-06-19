@@ -7,22 +7,11 @@ import {
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
-import mermaid from 'mermaid';
 import { Maximize2, Activity } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 interface MermaidViewerProps {
   mermaidCode: string;
-}
-
-// Inicializar mermaid fuera del componente
-if (typeof window !== 'undefined') {
-  mermaid.initialize({
-    startOnLoad: true,
-    theme: 'dark',
-    securityLevel: 'loose',
-    fontFamily: 'Inter, system-ui, sans-serif',
-  });
 }
 
 const MermaidViewer: React.FC<MermaidViewerProps> = ({ mermaidCode }) => {
@@ -39,6 +28,16 @@ const MermaidViewer: React.FC<MermaidViewerProps> = ({ mermaidCode }) => {
       try {
         // Asegurar que el contenedor sea visible y no se quede oculto de ejecuciones previas
         container.style.display = '';
+        
+        // Importar e inicializar dinámicamente mermaid
+        const mermaidModule = await import('mermaid');
+        const mermaid = mermaidModule.default;
+        mermaid.initialize({
+          startOnLoad: false,
+          theme: 'dark',
+          securityLevel: 'loose',
+          fontFamily: 'Inter, system-ui, sans-serif',
+        });
         
         // Renderizar usando el contenedor para evitar errores en Portales/Dialogs
         const { svg } = await mermaid.render(id, mermaidCode, container);

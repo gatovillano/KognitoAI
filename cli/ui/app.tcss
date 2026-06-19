@@ -1,0 +1,492 @@
+/* ═══════════════════════════════════════════════════════════════════
+   KognitoAI CLI — Corporate Dark TUI Theme
+   Textual CSS v8+
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Global ──────────────────────────────────────────────────────── */
+Screen {
+    background: #0a0e1a;
+    color: #e2e8f0;
+    layers: base overlay;
+}
+
+/* ── Login Screen ─────────────────────────────────────────────────── */
+#login-container {
+    align: center middle;
+    width: 60;
+    height: auto;
+    background: #0f1629;
+    border: solid #6C63FF;
+    padding: 2 4;
+}
+
+#login-logo {
+    content-align: center middle;
+    color: #6C63FF;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#login-subtitle {
+    content-align: center middle;
+    color: #64748b;
+    margin-bottom: 2;
+}
+
+#login-error {
+    color: #f87171;
+    content-align: center middle;
+    margin-top: 1;
+}
+
+/* ── Sidebar ──────────────────────────────────────────────────────── */
+#sidebar {
+    width: 28;
+    background: #0f1629;
+    border-right: solid #1e2840;
+    layout: vertical;
+    padding: 0 0 1 0;
+}
+
+#sidebar-header {
+    background: #0a0e1a;
+    padding: 1 2;
+    border-bottom: solid #1e2840;
+    height: 5;
+}
+
+#logo-text {
+    color: #6C63FF;
+    text-style: bold;
+    content-align: left middle;
+}
+
+#logo-sub {
+    color: #475569;
+    content-align: left middle;
+}
+
+#threads-label {
+    color: #6C63FF;
+    text-style: bold;
+    padding: 1 2 0 2;
+    margin-top: 1;
+}
+
+#thread-list {
+    height: 1fr;
+    background: transparent;
+    scrollbar-background: #0f1629;
+    scrollbar-color: #2d3a56;
+    scrollbar-color-hover: #6C63FF;
+    padding: 0 1;
+}
+
+#thread-list > ListItem {
+    padding: 0 1;
+    color: #94a3b8;
+    border-bottom: solid #1a2035;
+    height: 3;
+}
+
+#thread-list > ListItem:hover {
+    background: #1a2035;
+    color: #e2e8f0;
+}
+
+#thread-list > ListItem.--highlight {
+    background: #1e2a4a;
+    color: #6C63FF;
+    text-style: bold;
+}
+
+#new-chat-btn {
+    margin: 1 2;
+    background: #6C63FF;
+    color: #ffffff;
+    border: none;
+    height: 3;
+}
+
+#new-chat-btn:hover {
+    background: #8b85ff;
+}
+
+#sidebar-footer {
+    background: #0a0e1a;
+    border-top: solid #1e2840;
+    padding: 1 2;
+    height: 5;
+}
+
+#user-info {
+    color: #94a3b8;
+}
+
+/* ── Main Content ──────────────────────────────────────────────────── */
+#main-content {
+    layout: vertical;
+    background: #0a0e1a;
+}
+
+/* ── Tab Bar ──────────────────────────────────────────────────────── */
+#tab-bar {
+    height: 3;
+    background: #0f1629;
+    border-bottom: solid #1e2840;
+    layout: horizontal;
+    padding: 0 2;
+}
+
+.tab-btn {
+    height: 3;
+    border: none;
+    background: transparent;
+    color: #475569;
+    padding: 0 2;
+    min-width: 12;
+}
+
+.tab-btn:hover {
+    background: #1a2035;
+    color: #e2e8f0;
+}
+
+.tab-btn.active {
+    color: #6C63FF;
+    text-style: bold;
+    border-bottom: solid #6C63FF;
+}
+
+/* ── Chat Panel ───────────────────────────────────────────────────── */
+#chat-panel {
+    layout: vertical;
+    height: 1fr;
+}
+
+#thread-title-bar {
+    background: #0f1629;
+    border-bottom: solid #1e2840;
+    padding: 0 3;
+    height: 3;
+    layout: horizontal;
+    align: left middle;
+}
+
+#thread-title {
+    color: #e2e8f0;
+    text-style: bold;
+    width: 1fr;
+    content-align: left middle;
+}
+
+#messages-scroll {
+    height: 1fr;
+    background: #0a0e1a;
+    scrollbar-background: #0a0e1a;
+    scrollbar-color: #1e2840;
+    scrollbar-color-hover: #6C63FF;
+    padding: 1 2;
+}
+
+/* ── Message Bubbles ──────────────────────────────────────────────── */
+.msg-user {
+    background: #1a2a4a;
+    border: solid #2d4070;
+    border-left: tall #6C63FF;
+    padding: 1 2;
+    margin: 0 0 1 8;
+    color: #e2e8f0;
+}
+
+.msg-user .msg-sender {
+    color: #6C63FF;
+    text-style: bold;
+}
+
+.msg-ai {
+    background: #0f1a2e;
+    border: solid #1e2840;
+    border-left: tall #10b981;
+    padding: 1 2;
+    margin: 0 8 1 0;
+    color: #e2e8f0;
+}
+
+.msg-ai .msg-sender {
+    color: #10b981;
+    text-style: bold;
+}
+
+.msg-timestamp {
+    color: #334155;
+}
+
+/* ── Typing indicator ─────────────────────────────────────────────── */
+#typing-indicator {
+    color: #6C63FF;
+    padding: 0 2;
+    height: 2;
+}
+
+/* ── Input bar ────────────────────────────────────────────────────── */
+#input-bar {
+    background: #0f1629;
+    border-top: solid #1e2840;
+    padding: 1 2;
+    height: 5;
+    layout: horizontal;
+}
+
+#chat-input {
+    height: 3;
+    width: 1fr;
+    background: #1a2035;
+    color: #e2e8f0;
+    border: solid #2d3a56;
+    padding: 0 2;
+}
+
+#chat-input:focus {
+    border: solid #6C63FF;
+}
+
+#send-btn {
+    width: 12;
+    height: 3;
+    background: #6C63FF;
+    color: #ffffff;
+    border: none;
+    margin-left: 1;
+    content-align: center middle;
+}
+
+#send-btn:hover {
+    background: #8b85ff;
+}
+
+#send-btn:disabled {
+    background: #2d3a56;
+    color: #475569;
+}
+
+/* ── Doc Editor Panel ─────────────────────────────────────────────── */
+#doc-panel {
+    layout: vertical;
+    height: 1fr;
+}
+
+#doc-toolbar {
+    background: #0f1629;
+    border-bottom: solid #1e2840;
+    padding: 0 2;
+    height: 3;
+    layout: horizontal;
+    align: left middle;
+}
+
+.doc-tool-btn {
+    height: 3;
+    background: transparent;
+    color: #94a3b8;
+    border: none;
+    padding: 0 2;
+    min-width: 10;
+}
+
+.doc-tool-btn:hover {
+    background: #1a2035;
+    color: #6C63FF;
+}
+
+.doc-tool-btn.-active {
+    color: #6C63FF;
+    text-style: bold;
+}
+
+#doc-editor {
+    height: 1fr;
+    background: #0c1020;
+    color: #e2e8f0;
+    border: none;
+    padding: 2 4;
+}
+
+#doc-statusbar {
+    background: #0f1629;
+    border-top: solid #1e2840;
+    padding: 0 2;
+    height: 2;
+    layout: horizontal;
+    align: left middle;
+    color: #475569;
+}
+
+#doc-status-text {
+    width: 1fr;
+    color: #475569;
+}
+
+#doc-export-btns {
+    layout: horizontal;
+    align: right middle;
+    height: 2;
+}
+
+.export-btn {
+    height: 2;
+    background: #1a2035;
+    color: #6C63FF;
+    border: none;
+    padding: 0 2;
+    margin-left: 1;
+}
+
+.export-btn:hover {
+    background: #6C63FF;
+    color: #ffffff;
+}
+
+/* ── Code Editor Panel ────────────────────────────────────────────── */
+#code-panel {
+    layout: vertical;
+    height: 1fr;
+}
+
+#code-header {
+    background: #0f1629;
+    border-bottom: solid #1e2840;
+    padding: 0 2;
+    height: 3;
+    layout: horizontal;
+    align: left middle;
+}
+
+#code-title {
+    color: #10b981;
+    text-style: bold;
+    width: 1fr;
+}
+
+#code-lang-label {
+    color: #475569;
+}
+
+#code-editor {
+    height: 1fr;
+    background: #060a14;
+    color: #e2e8f0;
+    border: none;
+    padding: 1 3;
+}
+
+#code-statusbar {
+    background: #0f1629;
+    border-top: solid #1e2840;
+    padding: 0 2;
+    height: 2;
+    layout: horizontal;
+    color: #475569;
+    align: left middle;
+}
+
+#code-status-info {
+    width: 1fr;
+}
+
+.code-btn {
+    height: 2;
+    background: #1a2035;
+    color: #10b981;
+    border: none;
+    padding: 0 2;
+    margin-left: 1;
+}
+
+.code-btn:hover {
+    background: #10b981;
+    color: #0a0e1a;
+}
+
+/* ── Modal / Dialog ───────────────────────────────────────────────── */
+#modal-overlay {
+    align: center middle;
+    layer: overlay;
+}
+
+.modal-box {
+    background: #0f1629;
+    border: solid #6C63FF;
+    padding: 2 4;
+    width: 70;
+    height: auto;
+    max-height: 80vh;
+}
+
+.modal-title {
+    color: #6C63FF;
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+/* ── Notifications / Toast ────────────────────────────────────────── */
+Toast {
+    background: #1a2a4a;
+    border: solid #6C63FF;
+    color: #e2e8f0;
+}
+
+/* ── Input & Select ───────────────────────────────────────────────── */
+Input {
+    background: #1a2035;
+    color: #e2e8f0;
+    border: solid #2d3a56;
+}
+
+Input:focus {
+    border: solid #6C63FF;
+}
+
+Label {
+    color: #94a3b8;
+    margin-bottom: 1;
+}
+
+Select {
+    background: #1a2035;
+    color: #e2e8f0;
+    border: solid #2d3a56;
+}
+
+/* ── Scrollbar global ─────────────────────────────────────────────── */
+ScrollBar {
+    background: #0a0e1a;
+    color: #1e2840;
+}
+
+ScrollBar:hover {
+    color: #6C63FF;
+}
+
+/* ── Welcome Screen ───────────────────────────────────────────────── */
+#welcome-panel {
+    align: center middle;
+    layout: vertical;
+}
+
+#welcome-logo {
+    content-align: center middle;
+    color: #6C63FF;
+    text-style: bold;
+    margin-bottom: 2;
+}
+
+#welcome-hint {
+    content-align: center middle;
+    color: #334155;
+}
+
+.welcome-shortcut {
+    color: #6C63FF;
+    text-style: bold;
+}

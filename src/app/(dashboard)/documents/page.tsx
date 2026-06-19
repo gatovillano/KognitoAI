@@ -633,6 +633,17 @@ export default function DocumentsPage() {
     }
   };
 
+  const handleVectorize = async (doc: OnlyOfficeDoc) => {
+    const toastId = toast.loading(`Vectorizando e indexando "${doc.filename}"...`);
+    try {
+      await apiClient.post(`/api/onlyoffice/${doc.id}/vectorize`);
+      toast.success(`Documento "${doc.filename}" indexado correctamente para el RAG`, { id: toastId });
+    } catch (error: any) {
+      const errorMessage = error?.response?.data?.detail || 'Error al vectorizar el documento';
+      toast.error(errorMessage, { id: toastId });
+    }
+  };
+
   const fetchDocumentShareLinks = async (docId: string) => {
     setIsLoadingShareLinks(true);
     try {
@@ -890,6 +901,7 @@ export default function DocumentsPage() {
       case 'docx': case 'doc': case 'txt': return 'text-blue-500 bg-blue-500/10';
       case 'xlsx': case 'xls': case 'csv': return 'text-emerald-500 bg-emerald-500/10';
       case 'pptx': case 'ppt': return 'text-orange-500 bg-orange-500/10';
+      case 'pdf': return 'text-rose-500 bg-rose-500/10';
       default: return 'text-slate-500 bg-slate-500/10';
     }
   };
@@ -1101,7 +1113,7 @@ export default function DocumentsPage() {
             id="file-upload"
             className="hidden"
             onChange={handleUpload}
-            accept=".docx,.xlsx,.pptx,.doc,.xls,.ppt,.txt,.csv"
+            accept=".docx,.xlsx,.pptx,.doc,.xls,.ppt,.txt,.csv,.pdf"
           />
         </div>
       </div>
@@ -1498,6 +1510,13 @@ export default function DocumentsPage() {
                             <Copy className="h-4 w-4" />
                             <span className="font-medium">Duplicar Documento</span>
                           </DropdownMenuItem>
+                          <DropdownMenuItem 
+                            onClick={() => handleVectorize(doc)}
+                            className="gap-2 cursor-pointer py-2 px-3"
+                          >
+                            <Layers className="h-4 w-4 text-emerald-500" />
+                            <span className="font-medium text-emerald-500">Vectorizar (RAG)</span>
+                          </DropdownMenuItem>
                           <div className="h-px bg-border/40 my-1" />
                           <DropdownMenuItem 
                             onClick={() => handleDelete(doc.id, doc.filename)} 
@@ -1771,6 +1790,13 @@ export default function DocumentsPage() {
                           >
                             <Copy className="h-4 w-4" />
                             <span className="font-medium">Duplicar Documento</span>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem 
+                            onClick={(e) => { e.stopPropagation(); handleVectorize(doc); }}
+                            className="gap-2 cursor-pointer py-2 px-3"
+                          >
+                            <Layers className="h-4 w-4 text-emerald-500" />
+                            <span className="font-medium text-emerald-500">Vectorizar (RAG)</span>
                           </DropdownMenuItem>
                           <div className="h-px bg-border/40 my-1" />
                           <DropdownMenuItem 
@@ -2185,6 +2211,37 @@ export default function DocumentsPage() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsShareDialogOpen(false)}>
               Cerrar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Delete Confirm Dialog */}
+      <Dialog open={bulkDeleteConfirmOpen} onOpenChange={setBulkDeleteConfirmOpen}>
+        <DialogContent className="sm:max-w-md rounded-[2rem] border-destructive/10 shadow-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold flex items-center gap-3 text-destructive">
+              <div className="p-2 rounded-xl bg-destructive/10 text-destructive">
+                <Trash2 className="h-6 w-6" />
+              </div>
+              Eliminar Elementos
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-muted-foreground">
+              ¿Estás seguro de que deseas eliminar los {selectedDocs.length + selectedFolders.length} elementos seleccionados? Esta acción no se puede deshacer.
+            </p>
+          </div>
+          <DialogFooter className="sm:justify-end gap-3">
+            <Button variant="outline" onClick={() => setBulkDeleteConfirmOpen(false)} className="rounded-xl h-12 px-6">
+              Cancelar
+            </Button>
+            <Button 
+              variant="destructive" 
+              onClick={handleBulkDelete} 
+              className="rounded-xl h-12 px-8 shadow-lg shadow-destructive/20 font-bold"
+            >
+              Sí, eliminar
             </Button>
           </DialogFooter>
         </DialogContent>

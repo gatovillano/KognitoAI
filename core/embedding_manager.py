@@ -55,15 +55,23 @@ class KognitoInternalEmbeddingService(EmbeddingService):
         self.use_fp16 = use_fp16
         if KognitoInternalEmbeddingService._model is None:
             logger.info(f"✨ Cargando modelo de embeddings interno: {self.model_name}...")
+            device = getattr(settings, "embedding_device", None)
+            if device:
+                logger.info(f"⚙️ Cargando modelo de embeddings en dispositivo configurado: {device}")
+            else:
+                logger.info(f"⚙️ Cargando modelo de embeddings con dispositivo automático (GPU si está disponible)")
             try:
-                # Intentar cargar con dispositivo automático (normalmente GPU si está disponible)
-                KognitoInternalEmbeddingService._model = SentenceTransformer(self.model_name)
+                KognitoInternalEmbeddingService._model = SentenceTransformer(self.model_name, device=device)
                 if self.use_fp16:
                     KognitoInternalEmbeddingService._model.half()
                 logger.info(f"✅ Modelo de embeddings interno cargado exitosamente.")
             except Exception as e:
-                if "CUDA out of memory" in str(e) or "out of memory" in str(e).lower():
-                    logger.warning(f"⚠️ GPU llena (OOM), reintentando carga en CPU...")
+                if device == "cpu":
+                    logger.error(f"❌ Error crítico cargando modelo en CPU: {e}")
+                    raise e
+                
+                if "CUDA out of memory" in str(e) or "out of memory" in str(e).lower() or device != "cpu":
+                    logger.warning(f"⚠️ Error al cargar en {device or 'GPU'} ({e}), reintentando carga en CPU...")
                     try:
                         KognitoInternalEmbeddingService._model = SentenceTransformer(self.model_name, device="cpu")
                         logger.info(f"✅ Modelo de embeddings cargado exitosamente en CPU como fallback.")

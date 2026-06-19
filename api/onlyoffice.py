@@ -9,8 +9,8 @@ import httpx
 import jwt
 from datetime import datetime
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Request, Response
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Request
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_
 from pydantic import BaseModel
@@ -26,8 +26,14 @@ from core.database import (
     OnlyOfficeDocumentChat,
 )
 from core.dependencies import get_db_session
-from utils.security import get_current_account_id, check_workspace_permission
+from utils.security import get_current_account_id, check_workspace_permission, decode_access_token
 from core.config import settings
+from core.onlyoffice_storage import (
+    build_onlyoffice_relative_path,
+    ensure_onlyoffice_account_dir,
+    get_onlyoffice_docs_root,
+    resolve_onlyoffice_file_path,
+)
 
 def check_office_libs():
     """Verifica dinámicamente qué librerías de oficina están instaladas."""
@@ -112,9 +118,8 @@ async def _can_access_document(
     return False
 
 # Directorio para los documentos de OnlyOffice
-# Usar la ruta original de almacenamiento (funciona en host y docker)
-DEFAULT_DOCS_ROOT = "/media/gato/Almacenamiento/Nueva Fototeca/kognitoalbums/documents"
-DOCUMENTS_ROOT = os.environ.get("ONLYOFFICE_DOCS_ROOT", DEFAULT_DOCS_ROOT)
+# Usar la ruta configurada en settings
+DOCUMENTS_ROOT = str(get_onlyoffice_docs_root())
 os.makedirs(DOCUMENTS_ROOT, exist_ok=True)
 
 @router.post("/upload")
@@ -138,16 +143,15 @@ async def upload_document(
     extension = filename.split('.')[-1].lower() if '.' in filename else ""
     
     # Validar extensiones soportadas por OnlyOffice (básico)
-    supported = ['docx', 'xlsx', 'pptx', 'doc', 'xls', 'ppt', 'txt', 'csv', 'md']
+    supported = ['docx', 'xlsx', 'pptx', 'doc', 'xls', 'ppt', 'txt', 'csv', 'md', 'pdf']
     if extension not in supported:
         raise HTTPException(status_code=400, detail=f"Extensión .{extension} no soportada.")
 
     # Guardar archivo físicamente
     unique_filename = f"{uuid.uuid4()}.{extension}"
-    user_dir = os.path.join(DOCUMENTS_ROOT, current_account_id)
-    os.makedirs(user_dir, exist_ok=True)
+    user_dir = ensure_onlyoffice_account_dir(current_account_id)
     
-    file_path = os.path.join(user_dir, unique_filename)
+    file_path = user_dir / unique_filename
     
     try:
         content = await file.read()
@@ -157,14 +161,24 @@ async def upload_document(
         logger.error(f"Error al guardar archivo OnlyOffice: {e}")
         raise HTTPException(status_code=500, detail="Error al guardar el archivo en el servidor.")
     
+    # Obtener folder_id
+    fid = uuid.UUID(folder_id) if folder_id and folder_id != "null" else None
+    ws_id = uuid.UUID(workspace_id) if workspace_id and workspace_id != "null" else None
+    
+    # Inherit workspace_id from folder if not provided
+    if fid and not ws_id:
+        folder = await db.get(DocumentFolder, fid)
+        if folder:
+            ws_id = folder.workspace_id
+
     # Guardar metadatos en la base de datos
     new_doc = Document(
         account_id=account_id_uuid,
-        workspace_id=uuid.UUID(workspace_id) if workspace_id else None,
+        workspace_id=ws_id,
         filename=filename,
         extension=extension,
-        file_path=os.path.join(current_account_id, unique_filename),
-        folder_id=uuid.UUID(folder_id) if folder_id and folder_id != "null" else None
+        file_path=build_onlyoffice_relative_path(current_account_id, unique_filename),
+        folder_id=fid
     )
     db.add(new_doc)
     await db.commit()
@@ -265,6 +279,27 @@ async def list_folders(
     
     return folders
 
+async def update_folder_workspace_recursive(folder_id: uuid.UUID, workspace_id: Optional[uuid.UUID], db: AsyncSession):
+    # 1. Update all documents in this folder
+    docs_stmt = select(Document).where(Document.folder_id == folder_id)
+    docs = (await db.execute(docs_stmt)).scalars().all()
+    for doc in docs:
+        doc.workspace_id = workspace_id
+        # Update associated chat thread if it exists
+        mapping_stmt = select(OnlyOfficeDocumentChat).where(OnlyOfficeDocumentChat.document_id == doc.id)
+        mapping = (await db.execute(mapping_stmt)).scalars().first()
+        if mapping:
+            thread = await db.get(ChatThread, mapping.thread_id)
+            if thread:
+                thread.workspace_id = workspace_id
+
+    # 2. Update all subfolders recursively
+    subfolders_stmt = select(DocumentFolder).where(DocumentFolder.parent_id == folder_id)
+    subfolders = (await db.execute(subfolders_stmt)).scalars().all()
+    for subfolder in subfolders:
+        subfolder.workspace_id = workspace_id
+        await update_folder_workspace_recursive(subfolder.id, workspace_id, db)
+
 @router.post("/folders")
 async def create_folder(
     name: str = Form(...),
@@ -274,10 +309,19 @@ async def create_folder(
     db: AsyncSession = Depends(get_db_session)
 ):
     """Crea una nueva carpeta para OnlyOffice."""
+    parent_uuid = uuid.UUID(parent_id) if parent_id and parent_id != "null" else None
+    ws_uuid = uuid.UUID(workspace_id) if workspace_id and workspace_id != "null" else None
+    
+    # Inherit workspace_id from parent folder if not provided
+    if parent_uuid and not ws_uuid:
+        parent_folder = await db.get(DocumentFolder, parent_uuid)
+        if parent_folder:
+            ws_uuid = parent_folder.workspace_id
+
     new_folder = DocumentFolder(
         account_id=uuid.UUID(current_account_id),
-        workspace_id=uuid.UUID(workspace_id) if workspace_id and workspace_id != "null" else None,
-        parent_id=uuid.UUID(parent_id) if parent_id and parent_id != "null" else None,
+        workspace_id=ws_uuid,
+        parent_id=parent_uuid,
         name=name
     )
     db.add(new_folder)
@@ -335,11 +379,20 @@ async def create_document(
         logger.error(f"Error al crear archivo OnlyOffice: {e}")
         raise HTTPException(status_code=500, detail="Error al crear el archivo físico.")
 
+    fid = uuid.UUID(folder_id) if folder_id and folder_id != "null" else None
+    ws_id = uuid.UUID(workspace_id) if workspace_id and workspace_id != "null" else None
+    
+    # Inherit workspace_id from folder if not provided
+    if fid and not ws_id:
+        folder = await db.get(DocumentFolder, fid)
+        if folder:
+            ws_id = folder.workspace_id
+
     # Guardar en DB
     new_doc = Document(
         account_id=uuid.UUID(current_account_id),
-        workspace_id=uuid.UUID(workspace_id) if workspace_id and workspace_id != "null" else None,
-        folder_id=uuid.UUID(folder_id) if folder_id and folder_id != "null" else None,
+        workspace_id=ws_id,
+        folder_id=fid,
         filename=full_filename,
         extension=extension,
         file_path=os.path.join(current_account_id, unique_filename)
@@ -374,7 +427,24 @@ async def update_document_meta(
         doc.workspace_id = uuid.UUID(workspace_id) if workspace_id != "null" else None
     
     if folder_id:
-        doc.folder_id = uuid.UUID(folder_id) if folder_id != "null" else None
+        if folder_id == "null":
+            doc.folder_id = None
+        else:
+            fid = uuid.UUID(folder_id)
+            doc.folder_id = fid
+            # Inherit workspace_id from folder if not explicitly provided
+            if not workspace_id:
+                folder = await db.get(DocumentFolder, fid)
+                if folder:
+                    doc.workspace_id = folder.workspace_id
+                    
+    # Sync associated chat thread if it exists
+    mapping_stmt = select(OnlyOfficeDocumentChat).where(OnlyOfficeDocumentChat.document_id == doc.id)
+    mapping = (await db.execute(mapping_stmt)).scalars().first()
+    if mapping:
+        thread = await db.get(ChatThread, mapping.thread_id)
+        if thread:
+            thread.workspace_id = doc.workspace_id
         
     await db.commit()
     return {"message": "Metadatos actualizados"}
@@ -398,9 +468,22 @@ async def update_folder_meta(
 
     if workspace_id:
         folder.workspace_id = uuid.UUID(workspace_id) if workspace_id != "null" else None
+        # Recursively update all subfolders and documents inside this folder
+        await update_folder_workspace_recursive(folder.id, folder.workspace_id, db)
     
     if parent_id:
-        folder.parent_id = uuid.UUID(parent_id) if parent_id != "null" else None
+        if parent_id == "null":
+            folder.parent_id = None
+        else:
+            pid = uuid.UUID(parent_id)
+            folder.parent_id = pid
+            # Inherit workspace from parent folder if not explicitly provided
+            if not workspace_id:
+                parent_folder = await db.get(DocumentFolder, pid)
+                if parent_folder:
+                    folder.workspace_id = parent_folder.workspace_id
+                    # Recursively update all subfolders and documents inside this folder
+                    await update_folder_workspace_recursive(folder.id, folder.workspace_id, db)
         
     await db.commit()
     return {"message": "Metadatos de carpeta actualizados"}
@@ -421,8 +504,8 @@ async def delete_folder(
         docs_stmt = select(Document).where(Document.folder_id == fid)
         docs = (await db.execute(docs_stmt)).scalars().all()
         for doc in docs:
-            file_full_path = os.path.join(DOCUMENTS_ROOT, doc.file_path)
-            if os.path.exists(file_full_path):
+            file_full_path = resolve_onlyoffice_file_path(doc.file_path)
+            if file_full_path.exists():
                 try:
                     os.remove(file_full_path)
                 except Exception as e:
@@ -751,6 +834,14 @@ async def get_or_create_document_chat_link(
     if not await _can_access_document(doc, current_account_id, db):
         raise HTTPException(status_code=403, detail="No tienes acceso a este documento")
 
+    effective_workspace_id = doc.workspace_id
+    if effective_workspace_id is None and doc.folder_id is not None:
+        folder = await db.get(DocumentFolder, doc.folder_id)
+        if folder:
+            effective_workspace_id = folder.workspace_id
+            doc.workspace_id = effective_workspace_id
+            await db.commit()
+
     mapping_stmt = select(OnlyOfficeDocumentChat).where(OnlyOfficeDocumentChat.document_id == doc.id)
     mapping = (await db.execute(mapping_stmt)).scalars().first()
 
@@ -758,7 +849,7 @@ async def get_or_create_document_chat_link(
         title_base = doc.filename.rsplit('.', 1)[0] if doc.filename else "Documento"
         thread = ChatThread(
             account_id=doc.account_id,
-            workspace_id=doc.workspace_id,
+            workspace_id=effective_workspace_id,
             title=f"Chat documento: {title_base} (Nueva sesión)" if force_new else f"Chat documento: {title_base}",
             platform="web",
             created_at=datetime.now(),
@@ -782,6 +873,12 @@ async def get_or_create_document_chat_link(
         
         await db.commit()
         await db.refresh(mapping)
+    else:
+        # Verify that the existing thread's workspace_id matches the document's workspace_id
+        thread = await db.get(ChatThread, mapping.thread_id)
+        if thread and thread.workspace_id != effective_workspace_id:
+            thread.workspace_id = effective_workspace_id
+            await db.commit()
 
     share_stmt = select(SharedConversationLink).where(
         SharedConversationLink.thread_id == mapping.thread_id,
@@ -823,24 +920,64 @@ def get_document_type(ext: str) -> str:
 @router.get("/download/{document_id}")
 async def download_document(
     document_id: uuid.UUID,
+    request: Request,
     inline: bool = Query(False, description="Servir el archivo inline para previsualización"),
     db = Depends(get_db_session)
 ):
     """Permite a OnlyOffice descargar el archivo actual."""
-    # Nota: Este endpoint es público para que el servidor OnlyOffice pueda acceder.
-    # En producción se debería usar un token secreto o validar la IP.
+    # ── Validación de Acceso (JWT) ──────────────────────────────────────────
+    jwt_secret = os.getenv("ONLYOFFICE_JWT_SECRET")
+    jwt_enabled = os.getenv("ONLYOFFICE_JWT_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+    
+    token = request.query_params.get("token")
+    if not token:
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.replace("Bearer ", "").strip()
+            
+    is_authenticated = False
+    
+    if jwt_enabled and jwt_secret and token:
+        try:
+            jwt.decode(token, jwt_secret, algorithms=["HS256"])
+            is_authenticated = True
+            logger.debug(f"Acceso a descarga de documento {document_id} verificado mediante JWT de OnlyOffice.")
+        except Exception:
+            pass
+            
+    if not is_authenticated and token:
+        try:
+            user_id = decode_access_token(token)
+            if user_id:
+                is_authenticated = True
+                logger.debug(f"Acceso a descarga de documento {document_id} verificado mediante JWT de usuario.")
+        except Exception:
+            pass
+            
+    if jwt_enabled and not is_authenticated:
+        logger.warning(f"Acceso denegado a descarga de documento {document_id}: Autenticación fallida o token ausente.")
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado. Se requiere un token JWT válido de OnlyOffice o de usuario."
+        )
+
     doc = await db.get(Document, document_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Documento no encontrado")
     
-    file_full_path = os.path.join(DOCUMENTS_ROOT, doc.file_path)
-    
-    # OnlyOffice hace polling infinito GET mientras el editor esta abierto
-    # No importa si existe o no: siempre devolvemos 200 incluso si ya esta cargado
-    # Esto detiene completamente el reintento infinito
-    if not os.path.exists(file_full_path):
-        logger.debug(f"OnlyOffice polling: Documento abierto correctamente, respondiendo OK para {document_id}")
-        return Response(status_code=200, content=b'', headers={"Content-Length": "0"})
+    try:
+        file_full_path = resolve_onlyoffice_file_path(doc.file_path)
+    except ValueError as exc:
+        logger.error("Ruta física inválida para documento %s: %s", document_id, exc)
+        raise HTTPException(status_code=500, detail="Ruta física del documento inválida") from exc
+
+    if not file_full_path.exists():
+        logger.error(
+            "Archivo físico faltante para documento %s en %s",
+            document_id,
+            file_full_path,
+        )
+        raise HTTPException(status_code=404, detail="Archivo del documento no encontrado")
         
     media_type, _ = mimetypes.guess_type(doc.filename or "")
     response_headers = None
@@ -850,7 +987,7 @@ async def download_document(
         response_headers = {"Content-Disposition": f'inline; filename="{safe_filename}"'}
 
     return FileResponse(
-        file_full_path,
+        str(file_full_path),
         filename=None if inline else doc.filename,
         media_type=media_type or "application/octet-stream",
         headers=response_headers,
@@ -861,61 +998,91 @@ async def onlyoffice_callback(document_id: uuid.UUID, request: Request):
     """Recibe las actualizaciones de OnlyOffice para guardar el archivo."""
     try:
         body = await request.json()
-    except:
+    except Exception as e:
+        logger.error(f"Error leyendo JSON del callback: {e}")
         return {"error": 1}
         
+    jwt_secret = os.getenv("ONLYOFFICE_JWT_SECRET")
+    jwt_enabled = os.getenv("ONLYOFFICE_JWT_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+    
+    if jwt_enabled and jwt_secret:
+        token = body.get("token")
+        if not token:
+            auth_header = request.headers.get("Authorization")
+            if auth_header and auth_header.startswith("Bearer "):
+                token = auth_header.replace("Bearer ", "").strip()
+        
+        if not token:
+            logger.error("Token JWT requerido pero no encontrado en el callback de OnlyOffice.")
+            return {"error": 1}
+            
+        import jwt
+        try:
+            decoded = jwt.decode(token, jwt_secret, algorithms=["HS256"])
+            if isinstance(decoded, dict) and "payload" in decoded:
+                body = decoded["payload"]
+            else:
+                body = decoded
+        except Exception as e:
+            logger.error(f"Error decodificando JWT en callback: {e}")
+            return {"error": 1}
+
     status = body.get("status")
     logger.info(f"OnlyOffice Callback para {document_id}: Status {status}")
     
-    # Status 2: El documento está listo para ser guardado
-    # Status 6: El documento se está guardando forzadamente (forcesave)
-    if status in [2, 6]:
-        download_url = body.get("url")
-        if not download_url:
-            return {"error": 1}
-            
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(download_url)
-            if resp.status_code == 200:
-                async with SessionLocal() as db:
-                    doc = await db.get(Document, document_id)
-                    if doc:
-                        file_full_path = os.path.join(DOCUMENTS_ROOT, doc.file_path)
-                        
-                        # ✅ BACKUP AUTOMATICO ANTES DE SOBREESCRIBIR
-                        if os.path.exists(file_full_path):
-                            backups_dir = os.path.join(os.path.dirname(file_full_path), '.backups')
-                            os.makedirs(backups_dir, exist_ok=True)
-                            
-                            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                            backup_filename = f"{os.path.basename(file_full_path)}.{timestamp}.bak"
-                            backup_full_path = os.path.join(backups_dir, backup_filename)
-                            
-                            import shutil
-                            import time
-                            shutil.copy2(file_full_path, backup_full_path)
-                            
-                            # Limpiar backups mayores a 30 dias
-                            for backup_file in os.listdir(backups_dir):
-                                bk_path = os.path.join(backups_dir, backup_file)
-                                if time.time() - os.path.getmtime(bk_path) > 2592000: # 30 dias en segundos
-                                    os.remove(bk_path)
-                        
-                        # Guardar nueva version solo si el archivo es válido (>100 bytes)
-                        if len(resp.content) > 100:
-                            with open(file_full_path, "wb") as f:
-                                f.write(resp.content)
-                            
-                            doc.updated_at = datetime.now()
-                            await db.commit()
-                            logger.info(f"✅ Documento guardado (size: {len(resp.content)} bytes). Backup creado automáticamente.")
-                        else:
-                            logger.error(f"❌ PELIGRO: OnlyOffice devolvió un archivo vacío ({len(resp.content)} bytes). Se ignora para evitar corrupción.")
-                    else:
-                        logger.error(f"Documento {document_id} no encontrado en DB durante callback.")
-            else:
-                logger.error(f"Error al descargar actualización de OnlyOffice: {resp.status_code}")
+    try:
+        if status in [2, 6]:
+            download_url = body.get("url")
+            if not download_url:
+                logger.error("No se proporcionó download_url en el callback.")
                 return {"error": 1}
+                
+            logger.info(f"Descargando archivo desde: {download_url}")
+            async with httpx.AsyncClient(verify=False) as client:
+                resp = await client.get(download_url)
+                if resp.status_code == 200:
+                    async with SessionLocal() as db:
+                        doc = await db.get(Document, document_id)
+                        if doc:
+                            file_full_path = resolve_onlyoffice_file_path(doc.file_path)
+                            
+                            if file_full_path.exists():
+                                backups_dir = file_full_path.parent / '.backups'
+                                os.makedirs(backups_dir, exist_ok=True)
+                                
+                                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                                backup_filename = f"{file_full_path.name}.{timestamp}.bak"
+                                backup_full_path = backups_dir / backup_filename
+                                
+                                import shutil
+                                import time
+                                shutil.copy2(file_full_path, backup_full_path)
+                                
+                                try:
+                                    for backup_file in os.listdir(backups_dir):
+                                        bk_path = backups_dir / backup_file
+                                        if bk_path.is_file() and time.time() - bk_path.stat().st_mtime > 2592000:
+                                            os.remove(bk_path)
+                                except Exception as e:
+                                    logger.error(f"Error limpiando backups: {e}")
+                            
+                            if len(resp.content) > 100:
+                                with open(file_full_path, "wb") as f:
+                                    f.write(resp.content)
+                                
+                                doc.updated_at = datetime.now()
+                                await db.commit()
+                                logger.info(f"✅ Documento guardado (size: {len(resp.content)} bytes). Backup creado.")
+                            else:
+                                logger.error(f"❌ PELIGRO: OnlyOffice devolvió un archivo vacío. Ignorando.")
+                        else:
+                            logger.error(f"Documento {document_id} no encontrado en DB durante callback.")
+                else:
+                    logger.error(f"Error al descargar actualización de OnlyOffice: {resp.status_code} - {resp.text}")
+                    return {"error": 1}
+    except Exception as e:
+        logger.error(f"Excepción en el callback de OnlyOffice: {e}")
+        return {"error": 1}
                         
     return {"error": 0}
 
@@ -931,13 +1098,13 @@ async def duplicate_document(
         raise HTTPException(status_code=404, detail="Documento no encontrado")
     
     # Copiar archivo fisico
-    original_path = os.path.join(DOCUMENTS_ROOT, original_doc.file_path)
-    if not os.path.exists(original_path):
+    original_path = resolve_onlyoffice_file_path(original_doc.file_path)
+    if not original_path.exists():
         raise HTTPException(status_code=404, detail="Archivo fisico no encontrado")
         
     new_uuid = uuid.uuid4()
-    new_file_path = f"{current_account_id}/{new_uuid}.{original_doc.extension}"
-    new_full_path = os.path.join(DOCUMENTS_ROOT, new_file_path)
+    new_file_path = build_onlyoffice_relative_path(current_account_id, f"{new_uuid}.{original_doc.extension}")
+    new_full_path = resolve_onlyoffice_file_path(new_file_path)
     
     import shutil
     shutil.copy2(original_path, new_full_path)
@@ -970,17 +1137,17 @@ async def get_document_history(
     if not doc or str(doc.account_id) != current_account_id:
         raise HTTPException(status_code=404, detail="Documento no encontrado")
         
-    file_full_path = os.path.join(DOCUMENTS_ROOT, doc.file_path)
-    backups_dir = os.path.join(os.path.dirname(file_full_path), '.backups')
+    file_full_path = resolve_onlyoffice_file_path(doc.file_path)
+    backups_dir = file_full_path.parent / '.backups'
     
-    if not os.path.exists(backups_dir):
+    if not backups_dir.exists():
         return []
         
     backups = []
-    base_name = os.path.basename(file_full_path)
+    base_name = file_full_path.name
     for f in os.listdir(backups_dir):
         if f.startswith(base_name) and f.endswith(".bak"):
-            bk_path = os.path.join(backups_dir, f)
+            bk_path = backups_dir / f
             # Extraer la fecha del nombre del archivo (ej: nombre.ext.20231015_120000.bak)
             timestamp_str = f.replace(base_name + ".", "").replace(".bak", "")
             try:
@@ -988,7 +1155,7 @@ async def get_document_history(
                 backups.append({
                     "filename": f,
                     "date": date_obj.isoformat(),
-                    "size": os.path.getsize(bk_path)
+                    "size": bk_path.stat().st_size
                 })
             except:
                 pass
@@ -1009,18 +1176,18 @@ async def restore_document_backup(
     if not doc or str(doc.account_id) != current_account_id:
         raise HTTPException(status_code=404, detail="Documento no encontrado")
         
-    file_full_path = os.path.join(DOCUMENTS_ROOT, doc.file_path)
-    backups_dir = os.path.join(os.path.dirname(file_full_path), '.backups')
-    backup_path = os.path.join(backups_dir, backup_filename)
+    file_full_path = resolve_onlyoffice_file_path(doc.file_path)
+    backups_dir = file_full_path.parent / '.backups'
+    backup_path = backups_dir / backup_filename
     
-    if not os.path.exists(backup_path):
+    if not backup_path.exists():
         raise HTTPException(status_code=404, detail="Backup no encontrado")
         
     import shutil
     # Crear un último backup del estado actual antes de restaurar
-    if os.path.exists(file_full_path):
+    if file_full_path.exists():
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        pre_restore_backup = os.path.join(backups_dir, f"{os.path.basename(file_full_path)}.{timestamp}.bak")
+        pre_restore_backup = backups_dir / f"{file_full_path.name}.{timestamp}.bak"
         shutil.copy2(file_full_path, pre_restore_backup)
         
     shutil.copy2(backup_path, file_full_path)
@@ -1041,13 +1208,112 @@ async def delete_document(
     if not doc or str(doc.account_id) != current_account_id:
         raise HTTPException(status_code=404, detail="Documento no encontrado")
     
-    file_full_path = os.path.join(DOCUMENTS_ROOT, doc.file_path)
-    if os.path.exists(file_full_path):
+    file_full_path = resolve_onlyoffice_file_path(doc.file_path)
+    if file_full_path.exists():
         try:
             os.remove(file_full_path)
         except Exception as e:
             logger.error(f"Error al eliminar archivo físico: {e}")
         
+    # Eliminar chunks de pgvector
+    from core.memory_manager import delete_document_chunks
+    try:
+        await delete_document_chunks(
+            account_id=current_account_id,
+            file_name=doc.filename,
+            workspace_id=str(doc.workspace_id) if doc.workspace_id else None
+        )
+    except Exception as e:
+        logger.error(f"Error al eliminar chunks RAG del documento {doc.filename}: {e}")
+
     await db.delete(doc)
     await db.commit()
     return {"message": "Documento eliminado con éxito."}
+
+
+@router.post("/{document_id}/vectorize")
+async def vectorize_document(
+    document_id: uuid.UUID,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """Vectoriza e indexa un documento de OnlyOffice en el sistema RAG."""
+    doc = await db.get(Document, document_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Documento no encontrado")
+        
+    if not await _can_access_document(doc, current_account_id, db):
+        raise HTTPException(status_code=403, detail="No tienes acceso a este documento")
+
+    try:
+        file_full_path = resolve_onlyoffice_file_path(doc.file_path)
+    except ValueError as exc:
+        logger.error(f"Ruta física inválida para documento {document_id}: {exc}")
+        raise HTTPException(status_code=500, detail="Ruta física del documento inválida")
+        
+    if not file_full_path.exists():
+        raise HTTPException(status_code=404, detail="Archivo físico no encontrado")
+
+    try:
+        with open(file_full_path, "rb") as f:
+            file_content = f.read()
+    except Exception as e:
+        logger.error(f"Error al leer el archivo para vectorización: {e}")
+        raise HTTPException(status_code=500, detail="Error al leer el archivo en el servidor")
+
+    from utils.document_parser import extract_text_and_metadata_from_document
+    from core.memory_manager import delete_document_chunks, process_document_for_rag
+
+    try:
+        extracted_text, parser_metadata = await extract_text_and_metadata_from_document(doc.filename, file_content)
+    except Exception as e:
+        logger.error(f"Error al extraer texto del documento: {e}")
+        raise HTTPException(status_code=500, detail="Error al extraer texto del documento")
+
+    if not extracted_text or not extracted_text.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="El documento no contiene texto extraíble. Verifique que no esté vacío o que el formato sea soportado (ej. DOCX)."
+        )
+
+    # Determinar el topic (colección)
+    topic = "general_documents"
+    if doc.folder_id:
+        folder = await db.get(DocumentFolder, doc.folder_id)
+        if folder and folder.name:
+            topic = folder.name
+
+    # Eliminar chunks previos del mismo documento para evitar duplicados
+    await delete_document_chunks(
+        account_id=current_account_id,
+        file_name=doc.filename,
+        workspace_id=str(doc.workspace_id) if doc.workspace_id else None
+    )
+
+    # Preparar metadatos para el RAG
+    metadata = {
+        "document_id": str(doc.id),
+        "workspace_id": str(doc.workspace_id) if doc.workspace_id else None,
+        "folder_id": str(doc.folder_id) if doc.folder_id else None,
+        "extension": doc.extension,
+        "created_at": doc.created_at.isoformat() if doc.created_at else None,
+        "file_name": doc.filename,
+    }
+    if parser_metadata:
+        metadata.update(parser_metadata)
+
+    # Llamar a la función de procesamiento RAG
+    chunks_processed = await process_document_for_rag(
+        file_name=doc.filename,
+        extracted_text=extracted_text,
+        topic=topic,
+        account_id=current_account_id,
+        metadata=metadata,
+        workspace_id=str(doc.workspace_id) if doc.workspace_id else None
+    )
+
+    return {
+        "message": "Documento vectorizado e indexado correctamente",
+        "chunks_processed": chunks_processed,
+        "topic": topic
+    }

@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>KognitoAI - Dossier comercial</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 18mm 16mm 18mm 16mm;
+    }
+    :root {
+      --bg: #f4f7fb;
+      --paper: #ffffff;
+      --ink: #132033;
+      --muted: #5a6980;
+      --primary: #5b5cf0;
+      --primary-2: #7c3aed;
+      --accent: #06b6d4;
+      --line: #d8e1ee;
+      --soft: #edf2ff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at top left, rgba(91,92,240,0.10), transparent 28%),
+        radial-gradient(circle at top right, rgba(6,182,212,0.10), transparent 22%),
+        var(--bg);
+      color: var(--ink);
+      font-family: Inter, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.62;
+      font-size: 11.2pt;
+    }
+    .page {
+      max-width: 210mm;
+      margin: 0 auto;
+      padding: 14mm 0;
+    }
+    .sheet {
+      background: var(--paper);
+      border: 1px solid rgba(91,92,240,0.10);
+      border-radius: 24px;
+      box-shadow: 0 18px 60px rgba(20, 32, 60, 0.10);
+      overflow: hidden;
+    }
+    .hero {
+      padding: 26mm 18mm 18mm 18mm;
+      background:
+        linear-gradient(135deg, rgba(91,92,240,0.98), rgba(124,58,237,0.95) 58%, rgba(6,182,212,0.92));
+      color: white;
+      position: relative;
+    }
+    .hero::after {
+      content: '';
+      position: absolute;
+      inset: auto -10% -22% auto;
+      width: 210px;
+      height: 210px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.08);
+      filter: blur(2px);
+    }
+    .brand {
+      display: inline-block;
+      padding: 6px 12px;
+      border: 1px solid rgba(255,255,255,0.22);
+      border-radius: 999px;
+      font-size: 10pt;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      margin-bottom: 14px;
+      background: rgba(255,255,255,0.08);
+    }
+    .hero h1 {
+      margin: 0;
+      font-size: 28pt;
+      line-height: 1.05;
+      letter-spacing: -0.03em;
+    }
+    .hero h2 {
+      margin: 10px 0 0;
+      font-size: 14pt;
+      font-weight: 500;
+      color: rgba(255,255,255,0.88);
+    }
+    .hero p {
+      max-width: 145mm;
+      margin: 18px 0 0;
+      font-size: 11.4pt;
+      color: rgba(255,255,255,0.92);
+    }
+    .content {
+      padding: 14mm 18mm 18mm 18mm;
+    }
+    h1:first-child, h2:first-child { margin-top: 0; }
+    h1, h2, h3 {
+      color: #111c31;
+      page-break-after: avoid;
+      break-after: avoid;
+    }
+    h1 { font-size: 23pt; margin: 0 0 8px; letter-spacing: -0.03em; }
+    h2 {
+      font-size: 18pt;
+      margin: 28px 0 12px;
+      padding-top: 8px;
+      border-top: 1px solid var(--line);
+      letter-spacing: -0.02em;
+    }
+    h3 {
+      font-size: 13.5pt;
+      margin: 18px 0 8px;
+      color: var(--primary);
+    }
+    p { margin: 0 0 12px; }
+    hr {
+      border: 0;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--line), transparent);
+      margin: 18px 0;
+    }
+    ul, ol { margin: 8px 0 14px 20px; padding: 0; }
+    li { margin: 0 0 6px; }
+    strong { color: #0d1730; }
+    blockquote {
+      margin: 16px 0;
+      padding: 14px 16px;
+      border-left: 4px solid var(--accent);
+      background: linear-gradient(180deg, rgba(6,182,212,0.08), rgba(91,92,240,0.05));
+      border-radius: 0 14px 14px 0;
+      color: #16324f;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 14px 0 18px;
+      font-size: 10.2pt;
+      page-break-inside: avoid;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 10px 11px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      background: linear-gradient(180deg, rgba(91,92,240,0.10), rgba(91,92,240,0.05));
+      color: #18284a;
+      font-weight: 700;
+    }
+    tr:nth-child(even) td { background: #fbfcff; }
+    .footer {
+      margin-top: 24px;
+      padding-top: 10px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 9.5pt;
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .content > h2:first-of-type { border-top: 0; padding-top: 0; }
+    .section, table, ul, ol, p { break-inside: avoid-page; }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="sheet">
+      <section class="hero">
+        <div class="brand">KOGNITOAI · DOSSIER COMERCIAL</div>
+        <h1>KognitoAI</h1>
+        <h2>Dossier comercial detallado para usuarios, equipos y empresas</h2>
+        <p>Una plataforma de inteligencia aumentada para transformar información dispersa en memoria activa, contexto útil y decisiones mejor informadas.</p>
+      </section>
+      <main class="content">
+        <h1>KognitoAI</h1>
+<h2>Dossier comercial detallado para usuarios, equipos y empresas</h2>
+<p><strong>KognitoAI</strong> es una plataforma de inteligencia aumentada pensada para convertir información dispersa en una ventaja operativa real. Su propuesta no es ofrecer un chat aislado, sino un <strong>exocerebro digital</strong> capaz de <strong>recordar, relacionar, analizar, asistir y activar conocimiento</strong> en distintos contextos de trabajo.</p>
+<p>Su enfoque combina tres ideas clave:</p>
+<ol>
+<li><strong>Soberanía cognitiva:</strong> la organización conserva el control de su información, su contexto y su propiedad intelectual.</li>
+<li><strong>Memoria activa:</strong> los datos no quedan archivados de forma pasiva; se organizan, se conectan y vuelven a estar disponibles cuando realmente importan.</li>
+<li><strong>IA útil y accionable:</strong> KognitoAI no solo responde preguntas; ayuda a investigar, priorizar, ejecutar y tomar decisiones mejor informadas.</li>
+</ol>
+<hr />
+<h2>1. Qué es KognitoAI</h2>
+<p>KognitoAI es una plataforma integral de IA para personas, equipos y organizaciones que necesitan:</p>
+<ul>
+<li>centralizar conocimiento;</li>
+<li>consultar documentos y conversaciones con contexto;</li>
+<li>analizar información compleja con apoyo de IA;</li>
+<li>trabajar de forma colaborativa y segura;</li>
+<li>operar desde web, Telegram y servicios internos;</li>
+<li>mantener trazabilidad y control sobre lo que la IA responde.</li>
+</ul>
+<p>En lugar de depender de herramientas desconectadas, KognitoAI unifica <strong>memoria, análisis, colaboración, documentos, agenda, perfiles, formularios y automatización inteligente</strong> dentro de un mismo ecosistema.</p>
+<hr />
+<h2>2. Enfoque diferencial</h2>
+<h3>2.1. IA con memoria real</h3>
+<p>KognitoAI está diseñado para que el conocimiento no se pierda entre carpetas, chats, notas, documentos, audios o reuniones. Cada nuevo contenido puede incorporarse al sistema y convertirse en parte de una memoria reutilizable.</p>
+<h3>2.2. Arquitectura híbrida de conocimiento</h3>
+<p>La plataforma combina dos formas de inteligencia sobre la información:</p>
+<ul>
+<li><strong>búsqueda semántica vectorial</strong>, para encontrar contenido por significado;</li>
+<li><strong>grafo de conocimiento</strong>, para descubrir relaciones entre conceptos, personas, proyectos, documentos y temas.</li>
+</ul>
+<p>Esto permite respuestas más contextuales, navegación conceptual y descubrimiento de conexiones que no suelen aparecer en una búsqueda tradicional.</p>
+<h3>2.3. IA proactiva y no solo reactiva</h3>
+<p>KognitoAI puede detectar patrones, temas recurrentes, brechas de conocimiento e insights que merecen seguimiento. El objetivo no es solo responder cuando alguien pregunta, sino <strong>ayudar a anticipar decisiones y mover al equipo a la acción</strong>.</p>
+<h3>2.4. Privacidad, control y adaptación</h3>
+<p>KognitoAI está pensado para entornos donde el conocimiento importa: equipos internos, organizaciones con información sensible, empresas que necesitan control de accesos y espacios separados por área, cliente o proyecto.</p>
+<hr />
+<h2>3. Propuesta de valor para usuarios y empresas</h2>
+<table>
+<thead>
+<tr>
+<th>Necesidad</th>
+<th>Cómo responde KognitoAI</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Encontrar información dispersa</td>
+<td>Centraliza conocimiento y lo hace consultable con IA</td>
+</tr>
+<tr>
+<td>Evitar pérdida de contexto</td>
+<td>Relaciona documentos, notas, perfiles, análisis y conversaciones</td>
+</tr>
+<tr>
+<td>Reducir tiempo de búsqueda</td>
+<td>Usa búsqueda semántica, colecciones y análisis contextual</td>
+</tr>
+<tr>
+<td>Mejorar decisiones</td>
+<td>Genera insights, reportes, resúmenes y apoyo investigativo</td>
+</tr>
+<tr>
+<td>Trabajar con equipos</td>
+<td>Ofrece workspaces, compartición, roles y vistas colaborativas</td>
+</tr>
+<tr>
+<td>Mantener control de información</td>
+<td>Permite segmentación por espacios, usuarios y recursos</td>
+</tr>
+<tr>
+<td>Atender distintos formatos</td>
+<td>Procesa texto, documentos, imágenes, audios y fuentes web</td>
+</tr>
+<tr>
+<td>Llevar la IA al flujo diario</td>
+<td>Integra dashboard web, chat, agenda, documentos y Telegram</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>4. Características y funcionalidades principales</h2>
+<h3>4.1. Escritorio inteligente</h3>
+<p>El dashboard de KognitoAI funciona como centro operativo del conocimiento.</p>
+<p>Incluye capacidades como:</p>
+<ul>
+<li>visualización de <strong>temas principales</strong>;</li>
+<li>acceso a <strong>insights proactivos</strong>;</li>
+<li>consultas rápidas sobre el estado del conocimiento;</li>
+<li>acceso a conversaciones recientes;</li>
+<li>detección de patrones y brechas que merecen exploración.</li>
+</ul>
+<p><strong>Valor para el usuario:</strong> permite abrir la plataforma y entender rápidamente qué está ocurriendo, qué temas importan y dónde conviene profundizar.</p>
+<hr />
+<h3>4.2. Chat inteligente con contexto</h3>
+<p>KognitoAI incorpora un chat conversacional que no se limita a responder de forma genérica. Puede apoyarse en la memoria disponible, el contexto del workspace, documentos relacionados y herramientas internas.</p>
+<p>Capacidades destacadas:</p>
+<ul>
+<li>consultas en lenguaje natural;</li>
+<li>conversaciones persistentes;</li>
+<li>soporte para contexto documental;</li>
+<li>interacción con colecciones y recursos del sistema;</li>
+<li>posibilidad de usarlo desde web y flujos conectados con Telegram.</li>
+</ul>
+<p><strong>Valor para empresa:</strong> transforma la base documental y operativa en una interfaz conversacional mucho más accesible para equipos no técnicos.</p>
+<hr />
+<h3>4.3. Biblioteca de conocimientos y RAG</h3>
+<p>KognitoAI dispone de un módulo de conocimientos orientado a la ingesta, organización y consulta de información.</p>
+<p>Permite:</p>
+<ul>
+<li>crear y administrar <strong>colecciones</strong>;</li>
+<li>subir archivos y monitorear su procesamiento;</li>
+<li>consultar contenido mediante recuperación semántica;</li>
+<li>clasificar por temas;</li>
+<li>trabajar con análisis sobre colecciones completas;</li>
+<li>integrar repositorios y fuentes de contenido como parte del ecosistema consultable.</li>
+</ul>
+<p><strong>Valor para usuario o equipo:</strong> ya no hace falta recordar en qué carpeta estaba la información; basta con preguntar o navegar por la colección adecuada.</p>
+<hr />
+<h3>4.4. Análisis asistido por IA</h3>
+<p>Uno de los diferenciales más potentes de KognitoAI es su capa de análisis.</p>
+<p>La plataforma contempla distintos tipos de análisis, entre ellos:</p>
+<ul>
+<li>análisis de documentos;</li>
+<li>análisis de colecciones;</li>
+<li>insights manuales y proactivos;</li>
+<li>resumen semántico;</li>
+<li>análisis de notas;</li>
+<li>investigación profunda;</li>
+<li>análisis web integral;</li>
+<li>análisis de conocimiento en grafo;</li>
+<li>análisis orientado a código y contextos técnicos.</li>
+</ul>
+<p><strong>Valor comercial:</strong> KognitoAI no solo almacena información; la convierte en reportes, hallazgos, oportunidades y decisiones accionables.</p>
+<hr />
+<h3>4.5. Investigación profunda</h3>
+<p>KognitoAI integra flujos de <strong>deep research</strong> para escenarios donde una simple respuesta no basta.</p>
+<p>Este enfoque permite:</p>
+<ul>
+<li>investigar un tema de manera más estructurada;</li>
+<li>cruzar fuentes internas y externas;</li>
+<li>producir entregables más completos;</li>
+<li>apoyar trabajos de análisis, estrategia, cumplimiento, producto o investigación.</li>
+</ul>
+<p><strong>Ideal para:</strong> consultoría, dirección, áreas de inteligencia, equipos de producto, legal, operaciones y analistas.</p>
+<hr />
+<h3>4.6. Grafo de conocimiento</h3>
+<p>KognitoAI utiliza un enfoque de grafo para representar relaciones entre entidades, conceptos y recursos.</p>
+<p>Esto habilita:</p>
+<ul>
+<li>visualización de conexiones;</li>
+<li>exploración relacional del conocimiento;</li>
+<li>detección de nodos relevantes;</li>
+<li>comprensión de cómo se relacionan ideas, personas, documentos y proyectos;</li>
+<li>administración y análisis del conocimiento desde una perspectiva más estructural.</li>
+</ul>
+<p><strong>Valor diferencial:</strong> no solo responde "dónde está esto", sino también <strong>"cómo se conecta esto con lo demás"</strong>.</p>
+<hr />
+<h3>4.7. Documentos y edición colaborativa</h3>
+<p>KognitoAI incluye un módulo de documentos pensado para trabajo operativo y colaborativo.</p>
+<p>Funcionalidades destacadas:</p>
+<ul>
+<li>gestión de documentos por carpetas;</li>
+<li>organización por workspace;</li>
+<li>creación y administración de archivos;</li>
+<li>compartición pública o privada;</li>
+<li>permisos de edición;</li>
+<li>integración con edición documental;</li>
+<li>generación de chat asociado a documentos.</li>
+</ul>
+<p><strong>Valor para empresa:</strong> concentrar redacción, consulta y colaboración documental dentro del mismo entorno cognitivo.</p>
+<hr />
+<h3>4.8. Workspaces y segmentación por contexto</h3>
+<p>La plataforma permite crear <strong>espacios de trabajo independientes</strong> para separar equipos, clientes, proyectos o unidades.</p>
+<p>Cada workspace puede funcionar como un entorno propio con:</p>
+<ul>
+<li>documentos y carpetas;</li>
+<li>conversaciones;</li>
+<li>colecciones de conocimiento;</li>
+<li>configuraciones específicas;</li>
+<li>contexto aislado;</li>
+<li>colaboración entre usuarios con acceso controlado.</li>
+</ul>
+<p><strong>Beneficio clave:</strong> evita mezclar información sensible y permite especializar la IA por área o necesidad.</p>
+<hr />
+<h3>4.9. Agenda cognitiva</h3>
+<p>KognitoAI extiende la idea de calendario hacia una agenda con contexto.</p>
+<p>Capacidades:</p>
+<ul>
+<li>gestión de agenda y eventos;</li>
+<li>soporte de integración tipo CalDAV;</li>
+<li>articulación entre reuniones, conocimiento previo y contexto operativo;</li>
+<li>potencial para preparar mejor al usuario antes de una reunión o seguimiento.</li>
+</ul>
+<p><strong>Valor para el usuario:</strong> menos tiempo recordando antecedentes y más tiempo entrando a la conversación correcta.</p>
+<hr />
+<h3>4.10. Notas con memoria activa</h3>
+<p>Las notas en KognitoAI no son simples textos aislados. Forman parte del ecosistema de conocimiento.</p>
+<p>Permite:</p>
+<ul>
+<li>crear y editar notas;</li>
+<li>vincularlas con otros recursos;</li>
+<li>analizarlas;</li>
+<li>integrarlas al grafo y al contexto general;</li>
+<li>convertir anotaciones dispersas en insumos útiles para la IA.</li>
+</ul>
+<p><strong>Resultado:</strong> cada nota puede evolucionar desde apunte rápido a conocimiento reutilizable.</p>
+<hr />
+<h3>4.11. Perfiles y relaciones</h3>
+<p>KognitoAI contempla una capa de perfiles de contacto o relación, útil para equipos que trabajan con clientes, aliados, personas clave o actores internos.</p>
+<p>Esto permite:</p>
+<ul>
+<li>centralizar fichas de relación;</li>
+<li>vincular perfiles con notas, formularios, galerías u otros recursos;</li>
+<li>consolidar contexto de interacciones y seguimiento.</li>
+</ul>
+<p><strong>Valor comercial:</strong> convierte la memoria relacional del equipo en un activo compartido, no en información que vive solo en la cabeza de una persona.</p>
+<hr />
+<h3>4.12. Formularios y captura estructurada</h3>
+<p>La plataforma incluye módulos para formularios y recolección de datos.</p>
+<p>Con esto se puede:</p>
+<ul>
+<li>crear formularios;</li>
+<li>editar y publicar estructuras de captura;</li>
+<li>recibir respuestas;</li>
+<li>usar esos datos como parte del conocimiento organizacional;</li>
+<li>alimentar análisis, seguimiento o documentación posterior.</li>
+</ul>
+<p><strong>Aplicaciones típicas:</strong> auditorías, levantamientos, encuestas internas, procesos de terreno, onboarding, evaluaciones o levantamiento de evidencia.</p>
+<hr />
+<h3>4.13. Galerías y activos visuales</h3>
+<p>KognitoAI incorpora gestión de galerías para organizar recursos visuales.</p>
+<p>Permite:</p>
+<ul>
+<li>crear álbumes;</li>
+<li>administrar imágenes y material visual;</li>
+<li>asociar contenido a perfiles, proyectos o procesos;</li>
+<li>compartir determinados recursos de forma controlada.</li>
+</ul>
+<p><strong>Valor:</strong> integrar la evidencia visual dentro del mismo sistema de memoria y contexto.</p>
+<hr />
+<h3>4.14. Compartición segura</h3>
+<p>La plataforma cuenta con mecanismos de compartición en distintos recursos.</p>
+<p>Según el módulo, esto puede incluir:</p>
+<ul>
+<li>enlaces compartidos;</li>
+<li>acceso por token;</li>
+<li>compartición de chats;</li>
+<li>compartición de análisis;</li>
+<li>compartición de documentos;</li>
+<li>acceso público o privado según escenario.</li>
+</ul>
+<p><strong>Ventaja:</strong> facilita colaboración y presentación de información sin romper la trazabilidad del sistema.</p>
+<hr />
+<h3>4.15. Integración con Telegram</h3>
+<p>KognitoAI no vive solo en un dashboard web. También contempla integración con Telegram mediante bot y web app.</p>
+<p>Esto aporta:</p>
+<ul>
+<li>acceso conversacional más inmediato;</li>
+<li>continuidad entre móvil y web;</li>
+<li>notificaciones y flujos de uso más cercanos al día a día;</li>
+<li>posibilidad de capturar o consultar información desde un canal liviano y familiar.</li>
+</ul>
+<p><strong>Valor para adopción:</strong> reduce fricción y lleva la IA al canal donde muchas personas ya trabajan.</p>
+<hr />
+<h3>4.16. Streaming, WebSockets y experiencia en tiempo real</h3>
+<p>La arquitectura de KognitoAI incorpora actualizaciones en tiempo real para distintos procesos.</p>
+<p>Esto se refleja en:</p>
+<ul>
+<li>seguimiento del procesamiento de archivos;</li>
+<li>progreso de tareas y análisis;</li>
+<li>canales de transcripción;</li>
+<li>actualización de eventos operativos en la interfaz.</li>
+</ul>
+<p><strong>Beneficio:</strong> una experiencia más viva, transparente y operativa para el usuario final.</p>
+<hr />
+<h3>4.17. Administración y operación avanzada</h3>
+<p>KognitoAI también incluye capacidades administrativas y técnicas para escalar su uso interno.</p>
+<p>Entre ellas:</p>
+<ul>
+<li>administración del conocimiento;</li>
+<li>paneles administrativos;</li>
+<li>herramientas programadas;</li>
+<li>monitoreo de procesos;</li>
+<li>organización del ecosistema de IA y sus recursos.</li>
+</ul>
+<p><strong>Enfoque empresarial:</strong> no solo sirve para consultar conocimiento; también para gobernar cómo ese conocimiento se construye y se opera.</p>
+<hr />
+<h2>5. Enfoque tecnológico</h2>
+<p>KognitoAI está construido como una plataforma moderna y modular.</p>
+<p>Su enfoque tecnológico combina:</p>
+<ul>
+<li><strong>backend en FastAPI</strong> para servicios centrales;</li>
+<li><strong>frontend web en Next.js + React + TypeScript</strong>;</li>
+<li><strong>PostgreSQL + pgvector</strong> para búsqueda semántica;</li>
+<li><strong>Neo4j</strong> para grafo de conocimiento;</li>
+<li><strong>Redis</strong> para soporte de procesos y rendimiento;</li>
+<li><strong>WebSockets</strong> para interacción en tiempo real;</li>
+<li><strong>Docker y Docker Compose</strong> para despliegue estructurado;</li>
+<li>integración con canales externos como <strong>Telegram</strong>.</li>
+</ul>
+<p>Esto le da una base apta tanto para entornos de experimentación como para despliegues organizacionales más serios.</p>
+<hr />
+<h2>6. Beneficios concretos para empresa</h2>
+<h3>6.1. Menos tiempo perdido buscando información</h3>
+<p>KognitoAI reduce fricción operativa al permitir consultar información por significado, tema, recurso relacionado o contexto de uso.</p>
+<h3>6.2. Mejor continuidad del conocimiento</h3>
+<p>Cuando un colaborador se va, el contexto no desaparece por completo. Las notas, documentos, perfiles, conversaciones y relaciones quedan integrados al sistema.</p>
+<h3>6.3. Mejor colaboración entre equipos</h3>
+<p>Los workspaces, recursos compartidos y módulos colaborativos permiten que varias personas trabajen sobre una misma base de conocimiento sin perder orden.</p>
+<h3>6.4. Mejor trazabilidad de lo que hace la IA</h3>
+<p>El enfoque basado en memoria, colecciones, análisis y estructuras relacionadas facilita revisar de dónde sale una respuesta o un hallazgo.</p>
+<h3>6.5. Mayor capacidad de análisis</h3>
+<p>KognitoAI no se queda en búsqueda básica. Puede convertir información en informes, insights, relaciones y apoyo investigativo.</p>
+<h3>6.6. Adaptación a distintos tipos de organización</h3>
+<p>Puede ser valioso para:</p>
+<ul>
+<li>consultoras;</li>
+<li>equipos legales;</li>
+<li>áreas de I+D;</li>
+<li>operaciones;</li>
+<li>educación e investigación;</li>
+<li>empresas con alto volumen documental;</li>
+<li>organizaciones que necesitan soberanía sobre sus datos.</li>
+</ul>
+<hr />
+<h2>7. Casos de uso representativos</h2>
+<h3>Caso 1: empresa con mucho conocimiento disperso</h3>
+<p>KognitoAI permite reunir documentos, notas, análisis y conversaciones para crear una memoria empresarial útil, consultable y viva.</p>
+<h3>Caso 2: equipo comercial o consultivo</h3>
+<p>Los perfiles, documentos, formularios, agenda y notas ayudan a consolidar contexto de clientes, visitas, hallazgos y seguimiento.</p>
+<h3>Caso 3: área legal, técnica o compliance</h3>
+<p>La capacidad de consultar documentos, generar análisis y cruzar relaciones permite trabajar con mayor contexto, trazabilidad y velocidad.</p>
+<h3>Caso 4: dirección o liderazgo</h3>
+<p>El dashboard, los insights y la investigación profunda permiten convertir el exceso de información en foco estratégico.</p>
+<h3>Caso 5: equipos distribuidos o movilidad</h3>
+<p>La combinación de web, Telegram y recursos compartidos hace más fácil capturar y consultar conocimiento desde distintos puntos del trabajo real.</p>
+<hr />
+<h2>8. Por qué KognitoAI no es "otro chatbot"</h2>
+<p>Porque su valor no está solo en conversar, sino en su capacidad de:</p>
+<ul>
+<li><strong>recordar</strong>;</li>
+<li><strong>organizar</strong>;</li>
+<li><strong>relacionar</strong>;</li>
+<li><strong>analizar</strong>;</li>
+<li><strong>investigar</strong>;</li>
+<li><strong>coordinar información</strong>;</li>
+<li><strong>acompañar procesos reales de trabajo</strong>.</li>
+</ul>
+<p>Un chatbot común responde.</p>
+<p><strong>KognitoAI construye una infraestructura de conocimiento útil para pensar y operar mejor.</strong></p>
+<hr />
+<h2>9. Mensaje comercial</h2>
+<p>KognitoAI está pensado para organizaciones y usuarios que entienden que el conocimiento no debería quedar enterrado en archivos, chats aislados o dependencias personales.</p>
+<p>Es una plataforma para quienes buscan:</p>
+<ul>
+<li>transformar información en ventaja competitiva;</li>
+<li>trabajar con IA sin perder control sobre el contexto;</li>
+<li>construir memoria organizacional;</li>
+<li>acelerar análisis y ejecución;</li>
+<li>aumentar productividad sin sacrificar profundidad.</li>
+</ul>
+<p><strong>KognitoAI no vende solo automatización. Vende continuidad, contexto, inteligencia aplicada y capacidad de decisión.</strong></p>
+<hr />
+<h2>10. Cierre</h2>
+<p>KognitoAI propone una evolución clara: pasar de herramientas desconectadas a un entorno donde la información se convierte en memoria, la memoria en contexto y el contexto en acción.</p>
+<p>Para un usuario, significa tener una IA más útil, más cercana y mejor conectada con su trabajo real.</p>
+<p>Para una empresa, significa construir una base de conocimiento viva, segura, analizable y escalable, capaz de sostener productividad, aprendizaje y toma de decisiones en el tiempo.</p>
+<p><strong>KognitoAI es una plataforma para organizaciones que quieren pensar mejor, recordar mejor y actuar con más inteligencia.</strong></p>
+        <div class="footer">
+          <span>KognitoAI · Documento comercial estilizado</span>
+          <span>Generado desde el dossier Markdown del proyecto</span>
+        </div>
+      </main>
+    </div>
+  </div>
+</body>
+</html>

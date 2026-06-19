@@ -1,8 +1,9 @@
 import logging
 import uuid
 import asyncio
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel
+from typing import Dict, Any
 from langchain_core.messages import HumanMessage, AIMessage 
 from typing import List, Union 
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
@@ -19,6 +20,10 @@ from utils.security import get_current_account_id
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# In-memory store for async research jobs. In production, this should be Redis or a Database.
+# format: {run_id: {"status": "processing" | "success" | "error" | "clarification_needed", "result": {...}, "error": "..."}}
+research_jobs: Dict[str, Any] = {}
 
 # Compilar el grafo una sola vez al iniciar la aplicación
 try:
@@ -43,6 +48,107 @@ class DeepResearchPDFExportRequest(BaseModel):
     sources: List[dict] = []
     recommendations: List[str] = []
     # account_id se obtiene del token, no del body
+
+async def _run_deep_research_background(run_id: str, inputs: dict, config: dict):
+    logger.info(f"Background Task: Invoking Deep Research graph with run_id: {run_id}")
+    try:
+        max_retries = 5
+        final_state = None
+        for attempt in range(max_retries):
+            try:
+                final_state = await deep_researcher_graph.ainvoke(inputs, config=config)
+                break
+            except Exception as e:
+                error_str = f"{type(e).__name__}: {str(e)} {repr(e)}"
+                if ("MidStreamFallbackError" in error_str or "APIError" in error_str or "OpenrouterException" in error_str or "unmapped" in error_str) and attempt < max_retries - 1:
+                    wait_time = (attempt + 1) * 3
+                    logger.warning(f"Background Task LLM API Error detected (attempt {attempt + 1}/{max_retries}): {error_str}. Retrying in {wait_time}s...")
+                    await asyncio.sleep(wait_time)
+                    continue
+                raise e
+
+        if final_state and "final_report" in final_state:
+            if final_state.get("final_report") == "CLARIFICATION":
+                logger.info(f"Background Task: Deep research for run_id {run_id} requires clarification.")
+                clarification_question = "No clarification question found."
+                if final_state.get("messages") and isinstance(final_state["messages"], list):
+                    for msg in reversed(final_state["messages"]):
+                        if isinstance(msg, AIMessage):
+                            clarification_question = msg.content
+                            break
+                research_jobs[run_id] = {
+                    "status": "clarification_needed",
+                    "message": clarification_question,
+                    "run_id": run_id
+                }
+            else:
+                logger.info(f"Background Task: Deep research completed successfully for run_id: {run_id}")
+                final_sources = final_state.get("sources", [])
+                if isinstance(final_sources, dict) and final_sources.get("type") == "override":
+                    final_sources = final_sources.get("value", [])
+                
+                research_jobs[run_id] = {
+                    "status": "success",
+                    "report": {
+                        "final_report": final_state.get("final_report"),
+                        "summary": final_state.get("summary", ""),
+                        "findings": final_state.get("findings", ""),
+                        "recommendations": final_state.get("recommendations", []),
+                        "sources": final_sources,
+                        "visual_schema": final_state.get("visual_schema")
+                    }
+                }
+        else:
+            logger.error(f"Background Task: Deep research for run_id {run_id} finished without a final report.")
+            research_jobs[run_id] = {"status": "error", "detail": "The deep research process finished, but no final report was generated."}
+
+    except Exception as e:
+        logger.error(f"Background Task: Error in deep research run_id {run_id}: {e}", exc_info=True)
+        research_jobs[run_id] = {"status": "error", "detail": str(e)}
+
+@router.post("/deep_research/async")
+async def run_deep_research_async(
+    request: DeepResearchRequest,
+    background_tasks: BackgroundTasks
+):
+    """
+    Inicia una investigación profunda en segundo plano y devuelve un run_id inmediatamente.
+    """
+    if deep_researcher_graph is None:
+        raise HTTPException(status_code=500, detail="Deep Researcher agent is not available.")
+
+    logger.info(f"Received async deep research request for: '{request.query}' by account '{request.account_id}'")
+    
+    run_id = str(uuid.uuid4())
+    config = {
+        "configurable": {
+            "account_id": request.account_id,
+            "thread_id": run_id,
+        }
+    }
+    inputs = {
+        "messages": [HumanMessage(content=request.query)],
+        "account_id": request.account_id
+    }
+
+    # Initialize job state
+    research_jobs[run_id] = {"status": "processing"}
+
+    # Add to background tasks
+    background_tasks.add_task(_run_deep_research_background, run_id, inputs, config)
+
+    return {"status": "processing", "run_id": run_id, "message": "Investigación profunda iniciada en segundo plano."}
+
+@router.get("/deep_research/status/{run_id}")
+async def get_deep_research_status(run_id: str):
+    """
+    Consulta el estado de una investigación profunda asíncrona.
+    """
+    job = research_jobs.get(run_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    return {"run_id": run_id, **job}
 
 @router.post("/deep_research/")
 async def run_deep_research(

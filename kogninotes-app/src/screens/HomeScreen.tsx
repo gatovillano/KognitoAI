@@ -32,7 +32,8 @@ import {
   Moon, 
   X, 
   Menu,
-  Clock
+  Clock,
+  Inbox
 } from 'lucide-react-native';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -249,10 +250,16 @@ export const HomeScreen = ({ navigation }: any) => {
                    <Text style={[styles.dropdownText, { color: theme.text }]}>Chat IA</Text>
                 </View>
              </TouchableOpacity>
-             <TouchableOpacity onPress={() => { setShowAppMenu(false); navigation.navigate('Calendar'); }} style={[styles.dropdownItem, { borderBottomWidth: 0 }]}>
+             <TouchableOpacity onPress={() => { setShowAppMenu(false); navigation.navigate('Calendar'); }} style={styles.dropdownItem}>
                 <View style={styles.dropdownIconText}>
                    <Calendar size={16} color={theme.primary} style={{ marginRight: 10 }} />
                    <Text style={[styles.dropdownText, { color: theme.text }]}>Calendario</Text>
+                </View>
+             </TouchableOpacity>
+             <TouchableOpacity onPress={() => { setShowAppMenu(false); navigation.navigate('Inbox'); }} style={[styles.dropdownItem, { borderBottomWidth: 0 }]}>
+                <View style={styles.dropdownIconText}>
+                   <Inbox size={16} color={theme.primary} style={{ marginRight: 10 }} />
+                   <Text style={[styles.dropdownText, { color: theme.text }]}>Bandeja</Text>
                 </View>
              </TouchableOpacity>
           </View>

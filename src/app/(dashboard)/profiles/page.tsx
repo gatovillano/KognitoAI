@@ -32,7 +32,7 @@ export interface ContactProfile {
   updated_at: string;
 }
 
-export default function ProfilesPage() {
+export default function ProfilesPage({ isEmbedded = false }: { isEmbedded?: boolean }) {
   const [profiles, setProfiles] = useState<ContactProfile[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [categoryView, setCategoryView] = useState(false); // NEW
@@ -202,20 +202,20 @@ export default function ProfilesPage() {
 
   const renderProfiles = () => {
     if (isLoading) {
-      return <p className="text-center py-10">Cargando perfiles...</p>;
+      return <p className="text-center py-10">Cargando contactos...</p>;
     }
 
     if (profiles.length === 0) {
       return (
         <div className="text-center py-16">
           <User className="mx-auto h-16 w-16 text-muted-foreground/50 mb-4" />
-          <h3 className="text-xl font-semibold mb-2">No tienes perfiles de contacto aún</h3>
+          <h3 className="text-xl font-semibold mb-2">No tienes contactos aún</h3>
           <p className="text-muted-foreground mb-6 max-w-md mx-auto">
-            Crea perfiles para tus contactos y organiza su información.
+            Crea contactos y organiza su información de manera inteligente.
           </p>
           <Button onClick={() => { setEditingProfile(null); setIsProfileDialogOpen(true); }} size="lg">
             <Plus className="mr-2 h-5 w-5" />
-            Crear tu primer Perfil
+            Crear tu primer Contacto
           </Button>
         </div>
       );
@@ -273,41 +273,71 @@ export default function ProfilesPage() {
 
   return (
     <>
-      <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h1 className="text-3xl font-bold flex items-center">
-              <User className="mr-3 h-8 w-8 text-primary" />
-              Mis Perfiles
+      <div className={isEmbedded ? "space-y-6" : "p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden"}>
+        {!isEmbedded ? (
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h1 className="text-3xl font-bold flex items-center">
+                <User className="mr-3 h-8 w-8 text-primary" />
+                Mis Contactos
+                <Button variant="ghost" size="icon" className="ml-2 h-6 w-6 text-muted-foreground" onClick={() => setIsInfoSheetOpen(true)}>
+                  <Info className="h-4 w-4" />
+                </Button>
+              </h1>
+            </div>
+            <div className="flex items-center gap-2">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-8 px-2 md:px-4">
+                    <span className="hidden md:inline">Acciones</span> <MoreHorizontal className="md:ml-2 h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-[180px]">
+                  <DropdownMenuItem onClick={() => { setEditingProfile(null); setIsProfileDialogOpen(true); }}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Nuevo Contacto
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => setCategoryView(!categoryView)}> {/* NEW */}
+                    {categoryView ? "Vista General" : "Vista por Categoría"}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between gap-4 mb-4">
+            <div className="flex items-center gap-2">
+              <h2 className="text-xl font-black uppercase tracking-widest text-muted-foreground/70">Mis Contactos</h2>
               <Button variant="ghost" size="icon" className="ml-2 h-6 w-6 text-muted-foreground" onClick={() => setIsInfoSheetOpen(true)}>
                 <Info className="h-4 w-4" />
               </Button>
-            </h1>
+            </div>
+            <div className="flex items-center gap-2">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="h-8 px-2 md:px-4">
+                    <span className="hidden md:inline">Acciones</span> <MoreHorizontal className="md:ml-2 h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-[180px]">
+                  <DropdownMenuItem onClick={() => { setEditingProfile(null); setIsProfileDialogOpen(true); }}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Nuevo Contacto
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => setCategoryView(!categoryView)}> {/* NEW */}
+                    {categoryView ? "Vista General" : "Vista por Categoría"}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="h-8 px-2 md:px-4">
-                  <span className="hidden md:inline">Acciones</span> <MoreHorizontal className="md:ml-2 h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-[180px]">
-                <DropdownMenuItem onClick={() => { setEditingProfile(null); setIsProfileDialogOpen(true); }}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Nuevo Perfil
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => setCategoryView(!categoryView)}> {/* NEW */}
-                  {categoryView ? "Vista General" : "Vista por Categoría"}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        </div>
+        )}
         <div className="mb-8 relative">
           <Input
             type="text"
-            placeholder="Buscar perfiles por nombre, email, teléfono o etiquetas..."
+            placeholder="Buscar contactos por nombre, email, teléfono o etiquetas..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="pl-10 pr-4 py-2 border rounded-md w-full"

@@ -655,11 +655,7 @@ export default function SharedAnalysisPage() {
                         ) : type === 'code' ? (
                             <CodeAnalysis 
                                 analysis={resultPayload as CodeAnalysisResultFrontend}
-                                codeColors={{
-                                    iconColor: colorScheme.iconColor,
-                                    cardBorder: colorScheme.cardBorder,
-                                    titleColor: colorScheme.cardTitle,
-                                }}
+                                codeColors={colorScheme}
                             />
                         ) : (
                             <>

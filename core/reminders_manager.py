@@ -24,40 +24,30 @@ import dateparser
 from typing import Tuple, Optional
 
 from sqlalchemy import select
-from telegram.ext import CallbackContext
 
 # Importaciones de la nueva arquitectura y del bot
 from core.database import SessionLocal, Account, Recordatorio, PlatformIdentity
 from utils.db_session import DBSession
-from telegram_client.bot_manager import bot_manager
+from utils.telegram_api import send_telegram_message
 
 # Configuración del logger para este módulo.
 logger = logging.getLogger(__name__)
 
 
-async def _send_simple_reminder_callback(context: CallbackContext):
+async def _send_simple_reminder_callback(reminder_id: int, telegram_id: int, text: str):
     """
-    La función que ejecuta JobQueue para enviar un recordatorio simple.
+    La función que ejecuta APScheduler para enviar un recordatorio simple.
     Esta función es el punto final de la entrega de la notificación.
     """
-    job = context.job
-    # Extraer los datos necesarios del job
-    reminder_id = job.data.get("reminder_id")
-    telegram_id = job.data.get("telegram_id")
-    text = job.data.get("text")
-
-    if not all([reminder_id, telegram_id, text]):
-        logger.error(f"Faltan datos en el job del recordatorio simple: {job.data}")
-        return
-
     logger.info(f"Enviando recordatorio simple {reminder_id} al usuario de Telegram {telegram_id}")
     try:
-        # Usa el bot_manager para asegurar el acceso al objeto bot
-        await bot_manager.bot.send_message(
-            chat_id=telegram_id,
-            text=f"🔔⏰ ¡Recordatorio! ⏰🔔 \n\nMe pediste que te recordara esto: <b>{text}</b>",
-            parse_mode='HTML'
+        success = await send_telegram_message(
+            telegram_id=telegram_id,
+            text=f"🔔⏰ ¡Recordatorio! ⏰🔔 \n\nMe pediste que te recordara esto: <b>{text}</b>"
         )
+        if not success:
+            raise ValueError("No se pudo enviar el mensaje via Telegram gateway.")
+            
         # Marcar el recordatorio como inactivo en la BD para que no se reprograme.
         async with DBSession(SessionLocal) as db:
             reminder = await db.get(Recordatorio, reminder_id)
@@ -78,23 +68,11 @@ async def set_simple_reminder(
 ) -> Tuple[bool, str]:
     """
     Programa un nuevo recordatorio simple.
-
-    Args:
-        account_id: El ID universal de la cuenta del usuario.
-        telegram_id: El ID de Telegram, necesario para la JobQueue y la zona horaria.
-        text: El contenido del recordatorio.
-        natural_language_time: La descripción en lenguaje natural del tiempo.
-        workspace_id: El ID del espacio de trabajo opcional.
-        thread_id: El ID del hilo de conversación opcional.
-
-    Returns:
-        Una tupla (bool, str) indicando éxito y un mensaje para el usuario.
     """
     async with DBSession(SessionLocal) as db:
         try:
             # Para recordatorios relativos ('en 20 minutos'), no necesitamos la
             # zona horaria del usuario. dateparser los interpreta correctamente en UTC.
-            # Le indicamos que el resultado debe estar en UTC.
             date_settings = {'RETURN_AS_TIMEZONE_AWARE': True, 'TO_TIMEZONE': 'UTC'}
             due_datetime_utc = dateparser.parse(natural_language_time, **date_settings)
 
@@ -123,18 +101,19 @@ async def set_simple_reminder(
             job_name = f"simple_reminder_{new_reminder.id}_{uuid.uuid4()}"
             new_reminder.job_name = job_name
 
-            # Programar el job en la JobQueue de Telegram.
-            bot_manager.job_queue.run_once(
+            # Programar el job en APScheduler.
+            from utils.tool_scheduler import tool_scheduler
+            tool_scheduler.scheduler.add_job(
                 _send_simple_reminder_callback,
-                when=due_datetime_utc,
-                data={"reminder_id": new_reminder.id, "telegram_id": telegram_id, "text": text},
-                name=job_name
+                'date',
+                run_date=due_datetime_utc,
+                args=[new_reminder.id, telegram_id, text],
+                id=job_name
             )
 
             await db.commit()
             
             # Formatear una respuesta amigable para el usuario.
-            # Si el usuario tiene una zona horaria configurada, se la mostramos.
             account = await db.get(Account, account_id)
             user_tz_str = account.timezone if account else None
             
@@ -157,23 +136,15 @@ async def set_simple_reminder(
             return False, "Ocurrió un error inesperado al programar tu recordatorio."
         
 
-        
-async def reschedule_simple_reminders(application):
+async def reschedule_simple_reminders():
     """
-    Recarga los recordatorios simples pendientes de la BD y los vuelve a programar.
-
-    Esta función se llama una sola vez al iniciar el bot. Barre la base de datos
-    en busca de todos los recordatorios que están activos y cuya fecha de vencimiento
-    aún no ha pasado, y los vuelve a añadir a la `JobQueue` de Telegram.
-    Esto asegura que los recordatorios sobrevivan a reinicios del bot.
+    Recarga los recordatorios simples pendientes de la BD y los vuelve a programar en APScheduler.
     """
     logger.info("Re-programando recordatorios simples pendientes desde la base de datos...")
+    from utils.tool_scheduler import tool_scheduler
     async with DBSession(SessionLocal) as db:
         now_utc = datetime.now(pytz.utc)
         
-        # Seleccionar todos los recordatorios que todavía están activos y son para el futuro.
-        # Es una consulta compleja que une Recordatorio, Account y PlatformIdentity
-        # para obtener el telegram_id necesario para la JobQueue.
         stmt = (
             select(Recordatorio, PlatformIdentity.platform_user_id)
             .join(Account, Recordatorio.account_id == Account.id)
@@ -181,7 +152,7 @@ async def reschedule_simple_reminders(application):
             .where(
                 Recordatorio.is_active == True,
                 Recordatorio.due_datetime > now_utc,
-                PlatformIdentity.platform == 'telegram' # Nos aseguramos de obtener el ID de Telegram
+                PlatformIdentity.platform == 'telegram'
             )
         )
         
@@ -190,24 +161,23 @@ async def reschedule_simple_reminders(application):
 
         count = 0
         for reminder, telegram_id_str in pending_reminders:
-            # El job_name es crucial para evitar duplicados y poder cancelar.
             if not reminder.job_name:
-                logger.warning(f"El recordatorio {reminder.id} no tiene job_name, no se puede re-programar de forma segura.")
                 continue
 
             try:
                 telegram_id = int(telegram_id_str)
-                application.job_queue.run_once(
+                tool_scheduler.scheduler.add_job(
                     _send_simple_reminder_callback,
-                    when=reminder.due_datetime,
-                    data={"reminder_id": reminder.id, "telegram_id": telegram_id, "text": reminder.text},
-                    name=reminder.job_name
+                    'date',
+                    run_date=reminder.due_datetime,
+                    args=[reminder.id, telegram_id, reminder.message],
+                    id=reminder.job_name
                 )
                 count += 1
-            except (ValueError, TypeError) as e:
-                logger.error(f"Error al procesar el telegram_id '{telegram_id_str}' para el recordatorio {reminder.id}: {e}")
+            except Exception as e:
+                logger.error(f"Error al re-programar recordatorio {reminder.id}: {e}")
         
         if count > 0:
-            logger.info(f"✅ {count} recordatorio(s) simple(s) han sido re-programados.")
+            logger.info(f"✅ {count} recordatorio(s) simple(s) han sido re-programados en APScheduler.")
         else:
             logger.info("ℹ️ No se encontraron recordatorios simples pendientes para re-programar.")

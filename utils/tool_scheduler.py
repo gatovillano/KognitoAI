@@ -315,3 +315,113 @@ async def schedule_custom_user_heartbeat(account_id: str, interval_minutes: int,
         workspace_id=workspace_id,
         allowed_tools=allowed_tools
     )
+
+
+async def schedule_custom_heartbeat(
+    heartbeat_id: str,
+    account_id: str,
+    schedule_type: str,
+    instructions: str,
+    allowed_tools: Optional[list] = None,
+    interval_minutes: Optional[int] = None,
+    hour: Optional[int] = None,
+    minute: Optional[int] = None,
+    day_of_week: Optional[int] = None,
+    workspace_id: Optional[str] = None,
+):
+    """
+    Programa un heartbeat personalizado específico utilizando APScheduler.
+    Soporta tipos: interval, daily, weekly.
+    """
+    if not account_id or not heartbeat_id:
+        return False
+
+    async def custom_heartbeat_task(account_id: str, **kwargs):
+        from core.agent import run_custom_user_heartbeat
+        return await run_custom_user_heartbeat(
+            account_id=account_id,
+            workspace_id=kwargs.get("workspace_id"),
+            heartbeat_id=kwargs.get("heartbeat_id"),
+            allowed_tools=kwargs.get("allowed_tools")
+        )
+
+    job_id = f"custom_{heartbeat_id}"
+
+    # Cancelar si ya existe programado
+    cancel_custom_heartbeat(heartbeat_id)
+
+    # Programar según schedule_type
+    try:
+        if schedule_type == "interval":
+            if not interval_minutes:
+                return False
+            tool_scheduler.scheduler.add_job(
+                tool_scheduler._execute_tool_callback,
+                'interval',
+                minutes=interval_minutes,
+                id=job_id,
+                args=["custom_heartbeat", custom_heartbeat_task, account_id],
+                kwargs={
+                    "heartbeat_id": heartbeat_id,
+                    "workspace_id": workspace_id,
+                    "allowed_tools": allowed_tools
+                }
+            )
+        elif schedule_type == "daily":
+            if hour is None:
+                return False
+            tool_scheduler.scheduler.add_job(
+                tool_scheduler._execute_tool_callback,
+                'cron',
+                hour=hour,
+                minute=minute if minute is not None else 0,
+                id=job_id,
+                args=["custom_heartbeat", custom_heartbeat_task, account_id],
+                kwargs={
+                    "heartbeat_id": heartbeat_id,
+                    "workspace_id": workspace_id,
+                    "allowed_tools": allowed_tools
+                }
+            )
+        elif schedule_type == "weekly":
+            if day_of_week is None or hour is None:
+                return False
+            tool_scheduler.scheduler.add_job(
+                tool_scheduler._execute_tool_callback,
+                'cron',
+                day_of_week=day_of_week,
+                hour=hour,
+                minute=minute if minute is not None else 0,
+                id=job_id,
+                args=["custom_heartbeat", custom_heartbeat_task, account_id],
+                kwargs={
+                    "heartbeat_id": heartbeat_id,
+                    "workspace_id": workspace_id,
+                    "allowed_tools": allowed_tools
+                }
+            )
+        else:
+            logger.error(f"Tipo de programación desconocido para heartbeat personalizado: {schedule_type}")
+            return False
+
+        tool_scheduler._sync_scheduled_jobs()
+        logger.info(f"Heartbeat personalizado '{heartbeat_id}' programado con éxito ({schedule_type})")
+        return True
+    except Exception as e:
+        logger.error(f"Error al programar heartbeat personalizado {heartbeat_id}: {e}", exc_info=True)
+        return False
+
+
+def cancel_custom_heartbeat(heartbeat_id: str):
+    """Cancela un heartbeat personalizado específico."""
+    job_id = f"custom_{heartbeat_id}"
+    try:
+        if tool_scheduler.scheduler.get_job(job_id):
+            tool_scheduler.scheduler.remove_job(job_id)
+            tool_scheduler._sync_scheduled_jobs()
+            logger.info(f"Heartbeat personalizado '{heartbeat_id}' cancelado.")
+            return True
+    except Exception as e:
+        logger.error(f"Error al cancelar heartbeat personalizado {heartbeat_id}: {e}")
+    return False
+

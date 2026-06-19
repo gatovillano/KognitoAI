@@ -54,6 +54,14 @@ const GraphVisualization = dynamic(() => import('@/components/KnowledgeGraph/Gra
   ),
 });
 
+const normalizeGraphId = (value: string | number | null | undefined) => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  return String(value);
+};
+
 // Hook personalizado para el grafo de conocimiento
 const useKnowledgeGraph = (maxNodes: number, maxHops: number, selectedDataset: string, filters: GraphFiltersType, processingMode: 'hybrid' | 'conceptual' = 'hybrid') => {
   const [originalGraphData, setOriginalGraphData] = useState<{ nodes: any[], edges: any[] } | null>(null); // Store full graph
@@ -64,7 +72,7 @@ const useKnowledgeGraph = (maxNodes: number, maxHops: number, selectedDataset: s
   const [processingStatus, setProcessingStatus] = useState<string | null>(null);
   const [availableDatasets, setAvailableDatasets] = useState<Array<{ name: string, node_count: number }>>([]);
   const [isInitialLoad, setIsInitialLoad] = useState(true); // Track initial load
-  const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string | number>>(new Set()); // Estado para nodos expandidos (acumulativo)
+  const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
 
   const loadAvailableDatasets = useCallback(async () => {
     try {
@@ -89,6 +97,99 @@ const useKnowledgeGraph = (maxNodes: number, maxHops: number, selectedDataset: s
       console.error('Error loading metadata:', err);
     }
   }, [selectedDataset]);
+
+  const applyClientFilters = useCallback(() => {
+    if (!originalGraphData) {
+      console.log("🔍 applyClientFilters: No hay originalGraphData");
+      return;
+    }
+
+    console.log("🔍 applyClientFilters: Iniciando con", originalGraphData.nodes.length, "nodos y", originalGraphData.edges.length, "edges");
+    console.log("🔍 focusedNodeId:", focusedNodeId);
+
+    let filteredNodes = [...originalGraphData.nodes];
+    let filteredEdges = [...originalGraphData.edges];
+
+    if (focusedNodeId !== null) {
+      console.log("🔍 Aplicando filtro por nodo enfocado:", focusedNodeId);
+
+      const visibleNodeIds = new Set<string>([focusedNodeId]);
+      const visibleEdges = originalGraphData.edges.filter(edge => {
+        const edgeSource = normalizeGraphId(edge.from ?? edge.source);
+        const edgeTarget = normalizeGraphId(edge.to ?? edge.target);
+        const isConnectedToFocusedNode = edgeSource === focusedNodeId || edgeTarget === focusedNodeId;
+
+        if (isConnectedToFocusedNode) {
+          if (edgeSource !== null) visibleNodeIds.add(edgeSource);
+          if (edgeTarget !== null) visibleNodeIds.add(edgeTarget);
+        }
+
+        return isConnectedToFocusedNode;
+      });
+
+      filteredNodes = originalGraphData.nodes.filter(node => visibleNodeIds.has(String(node.id)));
+      filteredEdges = visibleEdges;
+
+      console.log("🔍 Después del filtro por nodo enfocado:", filteredNodes.length, "nodos y", filteredEdges.length, "edges");
+    }
+
+    // Aplicar filtros de inclusión de tipos de nodo
+    if (filters.nodeTypes.length > 0) {
+      const nodeIds = new Set(filteredNodes
+        .filter(node => filters.nodeTypes.includes(node.type))
+        .map(node => String(node.id))
+      );
+
+      filteredNodes = filteredNodes.filter(node => nodeIds.has(String(node.id)));
+      filteredEdges = filteredEdges.filter(edge => {
+        const edgeSource = normalizeGraphId(edge.from ?? edge.source);
+        const edgeTarget = normalizeGraphId(edge.to ?? edge.target);
+        return edgeSource !== null && edgeTarget !== null && nodeIds.has(edgeSource) && nodeIds.has(edgeTarget);
+      });
+    }
+
+    // Aplicar filtros de exclusión de tipos de nodo
+    if (filters.excludedNodeTypes && filters.excludedNodeTypes.length > 0) {
+      const excludedNodeIds = new Set(filteredNodes
+        .filter(node => filters.excludedNodeTypes?.includes(node.type))
+        .map(node => String(node.id))
+      );
+
+      filteredNodes = filteredNodes.filter(node => !excludedNodeIds.has(String(node.id)));
+      filteredEdges = filteredEdges.filter(edge => {
+        const edgeSource = normalizeGraphId(edge.from ?? edge.source);
+        const edgeTarget = normalizeGraphId(edge.to ?? edge.target);
+        return (edgeSource === null || !excludedNodeIds.has(edgeSource)) && (edgeTarget === null || !excludedNodeIds.has(edgeTarget));
+      });
+    }
+
+    // Aplicar filtros de inclusión de tipos de relación
+    if (filters.edgeTypes.length > 0) {
+      filteredEdges = filteredEdges.filter(edge =>
+        filters.edgeTypes.includes(edge.type || edge.label)
+      );
+
+      const connectedNodeIds = new Set<string>();
+      filteredEdges.forEach(edge => {
+        const edgeSource = normalizeGraphId(edge.from ?? edge.source);
+        const edgeTarget = normalizeGraphId(edge.to ?? edge.target);
+        if (edgeSource !== null) connectedNodeIds.add(edgeSource);
+        if (edgeTarget !== null) connectedNodeIds.add(edgeTarget);
+      });
+
+      filteredNodes = filteredNodes.filter(node => connectedNodeIds.has(String(node.id)));
+    }
+
+    // Aplicar filtros de exclusión de tipos de relación
+    if (filters.excludedEdgeTypes && filters.excludedEdgeTypes.length > 0) {
+      filteredEdges = filteredEdges.filter(edge =>
+        !filters.excludedEdgeTypes?.includes(edge.type || edge.label)
+      );
+    }
+
+    console.log("🔍 Final: Enviando al display", filteredNodes.length, "nodos y", filteredEdges.length, "edges");
+    setDisplayGraphData({ nodes: filteredNodes, edges: filteredEdges });
+  }, [originalGraphData, filters, focusedNodeId]);
 
   const loadGraphData = useCallback(async (forceReload: boolean = false) => {
     // Si no es recarga forzada y ya tenemos datos, aplicar filtros en cliente
@@ -149,98 +250,7 @@ const useKnowledgeGraph = (maxNodes: number, maxHops: number, selectedDataset: s
     } finally {
       setIsLoading(false);
     }
-  }, [maxNodes, maxHops, selectedDataset, filters, processingMode, isInitialLoad, expandedNodeIds]);
-
-  // Función para aplicar filtros en el cliente sin recargar datos
-  const applyClientFilters = useCallback(() => {
-    if (!originalGraphData) {
-      console.log("🔍 applyClientFilters: No hay originalGraphData");
-      return;
-    }
-
-    console.log("🔍 applyClientFilters: Iniciando con", originalGraphData.nodes.length, "nodos y", originalGraphData.edges.length, "edges");
-    console.log("🔍 expandedNodeIds:", Array.from(expandedNodeIds));
-
-    let filteredNodes = [...originalGraphData.nodes];
-    let filteredEdges = [...originalGraphData.edges];
-
-    // Primero aplicar filtro por nodos expandidos (doble click) si hay alguno
-    if (expandedNodeIds.size > 0) {
-      console.log("🔍 Aplicando filtro por nodos expandidos:", Array.from(expandedNodeIds));
-
-      const visibleNodeIds = new Set<string | number>(expandedNodeIds);
-      const visibleEdges: any[] = [];
-
-      // Encontrar todas las relaciones conectadas a los nodos expandidos
-      originalGraphData.edges.forEach(edge => {
-        if (expandedNodeIds.has(edge.from) || expandedNodeIds.has(edge.to)) {
-          visibleEdges.push(edge);
-          visibleNodeIds.add(edge.from);
-          visibleNodeIds.add(edge.to);
-        }
-      });
-
-      filteredNodes = originalGraphData.nodes.filter(node => visibleNodeIds.has(node.id));
-      filteredEdges = visibleEdges;
-
-      console.log("🔍 Después del filtro por nodos expandidos:", filteredNodes.length, "nodos y", filteredEdges.length, "edges");
-    }
-
-    // Aplicar filtros de inclusión de tipos de nodo
-    if (filters.nodeTypes.length > 0) {
-      const nodeIds = new Set(filteredNodes
-        .filter(node => filters.nodeTypes.includes(node.type))
-        .map(node => node.id)
-      );
-
-      filteredNodes = filteredNodes.filter(node => nodeIds.has(node.id));
-      filteredEdges = filteredEdges.filter(edge =>
-        nodeIds.has(edge.from) && nodeIds.has(edge.to)
-      );
-    }
-
-    // Aplicar filtros de exclusión de tipos de nodo
-    if (filters.excludedNodeTypes && filters.excludedNodeTypes.length > 0) {
-      const excludedNodeIds = new Set(filteredNodes
-        .filter(node => filters.excludedNodeTypes?.includes(node.type))
-        .map(node => node.id)
-      );
-
-      filteredNodes = filteredNodes.filter(node => !excludedNodeIds.has(node.id));
-      filteredEdges = filteredEdges.filter(edge =>
-        !excludedNodeIds.has(edge.from) && !excludedNodeIds.has(edge.to)
-      );
-    }
-
-    // Aplicar filtros de inclusión de tipos de relación
-    if (filters.edgeTypes.length > 0) {
-      filteredEdges = filteredEdges.filter(edge =>
-        filters.edgeTypes.includes(edge.type || edge.label)
-      );
-
-      const connectedNodeIds = new Set<string | number>();
-      filteredEdges.forEach(edge => {
-        connectedNodeIds.add(edge.from);
-        connectedNodeIds.add(edge.to);
-      });
-
-      filteredNodes = filteredNodes.filter(node => connectedNodeIds.has(node.id));
-    }
-
-    // Aplicar filtros de exclusión de tipos de relación
-    if (filters.excludedEdgeTypes && filters.excludedEdgeTypes.length > 0) {
-      filteredEdges = filteredEdges.filter(edge =>
-        !filters.excludedEdgeTypes?.includes(edge.type || edge.label)
-      );
-
-      // Re-verificar nodos conectados si es necesario, pero generalmente queremos mantener los nodos
-      // aunque se oculten algunas relaciones, a menos que queden aislados y queramos ocultarlos.
-      // Por simplicidad, solo ocultamos las relaciones.
-    }
-
-    console.log("🔍 Final: Enviando al display", filteredNodes.length, "nodos y", filteredEdges.length, "edges");
-    setDisplayGraphData({ nodes: filteredNodes, edges: filteredEdges });
-  }, [originalGraphData, filters, expandedNodeIds]);
+  }, [applyClientFilters, maxNodes, maxHops, selectedDataset, filters, processingMode, isInitialLoad, originalGraphData]);
 
   const processKnowledgeGraph = useCallback(async (setProcessingProgress?: React.Dispatch<React.SetStateAction<number>>, setProcessingMessage?: React.Dispatch<React.SetStateAction<string>>) => {
     setIsLoading(true);
@@ -306,7 +316,7 @@ const useKnowledgeGraph = (maxNodes: number, maxHops: number, selectedDataset: s
     } finally {
       setIsLoading(false);
     }
-  }, [loadGraphData, processingMode]);
+  }, [loadAvailableDatasets, loadGraphData, loadMetadata, processingMode]);
 
   const refreshGraphData = useCallback(() => {
     loadGraphData();
@@ -340,7 +350,7 @@ const useKnowledgeGraph = (maxNodes: number, maxHops: number, selectedDataset: s
     if (!isInitialLoad && originalGraphData) {
       applyClientFilters();
     }
-  }, [filters, expandedNodeIds, applyClientFilters, isInitialLoad, originalGraphData]);
+  }, [filters, focusedNodeId, applyClientFilters, isInitialLoad, originalGraphData]);
 
   // Recargar datos cuando cambia el modo de procesamiento o parámetros que requieren nueva consulta
   useEffect(() => {
@@ -352,23 +362,11 @@ const useKnowledgeGraph = (maxNodes: number, maxHops: number, selectedDataset: s
 
 
   const resetGraphFilter = useCallback(() => {
-    setExpandedNodeIds(new Set()); // Reset filter to show all nodes
+    setFocusedNodeId(null);
   }, []);
 
   const updateFilteredNodeId = useCallback((nodeId: string | number | null) => {
-    if (nodeId === null) {
-      setExpandedNodeIds(new Set());
-    } else {
-      setExpandedNodeIds(prev => {
-        const next = new Set(prev);
-        if (next.has(nodeId)) {
-          next.delete(nodeId);
-        } else {
-          next.add(nodeId);
-        }
-        return next;
-      });
-    }
+    setFocusedNodeId(normalizeGraphId(nodeId));
   }, []);
 
   return {
@@ -386,6 +384,7 @@ const useKnowledgeGraph = (maxNodes: number, maxHops: number, selectedDataset: s
     clearError: () => setError(null),
     resetGraphFilter, // Expose new function
     updateFilteredNodeId, // Expose toggle function
+    focusedNodeId,
     deleteDataset: async (datasetName: string) => {
       try {
         const response = await apiClient.delete(`/api/knowledge-graph/datasets/${encodeURIComponent(datasetName)}`);
@@ -465,6 +464,7 @@ export function GraphView() {
     clearError,
     resetGraphFilter, // Get new function from hook
     updateFilteredNodeId, // Get setter function from hook
+    focusedNodeId,
     deleteDataset,
   } = useKnowledgeGraph(maxNodes, maxHops, selectedDataset, filters, processingMode);
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -475,7 +475,7 @@ export function GraphView() {
     console.log("🔍 filterGraphByNode llamado con nodeId:", nodeId);
     // Actualizar el estado del filtro por nodo usando la función del hook
     updateFilteredNodeId(nodeId);
-    console.log("🔍 Estado expandedNodeIds actualizado");
+    console.log("🔍 Nodo enfocado actualizado");
   }, [updateFilteredNodeId]);
 
   useEffect(() => {
@@ -847,6 +847,7 @@ export function GraphView() {
             onNodeDoubleClick={filterGraphByNode} // Pass the new handler
             onEdgeClick={handleEdgeClick} // Pass the new handler
             savedNodeIds={new Set(savedNodes.map(n => n.id))}
+            focusedNodeId={focusedNodeId}
           />
         </div>
       );

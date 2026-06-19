@@ -1,4 +1,4 @@
-# docker-compose.yml - VERSIÓN CON REDES EXPLÍCITAS
+# docker-compose.yml - VERSIÓN CORREGIDA
 
 version: "3.8"
 
@@ -6,179 +6,48 @@ services:
   # 1. Base de Datos
   db:
     image: pgvector/pgvector:pg15
-    container_name: kognito_db # Nombre explícito
+    container_name: kognito_db
     restart: always
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-kognito_db}
     ports:
-      - "5432:5432" # Mapea el puerto 5432 del contenedor al puerto 5432 del host
+      - "5432:5432"
     volumes:
       - db_data:/var/lib/postgresql/data
     networks:
       - kognito_network
     healthcheck:
-      # Añadimos healthcheck para la base de datos
       test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-kognito_db}" ]
       interval: 5s
       timeout: 5s
       retries: 5
 
-  # 2. El Cerebro (Servicio Core API)
+  # 2. El Cerebro (Servicio Core API) - COMENTADO
   # 🔧 API accesible en: http://localhost:8889
   # 📚 Documentación: http://localhost:8889/docs
-  core:
-    build:
-      context: .
-      dockerfile: Dockerfile.core.hybrid
-    container_name: kognito_core # Nombre explícito
-    restart: always
-    command: uvicorn run_api:app --host 0.0.0.0 --port 8000
-    depends_on:
-      db:
-        condition: service_healthy # Esperar a que la DB esté saludable
-      neo4j:
-        condition: service_started # Neo4j solo necesita haber arrancado
-      redis:
-        condition: service_started # Esperar a que Redis esté disponible
-      init_neo4j:
-        condition: service_completed_successfully # Esperar a que los índices de Neo4j se creen
-    ports:
-      - "${API_PORT:-8889}:8000" # API accesible en localhost:8889
-    volumes:
-      - ./api:/app/api
-      - ./core:/app/core
-      - ./utils:/app/utils
-      - ./tools:/app/tools
-      - ./external_agents:/app/external_agents
-      - ./knowledge_graph:/app/knowledge_graph
-      - ./run_api.py:/app/run_api.py
-      - ./credentials:/app/credentials:ro
-      - ${MEDIA_HOST_PATH:-./media}:/app/media
-      - ${THUMBNAILS_HOST_PATH:-./thumbnails}:/app/thumbnails
-      - ./alembic:/app/alembic
-      - ./alembic.ini:/app/alembic.ini
-      - ./scripts:/app/scripts
-      - ./skills:/app/skills
-      - ./.env:/app/.env:ro # Montar el archivo .env para que los cambios se apliquen sin reconstruir
-    env_file:
-      - ./.env
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    networks:
-      - kognito_network
-    ipc: host # Añadir el modo IPC para el rendimiento de PyTorch
-    ulimits:
-      # Configuración de ulimits para PyTorch
-      memlock:
-        soft: -1
-        hard: -1
-      stack:
-        soft: 67108864
-        hard: 67108864
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all # O puedes especificar un número, por ejemplo, 1
-              capabilities: [ gpu ]
+  # NOTA: Iniciarse localmente con start_local.sh
+  # core:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.core.hybrid
+  #   container_name: kognito_core
+  #   restart: always
+  #   command: uvicorn run_api:app --host 0.0.0.0 --port 8000
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
+  #   networks:
+  #     - kognito_network
 
-  # 3. El Cliente de Telegram
-  telegram_client:
-    build:
-      context: .
-      dockerfile: Dockerfile.telegram
-    container_name: kognito_telegram_client # Nombre explícito
-    restart: always
-    ports:
-      # Puerto para comunicación interna desde otros servicios. 
-      - "9094:9090"
-    depends_on:
-      - core
-    volumes:
-      - ./telegram_client:/app/telegram_client
-      - ./run_telegram_bot.py:/app/run_telegram_bot.py
-      - ./core:/app/core
-      - ./utils:/app/utils
-      - ./tmp:/app/tmp
-      - ./.env:/app/.env:ro # Montar el archivo .env para que los cambios se apliquen sin reconstruir
-    env_file:
-      - ./.env
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    networks:
-      - kognito_network
-    links:
-      - core # ¡NUEVO! Creamos un enlace explícito al servicio core.
-
-  # 4. El Frontend de la Web App Pública
-  # 🌐 Acceso: http://localhost:8880 
-  frontend:
-    # Usamos nuestro nuevo Dockerfile
-    build:
-      context: . # Asume que el Dockerfile y el código de Next.js están en la raíz
-      dockerfile: Dockerfile.frontend
-      args:
-        # Pasamos la URL del backend al proceso de build.
-        # Para producción usa la URL pública, para desarrollo usa localhost:8889
-        NEXT_PUBLIC_API_URL: "${NEXT_PUBLIC_API_URL:-https://apibase.gatoslibres.art}"
-    container_name: kognito_frontend
-    restart: always
-    environment:
-      NEXT_PUBLIC_API_URL: "${NEXT_PUBLIC_API_URL:-https://apibase.gatoslibres.art}"
-    # 📍 IMPORTANTE: Frontend accesible en http://localhost:8880
-    # (El puerto 3000 que aparece en logs es interno del contenedor)
-    ports:
-      - "${FRONTEND_PORT:-8880}:3000"
-    depends_on:
-      - core
-    volumes:
-      - ./src:/app/src
-      - ./public:/app/public
-      - ./package.json:/app/package.json
-      - ./next.config.mjs:/app/next.config.mjs
-      - ./tailwind.config.ts:/app/tailwind.config.ts
-      - ./postcss.config.js:/app/postcss.config.js
-      - ./tsconfig.json:/app/tsconfig.json
-    networks:
-      - kognito_network
-    # El 'links' es opcional en redes modernas, pero no hace daño
-    links:
-      - core
-
-  telegram_panel:
-    build:
-      context: .
-      dockerfile: Dockerfile.webapp
-    restart: always
-    # <<--- AÑADIR DIRECTORIO DE TRABAJO ---<<
-    working_dir: /app
-    ports:
-      - "8010:8000"
-    volumes:
-      # Usar rutas absolutas dentro del contenedor basadas en el working_dir
-      - ./telegram_panel:/app/telegram_panel
-      - ./run_telegram_panel.py:/app/run_telegram_panel.py
-      - ./utils:/app/utils
-      - ./telegram_client:/app/telegram_client
-      - ./.env:/app/.env:ro # Montar el archivo .env para que los cambios se apliquen sin reconstruir
-    environment:
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-telegram_bot_db}
-    env_file:
-      - ./.env
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-
-  # 6. Base de Datos de Grafos (Neo4j)
+  # 3. Base de Datos de Grafos (Neo4j)
   # 🌐 Acceso al Browser: http://localhost:7474
   # 🔌 Conexión Bolt: bolt://localhost:7687
   neo4j:
     image: neo4j:5.15-community
     container_name: kognito_neo4j
     restart: unless-stopped
-
     ports:
       - "7474:7474"
       - "7687:7687"
@@ -186,31 +55,22 @@ services:
       - neo4j_data:/data
       - neo4j_logs:/logs
       - ./docker/neo4j/docker-entrypoint.sh:/app/docker/neo4j/docker-entrypoint.sh
-      # MODIFICACIÓN: Eliminamos el montaje de la configuración específica que está causando problemas
-      # - neo4j_conf:/conf
-      # - ./config/neo4j/neo4j.conf:/var/lib/neo4j/conf/neo4j.conf
     environment:
       NEO4J_AUTH: none
       NEO4J_ACCEPT_LICENSE_AGREEMENT: "yes"
-      # Configuración para evitar reinicios
       NEO4J_dbms_default__database: "neo4j"
       NEO4J_dbms_allow__upgrade: "true"
-      # Configuración de memoria optimizada
       NEO4J_server_memory_heap_initial__size: "2G"
       NEO4J_server_memory_heap_max__size: "4G"
       NEO4J_server_memory_pagecache_size: "512m"
-      # Configuraciones de red estables
       NEO4J_server_default__listen__address: "0.0.0.0"
       NEO4J_server_bolt_listen__address: "0.0.0.0:7687"
       NEO4J_server_http_listen__address: "0.0.0.0:7474"
-      # Configuración de logs para ser menos verbosos
       NEO4J_dbms_logs_debug_level: "ERROR"
       NEO4J_dbms_logs_query_enabled: "OFF"
-      # Evitar problemas de concurrencia
       NEO4J_dbms_security_auth__enabled: "false"
       NEO4J_dbms_connector_bolt_enabled: "true"
       NEO4J_dbms_connector_http_enabled: "true"
-      # Deshabilitamos la validación estricta para evitar problemas de configuración
       NEO4J_server_config_strict__validation_enabled: "false"
       NEO4J_dbms_memory_transaction_total_max: "6G"
     healthcheck:
@@ -222,31 +82,64 @@ services:
     networks:
       - kognito_network
 
-  # 7. Servicio de Caching (Redis)
+  # 4. El Frontend de la Web App Pública - COMENTADO
+  # 🌐 Acceso: http://localhost:8880
+  # NOTA: Iniciarse localmente con start_local.sh
+  # frontend:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.frontend
+  #     args:
+  #       NEXT_PUBLIC_API_URL: "${NEXT_PUBLIC_API_URL:-https://apibase.gatoslibres.art}"
+  #   container_name: kognito_frontend
+  #   restart: always
+  #   environment:
+  #     NEXT_PUBLIC_API_URL: "${NEXT_PUBLIC_API_URL:-https://apibase.gatoslibres.art}"
+  #   ports:
+  #     - "${FRONTEND_PORT:-8880}:3000"
+  #   depends_on:
+  #     - core
+  #   volumes:
+  #     - ./src:/app/src
+  #     - ./public:/app/public
+  #     - ./package.json:/app/package.json
+  #     - ./next.config.mjs:/app/next.config.mjs
+  #     - ./tailwind.config.ts:/app/tailwind.config.ts
+  #     - ./postcss.config.js:/app/postcss.config.js
+  #     - ./tsconfig.json:/app/tsconfig.json
+  #   networks:
+  #     - kognito_network
+
+  # 5. Servicio de Caching (Redis)
   redis:
     image: redis:7.0-alpine
     container_name: kognito_redis
     restart: always
     ports:
-      - "6379:6379" # Puerto de Redis
+      - "6379:6379"
     networks:
       - kognito_network
 
+  # 6. Inicialización de Neo4j (crear índices)
   init_neo4j:
     image: neo4j:5.15-community
     container_name: kognito_neo4j_init
-
+    depends_on:
+      neo4j:
+        condition: service_healthy
     networks:
       - kognito_network
     volumes:
       - ./docker/neo4j/init_neo4j_indexes.cypher:/init_neo4j_indexes.cypher:ro
+    environment:
+      NEO4J_AUTH: none
     command: >
       bash -c "
-        sleep 10 && # Dar un poco más de tiempo por si acaso
-        cypher-shell -u neo4j -p ${NEO4J_PASSWORD:-neo4j} -f /init_neo4j_indexes.cypher || true
+        sleep 10 &&
+        cypher-shell -u neo4j -p '' -f /init_neo4j_indexes.cypher || true
       "
 
-  # 8. Servicio TTS Kokoro (Local ONNX)
+  # 7. Servicio TTS Kokoro (Local ONNX)
   # 🌐 Acceso Host: http://localhost:8011
   # 🔌 Acceso Interno: http://kokoro-tts:8011
   kokoro-tts:
@@ -257,9 +150,6 @@ services:
     restart: always
     ports:
       - "8011:8011"
-    # volumes:
-    #   # Montar los modelos desde una carpeta local
-    #   - ./kokoro_service/models:/opt/kokoro
     networks:
       - kognito_network
     healthcheck:
@@ -268,7 +158,51 @@ services:
       timeout: 5s
       retries: 3
 
+  # === MONITOREO Y BACKUP ===
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: always
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - kognito_network
 
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: always
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana:/etc/grafana/provisioning
+    networks:
+      - kognito_network
+
+  backup:
+    image: postgres:15-alpine
+    container_name: backup
+    restart: always
+    environment:
+      - PGPASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD}
+    volumes:
+      - ./scripts/backup.sh:/backup.sh
+      - backups:/backups
+    command: ["sh", "-c", "while true; do /backup.sh; sleep 3600; done"]
+    networks:
+      - kognito_network
 
 networks:
   kognito_network:
@@ -276,7 +210,9 @@ networks:
 
 volumes:
   db_data:
-  pgadmin_data:
   neo4j_data:
   neo4j_logs:
   credentials:
+  prometheus_data:
+  grafana_data:
+  backups:

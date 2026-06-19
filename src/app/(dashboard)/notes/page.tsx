@@ -6,7 +6,8 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/componen
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
-import { Plus, Notebook, Users, Edit, Trash2, MoreHorizontal, Info, Lightbulb, FileText, Link, Bot, Star } from 'lucide-react'; // Añadido Link, Bot y Star
+import { Plus, Notebook, Users, Edit, Trash2, MoreHorizontal, Info, Lightbulb, FileText, Link, Bot, Star, CheckSquare, X, MessageSquare } from 'lucide-react'; // Añadido Link, Bot, Star, CheckSquare y X
+import { Checkbox } from '@/components/ui/checkbox';
 import { motion, AnimatePresence } from 'framer-motion';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -19,26 +20,14 @@ import { useDrag, useDrop } from 'react-dnd';
 import { ManageLinkedProfilesDialog } from './ManageLinkedProfilesDialog';
 import { AnalysisDetailDialog } from '../analysis/analysis-detail-dialog';
 import { ContactProfile } from '../profiles/page';
-import { Analysis } from '@/lib/models';
+import { Analysis, Note } from '@/lib/models';
 import { useAuth } from '@/contexts/AuthContext';
 import { NoteSearch } from '@/components/NoteSearch';
+import { ContextualChat } from '@/components/ContextualChat';
 
-export interface Note {
-  id: number;
-  title: string | null;
-  content: string;
-  category: string;
-  created_at: string;
-  is_starred?: boolean;
-  team_shared?: boolean | string;
-  team_id?: string;
-  workspace_id?: string;
-  workspace_name?: string; // NEW
-  workspace_color?: string; // NEW
-  workspace_role?: string; // NEW: Role of the current user in this note's workspace
-}
+export type { Note };
 
-export default function NotesPage() {
+export default function NotesPage({ isEmbedded = false }: { params?: any; searchParams?: any; isEmbedded?: boolean }) {
   const { user } = useAuth();
   const [notes, setNotes] = useState<Note[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -57,6 +46,146 @@ export default function NotesPage() {
   const [isAnalysisResultDialogOpen, setIsAnalysisResultDialogOpen] = useState(false);
   const [currentAnalysisTaskId, setCurrentAnalysisTaskId] = useState<string | null>(null);
   const [isInfoSheetOpen, setIsInfoSheetOpen] = useState(false); // Nuevo estado para controlar la visibilidad del Sheet
+
+  // Estados para selección por lote
+  const [selectedNoteIds, setSelectedNoteIds] = useState<number[]>([]);
+  const [isSelectionMode, setIsSelectionMode] = useState(false);
+  const [isBulkDeleteDialogOpen, setIsBulkDeleteDialogOpen] = useState(false);
+  const [chatNote, setChatNote] = useState<Note | null>(null);
+  const [isChatOpen, setIsChatOpen] = useState(false);
+
+  const handleToggleSelectNote = (noteId: number, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setSelectedNoteIds(prev =>
+      prev.includes(noteId) ? prev.filter(id => id !== noteId) : [...prev, noteId]
+    );
+  };
+
+  const handleBulkDeleteConfirm = async () => {
+    if (selectedNoteIds.length === 0) return;
+    const toastId = toast.loading(`Eliminando ${selectedNoteIds.length} notas...`);
+    try {
+      const response = await apiClient.post('/api/notes/bulk-delete', { note_ids: selectedNoteIds });
+      const count = response.data.deleted_count;
+      toast.success(`${count} notas eliminadas`, { id: toastId });
+      setSelectedNoteIds([]);
+      setIsSelectionMode(false);
+      setIsBulkDeleteDialogOpen(false);
+      setSkip(0);
+      setHasMore(true);
+      fetchNotes(0, limit);
+    } catch (error) {
+      toast.error('Error al eliminar las notas por lote', { id: toastId });
+    }
+  };
+
+  const handleBulkChangeCategory = async (newCategory: string) => {
+    if (selectedNoteIds.length === 0) return;
+    const toastId = toast.loading(`Cambiando categoría a ${newCategory}...`);
+    try {
+      const response = await apiClient.post('/api/notes/bulk-update', {
+        note_ids: selectedNoteIds,
+        category: newCategory
+      });
+      const count = response.data.updated_count;
+      toast.success(`${count} notas movidas a '${newCategory}'`, { id: toastId });
+      setSelectedNoteIds([]);
+      setIsSelectionMode(false);
+      setNotes(prevNotes =>
+        prevNotes.map(note =>
+          selectedNoteIds.includes(note.id) ? { ...note, category: newCategory } : note
+        )
+      );
+    } catch (error) {
+      toast.error('Error al cambiar la categoría', { id: toastId });
+    }
+  };
+
+  const handleBulkChangeWorkspace = async (workspaceId: string | null) => {
+    if (selectedNoteIds.length === 0) return;
+    const isClearing = !workspaceId || workspaceId === "none";
+    const toastId = toast.loading(isClearing ? 'Quitando notas del workspace...' : 'Moviendo notas al workspace...');
+    try {
+      const response = await apiClient.post('/api/notes/bulk-update', {
+        note_ids: selectedNoteIds,
+        workspace_id: isClearing ? "" : workspaceId
+      });
+      const count = response.data.updated_count;
+      toast.success(
+        isClearing 
+          ? `${count} notas quitadas del workspace` 
+          : `${count} notas asociadas al workspace`, 
+        { id: toastId }
+      );
+      setSelectedNoteIds([]);
+      setIsSelectionMode(false);
+      fetchNotes(0, limit, false);
+    } catch (error) {
+      toast.error('Error al cambiar el workspace de las notas', { id: toastId });
+    }
+  };
+
+  const handleBulkToggleStar = async (starStatus: boolean) => {
+    if (selectedNoteIds.length === 0) return;
+    const toastId = toast.loading(starStatus ? 'Destacando notas...' : 'Quitando destaque...');
+    try {
+      const response = await apiClient.post('/api/notes/bulk-update', {
+        note_ids: selectedNoteIds,
+        is_starred: starStatus
+      });
+      const count = response.data.updated_count;
+      toast.success(
+        starStatus 
+          ? `${count} notas destacadas` 
+          : `${count} notas desmarcadas`, 
+        { id: toastId }
+      );
+      setSelectedNoteIds([]);
+      setIsSelectionMode(false);
+      setNotes(prevNotes => {
+        const updated = prevNotes.map(note =>
+          selectedNoteIds.includes(note.id) ? { ...note, is_starred: starStatus } : note
+        );
+        return updated.sort((a, b) => {
+          if (a.is_starred && !b.is_starred) return -1;
+          if (!a.is_starred && b.is_starred) return 1;
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        });
+      });
+    } catch (error) {
+      toast.error('Error al actualizar las notas destacadas', { id: toastId });
+    }
+  };
+
+  const handleBulkAnalyzeNotes = async () => {
+    if (selectedNoteIds.length === 0) return;
+    const toastId = toast.loading(`Iniciando análisis de ${selectedNoteIds.length} notas...`);
+    try {
+      const response = await apiClient.post('/api/analyze-note-collection', {
+        note_ids: selectedNoteIds,
+        collection_name: `Colección de ${selectedNoteIds.length} Notas`
+      });
+      toast.dismiss(toastId);
+      toast.success('Análisis de colección completado.');
+      
+      const newAnalysis: Analysis = {
+        id: response.data.task_id || `analysis-${Date.now()}`,
+        type: 'note_collection_analysis',
+        title: `Análisis de Selección (${selectedNoteIds.length} notas)`,
+        created_at: new Date().toISOString(),
+        result: response.data.result_payload
+      };
+
+      setAnalysisResult(newAnalysis);
+      setIsAnalysisResultDialogOpen(true);
+      setSelectedNoteIds([]);
+      setIsSelectionMode(false);
+    } catch (error) {
+      toast.dismiss(toastId);
+      toast.error('Error al analizar la selección de notas.');
+      console.error(error);
+    }
+  };
 
   // Estados para paginación
   const [skip, setSkip] = useState(0);
@@ -414,10 +543,18 @@ export default function NotesPage() {
         style={{ opacity: isDragging ? 0.5 : 1 }}
       >
         <Card
-          className="group relative overflow-hidden h-[280px] hover:bg-card/60 transition-all duration-300"
+          className={`group relative overflow-hidden h-[280px] transition-all duration-300 cursor-pointer ${
+            selectedNoteIds.includes(note.id)
+              ? 'bg-primary/5 border-primary shadow-lg ring-1 ring-primary/30'
+              : 'hover:bg-card/60 border-border/60 shadow-sm'
+          }`}
           onClick={() => {
-            setViewingNote(note);
-            setIsViewDialogOpen(true);
+            if (selectedNoteIds.length > 0 || isSelectionMode) {
+              handleToggleSelectNote(note.id);
+            } else {
+              setViewingNote(note);
+              setIsViewDialogOpen(true);
+            }
           }}
         >
           {/* Efecto de resplandor en el hover */}
@@ -426,8 +563,25 @@ export default function NotesPage() {
           <CardHeader className="pb-3 relative z-10">
             <CardTitle className="flex items-start justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0 flex-1">
-                <div className="p-3 rounded-2xl bg-background/50 border border-border/40 shadow-inner group-hover:scale-110 transition-transform duration-500 flex-shrink-0">
-                  <Notebook className="h-5 w-5 text-primary" />
+                <div className="relative flex-shrink-0">
+                  <div className={`p-3 rounded-2xl bg-background/50 border border-border/40 shadow-inner transition-all duration-500 ${
+                    (isSelectionMode || selectedNoteIds.length > 0) ? 'opacity-0 scale-75' : 'group-hover:scale-110'
+                  }`}>
+                    <Notebook className="h-5 w-5 text-primary" />
+                  </div>
+                  <div className={`absolute inset-0 flex items-center justify-center transition-all duration-300 ${
+                    (isSelectionMode || selectedNoteIds.length > 0) 
+                      ? 'opacity-100 scale-100' 
+                      : 'opacity-0 scale-75 pointer-events-none group-hover:opacity-100 group-hover:scale-100 group-hover:pointer-events-auto bg-card rounded-2xl border border-primary/40 shadow-sm'
+                  }`}
+                  onClick={(e) => e.stopPropagation()}
+                  >
+                    <Checkbox
+                      checked={selectedNoteIds.includes(note.id)}
+                      onCheckedChange={() => handleToggleSelectNote(note.id)}
+                      className="h-5 w-5 rounded-md border-primary text-primary focus:ring-primary z-30"
+                    />
+                  </div>
                 </div>
                 <span className="font-bold text-lg line-clamp-2 group-hover:text-primary transition-colors leading-tight tracking-tight">
                   {note.title || 'Nota sin título'}
@@ -478,6 +632,15 @@ export default function NotesPage() {
                       <DropdownMenuSeparator />
                     </>
                   )}
+                  <DropdownMenuItem onClick={(e) => {
+                    e.stopPropagation();
+                    setChatNote(note);
+                    setIsChatOpen(true);
+                  }} className="rounded-xl text-primary font-medium">
+                    <MessageSquare className="mr-2 h-4 w-4" />
+                    Chatear con Nota
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={(e) => {
                     e.stopPropagation();
                     onAnalyzeNote(note);
@@ -708,88 +871,202 @@ export default function NotesPage() {
   };
 
   return (
-    <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden">
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-3xl font-bold flex items-center">
-            <Notebook className="mr-3 h-8 w-8 text-primary" />
-            Mis Notas
-            <Button variant="ghost" size="icon" className="ml-2 h-6 w-6 text-muted-foreground" onClick={() => setIsInfoSheetOpen(true)}>
+    <div className={isEmbedded ? "space-y-6" : "p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden"}>
+      {!isEmbedded ? (
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h1 className="text-3xl font-bold flex items-center">
+              <Notebook className="mr-3 h-8 w-8 text-primary" />
+              Mis Notas
+              <Button variant="ghost" size="icon" className="ml-2 h-6 w-6 text-muted-foreground" onClick={() => setIsInfoSheetOpen(true)}>
+                <Info className="h-4 w-4" />
+              </Button>
+            </h1>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant={isSelectionMode ? "secondary" : "outline"}
+              size="sm"
+              onClick={() => {
+                setIsSelectionMode(!isSelectionMode);
+                if (isSelectionMode) {
+                  setSelectedNoteIds([]);
+                }
+              }}
+              className="h-8 px-2 md:px-4 rounded-xl gap-1.5"
+            >
+              <CheckSquare className="h-4 w-4 text-primary" />
+              <span className="hidden md:inline">{isSelectionMode ? "Cancelar Selección" : "Seleccionar"}</span>
+            </Button>
+            {!workspaceGroupView && (
+              <Select onValueChange={(value) => setWorkspaceView(value === "all" ? null : value)} value={workspaceView || "all"}>
+                <SelectTrigger className="w-[180px] h-8">
+                  <SelectValue placeholder="Filtrar por Workspace" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas las Notas</SelectItem>
+                  {availableWorkspaces.map((ws) => (
+                    <SelectItem key={ws.id} value={ws.id}>
+                      <div className="flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: ws.color || '#888888' }}></span>
+                        {ws.name}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="h-8 px-2 md:px-4">
+                  <span className="hidden md:inline">Acciones</span> <MoreHorizontal className="md:ml-2 h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-[180px]">
+                <DropdownMenuItem onClick={() => { setEditingNote(null); setIsNoteDialogOpen(true); }}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Nueva Nota
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => {
+                  setCategoryView(!categoryView);
+                  if (workspaceGroupView) setWorkspaceGroupView(false); // Desactivar vista por workspace si se activa vista por categoría
+                }}>
+                  {categoryView ? "Vista General" : "Vista por Categoría"}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => {
+                  setWorkspaceGroupView(!workspaceGroupView);
+                  if (categoryView) setCategoryView(false); // Desactivar vista por categoría si se activa vista por workspace
+                  setWorkspaceView(null); // Limpiar filtro de workspace al activar vista agrupada
+                }}>
+                  {workspaceGroupView ? "Vista General" : "Vista por Workspace"}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={handleAnalyzeAllNotes}>
+                  <Lightbulb className="mr-2 h-4 w-4" />
+                  Analizar Notas
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => toast.info(`Funcionalidad 'Resumen Semántico' en desarrollo.`)}>
+                  <FileText className="mr-2 h-4 w-4" />
+                  Resumen Semántico
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between gap-4 mb-4">
+          <div className="flex items-center gap-2">
+            <h2 className="text-xl font-black uppercase tracking-widest text-muted-foreground/70">Mis Notas</h2>
+            <Button variant="ghost" size="icon" className="h-8 w-8 rounded-xl bg-primary/5 text-primary hover:bg-primary/10 transition-all" onClick={() => setIsInfoSheetOpen(true)}>
               <Info className="h-4 w-4" />
             </Button>
-          </h1>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant={isSelectionMode ? "secondary" : "outline"}
+              size="sm"
+              onClick={() => {
+                setIsSelectionMode(!isSelectionMode);
+                if (isSelectionMode) {
+                  setSelectedNoteIds([]);
+                }
+              }}
+              className="h-8 px-2 md:px-4 rounded-xl gap-1.5"
+            >
+              <CheckSquare className="h-4 w-4 text-primary" />
+              <span className="hidden md:inline">{isSelectionMode ? "Cancelar Selección" : "Seleccionar"}</span>
+            </Button>
+            {!workspaceGroupView && (
+              <Select onValueChange={(value) => setWorkspaceView(value === "all" ? null : value)} value={workspaceView || "all"}>
+                <SelectTrigger className="w-[180px] h-8">
+                  <SelectValue placeholder="Filtrar por Workspace" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas las Notas</SelectItem>
+                  {availableWorkspaces.map((ws) => (
+                    <SelectItem key={ws.id} value={ws.id}>
+                      <div className="flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: ws.color || '#888888' }}></span>
+                        {ws.name}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="h-8 px-2 md:px-4">
+                  <span className="hidden md:inline">Acciones</span> <MoreHorizontal className="md:ml-2 h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-[180px]">
+                <DropdownMenuItem onClick={() => { setEditingNote(null); setIsNoteDialogOpen(true); }}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Nueva Nota
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => {
+                  setCategoryView(!categoryView);
+                  if (workspaceGroupView) setWorkspaceGroupView(false); // Desactivar vista por workspace si se activa vista por categoría
+                }}>
+                  {categoryView ? "Vista General" : "Vista por Categoría"}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => {
+                  setWorkspaceGroupView(!workspaceGroupView);
+                  if (categoryView) setCategoryView(false); // Desactivar vista por categoría si se activa vista por workspace
+                  setWorkspaceView(null); // Limpiar filtro de workspace al activar vista agrupada
+                }}>
+                  {workspaceGroupView ? "Vista General" : "Vista por Workspace"}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={handleAnalyzeAllNotes}>
+                  <Lightbulb className="mr-2 h-4 w-4" />
+                  Analizar Notas
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => toast.info(`Funcionalidad 'Resumen Semántico' en desarrollo.`)}>
+                  <FileText className="mr-2 h-4 w-4" />
+                  Resumen Semántico
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          {!workspaceGroupView && (
-            <Select onValueChange={(value) => setWorkspaceView(value === "all" ? null : value)} value={workspaceView || "all"}>
-              <SelectTrigger className="w-[180px] h-8">
-                <SelectValue placeholder="Filtrar por Workspace" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todas las Notas</SelectItem>
-                {availableWorkspaces.map((ws) => (
-                  <SelectItem key={ws.id} value={ws.id}>
-                    <div className="flex items-center gap-2">
-                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: ws.color || '#888888' }}></span>
-                      {ws.name}
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="h-8 px-2 md:px-4">
-                <span className="hidden md:inline">Acciones</span> <MoreHorizontal className="md:ml-2 h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-[180px]">
-              <DropdownMenuItem onClick={() => { setEditingNote(null); setIsNoteDialogOpen(true); }}>
-                <Plus className="mr-2 h-4 w-4" />
-                Nueva Nota
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => {
-                setCategoryView(!categoryView);
-                if (workspaceGroupView) setWorkspaceGroupView(false); // Desactivar vista por workspace si se activa vista por categoría
-              }}>
-                {categoryView ? "Vista General" : "Vista por Categoría"}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => {
-                setWorkspaceGroupView(!workspaceGroupView);
-                if (categoryView) setCategoryView(false); // Desactivar vista por categoría si se activa vista por workspace
-                setWorkspaceView(null); // Limpiar filtro de workspace al activar vista agrupada
-              }}>
-                {workspaceGroupView ? "Vista General" : "Vista por Workspace"}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={handleAnalyzeAllNotes}>
-                <Lightbulb className="mr-2 h-4 w-4" />
-                Analizar Notas
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => toast.info(`Funcionalidad 'Resumen Semántico' en desarrollo.`)}>
-                <FileText className="mr-2 h-4 w-4" />
-                Resumen Semántico
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </div>
+      )}
 
       <div className="mb-8">
         <NoteSearch
           accountId={user?.id || ''}
           workspaceId={workspaceView || undefined}
-          onResultClick={(result) => {
+          onResultClick={async (result) => {
             const note = notes.find(n => String(n.id) === result.note_id);
             if (note) {
               setViewingNote(note);
               setIsViewDialogOpen(true);
             } else {
-              toast.info(`Nota: ${result.title || 'Sin título'}`, {
-                description: result.content.substring(0, 200) + '...'
-              });
+              const toastId = toast.loading('Cargando nota...');
+              try {
+                const response = await apiClient.get(`/api/notes/${result.note_id}`);
+                const fetchedNote = response.data;
+                
+                // Si la nota tiene workspace_id, buscar el rol para los permisos
+                if (fetchedNote.workspace_id) {
+                  try {
+                    const roleResponse = await apiClient.get(`/api/workspaces/${fetchedNote.workspace_id}/my-role`);
+                    fetchedNote.workspace_role = roleResponse.data.role;
+                  } catch (roleError) {
+                    console.error(`Error fetching role for workspace ${fetchedNote.workspace_id}:`, roleError);
+                  }
+                }
+                
+                setViewingNote(fetchedNote);
+                setIsViewDialogOpen(true);
+                toast.dismiss(toastId);
+              } catch (error) {
+                console.error("Error fetching note from search result:", error);
+                toast.error("No se pudo cargar la nota completa.", { id: toastId });
+              }
             }
           }}
         />
@@ -919,6 +1196,163 @@ export default function NotesPage() {
           </div>
         </SheetContent>
       </Sheet>
+
+      <AlertDialog open={isBulkDeleteDialogOpen} onOpenChange={setIsBulkDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Estás seguro?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta acción eliminará {selectedNoteIds.length} notas permanentemente. Esta acción no se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleBulkDeleteConfirm} className="bg-destructive hover:bg-destructive/90">
+              Sí, eliminar {selectedNoteIds.length} notas
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AnimatePresence>
+        {selectedNoteIds.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 100 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 100 }}
+            className="fixed bottom-6 left-1/2 transform -translate-x-1/2 z-50 w-full max-w-4xl px-4"
+          >
+            <div className="bg-background/95 backdrop-blur-xl border border-border/60 shadow-2xl rounded-2xl p-4 flex flex-col md:flex-row items-center justify-between gap-4">
+              <div className="flex items-center gap-3 w-full md:w-auto">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="rounded-xl h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-primary/10"
+                  onClick={() => {
+                    setSelectedNoteIds([]);
+                    setIsSelectionMode(false);
+                  }}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+                <div className="flex flex-col">
+                  <span className="text-sm font-bold text-foreground">
+                    {selectedNoteIds.length} notas seleccionadas
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 w-full md:w-auto justify-end">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const filtered = workspaceView
+                      ? notes.filter(note => note.workspace_id === workspaceView)
+                      : notes;
+                    setSelectedNoteIds(filtered.map(n => n.id));
+                  }}
+                  className="h-9 rounded-xl text-xs font-semibold"
+                >
+                  Seleccionar todas
+                </Button>
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="h-9 rounded-xl text-xs font-semibold gap-1.5">
+                      <Star className="h-3.5 w-3.5 text-amber-500" />
+                      <span>Destacar</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="rounded-xl bg-card/95 backdrop-blur-xl border-border/40">
+                    <DropdownMenuItem onClick={() => handleBulkToggleStar(true)} className="rounded-lg">
+                      Destacar seleccionadas
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleBulkToggleStar(false)} className="rounded-lg">
+                      Quitar destacado
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="h-9 rounded-xl text-xs font-semibold gap-1.5">
+                      <Notebook className="h-3.5 w-3.5 text-primary" />
+                      <span>Categoría</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="rounded-xl bg-card/95 backdrop-blur-xl border-border/40">
+                    {["Concepto", "Idea", "Tarea", "General"].map(cat => (
+                      <DropdownMenuItem key={cat} onClick={() => handleBulkChangeCategory(cat)} className="rounded-lg">
+                        Mover a {cat}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="h-9 rounded-xl text-xs font-semibold gap-1.5">
+                      <Link className="h-3.5 w-3.5 text-blue-500" />
+                      <span>Workspace</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="rounded-xl bg-card/95 backdrop-blur-xl border-border/40 max-h-60 overflow-y-auto">
+                    <DropdownMenuItem onClick={() => handleBulkChangeWorkspace(null)} className="rounded-lg">
+                      Ninguno (Personal)
+                    </DropdownMenuItem>
+                    {availableWorkspaces.map(ws => (
+                      <DropdownMenuItem key={ws.id} onClick={() => handleBulkChangeWorkspace(ws.id)} className="rounded-lg">
+                        {ws.name}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleBulkAnalyzeNotes}
+                  className="h-9 rounded-xl text-xs font-semibold text-primary hover:text-primary-foreground hover:bg-primary gap-1.5"
+                >
+                  <Lightbulb className="h-3.5 w-3.5" />
+                  Analizar
+                </Button>
+
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => setIsBulkDeleteDialogOpen(true)}
+                  className="h-9 rounded-xl text-xs font-semibold gap-1.5"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Eliminar
+                </Button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {chatNote && (
+        <ContextualChat
+          isOpen={isChatOpen}
+          onClose={() => {
+            setIsChatOpen(false);
+            setChatNote(null);
+          }}
+          title={chatNote.title || "Nota sin título"}
+          context={{
+            type: 'note',
+            id: chatNote.id.toString(),
+            snapshot: {
+              title: chatNote.title || "Nota sin título",
+              content: chatNote.content,
+              category: chatNote.category,
+            }
+          }}
+        />
+      )}
     </div>
   );
 }
