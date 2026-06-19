@@ -1,7 +1,7 @@
 // src/app/(dashboard)/admin/page.tsx
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
@@ -12,7 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { Users, Settings, Clock, ArrowRight, Plus, Edit, Trash2, Network } from 'lucide-react';
+import { Users, Settings, Clock, ArrowRight, Plus, Edit, Trash2, Network, BarChart2, FlaskConical, RefreshCw, CheckCircle, AlertTriangle, Zap } from 'lucide-react';
 import apiClient from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 
@@ -31,10 +31,39 @@ interface AdminMetricsResponse {
   active_scheduled_tools: number;
 }
 
-interface AdminMetricsResponse {
-  total_users: number;
-  total_scheduled_tools: number;
-  active_scheduled_tools: number;
+interface PipelineMetric {
+  metric: string;
+  value: number;
+  reference: number;
+  status: 'OK' | 'WARNING';
+  unit?: string;
+}
+
+interface PipelineHistoryEntry {
+  filename: string;
+  timestamp: string;
+  metrics: PipelineMetric[];
+  summary: { total_metrics: number; warnings: number };
+  is_real?: boolean;
+  execution_time_seconds?: number;
+}
+
+interface PipelineStatus {
+  is_running: boolean;
+  last_run_time: string | null;
+  error: string | null;
+}
+
+interface PipelineResults {
+  latest: {
+    timestamp: string;
+    metrics: PipelineMetric[];
+    summary: { total_metrics: number; warnings: number };
+    is_real?: boolean;
+    execution_time_seconds?: number;
+  } | null;
+  history: PipelineHistoryEntry[];
+  status: PipelineStatus;
 }
 
 interface PageProps {
@@ -53,6 +82,9 @@ export default function AdminPage({ params }: PageProps) {
   const { id: adminId } = syncParams; // Using adminId to avoid conflict if 'id' is used elsewhere
 
   const [metrics, setMetrics] = useState<AdminMetricsResponse | null>(null);
+  const [pipelineResults, setPipelineResults] = useState<PipelineResults | null>(null);
+  const [pipelineLoading, setPipelineLoading] = useState(false);
+  const [pipelineRunning, setPipelineRunning] = useState(false);
 
   const [isCreateUserDialogOpen, setIsCreateUserDialogOpen] = useState(false);
   const [isEditUserDialogOpen, setIsEditUserDialogOpen] = useState(false);
@@ -167,10 +199,55 @@ export default function AdminPage({ params }: PageProps) {
     }
   }, [toast]);
 
+  const fetchPipelineResults = useCallback(async () => {
+    try {
+      setPipelineLoading(true);
+      const response = await apiClient.get('/api/admin/pipeline/results');
+      setPipelineResults(response.data);
+      setPipelineRunning(response.data?.status?.is_running ?? false);
+    } catch (error: any) {
+      console.error('Error fetching pipeline results:', error);
+    } finally {
+      setPipelineLoading(false);
+    }
+  }, []);
+
+  const handleRunPipeline = async () => {
+    try {
+      setPipelineRunning(true);
+      await apiClient.post('/api/admin/pipeline/run');
+      toast({
+        title: 'Pipeline iniciado',
+        description: 'Enviando queries reales al LLM. Puede tardar 1-5 minutos. Los resultados aparecerán automáticamente.',
+      });
+      // Poll every 8 seconds while running
+      const poll = setInterval(async () => {
+        const res = await apiClient.get('/api/admin/pipeline/results').catch(() => null);
+        if (res) {
+          setPipelineResults(res.data);
+          if (!res.data?.status?.is_running) {
+            setPipelineRunning(false);
+            clearInterval(poll);
+          }
+        }
+      }, 8000);
+      // Safety: stop polling after 12 minutes
+      setTimeout(() => { clearInterval(poll); setPipelineRunning(false); }, 720000);
+    } catch (error: any) {
+      setPipelineRunning(false);
+      toast({
+        title: 'Error',
+        description: error.response?.data?.detail || 'No se pudo iniciar el pipeline.',
+        variant: 'destructive',
+      });
+    }
+  };
+
   useEffect(() => {
     fetchUsers();
     fetchMetrics();
-  }, [fetchUsers, fetchMetrics]);
+    fetchPipelineResults();
+  }, [fetchUsers, fetchMetrics, fetchPipelineResults]);
 
   const handleSelectUser = (userId: string, isSelected: boolean) => {
     setSelectedUsers((prevSelected) => {
@@ -258,10 +335,14 @@ export default function AdminPage({ params }: PageProps) {
       </div>
 
       <Tabs defaultValue="users" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="users">Gestión de Usuarios</TabsTrigger>
           <TabsTrigger value="tools">Herramientas del Sistema</TabsTrigger>
           <TabsTrigger value="metrics">Métricas del Sistema</TabsTrigger>
+          <TabsTrigger value="ai-quality" className="flex items-center gap-1.5">
+            <FlaskConical className="h-3.5 w-3.5" />
+            Calidad IA
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="users" className="space-y-4">
@@ -535,30 +616,40 @@ export default function AdminPage({ params }: PageProps) {
               </Link>
             </Card>
 
-            <Card className="hover:shadow-md transition-shadow cursor-pointer opacity-50">
-              <CardHeader>
-                <CardTitle className="flex items-center justify-between">
-                  <div className="flex items-center">
-                    <Settings className="mr-2 h-5 w-5 text-muted-foreground" />
-                    Configuración del Sistema
-                  </div>
-                  <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                </CardTitle>
-                <CardDescription>
-                  Configuraciones generales del sistema (Próximamente)
-                </CardDescription>
-              </CardHeader>
+            <Card className="hover:shadow-md transition-shadow cursor-pointer">
+              <Link href="/admin/settings">
+                <CardHeader>
+                  <CardTitle className="flex items-center justify-between">
+                    <div className="flex items-center">
+                      <Settings className="mr-2 h-5 w-5 text-primary" />
+                      Configuración del Sistema
+                    </div>
+                    <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                  </CardTitle>
+                  <CardDescription>
+                    Configura el motor de IA global y administra credenciales del sistema
+                  </CardDescription>
+                </CardHeader>
+              </Link>
             </Card>
           </div>
         </TabsContent>
 
         <TabsContent value="metrics" className="space-y-4">
           <Card>
-            <CardHeader>
-              <CardTitle>Métricas del Sistema</CardTitle>
-              <CardDescription>
-                Información clave sobre el estado y uso del sistema.
-              </CardDescription>
+            <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div>
+                <CardTitle>Métricas del Sistema</CardTitle>
+                <CardDescription>
+                  Información clave sobre el estado y uso del sistema.
+                </CardDescription>
+              </div>
+              <Link href="/admin/analytics">
+                <Button className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white font-bold gap-2 text-xs">
+                  <BarChart2 size={14} />
+                  Ver Analíticas de Tráfico y Uso
+                </Button>
+              </Link>
             </CardHeader>
             <CardContent>
               {metrics ? (
@@ -606,6 +697,201 @@ export default function AdminPage({ params }: PageProps) {
                 </div>
               ) : (
                 <p className="text-center text-muted-foreground mt-4">Cargando métricas...</p>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ─── AI Quality Metrics Tab ─── */}
+        <TabsContent value="ai-quality" className="space-y-4">
+          <Card>
+            <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <FlaskConical className="h-5 w-5 text-purple-500" />
+                  Pipeline de Calidad IA
+                </CardTitle>
+                <CardDescription>
+                  Métricas de alucinaciones, recall y éxito de herramientas en tiempo real.
+                  {pipelineResults?.latest?.timestamp && (
+                    <span className="ml-2 text-xs text-muted-foreground">
+                      Última ejecución: {pipelineResults.latest.timestamp}
+                    </span>
+                  )}
+                </CardDescription>
+              </div>
+              <Button
+                onClick={handleRunPipeline}
+                disabled={pipelineRunning}
+                className="bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-600 hover:to-indigo-700 text-white font-bold gap-2 text-xs"
+              >
+                {pipelineRunning ? (
+                  <><RefreshCw className="h-3.5 w-3.5 animate-spin" /> Ejecutando...</>
+                ) : (
+                  <><FlaskConical className="h-3.5 w-3.5" /> Ejecutar Pipeline</>
+                )}
+              </Button>
+            </CardHeader>
+            <CardContent>
+              {pipelineLoading ? (
+                <p className="text-center text-muted-foreground py-8">Cargando resultados del pipeline...</p>
+              ) : pipelineResults?.latest ? (
+                <div className="space-y-6">
+                  {/* KPI Cards */}
+                  <div className="grid gap-4 md:grid-cols-3">
+                    {pipelineResults.latest.metrics.map((m) => {
+                      const isOk = m.status === 'OK';
+                      const metricLabels: Record<string, string> = {
+                        hallucination_rate: 'Tasa de Alucinaciones',
+                        recall_at_5: 'Recall@5',
+                        tool_success_rate: 'Éxito de Herramientas',
+                      };
+                      const metricIcons: Record<string, React.ReactNode> = {
+                        hallucination_rate: <AlertTriangle className="h-4 w-4" />,
+                        recall_at_5: <BarChart2 className="h-4 w-4" />,
+                        tool_success_rate: <Zap className="h-4 w-4" />,
+                      };
+                      return (
+                        <Card
+                          key={m.metric}
+                          className={`border-l-4 ${
+                            isOk ? 'border-l-green-500' : 'border-l-amber-500'
+                          }`}
+                        >
+                          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                            <CardTitle className="text-sm font-medium">
+                              {metricLabels[m.metric] ?? m.metric}
+                            </CardTitle>
+                            <span className={isOk ? 'text-green-500' : 'text-amber-500'}>
+                              {metricIcons[m.metric]}
+                            </span>
+                          </CardHeader>
+                          <CardContent>
+                            <div className="text-2xl font-bold">
+                              {m.value}{m.unit ?? ''}
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              Meta: {m.reference}{m.unit ?? ''} &mdash;{' '}
+                              <span className={isOk ? 'text-green-600 font-semibold' : 'text-amber-600 font-semibold'}>
+                                {isOk ? '✓ OK' : '⚠ Atención'}
+                              </span>
+                            </p>
+                            {/* Progress bar */}
+                            <div className="mt-3 h-1.5 w-full bg-muted rounded-full overflow-hidden">
+                              <div
+                                className={`h-full rounded-full transition-all ${
+                                  isOk ? 'bg-green-500' : 'bg-amber-500'
+                                }`}
+                                style={{
+                                  width: `${
+                                    m.metric === 'hallucination_rate'
+                                      ? Math.max(0, 100 - (m.value / 20) * 100)
+                                      : m.metric === 'recall_at_5'
+                                      ? m.value * 100
+                                      : m.value
+                                  }%`,
+                                }}
+                              />
+                            </div>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+                  </div>
+
+                  {/* Summary Banner */}
+                  <div
+                    className={`rounded-lg p-4 flex items-center gap-3 ${
+                      (pipelineResults.latest.summary?.warnings ?? 0) === 0
+                        ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800'
+                        : 'bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800'
+                    }`}
+                  >
+                    {(pipelineResults.latest.summary?.warnings ?? 0) === 0 ? (
+                      <CheckCircle className="h-5 w-5 text-green-600 shrink-0" />
+                    ) : (
+                      <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0" />
+                    )}
+                    <div>
+                      <p className="text-sm font-semibold">
+                        {(pipelineResults.latest.summary?.warnings ?? 0) === 0
+                          ? 'Todas las métricas están dentro del objetivo'
+                          : `${pipelineResults.latest.summary.warnings} métrica(s) requieren atención`}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {pipelineResults.latest.summary?.total_metrics} métricas evaluadas
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* History Table */}
+                  {pipelineResults.history.length > 0 && (
+                    <div>
+                      <h3 className="text-sm font-semibold mb-3 text-muted-foreground uppercase tracking-wide">
+                        Historial de Ejecuciones
+                      </h3>
+                      <div className="rounded-md border overflow-hidden">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Timestamp</TableHead>
+                              <TableHead className="text-center">Alucinaciones</TableHead>
+                              <TableHead className="text-center">Recall@5</TableHead>
+                              <TableHead className="text-center">Éxito Tools</TableHead>
+                              <TableHead className="text-center">Estado</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {pipelineResults.history.map((entry) => {
+                              const h = entry.metrics?.find((m) => m.metric === 'hallucination_rate');
+                              const r = entry.metrics?.find((m) => m.metric === 'recall_at_5');
+                              const t = entry.metrics?.find((m) => m.metric === 'tool_success_rate');
+                              return (
+                                <TableRow key={entry.filename}>
+                                  <TableCell className="text-xs font-mono">{entry.timestamp}</TableCell>
+                                  <TableCell className="text-center text-xs">
+                                    <span className={h?.status === 'OK' ? 'text-green-600' : 'text-amber-600'}>
+                                      {h?.value ?? '—'}{h?.unit ?? ''}
+                                    </span>
+                                  </TableCell>
+                                  <TableCell className="text-center text-xs">
+                                    <span className={r?.status === 'OK' ? 'text-green-600' : 'text-amber-600'}>
+                                      {r?.value ?? '—'}
+                                    </span>
+                                  </TableCell>
+                                  <TableCell className="text-center text-xs">
+                                    <span className={t?.status === 'OK' ? 'text-green-600' : 'text-amber-600'}>
+                                      {t?.value ?? '—'}{t?.unit ?? ''}
+                                    </span>
+                                  </TableCell>
+                                  <TableCell className="text-center">
+                                    {(entry.summary?.warnings ?? 0) === 0 ? (
+                                      <CheckCircle className="h-4 w-4 text-green-500 mx-auto" />
+                                    ) : (
+                                      <AlertTriangle className="h-4 w-4 text-amber-500 mx-auto" />
+                                    )}
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="text-center py-12 text-muted-foreground">
+                  <FlaskConical className="h-12 w-12 mx-auto mb-4 opacity-30" />
+                  <p className="font-medium">No hay resultados disponibles</p>
+                  <p className="text-sm mt-1">Ejecuta el pipeline para obtener métricas de calidad IA.</p>
+                </div>
+              )}
+
+              {pipelineResults?.status?.error && (
+                <div className="mt-4 rounded-lg p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
+                  <strong>Error:</strong> {pipelineResults.status.error}
+                </div>
               )}
             </CardContent>
           </Card>

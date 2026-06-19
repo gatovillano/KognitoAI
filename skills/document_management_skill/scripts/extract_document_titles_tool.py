@@ -44,10 +44,14 @@ class ExtractDocumentTitlesTool(BaseTool):
     """
     name: str = "extract_document_titles_tool"
     description: str = (
-        "Útil para extraer títulos de documentos y actualizar sus metadatos en la base de conocimiento del usuario. "
-        "Esta herramienta procesa los documentos almacenados y actualiza automáticamente los títulos en los metadatos. "
-        "Los metadatos se almacenan en el campo 'cmetadata' de la tabla 'langchain_pg_embedding', parte de la integración "
-        "con LangChain y PGVector, permitiendo almacenar información estructurada junto con los embeddings vectoriales."
+        "Extrae y actualiza títulos de documentos YA INDEXADOS en la base de conocimiento. "
+        "Úsala SOLO cuando: (1) el usuario tenga documentos subidos previamente sin título o con título genérico, "
+        "(2) necesites rellenar metadatos faltantes, o (3) quieras mejorar la calidad de búsqueda de documentos existentes. "
+        "NO la uses para documentos nuevos que aún no han sido procesados por el sistema de indexación. "
+        "Procesa chunks existentes en 'langchain_pg_embedding' con content_type='user_documents' y type='document_chunk'. "
+        "Filtros opcionales: topic (tema), collection_id (colección), file_name (nombre específico). "
+        "Acciones que realiza: analiza el primer fragmento de cada documento con LLM, extrae el título, "
+        "actualiza el campo 'title' en 'cmetadata' y notifica el progreso al usuario."
     )
     args_schema: Type[BaseModel] = ExtractDocumentTitlesInput
     return_direct: bool = False

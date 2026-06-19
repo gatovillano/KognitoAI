@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useMediaQuery } from '@uidotdev/usehooks';
 import { usePathname, useRouter } from 'next/navigation';
 import { Sidebar } from './Sidebar';
@@ -47,9 +47,64 @@ export function AppShell({ children }: AppShellProps) {
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(false); // New state for right panel
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
 
+  // Resizable sidebar
+  const SIDEBAR_MIN = 180;
+  const SIDEBAR_MAX = 480;
+  const SIDEBAR_DEFAULT = 288; // 72 * 4 = w-72 equivalent
+  const SIDEBAR_COLLAPSED_WIDTH = 96; // w-24 equivalent
+  const COLLAPSE_THRESHOLD = 140;
+  const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT);
+  const isDraggingSidebar = useRef(false);
+  const dragStartX = useRef(0);
+  const dragStartWidth = useRef(SIDEBAR_DEFAULT);
+  const [isDraggingActive, setIsDraggingActive] = useState(false);
+
   const toggleSidebar = () => {
-    setIsSidebarCollapsed(!isSidebarCollapsed);
+    if (isSidebarCollapsed) {
+      setIsSidebarCollapsed(false);
+      setSidebarWidth(SIDEBAR_DEFAULT);
+    } else {
+      setIsSidebarCollapsed(true);
+    }
   };
+
+  const handleResizeMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isDraggingSidebar.current = true;
+    dragStartX.current = e.clientX;
+    dragStartWidth.current = isSidebarCollapsed ? SIDEBAR_COLLAPSED_WIDTH : sidebarWidth;
+    setIsDraggingActive(true);
+  }, [isSidebarCollapsed, sidebarWidth]);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDraggingSidebar.current) return;
+      const delta = e.clientX - dragStartX.current;
+      const newWidth = dragStartWidth.current + delta;
+
+      if (newWidth < COLLAPSE_THRESHOLD) {
+        setIsSidebarCollapsed(true);
+      } else {
+        setIsSidebarCollapsed(false);
+        const clampedWidth = Math.min(Math.max(newWidth, SIDEBAR_MIN), SIDEBAR_MAX);
+        setSidebarWidth(clampedWidth);
+      }
+    };
+
+    const handleMouseUp = () => {
+      if (isDraggingSidebar.current) {
+        isDraggingSidebar.current = false;
+        setIsDraggingActive(false);
+      }
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, []);
 
   // Detectar si estamos en un chat de workspace
   const workspaceMatch = pathname?.match(/\/workspaces\/([a-f0-9-]+)\/chat\/([a-f0-9-]+)/);
@@ -92,9 +147,29 @@ export function AppShell({ children }: AppShellProps) {
           <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-secondary/5 pointer-events-none z-0" />
 
           {/* Sidebar para desktop (fijo en md y superior) */}
-          <aside className={`hidden md:block h-full p-4 pr-0 flex-shrink-0 transition-all duration-500 ease-in-out z-10 ${isSidebarCollapsed ? 'w-24' : 'w-72'}`}>
-            <div className="h-full w-full bg-card/40 backdrop-blur-2xl shadow-xl border border-border/40 rounded-3xl overflow-hidden transition-all duration-300 hover:border-primary/20">
+          <aside
+            className="hidden md:flex h-full p-4 pr-0 flex-shrink-0 z-10 items-stretch"
+            style={{
+              width: isSidebarCollapsed ? `${SIDEBAR_COLLAPSED_WIDTH + 16}px` : `${sidebarWidth + 16}px`,
+              transition: isDraggingActive ? 'none' : 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+            }}
+          >
+            <div className="h-full flex-1 bg-card/40 backdrop-blur-2xl shadow-xl border border-border/40 rounded-3xl overflow-hidden transition-colors duration-300 hover:border-primary/20">
               <Sidebar isCollapsed={isSidebarCollapsed} showToolText={!isSidebarCollapsed} />
+            </div>
+            {/* Resize handle */}
+            <div
+              onMouseDown={handleResizeMouseDown}
+              className="group relative flex items-center justify-center w-3 flex-shrink-0 cursor-col-resize select-none"
+              title="Arrastrar para redimensionar"
+            >
+              <div
+                className={`absolute inset-y-6 w-[3px] rounded-full transition-all duration-200 ${
+                  isDraggingActive
+                    ? 'bg-primary scale-y-100 opacity-100'
+                    : 'bg-border/50 opacity-0 group-hover:opacity-100 group-hover:bg-primary/40'
+                }`}
+              />
             </div>
           </aside>
 

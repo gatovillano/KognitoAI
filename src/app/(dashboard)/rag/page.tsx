@@ -26,7 +26,7 @@ import { GitHubRepoDialog } from './github-repo-dialog';
 import { EditCollectionDialog } from './edit-collection-dialog';
 import { ShareCollectionDialog } from './share-collection-dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
-import { CollectionDisplay, StaticCollectionCard } from '@/components/CollectionDisplay';
+import { CollectionDisplay, StaticCollectionCard, Collection } from '@/components/CollectionDisplay';
 import { GenericCard } from '@/components/GenericCard'; // Import CollectionDisplay and StaticCollectionCard
 import { DatasetNameDialog } from './dataset-name-dialog';
 import { TablesView } from './tables-view';
@@ -35,17 +35,7 @@ import { GraphView } from '@/components/GraphView';
 import { ContextualChat } from '@/components/ContextualChat';
 import GraphProgressIndicator, { GraphTask } from '@/components/GraphProgressIndicator';
 
-interface Collection {
-  topic: string;
-  document_count: number;
-  description?: string;
-  team_shared?: boolean;
-  has_knowledge_graph?: boolean;
-  workspace_id?: string;
-  workspace_name?: string;
-  workspace_color?: string; // Nuevo campo
-  parent_id?: string | null;
-}
+// Using unified Collection interface imported above
 
 export default function RagCollectionsPage() {
   const [collections, setCollections] = useState<Collection[]>([]);
@@ -625,22 +615,38 @@ export default function RagCollectionsPage() {
       )}
 
       <Tabs defaultValue="collections" className="w-full">
-        <TabsList className="flex w-full overflow-x-auto no-scrollbar bg-muted/50 p-1 rounded-xl mb-8">
-          <TabsTrigger value="collections" className="flex-1 flex items-center justify-center gap-2 py-2.5">
+        <TabsList className="grid h-auto w-full grid-cols-2 gap-1 bg-muted/50 p-1 rounded-xl mb-8 sm:grid-cols-4">
+          <TabsTrigger
+            value="collections"
+            title="Colecciones"
+            className="flex min-h-[3.5rem] flex-col items-center justify-center gap-1 py-2.5 text-center sm:flex-row sm:gap-2"
+          >
             <Library className="h-4 w-4" />
-            <span className="hidden xs:inline text-xs">Colecciones</span>
+            <span className="text-[11px] leading-none sm:text-xs">Colecciones</span>
           </TabsTrigger>
-          <TabsTrigger value="tables" className="flex-1 flex items-center justify-center gap-2 py-2.5">
+          <TabsTrigger
+            value="tables"
+            title="Tablas"
+            className="flex min-h-[3.5rem] flex-col items-center justify-center gap-1 py-2.5 text-center sm:flex-row sm:gap-2"
+          >
             <TableIcon className="h-4 w-4" />
-            <span className="hidden xs:inline text-xs">Tablas</span>
+            <span className="text-[11px] leading-none sm:text-xs">Tablas</span>
           </TabsTrigger>
-          <TabsTrigger value="results" className="flex-1 flex items-center justify-center gap-2 py-2.5">
+          <TabsTrigger
+            value="results"
+            title="Resultados"
+            className="flex min-h-[3.5rem] flex-col items-center justify-center gap-1 py-2.5 text-center sm:flex-row sm:gap-2"
+          >
             <BarChart3 className="h-4 w-4" />
-            <span className="hidden xs:inline text-xs">Resultados</span>
+            <span className="text-[11px] leading-none sm:text-xs">Resultados</span>
           </TabsTrigger>
-          <TabsTrigger value="graph" className="flex-1 flex items-center justify-center gap-2 py-2.5">
+          <TabsTrigger
+            value="graph"
+            title="Grafos"
+            className="flex min-h-[3.5rem] flex-col items-center justify-center gap-1 py-2.5 text-center sm:flex-row sm:gap-2"
+          >
             <Network className="h-4 w-4" />
-            <span className="hidden xs:inline text-xs">Grafos</span>
+            <span className="text-[11px] leading-none sm:text-xs">Grafos</span>
           </TabsTrigger>
         </TabsList>
 

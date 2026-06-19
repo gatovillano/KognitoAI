@@ -1,0 +1,43 @@
+{
+  "timestamp": "2026-05-21T22:44:56.004515",
+  "api_base": "http://localhost:8889",
+  "measurements": {
+    "health": true,
+    "endpoint_docs": {
+      "endpoint": "/docs",
+      "status": 200,
+      "time_ms": 5.16,
+      "success": true
+    },
+    "endpoint_api_skills_available": {
+      "endpoint": "/api/skills/available",
+      "status": 401,
+      "time_ms": 10.31,
+      "success": false
+    },
+    "endpoint_api_knowledge-graph_stats": {
+      "endpoint": "/api/knowledge-graph/stats",
+      "status": 401,
+      "time_ms": 11.44,
+      "success": false
+    },
+    "endpoint_api_llm_models_openai": {
+      "endpoint": "/api/llm/models/openai",
+      "status": 401,
+      "time_ms": 34.43,
+      "success": false
+    },
+    "chat_test": {
+      "endpoint": "/api/chat",
+      "status": 401,
+      "time_ms": 15.39,
+      "success": false
+    },
+    "system_metrics": {
+      "endpoint": "/api/admin/metrics",
+      "status": 401,
+      "time_ms": 7.53,
+      "success": false
+    }
+  }
+}

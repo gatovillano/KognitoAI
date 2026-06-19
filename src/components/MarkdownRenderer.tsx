@@ -43,8 +43,15 @@ import 'prismjs/components/prism-dart';
 import 'prismjs/components/prism-elixir';
 import 'prismjs/components/prism-haskell';
 import { createRoot } from 'react-dom/client';
+import { useAuth } from '@/contexts/AuthContext';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import MermaidViewer from '@/components/MermaidViewer'; // Importar el nuevo componente
+import dynamic from 'next/dynamic';
+const MermaidViewer = dynamic(() => import('@/components/MermaidViewer'), {
+  ssr: false,
+}); // Importar el nuevo componente dinámicamente
+const PtyTerminalDynamic = dynamic(() => import('@/components/terminal/PtyTerminalEmbedded'), {
+  ssr: false,
+});
 import { SourceButton, Source, ContentPart } from './SourceButton'; // Importar SourceButton, Source, ContentPart
 
 
@@ -84,6 +91,7 @@ const Citation: React.FC<{ source: Source }> = ({ source }) => {
 const MarkdownRendererComponent = ({ content, contentParts, fontSize, isStreaming = false, inline = false, style }: MarkdownRendererProps) => {
   const [copiedStates, setCopiedStates] = useState<Record<string, boolean>>({});
   const containerRef = useRef<HTMLDivElement>(null);
+  const { user, token } = useAuth();
 
   const handleCopy = useCallback((text: string, index: string) => {
     navigator.clipboard.writeText(text)
@@ -138,6 +146,15 @@ const MarkdownRendererComponent = ({ content, contentParts, fontSize, isStreamin
               </a>`;
             }
             return `<a href="${href}" title="${title || ''}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+          };
+    
+          renderer.image = function ({ href, title, text }) {
+            let src = href;
+            if (href.startsWith('/tmp/') || href.startsWith('/media/')) {
+              const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+              src = `${apiUrl}${href}`;
+            }
+            return `<img src="${src}" alt="${text || ''}" title="${title || ''}" class="rounded-xl max-w-full my-2 border border-border/20 shadow-sm inline-block" />`;
           };
     
           renderer.code = function ({ text, lang }) {
@@ -307,7 +324,31 @@ const MarkdownRendererComponent = ({ content, contentParts, fontSize, isStreamin
         console.error("Error hydrating mermaid block:", e);
       }
     });
-  }, [contentParts, renderedContent]);
+
+    // 3. PTY placeholders
+    const ptyPlaceholders = container.querySelectorAll('.pty-session-placeholder');
+    ptyPlaceholders.forEach((placeholder) => {
+      if (placeholder.getAttribute('data-hydrated') === 'true') return;
+      const cmd = placeholder.getAttribute('data-cmd') || '';
+      const sessionId = placeholder.getAttribute('data-session-id') || '';
+      placeholder.setAttribute('data-hydrated', 'true');
+
+      try {
+        const ptyElement = React.createElement(PtyTerminalDynamic, {
+          accountId: (user?.account_id || user?.id) as string || '',
+          token: token || '',
+          apiBaseUrl: process.env.NEXT_PUBLIC_API_URL || (typeof window !== 'undefined' ? window.location.origin : ''),
+          sessionId: sessionId,
+          initialCommand: cmd,
+          className: 'h-[260px]'
+        });
+        const reactRoot = createRoot(placeholder);
+        reactRoot.render(ptyElement);
+      } catch (e) {
+        console.error('Error hydrating PTY placeholder:', e);
+      }
+    });
+  }, [contentParts, renderedContent, user?.id, user?.account_id, token]);
 
 
   const MotionContainer = inline ? (motion.span as any) : (motion.div as any);

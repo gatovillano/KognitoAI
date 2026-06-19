@@ -31,10 +31,15 @@ async def get_user_api_key(account_id: str, provider: str) -> Optional[str]:
             repo = SecretRepository(db)
             key_name = f"{provider.upper()}_API_KEY"
             api_key = await repo.get_decrypted_secret(uuid.UUID(account_id), key_name)
-            
+
             if not api_key and provider.lower() in ["gemini", "google"]:
                 api_key = await repo.get_decrypted_secret(uuid.UUID(account_id), "GOOGLE_API_KEY")
-            
+
+            if api_key:
+                if not api_key.isascii():
+                    logger.warning(f"API key for {provider} contains non-ASCII characters. Stripping them.")
+                    api_key = api_key.encode('ascii', 'ignore').decode('ascii')
+
             return api_key
     except Exception as e:
         logger.error(f"Error al obtener API key para {provider}: {e}")
@@ -381,7 +386,7 @@ async def get_provider_models(
                     else:
                         logger.warning(f"Ollama respondió con error {response.status_code} en {ollama_base}")
             except Exception as e:
-                logger.warning(f"Ollama no disponible o error en {ollama_base}: {e}")
+                    logger.warning(f"Ollama no disponible o error en {ollama_base}: {str(e)}")
             
             if not models:
                 logger.info(f"No se detectaron modelos en {ollama_base}, usando modelo de respaldo.")
@@ -428,7 +433,7 @@ async def get_provider_models(
                         else:
                             logger.warning(f"Endpoint {endpoint} respondió con {response.status_code}")
                 except Exception as e:
-                    logger.warning(f"Error al conectar con {endpoint}: {e}")
+                    logger.warning(f"Error al conectar con {endpoint}: {str(e)}")
                     continue
             
             if not models:
@@ -481,45 +486,50 @@ async def get_provider_models(
 
         elif provider == "kilocode":
             # Kilocode Gateway - API unificada de IA
-            api_key = user_api_key or os.getenv("KILOCODE_API_KEY")
+            api_key = (user_api_key or os.getenv("KILOCODE_API_KEY") or "").strip()
+            if api_key and not api_key.isascii():
+                logger.warning("KILOCODE_API_KEY contains non-ASCII characters. Stripping them.")
+                api_key = api_key.encode('ascii', 'ignore').decode('ascii')
             # Kilocode usa una API base fija, no usa la del usuario
             kilocode_base = "https://api.kilo.ai/api/gateway"
             
             if api_key:
-                try:
-                    async with httpx.AsyncClient() as client:
-                        response = await client.get(
-                            f"{kilocode_base}/models",
-                            headers={"Authorization": f"Bearer {api_key}"},
-                            timeout=15.0
-                        )
-                        if response.status_code == 200:
-                            data = response.json()
-                            raw_models = data.get("data", [])
-                            for m in raw_models:
-                                model_id = m.get("id", "")
-                                model_name = m.get("name") or model_id
-                                models.append({
-                                    "id": f"kilocode/{model_id}",
-                                    "name": model_name,
-                                    "context_length": m.get("context_length"),
-                                    "pricing": m.get("pricing", {})
-                                })
-                            logger.info(f"Obtenidos {len(models)} modelos de Kilocode Gateway")
-                        else:
-                            logger.warning(f"Kilocode respondió con error {response.status_code}")
-                except Exception as e:
-                    logger.warning(f"Error al conectar con Kilocode Gateway: {e}")
+                # Intentar con /models y /v1/models por si acaso
+                endpoints = [f"{kilocode_base}/v1/models", f"{kilocode_base}/models"]
+                for endpoint in endpoints:
+                    try:
+                        async with httpx.AsyncClient() as client:
+                            response = await client.get(
+                                endpoint,
+                                headers={"Authorization": f"Bearer {api_key}"},
+                                timeout=15.0
+                            )
+                            if response.status_code == 200:
+                                data = response.json()
+                                raw_models = data.get("data", [])
+                                if not raw_models and isinstance(data, list):
+                                    raw_models = data
+                                
+                                for m in raw_models:
+                                    model_id = m.get("id", "")
+                                    model_name = m.get("name") or model_id
+                                    models.append({
+                                        "id": f"kilocode/{model_id}",
+                                        "name": model_name,
+                                        "context_length": m.get("context_length"),
+                                        "pricing": m.get("pricing", {})
+                                    })
+                                logger.info(f"Obtenidos {len(models)} modelos de Kilocode Gateway desde {endpoint}")
+                                break # Éxito, salir del loop de endpoints
+                            else:
+                                logger.warning(f"Kilocode ({endpoint}) respondió con error {response.status_code}")
+                    except Exception as e:
+                        logger.warning("Error al conectar con Kilocode Gateway (%s): %s", endpoint, str(e))
             
             if not models:
-                # Modelos por defecto si no hay conexión
-                models = [
-                    {"id": "kilocode/kilo/auto", "name": "Kilo Auto (Smart Routing)"},
-                    {"id": "kilocode/anthropic/claude-sonnet-4", "name": "Claude Sonnet 4 (vía Kilo)"},
-                    {"id": "kilocode/openai/gpt-5.5", "name": "GPT-5.5 (vía Kilo)"},
-                    {"id": "kilocode/google/gemini-3.1-pro-preview", "name": "Gemini 3.1 Pro (vía Kilo)"},
-                ]
-                logger.info(f"Usando modelos por defecto de Kilocode Gateway")
+                # No devolvemos modelos por defecto para evitar el comportamiento hardcodeado
+                models = []
+                logger.info(f"No se pudieron obtener modelos de Kilocode Gateway, lista vacía.")
 
         else:
             logger.warning(f"Proveedor '{provider}' no reconocido.")

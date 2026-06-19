@@ -41,6 +41,29 @@ const getPhaseLabel = (phase: string) => {
     return phases[phase] || phase;
 };
 
+const getGroupTitle = (tasks: GraphTask[]) => {
+    if (tasks.some(t => t.type === 'document' || t.analysis_type === 'document' || t.analysis_type === 'document_summary' || t.file_name)) {
+        return 'Análisis de Documento';
+    }
+    if (tasks.some(t => t.type === 'collection' || t.topic)) {
+        return 'Análisis de Colección';
+    }
+    if (tasks.some(t => t.type === 'graph')) {
+        return 'Grafo de Conocimiento';
+    }
+    return 'Procesamiento de IA';
+};
+
+const getTaskTitle = (task: GraphTask) => {
+    if (task.file_name) {
+        return `Documento: ${task.file_name}`;
+    }
+    if (task.topic) {
+        return `Colección: ${task.topic}`;
+    }
+    return 'Proceso en ejecución';
+};
+
 export default function GraphProgressIndicator({ tasks, onDismiss }: { tasks: GraphTask[], onDismiss: (taskId: string) => void }) {
     const [isVisible, setIsVisible] = useState(false);
 
@@ -73,15 +96,11 @@ export default function GraphProgressIndicator({ tasks, onDismiss }: { tasks: Gr
                             <div className="p-2 rounded-lg bg-gradient-to-br from-purple-600 to-indigo-600 shadow-md">
                                 <Brain className="h-5 w-5 text-white" />
                             </div>
-                            <div>
-                                <div className="flex items-center gap-2">
-                                    {tasks.some(t => t.topic) 
-                                        ? 'Análisis de Colección'
-                                        : tasks.some(t => t.message.toLowerCase().includes('análisis') || t.message.toLowerCase().includes('analizando'))
-                                            ? 'Procesamiento de IA'
-                                            : 'Grafo de Conocimiento'}
-                                    <Sparkles className="h-4 w-4 text-purple-500 animate-pulse" />
-                                </div>
+                                    <div>
+                                        <div className="flex items-center gap-2">
+                                            {getGroupTitle(tasks)}
+                                            <Sparkles className="h-4 w-4 text-purple-500 animate-pulse" />
+                                        </div>
                                 <p className="text-xs font-normal text-muted-foreground mt-0.5">
                                     {tasks.length} {tasks.length === 1 ? 'proceso activo' : 'procesos activos'}
                                 </p>
@@ -115,11 +134,13 @@ export default function GraphProgressIndicator({ tasks, onDismiss }: { tasks: Gr
                                             <div className="flex-1 min-w-0">
                                                 <div className="flex items-center gap-2 mb-1">
                                                     <p className="font-bold text-sm truncate">
-                                                        {task.topic ? `Colección: ${task.topic}` : 'Grafo Global'}
+                                                        {getTaskTitle(task)}
                                                     </p>
-                                                    <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-purple-100 text-purple-700 dark:bg-purple-900/50 dark:text-purple-300 font-medium uppercase tracking-wider">
-                                                        {task.processing_mode}
-                                                    </span>
+                                                    {task.processing_mode && (
+                                                        <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-purple-100 text-purple-700 dark:bg-purple-900/50 dark:text-purple-300 font-medium uppercase tracking-wider">
+                                                            {task.processing_mode}
+                                                        </span>
+                                                    )}
                                                 </div>
                                                 <p className="text-xs text-muted-foreground font-medium flex items-center gap-1.5">
                                                     {getPhaseLabel(task.phase)}

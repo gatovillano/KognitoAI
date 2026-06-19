@@ -20,7 +20,7 @@ import { useAuth } from '../context/AuthContext';
 import { chatService, ChatMessage, ChatThread } from '../api/chatService';
 import { workspaceService, Workspace } from '../api/workspaceService';
 import { colors, lightColors, spacing, borderRadius } from '../theme/colors';
-import { Send, Menu, List, Plus, ChevronDown, Briefcase, Sparkles, MessageSquare, History, X, Layout, FileText, Calendar } from 'lucide-react-native';
+import { Send, Menu, List, Plus, ChevronDown, Briefcase, Sparkles, MessageSquare, History, X, Layout, FileText, Calendar, Inbox } from 'lucide-react-native';
 import Markdown from 'react-native-markdown-display';
 import { useStreamingChat } from '../hooks/useStreamingChat';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -304,10 +304,16 @@ export const ChatScreen = ({ navigation }: any) => {
                 <Text style={[styles.dropdownText, { color: theme.text }]}>Mis Notas</Text>
              </View>
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => { setShowAppMenu(false); navigation.navigate('Calendar'); }} style={[styles.dropdownItem, { borderBottomWidth: 0 }]}>
+          <TouchableOpacity onPress={() => { setShowAppMenu(false); navigation.navigate('Calendar'); }} style={styles.dropdownItem}>
              <View style={styles.dropdownIconText}>
                 <Calendar size={16} color={theme.primary} style={{ marginRight: 10 }} />
                 <Text style={[styles.dropdownText, { color: theme.text }]}>Calendario</Text>
+             </View>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => { setShowAppMenu(false); navigation.navigate('Inbox'); }} style={[styles.dropdownItem, { borderBottomWidth: 0 }]}>
+             <View style={styles.dropdownIconText}>
+                <Inbox size={16} color={theme.primary} style={{ marginRight: 10 }} />
+                <Text style={[styles.dropdownText, { color: theme.text }]}>Bandeja</Text>
              </View>
           </TouchableOpacity>
         </View>

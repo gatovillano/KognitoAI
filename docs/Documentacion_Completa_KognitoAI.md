@@ -12,6 +12,8 @@ La visión detrás de KognitoAI es crear un **"Exocerebro Digital"** seguro, esc
 ## Características Principales Actualizadas
 
 *   📋 **Documentación del Sistema de Agentes**: Ver [`SISTEMA_AGENTES_ACTUAL.md`](SISTEMA_AGENTES_ACTUAL.md) para detalles completos sobre arquitectura, implementaciones y uso de agentes.
+*   📘 **Manual de Usuario y Guía Funcional**: Ver [`Manual_Usuario_y_Funcional_KognitoAI.md`](Manual_Usuario_y_Funcional_KognitoAI.md) para una explicación exhaustiva módulo por módulo sobre para qué sirve cada vista y cómo se utiliza.
+*   🏢 **Dossier Corporativo y Propuesta de Valor**: Ver [`Propuesta_Valor_y_Funcionalidades_Corporativas_KognitoAI.md`](Propuesta_Valor_y_Funcionalidades_Corporativas_KognitoAI.md) para una evaluación comercial, retorno de inversión (ROI), gobernanza de TI y modelos de despliegue orientados a la adquisición del software por parte de una empresa.
 *   **Identidad Universal y "Second Me"**: Gestión de datos coherente en Telegram y WebApp mediante un UUID único y alineación profunda de la IA con el usuario.
 *   **Grafo de Conocimiento Neuronal (Neo4j)**: Modelado de relaciones complejas entre entidades y conceptos, permitiendo el descubrimiento de conexiones invisibles y razonamiento relacional.
 *   **Memoria a Largo Plazo y RAG 2.0**: Implementación avanzada de *Retrieval-Augmented Generation* usando **PostgreSQL + pgvector**, proporcionando respuestas con citas exactas al documento fuente.

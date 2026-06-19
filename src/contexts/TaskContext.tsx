@@ -31,6 +31,8 @@ export interface AnalysisTask {
   };
   processing_mode?: string;
   topic?: string;
+  file_name?: string;
+  analysis_type?: string;
   type?: 'graph' | 'analysis' | 'collection' | 'document';
 }
 

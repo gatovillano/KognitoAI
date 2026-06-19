@@ -29,7 +29,7 @@ interface ContextualChatProps {
     isOpen: boolean;
     onClose: () => void;
     context: {
-        type: 'table' | 'graph' | 'analysis' | 'collection';
+        type: 'table' | 'graph' | 'analysis' | 'collection' | 'note';
         id: string;
         snapshot?: any;
         full_text?: string;
@@ -57,6 +57,8 @@ export function ContextualChat({ isOpen, onClose, context, title }: ContextualCh
                     enrichedContext.full_text = typeof enrichedContext.snapshot === 'string'
                         ? enrichedContext.snapshot
                         : JSON.stringify(enrichedContext.snapshot, null, 2);
+                } else if (enrichedContext.type === 'note' && enrichedContext.snapshot) {
+                    enrichedContext.full_text = `Título: ${enrichedContext.snapshot.title || 'Sin título'}\n\nContenido:\n${enrichedContext.snapshot.content || ''}`;
                 }
 
                 const response = await apiClient.post('/api/threads', {
@@ -195,6 +197,8 @@ export function ContextualChat({ isOpen, onClose, context, title }: ContextualCh
                 enrichedContext.full_text = typeof enrichedContext.snapshot === 'string'
                     ? enrichedContext.snapshot
                     : JSON.stringify(enrichedContext.snapshot, null, 2);
+            } else if (enrichedContext.type === 'note' && enrichedContext.snapshot) {
+                enrichedContext.full_text = `Título: ${enrichedContext.snapshot.title || 'Sin título'}\n\nContenido:\n${enrichedContext.snapshot.content || ''}`;
             }
 
             await apiClient.post('/api/chat', {

@@ -41,9 +41,17 @@ async def get_local_tree_flat(
             secret_repo = SecretRepository(db)
             password = await secret_repo.get_decrypted_secret(uuid.UUID(account_id), 'SSH_PASSWORD')
             private_key = await secret_repo.get_decrypted_secret(uuid.UUID(account_id), 'SSH_PRIVATE_KEY')
-            
+
+            # host.docker.internal only resolves from inside a Docker container.
+            # When the API runs on the host (no /.dockerenv), translate it to localhost.
+            ssh_host = account.ssh_host
+            import os as _os
+            if not _os.path.exists("/.dockerenv") and ssh_host in ("host.docker.internal",):
+                logger.info(f"API running outside Docker: translating host.docker.internal → localhost for SSH")
+                ssh_host = "localhost"
+
             ssh_config = {
-                "host": account.ssh_host,
+                "host": ssh_host,
                 "port": int(account.ssh_port or 22),
                 "username": account.ssh_user,
                 "base_path": account.local_base_path or ".", # Default to home if not specified

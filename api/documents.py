@@ -20,7 +20,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, text, update
 import asyncio
 
-from core.database import SessionLocal, LangchainPgCollection, UploadTask, GitHubDocument
+from core.database import SessionLocal, LangchainPgCollection, UploadTask, GitHubDocument, Document, DocumentFolder
 from utils.security import get_current_account_id, check_workspace_permission
 from sqlalchemy.ext.asyncio import AsyncSession
 from utils.document_parser import extract_text_and_metadata_from_document
@@ -29,6 +29,7 @@ from utils.db_session import DBSession
 from core.dependencies import get_db_session
 from skills.rag_skill.scripts.add_web_to_rag_tool import AddWebToRAGTool
 from core.websocket_manager import send_personal_message
+from core.onlyoffice_storage import ensure_onlyoffice_account_dir, build_onlyoffice_relative_path
 from core.tasks import process_upload_task, extract_titles_and_update_metadata, process_knowledge_graph
 from utils.knowledge_graph_analysis import start_knowledge_graph_analysis
 from langchain_community.chat_message_histories import PostgresChatMessageHistory
@@ -45,6 +46,41 @@ router = APIRouter()
 
 def decoded_topic(topic: str = Path(..., description="El tema de la colección, codificado en la URL")) -> str:
     return unquote(topic)
+
+
+async def get_or_create_onlyoffice_folder(
+    db_session: AsyncSession,
+    account_id: str,
+    topic: str,
+    workspace_id: Optional[str] = None
+) -> uuid.UUID:
+    acc_id = uuid.UUID(account_id)
+    ws_id = uuid.UUID(workspace_id) if workspace_id else None
+    
+    stmt = select(DocumentFolder).where(
+        DocumentFolder.account_id == acc_id,
+        DocumentFolder.name == topic,
+        DocumentFolder.parent_id == None
+    )
+    if ws_id:
+        stmt = stmt.where(DocumentFolder.workspace_id == ws_id)
+    else:
+        stmt = stmt.where(DocumentFolder.workspace_id == None)
+        
+    result = await db_session.execute(stmt)
+    folder = result.scalars().first()
+    
+    if not folder:
+        folder = DocumentFolder(
+            account_id=acc_id,
+            workspace_id=ws_id,
+            name=topic,
+            parent_id=None
+        )
+        db_session.add(folder)
+        await db_session.flush()
+        
+    return folder.id
 
 
 
@@ -464,6 +500,7 @@ async def associate_collection_to_workspace(collection_id: str, current_account_
  
 @router.post("/collections/{topic}/documents", status_code=status.HTTP_201_CREATED, summary="Añadir un documento a una colección")
 async def add_document_to_collection(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     topic: str = Depends(decoded_topic),
     current_account_id: str = Depends(get_current_account_id),
@@ -481,14 +518,86 @@ async def add_document_to_collection(
     # Extraer texto y metadatos (Añadido para consistencia con el nuevo parser asíncrono)
     extracted_text, metadata = await extract_text_and_metadata_from_document(file.filename, file_content)
     
+    # --- GUARDADO FÍSICO DEL ARCHIVO (OnlyOffice) ---
+    extension = file.filename.split('.')[-1].lower() if '.' in file.filename else ""
+    unique_filename = f"{uuid.uuid4()}.{extension}"
+    
+    # Obtener o crear la carpeta OnlyOffice
+    folder_id = None
+    try:
+        folder_id = await get_or_create_onlyoffice_folder(
+            db,
+            current_account_id,
+            topic,
+            workspace_id
+        )
+    except Exception as folder_err:
+        logger.error(f"Error al obtener/crear carpeta OnlyOffice para la colección '{topic}': {folder_err}")
+        
+    # Crear directorio físico si no existe
+    clean_topic = topic.replace("/", "_").replace("\\", "_")
+    user_dir = ensure_onlyoffice_account_dir(current_account_id)
+    collection_dir = user_dir / clean_topic
+    collection_dir.mkdir(parents=True, exist_ok=True)
+    
+    physical_file_path = collection_dir / unique_filename
+    try:
+        with open(physical_file_path, "wb") as f:
+            f.write(file_content)
+        logger.info(f"Archivo físico guardado en: {physical_file_path}")
+    except Exception as save_err:
+        logger.error(f"Error al guardar archivo físico {file.filename}: {save_err}")
+        raise HTTPException(status_code=500, detail="Error al guardar el archivo físico.")
+        
+    # Registrar en la tabla Document para que sea visible en OnlyOffice
+    new_doc = Document(
+        account_id=uuid.UUID(current_account_id),
+        workspace_id=uuid.UUID(workspace_id) if workspace_id else None,
+        filename=file.filename,
+        extension=extension,
+        file_path=build_onlyoffice_relative_path(current_account_id, f"{clean_topic}/{unique_filename}"),  # Ruta relativa a DOCUMENTS_ROOT
+        folder_id=folder_id
+    )
+    db.add(new_doc)
+    await db.flush()  # Para obtener el ID del documento
+    
+    document_id = str(new_doc.id)
+    logger.info(f"Documento '{file.filename}' registrado en OnlyOffice con ID {document_id}")
+    
+    # Preparar metadata para RAG
+    if not metadata:
+        metadata = {}
+    metadata.update({
+        "original_filename": file.filename,
+        "document_id": document_id
+    })
+    
     # Llamar a la función de procesamiento de documentos
     await process_document_for_rag(
         file_name=file.filename,
         extracted_text=extracted_text,
         account_id=current_account_id,
         topic=topic,
+        metadata=metadata,
         workspace_id=workspace_id
     )
+    
+    # Commit final
+    await db.commit()
+    
+    # Extraer título de forma automática en segundo plano
+    try:
+        background_tasks.add_task(
+            extract_titles_and_update_metadata,
+            account_id=current_account_id,
+            topic=topic,
+            workspace_id=workspace_id,
+            file_name=file.filename
+        )
+        logger.info(f"Tarea de extracción automática de título programada para '{file.filename}'.")
+    except Exception as title_err:
+        logger.error(f"Error al programar extracción automática de título para '{file.filename}': {title_err}", exc_info=True)
+    
     logger.info(f"Documento '{file.filename}' subido y procesado exitosamente en la colección '{topic}' para el workspace '{workspace_id}'.")
     return {"message": f"Documento {file.filename} añadido a la colección '{topic}'."}
  

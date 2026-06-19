@@ -5,7 +5,7 @@ import asyncio
 import uuid
 from typing import Type, Any, Optional, List, Dict, Union
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from langchain_core.tools import BaseTool
 from sqlalchemy import select, update # Added update
 from sqlalchemy.orm import selectinload
@@ -50,6 +50,17 @@ class ContactProfileToolInput(BaseModel):
     note_id: Optional[int] = Field(None, description="ID de la nota a vincular (para link_to_note).")
     event_id: Optional[str] = Field(None, description="ID del evento a vincular (para link_to_event_or_task).")
     task_id: Optional[str] = Field(None, description="ID de la tarea a vincular (para link_to_event_or_task).")
+
+    @field_validator("phone", mode="before")
+    @classmethod
+    def normalize_phone(cls, value: Any) -> Any:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, (int, float)):
+            return str(value)
+        raise ValueError("El parámetro 'phone' debe ser una cadena de texto (string) o un valor numérico.")
 
 # --- Clase de Herramienta ---
 

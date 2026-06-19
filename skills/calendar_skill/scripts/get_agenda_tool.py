@@ -30,8 +30,8 @@ class GetAgendaInput(BaseModel):
     Valida que todos los argumentos necesarios sean proporcionados por el LLM.
     """
     target_date: str = Field(
-        ...,
-        description="La fecha o período para el cual se consulta la agenda. Puede ser 'hoy', 'mañana', '15 de junio', 'esta semana', 'próximo mes', etc."
+        "hoy",
+        description="La fecha o período para el cual se consulta la agenda. Puede ser 'hoy', 'mañana', '15 de junio', 'esta semana', 'próximo mes', etc. Por defecto es 'hoy'."
     )
     period_type: Optional[str] = Field(
         "day",
@@ -57,7 +57,7 @@ class GetAgendaTool(BaseTool):
     workspace_id: Optional[str] = None
     telegram_id: Optional[int] = None
 
-    async def _arun(self, target_date: str, period_type: str = "day", **kwargs: Any) -> str:
+    async def _arun(self, target_date: str = "hoy", period_type: str = "day", **kwargs: Any) -> str:
         """
         Ejecuta la lógica de la herramienta de forma asíncrona.
 

@@ -1,3 +1,53 @@
+## 26-02-26 Build Exitoso de Frontend Next.js y Corrección de Dependencias Faltantes ✅
+
+Se ha completado exitosamente el build de producción del frontend de Next.js del proyecto KognitoAI, corrigiendo previamente errores de compilación por dependencias faltantes e importaciones incorrectas.
+
+### Correcciones Aplicadas
+
+- **`src/app/presentacion/page.tsx`**: [MODIFICADO]
+  - Se eliminó la importación inválida `import styles from "../globals.css"`.
+  - En Next.js moderno (App Router), los archivos CSS globales no se importan de esa manera; se cargan automáticamente desde `layout.tsx`.
+
+- **Dependencias CSS (`@xterm/xterm`, `@xterm/addon-fit`, `@xterm/addon-web-links`)**: [INSTALADO]
+  - Se instalaron los paquetes faltantes requeridos por `src/components/terminal/PtyTerminal.tsx`.
+  - Comando: `npm install @xterm/xterm @xterm/addon-fit @xterm/addon-web-links`
+
+### Resultado del Build
+
+- **Estado**: ✅ Compilado exitosamente en 19.1s
+- **Linting**: ✅ Tipos válidos (solo warnings de `react-hooks/exhaustive-deps`, no errores)
+- **Páginas generadas**: 33 rutas estáticas + 2 rutas legacy
+- **Rutas principales**: `/dashboard`, `/chat`, `/analysis`, `/documents`, `/rag`, `/presentacion`, `/agenda`, `/settings`, `/workspaces`, etc.
+
+### Notas
+
+- Se mantiene la advertencia de `next.config.mjs` sobre `allowedDevOrigins` (clave no reconocida en `experimental`), la cual es informativa y no afecta el build.
+- Los warnings de hooks de React (`exhaustive-deps`) son advertencias de buenas prácticas y no impiden la compilación.
+
+---
+## 26-02-26 Configuración de Puerto Frontend a 3002 🔧
+
+Se ha configurado el puerto del frontend de Next.js para que se ejecute en el puerto `3002` por defecto.
+
+- **Cambio Aplicado (`.env`)**: [MODIFICADO]
+  - Se agregó la variable `PORT=3002` al archivo de configuración de entorno.
+  - Ahora el servidor de desarrollo se levanta en `http://localhost:3002` sin necesidad de especificar el puerto manualmente.
+
+- **Verificación**: El servidor se inició correctamente en el puerto 3002, respondiendo con `GET / 200 in 118ms` y sirviendo el HTML de la aplicación correctamente.
+
+---
+## 26-02-26 Corrección de Error de Caché Next.js: vendor-chunks/axios.js 🔧
+
+Se ha solucionado el error `Cannot find module './vendor-chunks/axios.js'` que ocurría al iniciar el servidor de desarrollo de Next.js.
+
+- **Causa del Error**: Caché corrupta de Next.js en el directorio `.next/server/`. El webpack no generó correctamente el vendor chunk de axios después de una instalación o actualización de dependencias, dejando una referencia rota en `webpack-runtime.js`.
+- **Solución**:
+  - Se eliminó completamente el directorio `.next` para limpiar la caché de build y runtime.
+  - Se ejecutó `npm install` para asegurar que todas las dependencias estén correctamente instaladas y sincronizadas.
+  - Se reinició el servidor de desarrollo (`npm run dev`), que se levantó correctamente sin errores.
+- **Resultado**: El servidor se ejecuta en `http://localhost:3005` sin errores de módulos faltantes. El error de `vendor-chunks/axios.js` está completamente resuelto.
+
+---
 ## 26-02-26 Corrección de Error de Renderizado en CollectionDisplay 🔧
 
 Se ha solucionado el error `Objects are not valid as a React child` que ocurría al renderizar la descripción de una colección en `CollectionDisplay`.
@@ -1674,3 +1724,140 @@ Se ha creado una skill profesional y robusta para la interacción con servidores
   - **Parsing Robusto**: Implementación de `decode_mime_header` y `get_email_body` para manejar correctamente diferentes encodings y priorizar texto plano sobre HTML, evitando errores de decodificación comunes.
   - **Salida Estructurada**: Los datos se retornan en formato JSON limpio, facilitando el procesamiento por parte del LLM.
 - **Fundamentación**: Se eligió IMAP por ser el estándar más compatible entre diversos proveedores (Gmail, Outlook, Yahoo). El uso de SSL y la recomendación de "App Passwords" aseguran que la herramienta sea segura y compatible con los estándares de seguridad modernos de los proveedores de correo.
+---
+
+## 26-02-26 Modificación de Títulos de Hilos en Sidebar para Permitir Saltos de Línea 📝
+
+Se ha solucionado el problema donde los títulos de las conversaciones en el sidebar se truncaban debido al ancho limitado del menú lateral, mostrándose de forma incompleta.
+
+- **Punto 1: Modificación en ChatList.svelte**: [MODIFICADO]
+  - Se eliminó la clase `line-clamp-1` que limitaba el texto a una sola línea.
+  - Se reemplazó por clases que permiten el salto de línea natural (`text-left text-sm w-full sm:basis-3/5`).
+  - Ahora los títulos se muestran completos, ocupando múltiples líneas si es necesario dentro del ancho del sidebar.
+
+- **Punto 2: Modificación en Chat.svelte**: [MODIFICADO]
+  - Se eliminó la truncación del título en la pestaña del navegador (límite de 30 caracteres).
+  - Ahora el título de la página muestra el nombre completo de la conversación sin límite de caracteres, mejorando la identificación de chats con títulos largos.
+
+- **Resultado**: Los usuarios ahora pueden ver los títulos completos de sus conversaciones tanto en el sidebar como en la pestaña del navegador, mejorando la experiencia de usuario y la navegación.
+
+---
+
+## 26-02-26 Implementación de Logs Detallados en Herramienta `moltbook_account` 📋🔍
+
+Se ha implementado un sistema de logging exhaustivo en la herramienta `moltbook_account` para facilitar el debugging, monitoreo y trazabilidad de todas sus operaciones.
+
+### Problemática
+La herramienta `moltbook_account` no contaba con logs estructurados, lo que dificultaba diagnosticar errores en producción, rastrear el flujo de ejecución y entender el estado de las operaciones (registro, consulta de estado, configuración de email, visualización de perfil, eliminación de credenciales).
+
+### Solicitud
+Agregar logs detallados en cada acción de la herramienta `moltbook_account`.
+
+### Cambio Aplicado (`skills/moltbook_skill/scripts/moltbook_account_tool.py`): [MODIFICADO]
+
+Se refactorizó completamente el método `_arun` para incluir:
+
+1. **Log de entrada estructurado**: Al inicio de cada ejecución se registra:
+   - Acción solicitada (normalizada a minúsculas)
+   - Parámetros recibidos (`agent_name`, `description`, `email`, `kwargs`)
+   - Separadores visuales con `=` para facilitar la lectura en logs
+
+2. **Logs por rama de acción**: Cada acción (`register`, `status`, `setup_email`, `view_profile`, `delete`/`reset`) tiene logs específicos que registran:
+   - Entrada a la rama
+   - Parámetros validados (con advertencias si faltan campos requeridos)
+   - Payloads enviados (sin exponer datos sensibles)
+   - Llamadas a API con método y endpoint
+   - Respuestas recibidas (ofuscadas con `_safe_log_dict`)
+   - Resultados finales y datos devueltos al usuario
+
+3. **Logs de credenciales**: Registro de operaciones de `load_credentials`, `save_credentials` y `delete_credentials` indicando:
+   - Presencia/ausencia de API key
+   - Éxito o fracaso de operaciones de guardado/borrado
+   - Rutas de archivos de credenciales
+
+4. **Manejo de excepciones global**: Bloque `try/except` que captura cualquier excepción no controlada y registra:
+   - Acción en la que ocurrió el error
+   - Mensaje de error completo
+   - Traceback completo (`traceback.format_exc()`)
+
+5. **Log de salida**: Bloque `finally` que marca el fin de cada ejecución con la acción procesada.
+
+6. **Método `_safe_log_dict`**: Función estática que ofusca campos sensibles (`api_key`, `password`, `token`, `secret`, `authorization`) en los diccionarios registrados en logs, reemplazándolos por `***REDACTED***`. Se aplica recursivamente a diccionarios anidados.
+
+### Fundamentación
+- **Trazabilidad**: Los logs estructurados con emojis y separadores permiten identificar rápidamente el flujo de ejecución en logs de producción.
+- **Seguridad**: El método `_safe_log_dict` asegura que las credenciales nunca se expongan en los logs, incluso en respuestas de API completas.
+- **Debugging**: El traceback completo en excepciones y los logs de entrada/salida facilitan la identificación de errores sin necesidad de reproducir el problema.
+- **Mantenibilidad**: La estructura de logs por rama hace que el código sea más legible y fácil de modificar en el futuro.
+- **Consistencia**: Se sigue el mismo patrón de logging usado en otras partes del proyecto (`moltbook_client.py`).
+
+---
+
+## 20-05-26 Implementación de Script de Visualización de Logs del Core 📊
+
+Se ha creado un script de visualización unificado de logs del core de KognitoAI que permite monitorear en tiempo real los logs del backend, frontend y LLM desde una sola terminal con colores diferenciados.
+
+### Creación del Script (`scripts/view_core_logs.sh`): [NUEVO]
+
+- **Funcionalidad principal**:
+  - Visualización unificada de logs del backend (Python/Uvicorn), frontend (Next.js) y LLM en una sola terminal.
+  - Colores diferenciados por fuente: verde para backend, azul para frontend, amarillo para LLM, magenta para herramientas.
+  - Formateo automático de logs del LLM con emojis semánticos (🚀 inicio, ✅ fin, 🔧 herramienta, ❌ error, 📨 prompt, 📄 contenido).
+  - Detección automática de servicios en ejecución por PID.
+  - Modo de seguimiento en tiempo real (tail -f) o visualización de histórico sin seguimiento.
+
+- **Opciones de filtrado**:
+  - `--backend`: Mostrar solo logs del backend.
+  - `--frontend`: Mostrar solo logs del frontend.
+  - `--llm`: Mostrar solo logs del LLM.
+  - `--history`: Ver historial de archivos de log LLM sin seguimiento.
+  - `--tail N`: Mostrar últimas N líneas de cada fuente (default: 50).
+  - `--no-follow`: No seguir archivos en tiempo real, solo mostrar líneas recientes.
+
+- **Características técnicas**:
+  - Detección de servicios por proceso (`pgrep -f "run_api.py"` para backend, `pgrep -f "next dev"` para frontend).
+  - Formato de salida con emojis y colores ANSI para mejor legibilidad.
+  - Manejo de Ctrl+C para salida limpia.
+  - Estadísticas de servicios (estado de ejecución, cantidad de archivos de log).
+
+### Fundamentación
+
+- **Problema resuelto**: Antes no existía una forma unificada de visualizar los logs del core. Los logs del LLM se guardaban en archivos con formato de timestamp, pero requerían comandos separados para cada fuente.
+- **Solución**: Un solo script que combina todas las fuentes de logs con formato visual mejorado, facilitando el debugging y monitoreo del sistema completo.
+- **Compatibilidad**: Funciona tanto en modo interactivo (seguimiento en tiempo real) como en modo histórico (visualización de archivos existentes).
+---
+
+## 26-02-26 Cierre de Servicios Iniciados por `start_local.sh` 🛑
+
+Se ha realizado el cierre completo de los servicios de backend y frontend que fueron iniciados por el script `start_local.sh`.
+
+### Problemática
+El script `start_local.sh` inicia dos servicios en segundo plano:
+- **Backend**: `./venv_host/bin/python run_api.py` (Puerto 8889)
+- **Frontend**: `npm run dev` (Puerto 3000)
+
+Cuando se intentaba matar los procesos hijos (`run_api.py` y `npm run dev`), el script `start_local.sh` seguía corriendo y los reiniciaba automáticamente.
+
+### Solución Aplicada
+1. **Identificación de procesos**: Se buscaron los PIDs de `run_api.py` y `npm run dev` usando `ps aux | grep`.
+2. **Cierre del script principal**: Se mató primero el proceso del script `start_local.sh` (PID 764665) para evitar que reinicie los servicios.
+3. **Cierre de procesos hijos**: Se mataron los procesos del backend y frontend asociados.
+4. **Verificación**: Se confirmó que no quedan procesos activos del stack KognitoAI.
+
+### Comandos Ejecutados
+```bash
+# Identificar procesos
+ps aux | grep -E "(run_api.py|npm run dev)" | grep -v grep
+
+# Matar script principal y procesos hijos
+kill -- -764665
+
+# Verificación final
+ps aux | grep -E "(start_local|run_api\.py|npm run dev)" | grep -v grep
+```
+
+### Resultado
+✅ Todos los servicios (backend, frontend y script de inicio) detenidos exitosamente.
+
+### Fundamentación
+El script `start_local.sh` actúa como proceso padre de los servicios. Al matar primero el script, se evita el comportamiento de reinicio automático de los procesos hijos, permitiendo un cierre completo y limpio del stack de desarrollo.
