@@ -8,10 +8,11 @@ import { Send } from 'lucide-react';
 
 interface SelectedContextItem {
   id: string;
-  type: 'document' | 'collection';
+  type: 'document' | 'collection' | 'repository';
   name: string;
   title?: string;
   topic?: string;
+  content?: string;
   file_name?: string;
 }
 

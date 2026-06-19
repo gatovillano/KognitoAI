@@ -1,103 +1,211 @@
-# utils/document_summarizer.py
-
 import logging
-from typing import Optional, Dict, Any
-from core.llm_manager import get_fast_llm
-from langchain_core.messages import HumanMessage
+import uuid
+from typing import Optional
+from datetime import datetime
+from sqlalchemy import update
+
+from core.database import SessionLocal, AnalysisTask
+from utils.db_session import DBSession
+from core.memory_manager import get_full_document_content
+from utils.advanced_text_analyzer import text_analyzer
+from utils.analysis_progress import persist_analysis_progress, send_analysis_progress
+import asyncio
 
 logger = logging.getLogger(__name__)
 
-async def generate_simple_summary(
-    text: str,
-    document_title: Optional[str] = None,
-    max_words: int = 150
-) -> Dict[str, Any]:
+async def run_document_summary_and_save(task_id: str, account_id: str, file_name: str, workspace_id: Optional[str] = None):
     """
-    Genera un resumen simple y estructurado de un documento.
-
-    Args:
-        text: Contenido completo del documento
-        document_title: Título del documento (opcional)
-        max_words: Máximo de palabras para el resumen ejecutivo
-
-    Returns:
-        Dict con: summary, key_points, topics, document_type
+    Función de utilidad pesada que se ejecuta en segundo plano para generar un resumen
+    estructurado y completo del documento.
     """
-    if not text or len(text.strip()) < 50:
-        return {
-            "summary": "El documento tiene muy poco contenido para generar un resumen.",
-            "key_points": ["Contenido insuficiente"],
-            "topics": ["general"],
-            "document_type": "desconocido",
-            "confidence": 0.5
-        }
+    async with DBSession(SessionLocal) as db_session: # type: ignore
+        try:
+            await persist_analysis_progress(
+                db_session,
+                task_id,
+                status="processing",
+                phase="initializing",
+                message=f'Preparando resumen de "{file_name}"...',
+                progress_percent=5,
+                analysis_type="document_summary",
+                file_name=file_name,
+            )
+            await send_analysis_progress(
+                account_id,
+                task_id,
+                phase="initializing",
+                message=f'Preparando resumen de "{file_name}"...',
+                progress_percent=5,
+                file_name=file_name,
+                analysis_type="document_summary",
+            )
 
-    try:
-        llm = get_fast_llm()
+            logger.info(f"Iniciando resumen de documento para tarea {task_id}...")
+            await persist_analysis_progress(
+                db_session,
+                task_id,
+                phase="reconstructing_content",
+                message="Cargando contenido del documento para resumir...",
+                progress_percent=18,
+                analysis_type="document_summary",
+                file_name=file_name,
+            )
+            await send_analysis_progress(
+                account_id,
+                task_id,
+                phase="reconstructing_content",
+                message="Cargando contenido del documento para resumir...",
+                progress_percent=18,
+                file_name=file_name,
+                analysis_type="document_summary",
+            )
+            text_content = await get_full_document_content(account_id, file_name)
+            if not text_content: 
+                raise ValueError("Contenido del documento no encontrado.")
+            
+            # 2. Generar el resumen estructurado específico
+            await persist_analysis_progress(
+                db_session,
+                task_id,
+                phase="summarizing",
+                message="Generando resumen estructurado con IA...",
+                progress_percent=35,
+                analysis_type="document_summary",
+                file_name=file_name,
+            )
+            await send_analysis_progress(
+                account_id,
+                task_id,
+                phase="summarizing",
+                message="Generando resumen estructurado con IA...",
+                progress_percent=35,
+                file_name=file_name,
+                analysis_type="document_summary",
+            )
 
-        prompt = f"""
-Eres KAI (Kognito AI). Genera un resumen CONCISO y ESTRUCTURADO del siguiente documento.
+            _llm_done = asyncio.Event()
 
-INSTRUCCIONES:
-1. Resumen Ejecutivo: 1-2 párrafos (máximo {max_words} palabras). Captura la esencia y propósito.
-2. Puntos Clave: Lista 3-5 puntos clave como frases cortas.
-3. Temas: Lista 3-5 temas/etiquetas principales.
-4. Tipo de Documento: Clasifica como: 'informe', 'artículo', 'técnico', 'legal', 'correspondencia', 'contrato', 'acta', 'memorando', 'otro'.
+            async def _progress_ticker():
+                steps = [
+                    (46, "Extrayendo estructura principal..."),
+                    (58, "Sintetizando ideas centrales..."),
+                    (70, "Refinando resumen ejecutivo..."),
+                    (82, "Construyendo síntesis final..."),
+                    (88, "Revisando claridad del resumen..."),
+                ]
+                for pct, msg in steps:
+                    try:
+                        await asyncio.wait_for(_llm_done.wait(), timeout=6.0)
+                        break
+                    except asyncio.TimeoutError:
+                        pass
+                    if _llm_done.is_set():
+                        break
+                    await persist_analysis_progress(
+                        db_session,
+                        task_id,
+                        phase="summarizing",
+                        message=msg,
+                        progress_percent=pct,
+                        analysis_type="document_summary",
+                        file_name=file_name,
+                    )
+                    await send_analysis_progress(
+                        account_id,
+                        task_id,
+                        phase="summarizing",
+                        message=msg,
+                        progress_percent=pct,
+                        file_name=file_name,
+                        analysis_type="document_summary",
+                    )
 
-RESPONDE EN FORMATO JSON (sin markdown):
-{{
-  "summary": "string",
-  "key_points": ["string", "string"],
-  "topics": ["string", "string"],
-  "document_type": "string"
-}}
+            async def _run_llm():
+                result = await text_analyzer.summarize_document(
+                    text_content,
+                    document_title=file_name,
+                    account_id=str(account_id),
+                )
+                _llm_done.set()
+                return result
 
-DOCUMENTO:
-Título: {document_title or 'No especificado'}
-Contenido:
-{text[:6000]}
-"""
+            analysis_result, _ = await asyncio.gather(_run_llm(), _progress_ticker())
 
-        response = await llm.ainvoke([HumanMessage(content=prompt)])
-        content = response.content
-        if isinstance(content, list):
-            content = " ".join(str(item) for item in content)
-        elif not isinstance(content, str):
-            content = str(content)
+            # 3. Guardar el resultado y marcar como 'completed'
+            # Asegurarse de que el resultado sea un diccionario
+            result_payload = analysis_result if isinstance(analysis_result, dict) else analysis_result.dict()
 
-        # Intentar extraer JSON de la respuesta
-        import json
-        import re
+            await persist_analysis_progress(
+                db_session,
+                task_id,
+                phase="saving_to_neo4j",
+                message="Guardando resumen generado...",
+                progress_percent=94,
+                analysis_type="document_summary",
+                file_name=file_name,
+            )
+            await send_analysis_progress(
+                account_id,
+                task_id,
+                phase="saving_to_neo4j",
+                message="Guardando resumen generado...",
+                progress_percent=94,
+                file_name=file_name,
+                analysis_type="document_summary",
+            )
 
-        # Buscar bloque JSON
-        json_match = re.search(r'\{[\s\S]*\}', content)
-        if json_match:
-            json_str = json_match.group()
-            data = json.loads(json_str)
-        else:
-            # Fallback: parsear como texto plano
-            data = {
-                "summary": content[:300],
-                "key_points": ["No se pudieron extraer puntos clave"],
-                "topics": ["general"],
-                "document_type": "otro"
+            # Agregar metadata de herramienta utilizada
+            result_payload["tool_used"] = "advanced_text_analyzer.py"
+            result_payload["analysis_metadata"] = {
+                "tool_used": "advanced_text_analyzer.py",
+                "analysis_type": "document_summary",
+                "file_name": file_name,
+                "workspace_id": workspace_id,
+                "created_at": datetime.now().isoformat()
             }
 
-        # Asegurar campos
-        data.setdefault("summary", "Resumen no disponible")
-        data.setdefault("key_points", [])
-        data.setdefault("topics", [])
-        data.setdefault("document_type", "otro")
-        data["confidence"] = 0.9
+            stmt_completed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                status="completed", result_payload=result_payload)
+            await db_session.execute(stmt_completed)
+            await db_session.commit()
+            logger.info(f"Resumen de documento para tarea {task_id} completado.")
+            await send_analysis_progress(
+                account_id,
+                task_id,
+                phase="completed",
+                message="¡Resumen del documento completado!",
+                progress_percent=100,
+                file_name=file_name,
+                analysis_type="document_summary",
+                is_complete=True,
+            )
 
-        return data
-
-    except Exception as e:
-        logger.error(f"Error generando resumen: {e}", exc_info=True)
-        return {
-            "summary": f"Error al generar resumen: {str(e)}",
-            "key_points": ["Error en procesamiento"],
-            "topics": ["error"],
-            "document_type": "otro",
-            "confidence": 0.0
-        }
+        except Exception as e:
+            logger.error(f"Fallo en tarea de resumen de documento {task_id}: {e}", exc_info=True)
+            stmt_failed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                status="failed", error_message=str(e))
+            await db_session.execute(stmt_failed)
+            await db_session.commit()
+            await persist_analysis_progress(
+                db_session,
+                task_id,
+                phase="error",
+                message="El resumen del documento falló.",
+                progress_percent=100,
+                status="failed",
+                analysis_type="document_summary",
+                file_name=file_name,
+                has_error=True,
+                error=str(e),
+            )
+            await send_analysis_progress(
+                account_id,
+                task_id,
+                phase="error",
+                message="El resumen del documento falló.",
+                progress_percent=100,
+                file_name=file_name,
+                analysis_type="document_summary",
+                has_error=True,
+                error=str(e),
+            )

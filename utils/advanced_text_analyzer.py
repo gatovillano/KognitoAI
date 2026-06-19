@@ -8,7 +8,13 @@ from typing import List, Dict, Optional, TypeVar, cast, Type
 # LangChain y Pydantic para robustez y estructura
 from langchain_core.messages import HumanMessage
 from langchain_core.output_parsers import PydanticOutputParser
-from core.llm_manager import get_llm_for_user, get_fast_llm, get_fallback_llm
+from core.config import settings
+from core.llm_manager import (
+    get_llm_for_user,
+    get_fast_llm,
+    get_main_llm,
+    get_configured_fallback_llm,
+)
 from core.utils.llm_utils import safe_json_loads
 from pydantic import BaseModel, Field # Usamos pydantic v2
 from typing import List, Dict, Optional, TypeVar, cast, Type, Any
@@ -16,6 +22,10 @@ from typing import List, Dict, Optional, TypeVar, cast, Type, Any
 logger = logging.getLogger(__name__)
 
 _PydanticType = TypeVar('_PydanticType', bound=BaseModel)
+
+# Límites conservadores para evitar timeouts por prompts excesivos en análisis de colección.
+MAX_COLLECTION_CONTEXT_CHARS = 18000
+MAX_COLLECTION_DOC_SNIPPET_CHARS = 700
 
 # --- Modelos de Salida Pydantic para garantizar la estructura del LLM ---
 
@@ -48,32 +58,51 @@ class SingleTextAnalysis(BaseModel):
     """Define la estructura de salida para el análisis de un único texto."""
     executive_summary: str = Field(description="Un resumen conciso que captura la esencia y las conclusiones principales del texto.")
     general_analysis: str = Field(description="Un análisis general extenso del documento que profundiza en el contexto, metodología, argumentos principales, implicaciones y relevancia (500-1000 palabras). Utiliza separación de parrafos pra facilitar la lectura")
-    key_themes: List[ThemeReference] = Field(description="Una lista de hasta 12 conceptos o temas centrales del texto, cada uno con citas del texto y explicación detallada.")
-    central_concepts: List[str] = Field(description="Una lista de hasta 8 conceptos centrales del texto en el formato 'CONCEPTO: DEFINICIÓN DETALLADA CON CONTEXTO Y EJEMPLOS'.")
-    discipline: List[str] = Field(description="El area, disciplina o campo al que refiere el documento. Por ejemplo si es un documémico y de qué área, o si es un documento técnico, etc.').")
-    authorial_tone: str = Field(description="El tono o la voz del autor (ej. 'Formal y Académico', 'Informal y Conversacional', 'Urgente y Directo', 'Escéptico y Crítico').")
-    knowledge_gaps: List[KnowledgeGap] = Field(description="Una lista de 5 a 8 brechas de conocimiento identificadas en el texto, cada una con explicación detallada de por qué existe esta brecha y qué implicaciones tiene.")
-    exploration_questions: List[str] = Field(description="Una lista de 5 a 8 preguntas adicionales para explorar a partir del texto, que el texto inspira pero no responde directamente.")
-    problematic_areas: List[str] = Field(description="Una lista de 3 a 5 áreas problemáticas, desafíos o puntos de controversia identificados en el texto.")
-    final_reflections: List[str] = Field (description="Una lista de 3 a 5 reflexiones finales sobre la importancia del contenido en el área que aborda, su aporte al conocimiento y apertura de temas de reflexión. Si se trata de documentos más técnicos o laborales puedes hablar de las posibilidades que abre, proyectos posibles o recomendaciones de gestión")
-    kai_synthesis: str = Field(description="Una síntesis única y profunda desde la perspectiva de KAI (Kognito AI) como exocerebro del usuario. Debe ser una reflexión de alto nivel (100-150 palabras) que conecte el contenido del documento con el contexto más amplio del conocimiento del usuario, identificando oportunidades, conexiones no obvias y valor estratégico.")
+    key_themes: List[ThemeReference] = Field(default_factory=list, description="Una lista de hasta 12 conceptos o temas centrales del texto, cada uno con citas del texto y explicación detallada.")
+    central_concepts: List[str] = Field(default_factory=list, description="Una lista de hasta 8 conceptos centrales del texto en el formato 'CONCEPTO: DEFINICIÓN DETALLADA CON CONTEXTO Y EJEMPLOS'.")
+    discipline: List[str] = Field(default_factory=list, description="El area, disciplina o campo al que refiere el documento. Por ejemplo si es un documémico y de qué área, o si es un documento técnico, etc.').")
+    authorial_tone: str = Field(default="", description="El tono o la voz del autor (ej. 'Formal y Académico', 'Informal y Conversacional', 'Urgente y Directo', 'Escéptico y Crítico').")
+    knowledge_gaps: List[KnowledgeGap] = Field(default_factory=list, description="Una lista de 5 a 8 brechas de conocimiento identificadas en el texto, cada una con explicación detallada de por qué existe esta brecha y qué implicaciones tiene.")
+    exploration_questions: List[str] = Field(default_factory=list, description="Una lista de 5 a 8 preguntas adicionales para explorar a partir del texto, que el texto inspira pero no responde directamente.")
+    problematic_areas: List[str] = Field(default_factory=list, description="Una lista de 3 a 5 áreas problemáticas, desafíos o puntos de controversia identificados en el texto.")
+    final_reflections: List[str] = Field(default_factory=list, description="Una lista de 3 a 5 reflexiones finales sobre la importancia del contenido en el área que aborda, su aporte al conocimiento y apertura de temas de reflexión. Si se trata de documentos más técnicos o laborales puedes hablar de las posibilidades que abre, proyectos posibles o recomendaciones de gestión")
+    kai_synthesis: str = Field(default="", description="Una síntesis única y profunda desde la perspectiva de KAI (Kognito AI) como exocerebro del usuario. Debe ser una reflexión de alto nivel (100-150 palabras) que conecte el contenido del documento con el contexto más amplio del conocimiento del usuario, identificando oportunidades, conexiones no obvias y valor estratégico.")
+
+class DocumentSummary(BaseModel):
+    """Estructura de salida simplificada para el resumen de un documento."""
+    executive_summary: str = Field(
+        description="Un resumen ejecutivo muy extenso y detallado (500-800 palabras) en español, estructurado en varios párrafos bien desarrollados que capture de manera condensada pero completa el contenido completo del documento, incluyendo todos sus puntos principales, objetivos, desarrollo de ideas, hallazgos, metodologías (si aplica), conclusiones y relevancia. Debe permitir al usuario comprender a fondo y con total claridad todo el documento sin necesidad de leer la versión completa."
+    )
+    document_structure: List[str] = Field(
+        default_factory=list,
+        description="Lista ordenada de las secciones o partes principales del documento. Cada elemento debe seguir el formato: 'Nombre de la Sección: descripción breve de qué trata y qué aporta (1-2 oraciones)'. Si el documento no tiene secciones explícitas, sintetiza su estructura lógica."
+    )
+    main_ideas: List[str] = Field(
+        default_factory=list,
+        description="Lista de 4 a 7 ideas, argumentos o afirmaciones principales del documento. Cada idea debe ser una oración completa y autoexplicativa."
+    )
+    kai_synthesis: str = Field(
+        default="",
+        description="Síntesis única desde la perspectiva de KAI (Kognito AI) como exocerebro del usuario (60-100 palabras). Reflexión estratégica que conecte el documento con el conocimiento más amplio del usuario, destacando su valor práctico o conexiones clave."
+    )
+
 
 class CollectionAnalysis(BaseModel):
     """Define la estructura de salida para el análisis de una colección de textos."""
     collection_summary: str = Field(description="Un resumen analítico que sintetiza la información de TODOS los documentos como un todo. Debe ser comprehensivo y detallado (200-300 palabras)")
     general_analysis: str = Field(description="Un análisis general extenso de la colección que profundiza en el contexto, metodología, argumentos principales, implicaciones y relevancia de los documentos en conjunto (500-1000 palabras). Utiliza separación de parrafos para facilitar la lectura.")
-    authorial_tone: str = Field(description="El tono o la voz predominante en la colección de documentos (ej. 'Formal y Académico', 'Informal y Conversacional', 'Urgente y Directo', 'Escéptico y Crítico').")
-    cross_cutting_themes: List[ThemeReference] = Field(description="Lista de hasta 10 temas recurrentes de los documentos que puedes identificar, cada uno con citas relacionadas de los documentos. Puedes agruparlos en algún concepto que los englobe cuando hay similitud semántica")
-    central_concepts: List[str] = Field(description="Una lista de hasta 8 conceptos, ideas o tesis centrales de la colección en el formato 'CONCEPTO: DEFINICIÓN DETALLADA'. Destaca con negrita el nombre de los conceptos")
-    concept_relationships: List[str] = Field(description="Una lista de hasta 8 descripciones detalladas de cómo los conceptos centrales se relacionan entre sí en la colección.")
-    identified_connections: List[CollectionConnection] = Field(description="Lista de insights específicos que conectan dos o más documentos. Incluye sinergias, evoluciones, contradicciones o complementariedades.")
-    emergent_knowledge_gaps: List[KnowledgeGap] = Field(description="Lista de 5-8 brechas de conocimiento emergentes de la colección en su conjunto, cada una con explicación detallada de por qué existe esta brecha y qué implicaciones tiene.")
-    exploration_questions: List[str] = Field(description="Lista de 5-8 preguntas adicionales para explorar a partir de la colección, que el texto inspira pero no responde directamente.")
-    problematic_areas: List[str] = Field(description="Una lista de 3 a 5 áreas problemáticas o desafíos comunes/emergentes identificados a través de la colección de documentos.")
-    final_reflections: List[str] = Field(description="3-5 reflexiones finales sobre la importancia del contenido en el área que aborda, su aporte al conocimiento y apertura de temas de reflexión. Si se trata de documentos más técnicos o laborales, puedes hablar de las posibilidades que abre, proyectos posibles o recomendaciones de gestión")
-    collection_insights: List[str] = Field(description="3-5 insights únicos que emergen del análisis conjunto de todos los documentos, que no serían evidentes analizando documentos individuales")
-    methodological_notes: List[str] = Field(description="2-3 observaciones sobre la metodología, enfoque o perspectiva común en los documentos analizados")
-    kai_synthesis: str = Field(description="Una síntesis de alto nivel desde la perspectiva de KAI (Kognito AI) como exocerebro del usuario. Debe ser una reflexión estratégica (150-200 palabras) que conecte el contenido de la colección con el contexto más amplio del conocimiento del usuario, identificando patrones emergentes, oportunidades de acción y valor estratégico único que surge del análisis conjunto.")
+    authorial_tone: str = Field(default="", description="El tono o la voz predominante en la colección de documentos (ej. 'Formal y Académico', 'Informal y Conversacional', 'Urgente y Directo', 'Escéptico y Crítico').")
+    cross_cutting_themes: List[ThemeReference] = Field(default_factory=list, description="Lista de hasta 10 temas recurrentes de los documentos que puedes identificar, cada uno con citas relacionadas de los documentos. Puedes agruparlos en algún concepto que los englobe cuando hay similitud semántica")
+    central_concepts: List[str] = Field(default_factory=list, description="Una lista de hasta 8 conceptos, ideas o tesis centrales de la colección en el formato 'CONCEPTO: DEFINICIÓN DETALLADA'. Destaca con negrita el nombre de los conceptos")
+    concept_relationships: List[str] = Field(default_factory=list, description="Una lista de hasta 8 descripciones detalladas de cómo los conceptos centrales se relacionan entre sí en la colección.")
+    identified_connections: List[CollectionConnection] = Field(default_factory=list, description="Lista de insights específicos que conectan dos o más documentos. Incluye sinergias, evoluciones, contradicciones o complementariedades.")
+    emergent_knowledge_gaps: List[KnowledgeGap] = Field(default_factory=list, description="Lista de 5-8 brechas de conocimiento emergentes de la colección en su conjunto, cada una con explicación detallada de por qué existe esta brecha y qué implicaciones tiene.")
+    exploration_questions: List[str] = Field(default_factory=list, description="Lista de 5-8 preguntas adicionales para explorar a partir de la colección, que el texto inspira pero no responde directamente.")
+    problematic_areas: List[str] = Field(default_factory=list, description="Una lista de 3 a 5 áreas problemáticas o desafíos comunes/emergentes identificados a través de la colección de documentos.")
+    final_reflections: List[str] = Field(default_factory=list, description="3-5 reflexiones finales sobre la importancia del contenido en el área que aborda, su aporte al conocimiento y apertura de temas de reflexión. Si se trata de documentos más técnicos o laborales, puedes hablar de las posibilidades que abre, proyectos posibles o recomendaciones de gestión")
+    collection_insights: List[str] = Field(default_factory=list, description="3-5 insights únicos que emergen del análisis conjunto de todos los documentos, que no serían evidentes analizando documentos individuales")
+    methodological_notes: List[str] = Field(default_factory=list, description="2-3 observaciones sobre la metodología, enfoque o perspectiva común en los documentos analizados")
+    kai_synthesis: str = Field(default="", description="Una síntesis de alto nivel desde la perspectiva de KAI (Kognito AI) como exocerebro del usuario. Debe ser una reflexión estratégica (150-200 palabras) que conecte el contenido de la colección con el contexto más amplio del conocimiento del usuario, identificando patrones emergentes, oportunidades de acción y valor estratégico único que surge del análisis conjunto.")
 
 
 # --- Helpers para resiliencia ante errores de proveedor LLM ---
@@ -102,7 +131,20 @@ def _clone_without_streaming(llm: Any) -> Any:
 def _is_retryable_llm_provider_error(exc: Exception) -> bool:
     """Detecta errores transitorios de proveedor que ameritan reintento con fallback."""
     error_text = str(exc).lower()
+    if any(marker in error_text for marker in [
+        "authenticationerror",
+        "api key not valid",
+        "invalid api key",
+        "incorrect api key",
+        "unauthorized",
+        "forbidden",
+        "401",
+    ]):
+        return False
     return any(marker in error_text for marker in [
+        "timeout",
+        "timed out",
+        "litellm.timeout",
         "midstreamfallbackerror",
         "openrouterexception",
         "provider returned error",
@@ -110,6 +152,43 @@ def _is_retryable_llm_provider_error(exc: Exception) -> bool:
         'error_type": "unmapped"',
         "serviceunavailableerror",
     ])
+
+
+def _hydrate_with_model_defaults(model_cls: Type[_PydanticType], payload: Any) -> Any:
+    """Completa campos omitidos por el LLM usando defaults declarados en el modelo."""
+    if not isinstance(payload, dict):
+        return payload
+
+    hydrated_payload = dict(payload)
+    for field_name, field_info in model_cls.model_fields.items():
+        if field_name in hydrated_payload or field_info.is_required():
+            continue
+        if field_info.default_factory is not None:
+            hydrated_payload[field_name] = field_info.default_factory()
+        else:
+            hydrated_payload[field_name] = field_info.default
+    return hydrated_payload
+
+
+def _get_effective_llm_identity(llm: Any) -> tuple[str, str]:
+    """Devuelve proveedor y modelo efectivos para logging, no los aliases internos de LiteLLM."""
+    raw_model = getattr(llm, "model_name", None) or getattr(llm, "model", None) or "desconocido"
+    raw_provider = getattr(llm, "provider", None) or getattr(llm, "custom_llm_provider", None) or "desconocido"
+    api_base = str(getattr(llm, "api_base", None) or "")
+
+    effective_provider = str(raw_provider)
+    effective_model = str(raw_model)
+
+    if "openrouter.ai" in api_base or effective_model.startswith("openrouter/"):
+        effective_provider = "openrouter"
+        if effective_model.startswith("openrouter/"):
+            effective_model = effective_model[len("openrouter/"):]
+        elif effective_model.startswith("openai/"):
+            effective_model = effective_model[len("openai/"):]
+    elif effective_provider == "openai" and effective_model.startswith("openai/"):
+        effective_model = effective_model[len("openai/"):]
+
+    return effective_provider, effective_model
 
 
 # --- Clase Principal del Analizador ---
@@ -128,60 +207,163 @@ class AdvancedTextAnalyzer:
         logger.info("Usando modelo rápido global para análisis de texto avanzado...")
         return get_fast_llm()
 
-    async def _run_analysis_with_parser(self, prompt: str, output_parser: PydanticOutputParser, pydantic_object: Type[_PydanticType], account_id: Optional[str] = None) -> _PydanticType:
+    async def _run_analysis_with_parser(self, prompt: str, output_parser: PydanticOutputParser, pydantic_object: Type[_PydanticType], account_id: Optional[str] = None, timeout_seconds: Optional[float] = None) -> _PydanticType:
         """
         Función centralizada y robusta para ejecutar una llamada al LLM y parsear la salida.
         """
         import json
 
-        llm = await self._get_model(account_id)
         full_prompt = f"{prompt}\n\n{output_parser.get_format_instructions()}"
 
-        async def _try_invoke_and_parse(candidate_llm: Any) -> _PydanticType:
-            response = await _clone_without_streaming(candidate_llm).ainvoke([HumanMessage(content=full_prompt)])
+        def _format_error(exc: Optional[Exception]) -> str:
+            if exc is None:
+                return "Error desconocido (sin excepción capturada)."
+            text = str(exc).strip()
+            if text:
+                return f"{type(exc).__name__}: {text}"
+            return f"{type(exc).__name__}: {repr(exc)}"
+
+        async def _try_invoke_and_parse(candidate_llm: Any, timeout_seconds: float) -> _PydanticType:
+            provider_name, model_name = _get_effective_llm_identity(candidate_llm)
+            logger.info("Invocando LLM (%s/%s) con timeout de %s segundos...", provider_name, model_name, timeout_seconds)
+            response = await asyncio.wait_for(
+                _clone_without_streaming(candidate_llm).ainvoke([HumanMessage(content=full_prompt)]),
+                timeout=timeout_seconds,
+            )
             response_content = response.content
             if isinstance(response_content, list):
                 response_content = " ".join(str(item) for item in response_content)
             elif not isinstance(response_content, str):
                 response_content = str(response_content)
 
+            logger.info("Respuesta del LLM recibida (longitud: %d caracteres). Iniciando parseo a JSON...", len(response_content))
+
             try:
                 obj = safe_json_loads(response_content)
+                obj = _hydrate_with_model_defaults(pydantic_object, obj)
                 json_string = json.dumps(obj)
             except Exception as parse_err:
                 logger.error(f"Error en safe_json_loads: {parse_err}")
                 json_string = response_content
 
             parsed_output = await output_parser.aparse(json_string)
+            logger.info("Parseo de JSON estructurado exitoso para el objeto %s.", pydantic_object.__name__)
             return cast(pydantic_object, parsed_output)
 
-        try:
-            return await _try_invoke_and_parse(llm)
-        except Exception as primary_exc:
-            if _is_retryable_llm_provider_error(primary_exc):
-                logger.warning(
-                    "Analizador de texto: error retryable del proveedor LLM, intentando con fallback | error=%s",
-                    primary_exc,
+        def _llm_signature(candidate_llm: Any) -> str:
+            provider, model = _get_effective_llm_identity(candidate_llm)
+            return f"{provider}|{model}"
+
+        candidates: List[Any] = []
+        seen_signatures: set[str] = set()
+
+        def _append_candidate(candidate_llm: Any):
+            if not candidate_llm:
+                return
+            sig = _llm_signature(candidate_llm)
+            if sig in seen_signatures:
+                return
+            seen_signatures.add(sig)
+            candidates.append(candidate_llm)
+
+        # Orden de intentos:
+        # 1) rápido de usuario/global, 2) principal del usuario, 3) fallback configurado.
+        primary_llm = await self._get_model(account_id)
+        _append_candidate(primary_llm)
+
+        if account_id:
+            try:
+                user_main_llm = await get_llm_for_user(account_id, purpose="main")
+                _append_candidate(user_main_llm)
+            except Exception as e:
+                logger.warning("No se pudo obtener LLM principal del usuario para fallback: %s", e)
+
+        fallback_llm = await get_configured_fallback_llm(
+            account_id=account_id,
+            failed_purpose="fast",
+        )
+        _append_candidate(fallback_llm)
+
+        last_error: Optional[Exception] = None
+        attempt_errors: List[str] = []
+
+        # Último recurso: intentar también modelos globales distintos a los ya evaluados.
+        _append_candidate(get_main_llm())
+        _append_candidate(get_fast_llm())
+
+        if not candidates:
+            raise ValueError("No hay modelos LLM disponibles para ejecutar el análisis.")
+
+        candidate_signatures = [f"{_get_effective_llm_identity(c)[0]}|{_get_effective_llm_identity(c)[1]}" for c in candidates]
+        logger.info(
+            "Iniciando ejecución de análisis con parser (%s). Candidatos de LLM a evaluar en orden: %s | Longitud de prompt: %d chars.",
+            pydantic_object.__name__,
+            candidate_signatures,
+            len(full_prompt)
+        )
+
+        for idx, candidate in enumerate(candidates, start=1):
+            provider_name, model_name = _get_effective_llm_identity(candidate)
+            try:
+                logger.info(
+                    "Analizador de texto: intento LLM %s/%s | provider=%s | model=%s",
+                    idx,
+                    len(candidates),
+                    provider_name,
+                    model_name,
                 )
-                fallback_llm = get_fallback_llm()
-                if fallback_llm:
-                    try:
-                        return await _try_invoke_and_parse(fallback_llm)
-                    except Exception as fallback_exc:
-                        logger.error(f"Fallo en el pipeline de análisis tras fallback: {fallback_exc}", exc_info=True)
-                        raise ValueError(f"No se pudo obtener una respuesta JSON válida del LLM. Error: {fallback_exc}")
-            logger.error(f"Fallo en el pipeline de análisis y parseo del LLM: {primary_exc}", exc_info=True)
-            raise ValueError(f"No se pudo obtener una respuesta JSON válida del LLM. Error: {primary_exc}")
+                effective_timeout = timeout_seconds if timeout_seconds is not None else float(settings.llm_request_timeout)
+                return await _try_invoke_and_parse(candidate, timeout_seconds=effective_timeout)
+            except Exception as exc:
+                last_error = exc
+                retryable = _is_retryable_llm_provider_error(exc) or isinstance(exc, asyncio.TimeoutError)
+                formatted_error = _format_error(exc)
+                attempt_errors.append(
+                    f"attempt={idx}/{len(candidates)} provider={provider_name} model={model_name} error={formatted_error}"
+                )
+                logger.warning(
+                    "Analizador de texto: fallo intento %s/%s | retryable=%s | provider=%s | model=%s | error=%s",
+                    idx,
+                    len(candidates),
+                    retryable,
+                    provider_name,
+                    model_name,
+                    formatted_error,
+                )
+                if not retryable:
+                    break
+
+        logger.error(
+            "Fallo en el pipeline de análisis tras agotar candidatos LLM. intentos=%s",
+            " | ".join(attempt_errors) if attempt_errors else "sin_detalle",
+            exc_info=last_error if last_error else False,
+        )
+        raise ValueError(
+            "No se pudo obtener una respuesta JSON válida del LLM. "
+            f"Último error: {_format_error(last_error)}"
+        )
 
     async def analyze_single_text(self, text: str, document_title: str = "Documento analizado", account_id: Optional[str] = None) -> SingleTextAnalysis:
         """
         Ejecuta un análisis completo y estructurado sobre un único fragmento de texto.
         """
+        logger.info(
+            "Iniciando análisis de texto único. Título: '%s' | Usuario (account_id): %s | Longitud texto: %d caracteres.",
+            document_title,
+            account_id,
+            len(text) if text else 0
+        )
         if not text or len(text.split()) < 30:
+            logger.warning(
+                "Texto demasiado corto para análisis detallado (título: '%s'). Longitud: %d palabras. Retornando estructura vacía.",
+                document_title,
+                len(text.split()) if text else 0
+            )
             return SingleTextAnalysis(
                 executive_summary=text, general_analysis="Texto insuficiente para análisis detallado",
                 key_themes=[], central_concepts=[], discipline=[], authorial_tone="N/A",
-                knowledge_gaps=[], final_reflections=[]
+                knowledge_gaps=[], exploration_questions=[], problematic_areas=[],
+                final_reflections=[], kai_synthesis="Texto insuficiente para generar una síntesis."
             )
 
         prompt = f"""
@@ -251,6 +433,8 @@ class AdvancedTextAnalyzer:
         
         IMPORTANTE: Las brechas de conocimiento deben seguir EXACTAMENTE la estructura JSON mostrada arriba, con "gap_title", "explanation" y "related_context" como campos obligatorios.
 
+        IMPORTANTE: Tu salida JSON debe incluir TODOS los campos del esquema, incluso si alguno queda vacío. Para listas usa [] y para strings usa "".
+
         Texto a analizar:
         ---
         {text}
@@ -258,30 +442,131 @@ class AdvancedTextAnalyzer:
         """
         parser = PydanticOutputParser(pydantic_object=SingleTextAnalysis)
         result = await self._run_analysis_with_parser(prompt, parser, SingleTextAnalysis, account_id=account_id)
+        logger.info(
+            "Análisis de texto único completado con éxito para '%s'. Temas encontrados: %d | Conceptos centrales: %d | Brechas identificadas: %d.",
+            document_title,
+            len(result.key_themes),
+            len(result.central_concepts),
+            len(result.knowledge_gaps)
+        )
         return cast(SingleTextAnalysis, result)
+
+    async def summarize_document(self, text: str, document_title: str = "Documento", account_id: Optional[str] = None) -> 'DocumentSummary':
+        """
+        Genera un resumen estructurado y conciso de un documento.
+        Diferente al análisis completo: más ligero, orientado a comprensión rápida.
+        """
+        logger.info(
+            "Iniciando resumen de documento. Título: '%s' | Usuario (account_id): %s | Longitud texto: %d caracteres.",
+            document_title,
+            account_id,
+            len(text) if text else 0
+        )
+        if not text or len(text.split()) < 30:
+            logger.warning(
+                "Texto demasiado corto para generar un resumen estructurado (título: '%s'). Longitud: %d palabras. Retornando estructura vacía.",
+                document_title,
+                len(text.split()) if text else 0
+            )
+            return DocumentSummary(
+                executive_summary=text,
+                document_structure=[],
+                main_ideas=[],
+                kai_synthesis="Texto insuficiente para generar un resumen."
+            )
+
+        prompt = f"""
+        Eres KAI (Kognito AI), el exocerebro del usuario. Tu tarea es generar un resumen estructurado y claro del siguiente documento.
+        Todo el contenido debe estar en español.
+
+        INSTRUCCIONES:
+
+        1. **Resumen Ejecutivo** (500-800 palabras): Redacta un resumen ejecutivo muy extenso y detallado, estructurado en varios párrafos bien diferenciados en español. Debe capturar de manera condensada pero completa el contenido completo del documento, incluyendo todos sus puntos principales, objetivos, desarrollo de ideas, hallazgos, metodologías (si aplica), conclusiones y relevancia. Debe permitir al usuario comprender a fondo y con total claridad todo el documento sin necesidad de leerlo en su totalidad.
+
+        2. **Estructura del Documento**: Lista ordenada de las secciones o partes del documento. Para cada una indica:
+           - Su nombre o título (si lo tiene)
+           - Una breve descripción de qué trata y qué aporta (1-2 oraciones)
+           Si el documento no tiene secciones explícitas, sintetiza su estructura lógica (introducción, desarrollo, conclusión, etc.).
+
+        3. **Ideas Principales** (4-7 ideas): Las ideas, argumentos o afirmaciones más importantes del documento. Cada una debe ser una oración completa y autoexplicativa, no una simple palabra clave.
+
+        4. **Síntesis de KAI** (60-100 palabras): Como exocerebro del usuario, reflexiona brevemente sobre el valor práctico o estratégico de este documento. ¿Qué conexiones abre? ¿Qué utilidad concreta tiene para el usuario? Usa un tono reflexivo y orientado a la acción.
+
+        Documento a resumir ("{document_title}"):
+        ---
+        {text}
+        ---
+        """
+        parser = PydanticOutputParser(pydantic_object=DocumentSummary)
+        result = await self._run_analysis_with_parser(prompt, parser, DocumentSummary, account_id=account_id)
+        logger.info(
+            "Resumen de documento completado con éxito para '%s'. Estructura (secciones): %d | Ideas principales: %d.",
+            document_title,
+            len(result.document_structure),
+            len(result.main_ideas)
+        )
+        return cast(DocumentSummary, result)
 
     async def analyze_collection(self, documents: List[Dict[str, str]], account_id: Optional[str] = None) -> CollectionAnalysis:
         """
         Analiza una colección de documentos para encontrar temas transversales, conexiones y brechas de conocimiento emergentes.
         """
+        logger.info(
+            "Iniciando análisis de colección de documentos. Total documentos: %d | Usuario (account_id): %s",
+            len(documents) if documents else 0,
+            account_id
+        )
         if not documents:
+            logger.warning("Colección de documentos vacía proporcionada para análisis. Retornando estructura vacía.")
             return CollectionAnalysis(
                 collection_summary="No se proporcionaron textos para analizar.",
+                general_analysis="No se proporcionaron textos para analizar.",
+                authorial_tone="",
                 cross_cutting_themes=[],
                 central_concepts=[],
                 concept_relationships=[],
                 identified_connections=[],
                 emergent_knowledge_gaps=[],
+                exploration_questions=[],
+                problematic_areas=[],
                 final_reflections=[],
                 collection_insights=[],
-                methodological_notes=[]
+                methodological_notes=[],
+                kai_synthesis="",
             )
             
         full_context_text = ""
+        truncated_docs = 0
+        total_context_chars = 0
         for i, doc in enumerate(documents):
             title = doc.get('title', f"Documento {i+1}")
-            content_snippet = (doc.get('content', '')[:1000] + '...') if len(doc.get('content', '')) > 1000 else doc.get('content', '')
-            full_context_text += f"--- INICIO DOCUMENTO: '{title}' ---\n{content_snippet}\n--- FIN DOCUMENTO: '{title}' ---\n\n"
+            raw_content = doc.get('content', '')
+            if len(raw_content) > MAX_COLLECTION_DOC_SNIPPET_CHARS:
+                content_snippet = raw_content[:MAX_COLLECTION_DOC_SNIPPET_CHARS] + '...'
+            else:
+                content_snippet = raw_content
+
+            next_block = f"--- INICIO DOCUMENTO: '{title}' ---\n{content_snippet}\n--- FIN DOCUMENTO: '{title}' ---\n\n"
+            if total_context_chars + len(next_block) > MAX_COLLECTION_CONTEXT_CHARS:
+                truncated_docs += 1
+                continue
+
+            full_context_text += next_block
+            total_context_chars += len(next_block)
+
+        if truncated_docs > 0:
+            logger.warning(
+                "Colección truncada para evitar timeout del proveedor LLM: %s documentos omitidos (chars=%s/%s)",
+                truncated_docs,
+                total_context_chars,
+                MAX_COLLECTION_CONTEXT_CHARS,
+            )
+        else:
+            logger.info(
+                "Contexto de colección construido exitosamente. Documentos incluidos: %d (caracteres totales: %d).",
+                len(documents) - truncated_docs,
+                total_context_chars
+            )
 
         output_parser = PydanticOutputParser(pydantic_object=CollectionAnalysis)
         prompt = f"""
@@ -333,7 +618,19 @@ class AdvancedTextAnalyzer:
         Colección de documentos:
         {full_context_text}
         """
-        result = await self._run_analysis_with_parser(prompt, output_parser, CollectionAnalysis, account_id=account_id)
+        result = await self._run_analysis_with_parser(
+            prompt,
+            output_parser,
+            CollectionAnalysis,
+            account_id=account_id,
+            timeout_seconds=max(float(settings.llm_request_timeout), 180.0),
+        )
+        logger.info(
+            "Análisis de colección de documentos completado con éxito. Temas transversales: %d | Conexiones identificadas: %d | Insights de la colección: %d.",
+            len(result.cross_cutting_themes),
+            len(result.identified_connections),
+            len(result.collection_insights)
+        )
         return cast(CollectionAnalysis, result)
 
 # --- INSTANCIA ÚNICA ---

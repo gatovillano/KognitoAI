@@ -79,6 +79,82 @@ async def read_users_me(current_account_id: str = Depends(get_current_account_id
         telegram_id=telegram_id,
         is_admin=bool(account.is_admin),  # type: ignore
         has_password=bool(account.hashed_password)
+    )# --- Modelos de Respuesta para el Perfil de IA (Memoria Estructurada) ---
+class AIUserProfileResponse(BaseModel):
+    nombre: Optional[str] = None
+    gustos: Optional[str] = None
+    intereses: Optional[str] = None
+    otros_datos: Optional[str] = None
+    system_prompt: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+class AIUserProfileUpdateRequest(BaseModel):
+    nombre: Optional[str] = None
+    gustos: Optional[str] = None
+    intereses: Optional[str] = None
+    otros_datos: Optional[str] = None
+    system_prompt: Optional[str] = None
+
+
+@router.get("/users/me/profile", response_model=AIUserProfileResponse, summary="Obtener perfil estructurado de IA del usuario actual")
+async def get_user_ai_profile(
+    current_account_id: str = Depends(get_current_account_id)
+):
+    """
+    Obtiene el perfil estructurado de IA del usuario actualmente autenticado.
+    Este perfil es gestionado autónomamente por el agente pero puede ser visualizado/editado aquí.
+    """
+    from core.memory_manager import get_user_profile
+    perfil = await get_user_profile(current_account_id)
+    if not perfil:
+        return AIUserProfileResponse()
+    return AIUserProfileResponse(
+        nombre=perfil.nombre,
+        gustos=perfil.gustos,
+        intereses=perfil.intereses,
+        otros_datos=perfil.otros_datos,
+        system_prompt=perfil.system_prompt
+    )
+
+@router.put("/users/me/profile", response_model=AIUserProfileResponse, summary="Actualizar perfil estructurado de IA del usuario actual")
+async def update_user_ai_profile(
+    profile_update: AIUserProfileUpdateRequest,
+    current_account_id: str = Depends(get_current_account_id)
+):
+    """
+    Actualiza el perfil estructurado de IA del usuario actualmente autenticado.
+    """
+    from core.memory_manager import update_user_profile, get_user_profile
+    
+    # Sanitizar las entradas si están provistas para evitar código malicioso
+    nombre_sanitized = sanitize_text(profile_update.nombre) if profile_update.nombre is not None else None
+    gustos_sanitized = sanitize_text(profile_update.gustos) if profile_update.gustos is not None else None
+    intereses_sanitized = sanitize_text(profile_update.intereses) if profile_update.intereses is not None else None
+    otros_datos_sanitized = sanitize_text(profile_update.otros_datos) if profile_update.otros_datos is not None else None
+    system_prompt_sanitized = sanitize_text(profile_update.system_prompt) if profile_update.system_prompt is not None else None
+
+    await update_user_profile(
+        account_id=current_account_id,
+        nombre=nombre_sanitized,
+        gustos=gustos_sanitized,
+        intereses=intereses_sanitized,
+        otros_datos=otros_datos_sanitized,
+        system_prompt=system_prompt_sanitized
+    )
+    
+    # Recuperar el perfil actualizado para la respuesta
+    perfil = await get_user_profile(current_account_id)
+    if not perfil:
+        raise HTTPException(status_code=500, detail="Error al recuperar el perfil actualizado.")
+        
+    return AIUserProfileResponse(
+        nombre=perfil.nombre,
+        gustos=perfil.gustos,
+        intereses=perfil.intereses,
+        otros_datos=perfil.otros_datos,
+        system_prompt=perfil.system_prompt
     )
 
 
@@ -316,6 +392,36 @@ async def delete_user_secret(
 
 
 # --- Endpoints de Administración de Usuarios (Solo para Admins) ---
+@router.put("/admin/users/{user_id}", summary="Actualizar privilegios de administrador (solo admin)")
+async def update_user_admin_status(
+    user_id: str,
+    is_admin: bool = Body(..., embed=True),
+    admin_account: Account = Depends(get_current_admin_account),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Sube o baja la categoría de un usuario a administrador. Requiere privilegios de administrador.
+    """
+    logger.info(f"Admin {admin_account.id} cambiando is_admin a {is_admin} para el usuario {user_id}")
+    
+    try:
+        target_user_id = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ID de usuario inválido.")
+
+    # Prevenir que el admin se quite a sí mismo el permiso si es el único o por seguridad
+    # (Opcional: podrías lanzar un error si intenta quitarse el admin a sí mismo)
+    
+    user = await db.get(Account, target_user_id)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuario no encontrado.")
+
+    user.is_admin = is_admin
+    await db.commit()
+    await db.refresh(user)
+    
+    return {"message": f"Estado de administrador actualizado para {user.name or user_id}."}
+
 @router.get("/admin/users", response_model=List[UserProfileResponse], summary="Listar todos los usuarios (solo admin)")
 async def list_all_users(
     admin_account: Account = Depends(get_current_admin_account),
@@ -356,12 +462,15 @@ async def list_all_users(
         ))
     return users_data
 
-@router.get("/users", response_model=List[UserProfileResponse], summary="Listar todos los usuarios (público)")
-async def list_all_users_public(db: AsyncSession = Depends(get_db_session)):
+@router.get("/users", response_model=List[UserProfileResponse], summary="Listar todos los usuarios (requiere autenticación)")
+async def list_all_users_public(
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
     """
-    Lista todos los usuarios registrados en el sistema.
+    Lista todos los usuarios registrados en el sistema. Requiere estar autenticado.
     """
-    logger.info("Listando todos los usuarios para acceso público.")
+    logger.info(f"Usuario {current_account_id} listando todos los usuarios.")
     stmt = select(Account).order_by(Account.created_at.desc())
     result = await db.execute(stmt)
     accounts = result.scalars().all()

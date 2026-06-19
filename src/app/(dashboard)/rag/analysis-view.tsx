@@ -10,12 +10,12 @@ import {
     Loader2, Info, Filter, ChevronDown, Search, BarChart3, FileText, FolderKanban,
     Lightbulb, Code, Calendar, Eye, Plus, TrendingUp, AlertTriangle, HelpCircle,
     CheckCircle, Clock, XCircle, ArrowLeft, StickyNote, TrendingDown, Users,
-    Activity, Target, PieChart, Sparkles, RefreshCcw, Zap, Network
+    Activity, Target, PieChart, RefreshCcw, Zap, Network
 } from 'lucide-react';
 import { toast } from 'sonner';
 import apiClient from '@/lib/api';
 import {
-    Analysis, AnalysisType, Insight, Question, AnalysisResponse,
+    Analysis, AnalysisType, Question, AnalysisResponse,
     DashboardInsightsResponse, AnalysisStats, KeyTopic
 } from '@/lib/models';
 import { Badge } from '@/components/ui/badge';
@@ -33,7 +33,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription
 } from '@/components/ui/dialog';
-import InsightGeneratorForm from '@/components/InsightGeneratorForm';
 import { QuestionSlider } from '@/components/QuestionSlider';
 import { KeyTopicSlider } from '@/components/KeyTopicSlider';
 import { KeyTopicDetailDialog } from '@/components/KeyTopicDetailDialog';
@@ -124,7 +123,6 @@ export function AnalysisView() {
     const keywordsTimeoutRef = useRef<number | null>(null);
     const [selectedType, setSelectedType] = useState<string | null>(null);
     const [selectedAnalysis, setSelectedAnalysis] = useState<Analysis | null>(null);
-    const [showInsightFormModal, setShowInsightFormModal] = useState(false);
     const [dashboardData, setDashboardData] = useState<DashboardInsightsResponse | null>(null);
     const [isLoadingDashboard, setIsLoadingDashboard] = useState(true);
     const [isKeyTopicDetailDialogOpen, setIsKeyTopicDetailDialogOpen] = useState(false);
@@ -157,13 +155,20 @@ export function AnalysisView() {
             });
 
             const data: AnalysisResponse = response.data;
+            const filteredAnalysis = data.analysis.filter(
+                (item) =>
+                    item.type !== 'insight' &&
+                    item.type !== 'proactive_insight_manual' &&
+                    item.type !== 'proactive_insight' &&
+                    item.type !== 'neural_insight'
+            );
             if (reset) {
-                setAnalyses(data.analysis);
+                setAnalyses(filteredAnalysis);
             } else {
-                setAnalyses(prev => [...prev, ...data.analysis]);
+                setAnalyses(prev => [...prev, ...filteredAnalysis]);
             }
 
-            setHasMore(!!data.has_more && data.analysis.length > 0);
+            setHasMore(!!data.has_more);
             offsetRef.current = currentOffset + data.analysis.length;
         } catch (error) {
             toast.error('Error al cargar los análisis');
@@ -328,8 +333,6 @@ export function AnalysisView() {
         { value: null, label: 'Todos los tipos' },
         { value: 'document', label: 'Documentos' },
         { value: 'collection', label: 'Colecciones' },
-        { value: 'insight', label: 'Insights Proactivos' },
-        { value: 'proactive_insight_manual', label: 'Insights Manuales' },
         { value: 'note_analysis', label: 'Notas' },
         { value: 'note_collection_analysis', label: 'Colecciones de Notas' },
         { value: 'code', label: 'Código' },
@@ -357,7 +360,6 @@ export function AnalysisView() {
         return {
             totalProcessed,
             successRate: Math.round(successRate),
-            activeInsights: dashboardData.total_proactive_insights || 0,
             lastUpdate: lastUpdateTime
         };
     }, [dashboardData, lastUpdateTime]);
@@ -390,16 +392,12 @@ export function AnalysisView() {
                         <RefreshCcw className={`h-4 w-4 ${isLoadingDashboard ? 'animate-spin' : ''}`} />
                         Actualizar
                     </Button>
-                    <Button onClick={() => setShowInsightFormModal(true)} className="h-12 px-6 rounded-2xl bg-primary shadow-lg shadow-primary/20 hover:shadow-primary/40 transition-all gap-2 font-bold">
-                        <Plus className="h-5 w-5" />
-                        Generar Insight
-                    </Button>
                 </div>
             </div>
 
             {dashboardData && systemStats && (
                 <>
-                    <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
+                    <div className="grid gap-6 md:grid-cols-3">
                         <Card className="group relative overflow-hidden border-border/40 bg-card/40 backdrop-blur-xl rounded-[2rem] transition-all duration-500 hover:shadow-2xl hover:shadow-blue-500/10 hover:-translate-y-1">
                             <div className="absolute inset-0 bg-gradient-to-br from-blue-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
                             <CardHeader className="flex flex-row items-center justify-between pb-2 relative z-10">
@@ -410,7 +408,7 @@ export function AnalysisView() {
                             </CardHeader>
                             <CardContent className="relative z-10">
                                 <div className="text-4xl font-black tracking-tighter bg-gradient-to-br from-blue-600 to-blue-400 bg-clip-text text-transparent">{dashboardData.total_analysis_tasks}</div>
-                                <p className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-wider mt-1">{dashboardData.total_proactive_insights} insights proactivos</p>
+                                <p className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-wider mt-1">Tareas completadas y fallidas</p>
                             </CardContent>
                         </Card>
 
@@ -439,20 +437,6 @@ export function AnalysisView() {
                             <CardContent className="relative z-10">
                                 <div className="text-4xl font-black tracking-tighter bg-gradient-to-br from-orange-600 to-orange-400 bg-clip-text text-transparent">{systemStats.totalProcessed}</div>
                                 <p className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-wider mt-1">Documentos y tareas</p>
-                            </CardContent>
-                        </Card>
-
-                        <Card className="group relative overflow-hidden border-border/40 bg-card/40 backdrop-blur-xl rounded-[2rem] transition-all duration-500 hover:shadow-2xl hover:shadow-yellow-500/10 hover:-translate-y-1">
-                            <div className="absolute inset-0 bg-gradient-to-br from-yellow-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-                            <CardHeader className="flex flex-row items-center justify-between pb-2 relative z-10">
-                                <CardTitle className="text-xs font-black uppercase tracking-widest text-muted-foreground/70">Insights Activos</CardTitle>
-                                <div className="p-2.5 rounded-xl bg-yellow-500/10 text-yellow-500 shadow-lg shadow-yellow-500/20 group-hover:scale-110 transition-transform duration-500">
-                                    <Sparkles className="h-5 w-5" />
-                                </div>
-                            </CardHeader>
-                            <CardContent className="relative z-10">
-                                <div className="text-4xl font-black tracking-tighter bg-gradient-to-br from-yellow-600 to-yellow-400 bg-clip-text text-transparent">{systemStats.activeInsights}</div>
-                                <p className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-wider mt-1">Generados por KAI</p>
                             </CardContent>
                         </Card>
                     </div>
@@ -624,40 +608,8 @@ export function AnalysisView() {
                                                 {formatDate(analysis.created_at || new Date().toISOString())}
                                             </div>
                                             <div className="flex items-center gap-1 group-hover:text-primary transition-colors">
-                                                {(analysis.type === 'neural_insight' || analysis.type === 'insight' || analysis.type === 'proactive_insight') ? (
-                                                    <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="icon"
-                                                            className="h-6 w-6 text-green-500 hover:text-green-600 hover:bg-green-50"
-                                                            onClick={() => { toast.success('Insight aceptado'); }}
-                                                        >
-                                                            <CheckCircle className="h-4 w-4" />
-                                                        </Button>
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="icon"
-                                                            className="h-6 w-6 text-red-500 hover:text-red-600 hover:bg-red-50"
-                                                            onClick={async () => {
-                                                                if (confirm('¿Eliminar insight?')) {
-                                                                    try {
-                                                                        await apiClient.delete('/api/delete-analysis', { data: { task_id: analysis.id } });
-                                                                        handleAnalysisDeleted(analysis.id);
-                                                                    } catch (err) {
-                                                                        toast.error('Error al eliminar');
-                                                                    }
-                                                                }
-                                                            }}
-                                                        >
-                                                            <XCircle className="h-4 w-4" />
-                                                        </Button>
-                                                    </div>
-                                                ) : (
-                                                    <>
-                                                        <span>Detalles</span>
-                                                        <Eye className="h-3.5 w-3.5" />
-                                                    </>
-                                                )}
+                                                <span>Detalles</span>
+                                                <Eye className="h-3.5 w-3.5" />
                                             </div>
                                         </CardFooter>
                                     </Card>
@@ -729,16 +681,6 @@ export function AnalysisView() {
                 }
             })()}
 
-            <Dialog open={showInsightFormModal} onOpenChange={setShowInsightFormModal}>
-                <DialogContent className="sm:max-w-[425px]">
-                    <DialogHeader>
-                        <DialogTitle>Generar Insight Manual</DialogTitle>
-                        <DialogDescription>Inicia un análisis específico sobre tus datos.</DialogDescription>
-                    </DialogHeader>
-                    {user?.account_id && <InsightGeneratorForm accountId={user.account_id} />}
-                </DialogContent>
-            </Dialog>
-
             <KeyTopicDetailDialog
                 isOpen={isKeyTopicDetailDialogOpen}
                 onOpenChange={setIsKeyTopicDetailDialogOpen}
@@ -761,7 +703,6 @@ export function AnalysisView() {
                                 <li>Historial completo de análisis realizados.</li>
                                 <li>Detección automática de brechas de conocimiento.</li>
                                 <li>Identificación de temas clave recurrentes.</li>
-                                <li>Generación manual de insights proactivos.</li>
                             </ul>
                         </div>
                     </div>

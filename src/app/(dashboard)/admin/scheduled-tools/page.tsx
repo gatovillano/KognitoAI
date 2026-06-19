@@ -30,6 +30,7 @@ interface ScheduledTool {
 interface User {
   id: string;
   name: string;
+  email?: string;
 }
 
 interface ScheduledToolsStatus {

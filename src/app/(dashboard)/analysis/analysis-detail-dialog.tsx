@@ -3,7 +3,7 @@ import { MessageSquare } from 'lucide-react';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Analysis, AnalysisType, Insight, Question, CollectionAnalysis, DocumentAnalysisResult as SingleTextAnalysis, CollectionConnection, ThemeReference, ThemeQuote, CodeAnalysisResultFrontend, NoteCollectionAnalysisResult, NoteAnalysisResult, DeepResearchAnalysisResult, ProactiveInsightResult, ComprehensiveWebAnalysisResult, ScopedRagAnalysisResult } from '@/lib/models';
+import { Analysis, AnalysisType, Insight, Question, CollectionAnalysis, DocumentAnalysisResult as SingleTextAnalysis, DocumentSummaryResult, CollectionConnection, ThemeReference, ThemeQuote, CodeAnalysisResultFrontend, NoteCollectionAnalysisResult, NoteAnalysisResult, DeepResearchAnalysisResult, ProactiveInsightResult, ComprehensiveWebAnalysisResult, ScopedRagAnalysisResult } from '@/lib/models';
 import { Lightbulb, Workflow, ScrollText, Megaphone, Target, BarChart3, TrendingUp, FlaskConical, Puzzle, Goal, LibraryBig, Bot, CircleCheck, Info, Sparkles, XCircle, FileWarning, HelpCircle, Brain, Network, Volume2, Loader2, Pause, Calendar, AlertTriangle, Expand, Atom, FileText, Settings, GitBranch, Activity, Trash2, Zap, ExternalLink, Download } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -24,6 +24,7 @@ import { cn } from '@/lib/utils';
 import SemanticAnalysis from './SemanticAnalysis';
 import CollectionAnalysisComponent from './CollectionAnalysis';
 import DocumentAnalysisComponent from './DocumentAnalysis';
+import DocumentSummaryComponent from './DocumentSummary';
 import CodeAnalysisComponent from './CodeAnalysis';
 import NoteCollectionAnalysisComponent from './NoteCollectionAnalysis';
 import NoteAnalysisComponent from './NoteAnalysis';
@@ -920,9 +921,15 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
     setDeleteError(null);
 
     try {
-      await apiClient.delete('/api/delete-analysis', {
-        data: { task_id: currentAnalysis.id }
-      });
+      if (currentAnalysis.type === 'insight' || currentAnalysis.type === 'neural_insight' || currentAnalysis.type === 'proactive_insight') {
+        await apiClient.delete('/api/delete-proactive-insight', {
+          data: { insight_id: currentAnalysis.id }
+        });
+      } else {
+        await apiClient.delete('/api/delete-analysis', {
+          data: { task_id: currentAnalysis.id }
+        });
+      }
 
       // Llamar al callback para actualizar la lista
       onAnalysisDeleted?.(currentAnalysis.id);
@@ -1103,7 +1110,6 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
         );
 
       case 'document':
-      case 'document_summary':
         const docColors = getAnalysisColorScheme(currentAnalysis.type);
         return (
           <DocumentAnalysisComponent
@@ -1113,6 +1119,20 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
             handleConceptClick={handleConceptClick}
             openGapsSlider={openGapsSlider}
             openQuestionsSlider={openQuestionsSlider}
+            play={play}
+            isLoading={isLoading}
+            isPlaying={isPlaying}
+            activeText={activeText || ""}
+            documentTitle={currentAnalysis.title}
+          />
+        );
+
+      case 'document_summary':
+        const summaryColors = getAnalysisColorScheme(currentAnalysis.type);
+        return (
+          <DocumentSummaryComponent
+            summary={currentAnalysis.full_data as DocumentSummaryResult}
+            docColors={summaryColors}
             play={play}
             isLoading={isLoading}
             isPlaying={isPlaying}
@@ -1472,9 +1492,15 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
                     onClick={async () => {
                       if (confirm('¿Estás seguro de que deseas rechazar y eliminar este insight?')) {
                         try {
-                          await apiClient.delete('/api/delete-analysis', { 
-                            data: { task_id: currentAnalysis.id } 
-                          });
+                          if (currentAnalysis.type === 'insight' || currentAnalysis.type === 'neural_insight' || currentAnalysis.type === 'proactive_insight') {
+                            await apiClient.delete('/api/delete-proactive-insight', { 
+                              data: { insight_id: currentAnalysis.id } 
+                            });
+                          } else {
+                            await apiClient.delete('/api/delete-analysis', { 
+                              data: { task_id: currentAnalysis.id } 
+                            });
+                          }
                           toast.success('Insight rechazado y eliminado.');
                           onOpenChange(false);
                           if (onAnalysisDeleted) onAnalysisDeleted(currentAnalysis.id);

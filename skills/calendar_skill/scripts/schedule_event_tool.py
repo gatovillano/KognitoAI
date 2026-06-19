@@ -13,8 +13,7 @@ from langchain_core.tools import BaseTool
 import dateparser
 
 from core.agenda_manager import schedule_event
-# ¡NUEVO! Importamos el bot_manager para acceder al user_data
-from telegram_client.bot_manager import bot_manager
+from utils.telegram_api import store_telegram_user_data
 
 logger = logging.getLogger(__name__)
 
@@ -76,9 +75,11 @@ class ScheduleEventTool(BaseTool):
                         telegram_id_to_use = run_manager.config.get("configurable", {}).get("telegram_id")
                 
                 if telegram_id_to_use:
-                    user_data = bot_manager.get_user_data(int(telegram_id_to_use))
-                    user_data[EVENT_ID_FOR_SCHEDULING_KEY] = new_event.id
-                    await bot_manager.flush_persistence()
+                    await store_telegram_user_data(
+                        telegram_id=int(telegram_id_to_use),
+                        key=EVENT_ID_FOR_SCHEDULING_KEY,
+                        data=new_event.id
+                    )
                     logger.info(f"ID de evento {new_event.id} guardado en user_data para que el handler lo programe.")
                 else:
                     logger.warning("No se pudo obtener telegram_id para guardar el ID del evento en user_data.")

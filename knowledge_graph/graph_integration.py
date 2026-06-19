@@ -349,10 +349,31 @@ class GraphIntegration:
                     progress_tracker=tracker
                 )
 
-                # NOTA: El guardado del grafo conceptual ahora se maneja directamente
-                # dentro de ConceptualGraphProcessor.process_documents_conceptually()
-                # para asegurar la correcta categorización de etiquetas (evitando Entity genérico).
-                logger.info("✅ Grafo conceptual persistido por ConceptualGraphProcessor.")
+                conceptual_neo4j_payload = await self._convert_conceptual_to_neo4j_format(
+                    conceptual_result
+                )
+                conceptual_entities = (
+                    conceptual_neo4j_payload.get("entities", [])
+                    + conceptual_neo4j_payload.get("profiles", [])
+                )
+                conceptual_relationships = (
+                    conceptual_neo4j_payload.get("relationships", [])
+                    + conceptual_neo4j_payload.get("profile_relationships", [])
+                )
+
+                stats = await self.hybrid_adapter.add_cognee_results_to_graph(
+                    conceptual_entities,
+                    conceptual_relationships,
+                    workspace_id=workspace_id,
+                    account_id=account_id,
+                    dataset_name=dataset_name,
+                )
+
+                logger.info(
+                    "✅ Grafo conceptual persistido en Neo4j: %s entidades, %s relaciones",
+                    len(conceptual_entities),
+                    len(conceptual_relationships),
+                )
 
                 logger.info("🎉 Procesamiento conceptual LLM-driven completado exitosamente.")
                 
@@ -367,6 +388,7 @@ class GraphIntegration:
                     "conceptual_quotes": len(conceptual_result.get("conceptual_nodes", [])),
                     "thematic_relationships": len(conceptual_result.get("thematic_relationships", [])),
                     "idea_profiles": len(conceptual_result.get("idea_profiles", [])),
+                    "neo4j_stats": stats,
                     "metadata": conceptual_result.get("metadata", {}),
                     "task_id": tracker.task_id  # Incluir task_id en respuesta
                 }

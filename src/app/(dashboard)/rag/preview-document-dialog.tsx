@@ -2,7 +2,7 @@
 'use client';
 
 import { Children, Fragment, cloneElement, isValidElement, type ComponentPropsWithoutRef, type MutableRefObject, type ReactNode, useEffect, useMemo, useState, useRef } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import ReactMarkdown from 'react-markdown';
 import type { Components } from 'react-markdown';
@@ -91,7 +91,7 @@ function highlightTextNodes(
       return node;
     }
 
-    return cloneElement(node, {
+    return cloneElement(node as any, {
       ...childProps,
       children: Children.map(childProps.children, child => highlightTextNodes(child, targetText, highlightRef, counter)),
     });
@@ -100,13 +100,13 @@ function highlightTextNodes(
   return node;
 }
 
-function createHighlightedTag<Tag extends keyof JSX.IntrinsicElements>(
-  tagName: Tag,
+function createHighlightedTag(
+  tagName: any,
   targetText: string | undefined,
   highlightRef: MutableRefObject<HTMLElement | null>,
   counter: HighlightCounter
 ) {
-  return function HighlightedTag({ children, ...props }: ComponentPropsWithoutRef<Tag>) {
+  return function HighlightedTag({ children, ...props }: any) {
     const TagName = tagName;
 
     return (
@@ -204,7 +204,7 @@ export function PreviewDocumentDialog({ document, isOpen, onOpenChange, highligh
   }, [content, markdownComponents]);
 
   const isPdf = document?.file_name?.toLowerCase().endsWith('.pdf');
-  const physicalDocumentId = normalizePhysicalDocumentId(document?.document_id);
+  const physicalDocumentId = normalizePhysicalDocumentId(document?.physical_document_id);
   const hasPhysicalFile = Boolean(physicalDocumentId);
   const showNativePdfViewer = isPdf && hasPhysicalFile;
 
@@ -218,6 +218,13 @@ export function PreviewDocumentDialog({ document, isOpen, onOpenChange, highligh
 
     let cancelled = false;
     let objectUrlToRevoke: string | null = null;
+
+    const loadTextPreview = async () => {
+      const response = await apiClient.get(`/api/documents/get-document-content?file_name=${encodeURIComponent(document.file_name)}`);
+      if (!cancelled) {
+        setContent(normalizeDocumentContent(response.data?.content));
+      }
+    };
 
     const fetchPreview = async () => {
       setIsLoading(true);
@@ -234,19 +241,40 @@ export function PreviewDocumentDialog({ document, isOpen, onOpenChange, highligh
             return;
           }
 
-          objectUrlToRevoke = URL.createObjectURL(new Blob([response.data], { type: 'application/pdf' }));
-          setPdfPreviewUrl(objectUrlToRevoke);
+          const blob = response.data instanceof Blob
+            ? response.data
+            : new Blob([response.data], { type: 'application/pdf' });
+          const contentTypeHeader = typeof response.headers?.['content-type'] === 'string'
+            ? response.headers['content-type']
+            : '';
+          const isPdfResponse = contentTypeHeader.includes('application/pdf') || blob.type === 'application/pdf';
+
+          if (blob.size > 0 && isPdfResponse) {
+            objectUrlToRevoke = URL.createObjectURL(blob);
+            setPdfPreviewUrl(objectUrlToRevoke);
+            return;
+          }
+
+          console.warn('PreviewDocumentDialog: PDF inline preview unavailable.', {
+            documentId: physicalDocumentId,
+            blobSize: blob.size,
+            contentTypeHeader,
+            blobType: blob.type,
+          });
+          setContent('No se pudo cargar el PDF original.');
           return;
         }
 
-        const response = await apiClient.get(`/api/documents/get-document-content?file_name=${encodeURIComponent(document.file_name)}`);
-        if (!cancelled) {
-          setContent(normalizeDocumentContent(response.data?.content));
+        if (isPdf) {
+          setContent('No se encontró el PDF original para este documento.');
+          return;
         }
+
+        await loadTextPreview();
       } catch (error) {
         if (!cancelled) {
           if (showNativePdfViewer) {
-            setContent('No se pudo cargar la previsualización del PDF.');
+            setContent('No se pudo cargar el PDF original.');
           } else {
             setContent('No se pudo cargar el contenido de este documento.');
           }
@@ -267,7 +295,7 @@ export function PreviewDocumentDialog({ document, isOpen, onOpenChange, highligh
         URL.revokeObjectURL(objectUrlToRevoke);
       }
     };
-  }, [isOpen, document, showNativePdfViewer, physicalDocumentId]);
+  }, [isOpen, document, isPdf, showNativePdfViewer, physicalDocumentId]);
 
   // Efecto para hacer scroll al texto resaltado una vez que el contenido se ha cargado y renderizado
   useEffect(() => {
@@ -286,6 +314,9 @@ export function PreviewDocumentDialog({ document, isOpen, onOpenChange, highligh
           <DialogTitle className="truncate text-lg sm:text-xl">
             Previsualizando: {document?.title || document?.file_name}
           </DialogTitle>
+          <DialogDescription className="sr-only">
+            Vista previa del documento seleccionado.
+          </DialogDescription>
         </DialogHeader>
         <div className="flex-grow overflow-hidden">
           {showNativePdfViewer ? (
@@ -298,7 +329,7 @@ export function PreviewDocumentDialog({ document, isOpen, onOpenChange, highligh
                 <iframe
                   src={pdfPreviewUrl}
                   className="w-full h-full border-0 rounded-md"
-                  title={`PDF Viewer - ${document.title || document.file_name}`}
+                  title={`PDF Viewer - ${document?.title || document?.file_name || ''}`}
                 />
               </div>
             ) : (

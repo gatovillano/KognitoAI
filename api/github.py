@@ -15,8 +15,67 @@ from skills.developer_tools_skill.scripts.github_repo_tool import GitHubRepoTool
 from utils.security import get_current_account_id
 from core.database import Account
 from core.memory_manager import delete_document_chunks
+from core.repositories.secret_repository import SecretRepository
 
 router = APIRouter()
+
+class GitHubCredentialsRequest(BaseModel):
+    github_token: str
+    description: Optional[str] = "Token de acceso personal de GitHub"
+
+@router.post("/credentials")
+async def save_github_credentials(
+    request: GitHubCredentialsRequest,
+    db: AsyncSession = Depends(get_db_session),
+    account_id: str = Depends(get_current_account_id)
+):
+    """
+    Guarda el token de GitHub del usuario de forma cifrada.
+    """
+    try:
+        secret_repo = SecretRepository(db)
+        await secret_repo.set_secret(
+            account_id=uuid.UUID(account_id),
+            key_name="GITHUB_TOKEN",
+            value=request.github_token,
+            description=request.description
+        )
+        return {"message": "Credenciales de GitHub guardadas correctamente."}
+    except Exception as e:
+        logger.error(f"Error al guardar credenciales de GitHub para {account_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error al guardar las credenciales: {str(e)}"
+        )
+
+@router.get("/status")
+async def get_github_status(
+    db: AsyncSession = Depends(get_db_session),
+    account_id: str = Depends(get_current_account_id)
+):
+    """
+    Verifica si el usuario tiene configurado GitHub.
+    """
+    secret_repo = SecretRepository(db)
+    secret = await secret_repo.get_secret_entry(uuid.UUID(account_id), "GITHUB_TOKEN")
+    return {
+        "is_configured": secret is not None,
+        "updated_at": secret.updated_at if secret else None
+    }
+
+@router.delete("/credentials")
+async def delete_github_credentials(
+    db: AsyncSession = Depends(get_db_session),
+    account_id: str = Depends(get_current_account_id)
+):
+    """
+    Elimina las credenciales de GitHub del usuario.
+    """
+    secret_repo = SecretRepository(db)
+    deleted = await secret_repo.delete_secret(uuid.UUID(account_id), "GITHUB_TOKEN")
+    if not deleted:
+        raise HTTPException(status_code=404, detail="No se encontraron credenciales de GitHub para eliminar.")
+    return {"message": "Credenciales de GitHub eliminadas."}
 
 class GitHubCollectionRequest(BaseModel):
     repo_url: str

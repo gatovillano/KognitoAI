@@ -15,6 +15,9 @@ from core.config import settings
 
 logger = logging.getLogger(__name__)
 
+import contextvars
+_in_tool_logging = contextvars.ContextVar('_in_tool_logging', default=False)
+
 # Categorías que siempre se cargan independientemente del filtro dinámico
 ALWAYS_ON_CATEGORIES = {"core_skills", "search_and_research_skill", "knowledge_and_memory_skill"}
 
@@ -250,11 +253,133 @@ class SkillManager:
             if 'account_id' in fields and not hasattr(instance, 'account_id'): instance.account_id = account_id
             if 'workspace_id' in fields and not hasattr(instance, 'workspace_id'): instance.workspace_id = workspace_id
             
+            # Envuelve la herramienta para logging automático de ejecuciones
+            instance = self._wrap_tool_with_logging(instance)
             return instance
 
         except Exception as e:
             logger.error(f"Error instantiating skill {ToolClass.__name__}: {e}", exc_info=True)
             return None
+
+    def _wrap_tool_with_logging(self, tool_instance: Any) -> Any:
+        """
+        Envuelve la ejecución de los puntos de entrada (invoke, ainvoke, run, arun, __call__)
+        de la herramienta usando un recursion guard para que siempre se registren logs
+        (al iniciar, en éxito y en error) exactamente una vez por ejecución.
+        """
+        import functools
+        import types
+        import time
+        import json
+
+        tool_name = getattr(tool_instance, 'name', tool_instance.__class__.__name__)
+
+        def format_args(args, kwargs):
+            try:
+                combined = {}
+                if args:
+                    combined["args"] = args
+                if kwargs:
+                    combined.update(kwargs)
+                if not combined:
+                    return "None"
+                # Eliminar self de los args posicionales si aparece
+                if "args" in combined and combined["args"] and combined["args"][0] == tool_instance:
+                    if len(combined["args"]) > 1:
+                        combined["args"] = combined["args"][1:]
+                    else:
+                        del combined["args"]
+                if not combined:
+                    return "None"
+                args_str = json.dumps(combined, ensure_ascii=False)
+                if len(args_str) > 500:
+                    return args_str[:497] + "..."
+                return args_str
+            except Exception:
+                return f"args: {args}, kwargs: {kwargs}"
+
+        def format_result(result):
+            try:
+                from core.citation_models import ToolOutputWithSources
+                if isinstance(result, ToolOutputWithSources):
+                    res_str = str(result.context_for_llm)
+                else:
+                    res_str = str(result)
+                if len(res_str) > 500:
+                    return res_str[:497] + "..."
+                return res_str
+            except Exception:
+                return str(result)[:500]
+
+        def make_async_wrapper(orig_func):
+            @functools.wraps(orig_func)
+            async def async_wrapper(self, *args, **kwargs):
+                if _in_tool_logging.get():
+                    return await orig_func(self, *args, **kwargs)
+                
+                token = _in_tool_logging.set(True)
+                start_time = time.time()
+                inputs = format_args(args, kwargs)
+                logger.info(f"🛠️ [TOOL START] Executing async tool '{tool_name}' | Args: {inputs}")
+                try:
+                    res = await orig_func(self, *args, **kwargs)
+                    elapsed = time.time() - start_time
+                    logger.info(f"✅ [TOOL SUCCESS] Tool '{tool_name}' completed in {elapsed:.3f}s | Result: {format_result(res)}")
+                    return res
+                except Exception as e:
+                    elapsed = time.time() - start_time
+                    logger.error(f"❌ [TOOL ERROR] Tool '{tool_name}' failed after {elapsed:.3f}s: {e}", exc_info=True)
+                    raise
+                finally:
+                    _in_tool_logging.reset(token)
+            return async_wrapper
+
+        def make_sync_wrapper(orig_func):
+            @functools.wraps(orig_func)
+            def sync_wrapper(self, *args, **kwargs):
+                if _in_tool_logging.get():
+                    return orig_func(self, *args, **kwargs)
+                
+                token = _in_tool_logging.set(True)
+                start_time = time.time()
+                inputs = format_args(args, kwargs)
+                logger.info(f"🛠️ [TOOL START] Executing sync tool '{tool_name}' | Args: {inputs}")
+                try:
+                    res = orig_func(self, *args, **kwargs)
+                    elapsed = time.time() - start_time
+                    logger.info(f"✅ [TOOL SUCCESS] Tool '{tool_name}' completed in {elapsed:.3f}s | Result: {format_result(res)}")
+                    return res
+                except Exception as e:
+                    elapsed = time.time() - start_time
+                    logger.error(f"❌ [TOOL ERROR] Tool '{tool_name}' failed after {elapsed:.3f}s: {e}", exc_info=True)
+                    raise
+                finally:
+                    _in_tool_logging.reset(token)
+            return sync_wrapper
+
+        for attr in ('invoke', 'ainvoke', 'run', 'arun', '__call__'):
+            original = getattr(tool_instance, attr, None)
+            if not original or not callable(original):
+                continue
+                
+            if getattr(original, '__wrapped_by_skill_manager__', False):
+                continue
+                
+            original_func = getattr(original, '__func__', original)
+            
+            if inspect.iscoroutinefunction(original_func):
+                wrapper = make_async_wrapper(original_func)
+            else:
+                wrapper = make_sync_wrapper(original_func)
+                
+            wrapper.__wrapped_by_skill_manager__ = True
+            bound_method = types.MethodType(wrapper, tool_instance)
+            try:
+                tool_instance.__dict__[attr] = bound_method
+            except Exception as e:
+                logger.warning(f"Could not wrap method '{attr}' for tool '{tool_name}': {e}")
+                
+        return tool_instance
 
     async def get_skills_metadata(self) -> List[Dict[str, str]]:
         """

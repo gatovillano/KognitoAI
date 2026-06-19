@@ -86,6 +86,7 @@ export function ColumnManagerDialog({ isOpen, onOpenChange, tableId, initialColu
                                         <SelectItem value="number">Nº</SelectItem>
                                         <SelectItem value="date">Fecha</SelectItem>
                                         <SelectItem value="boolean">Check</SelectItem>
+                                        <SelectItem value="object">Objeto Vinculado</SelectItem>
                                     </SelectContent>
                                 </Select>
                             </div>

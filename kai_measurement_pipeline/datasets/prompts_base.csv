@@ -1,0 +1,4 @@
+prompt,expected_tool,expected_answer,category
+"¿Cuál es la capital de Francia?",null,"París","trivia"
+"Resume el texto adjunto.","summarize",null,"summarization"
+"Agrega un recordatorio para mañana.","reminder",null,"productivity"

@@ -5,7 +5,7 @@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button'; // Importar Button
-import { Volume2, Pencil, Lightbulb, FileText, MoreHorizontal, Link, Download, FileType } from 'lucide-react'; // Importar el icono de volumen, el de lápiz, el de enlace y el de descarga
+import { Volume2, Pencil, Lightbulb, FileText, MoreHorizontal, Link, Download, FileType, MessageSquare } from 'lucide-react'; // Importar el icono de volumen, el de lápiz, el de enlace y el de descarga
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { toast } from 'sonner';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'; // Reutilizamos nuestro potente renderizador
@@ -16,6 +16,7 @@ import { useRouter } from 'next/navigation'; // Importar useRouter
 import type { Note } from './page'; // Importamos el tipo de dato 'Note' desde la página principal
 import { DialogFooter } from '@/components/ui/dialog'; // Importar DialogFooter
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'; // Importar Select components
+import { ContextualChat } from '@/components/ContextualChat';
 import { useUserSettings } from '@/contexts/UserSettingsContext';
 
 interface ContactProfile {
@@ -39,6 +40,7 @@ export function ViewNoteDialog({ note, isOpen, onOpenChange, onNoteUpdated }: Vi
   const [contactProfiles, setContactProfiles] = useState<ContactProfile[]>([]); // Estado para almacenar los perfiles de contacto
   const [loadingContactProfiles, setLoadingContactProfiles] = useState(false);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null); // Estado para el perfil seleccionado
+  const [isChatOpen, setIsChatOpen] = useState(false); // Estado para abrir el chat contextual
 
   useEffect(() => {
     const fetchContactProfiles = async () => {
@@ -215,9 +217,13 @@ export function ViewNoteDialog({ note, isOpen, onOpenChange, onNoteUpdated }: Vi
           <div className="flex justify-between items-center">
             <DialogTitle className="text-2xl">{note.title || "Nota sin título"}</DialogTitle>
             <div className="flex items-center gap-2"> {/* Contenedor para los botones */}
+              <Button size="sm" className="gap-2 ml-4" onClick={() => setIsChatOpen(true)}>
+                <MessageSquare className="h-4 w-4" />
+                Chat IA
+              </Button>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="ml-4">
+                  <Button variant="ghost" size="icon">
                     <MoreHorizontal className="h-5 w-5" />
                   </Button>
                 </DropdownMenuTrigger>
@@ -225,6 +231,10 @@ export function ViewNoteDialog({ note, isOpen, onOpenChange, onNoteUpdated }: Vi
                   <DropdownMenuItem onClick={() => setIsNoteEditDialogOpen(true)}>
                     <Pencil className="mr-2 h-4 w-4" />
                     Editar nota
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setIsChatOpen(true)}>
+                    <MessageSquare className="mr-2 h-4 w-4" />
+                    Chatear con Nota
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onClick={handleAnalyzeSingleNoteFromDialog}>
@@ -315,6 +325,23 @@ export function ViewNoteDialog({ note, isOpen, onOpenChange, onNoteUpdated }: Vi
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {note && (
+        <ContextualChat
+          isOpen={isChatOpen}
+          onClose={() => setIsChatOpen(false)}
+          title={note.title || "Nota sin título"}
+          context={{
+            type: 'note',
+            id: note.id.toString(),
+            snapshot: {
+              title: note.title || "Nota sin título",
+              content: note.content,
+              category: note.category,
+            }
+          }}
+        />
+      )}
     </Dialog>
   );
 }

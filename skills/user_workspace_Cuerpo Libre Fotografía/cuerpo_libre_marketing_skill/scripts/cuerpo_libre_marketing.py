@@ -3,8 +3,8 @@ from typing import Optional, Dict, List
 import json
 
 class CuerpoLibreMarketingTool(BaseTool):
-    name = "cuerpo_libre_marketing"
-    description = "Herramienta de marketing especializada para el proyecto 'Cuerpo Libre' de fotografía artística de desnudo. Genera planes de marketing, estrategias de contenido, análisis de audiencia y recomendaciones éticas adaptadas al nicho de diversidad corporal y desnudo artístico."
+    name: str = "cuerpo_libre_marketing"
+    description: str = "Herramienta de marketing especializada para el proyecto 'Cuerpo Libre' de fotografía artística de desnudo. Genera planes de marketing, estrategias de contenido, análisis de audiencia y recomendaciones éticas adaptadas al nicho de diversidad corporal y desnudo artístico."
 
     def _run(self, accion: str = "plan_completo", canal: Optional[str] = None) -> str:
         """

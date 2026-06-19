@@ -5,9 +5,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Plus, Trash2, Save, X, Loader2 } from 'lucide-react';
+import { Plus, Trash2, Save, X, Loader2, FileText, Calendar, User } from 'lucide-react';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
+import { Badge } from '@/components/ui/badge';
+import { cn } from '@/lib/utils';
+import { ObjectTagSelectorDialog, TaggedObject } from './object-tag-selector-dialog';
 
 interface EditableDataGridProps {
     tableId: string;
@@ -21,6 +24,8 @@ export function EditableDataGrid({ tableId, columns, onDataChange }: EditableDat
     const [editingCell, setEditingCell] = useState<{ rowId: string, colName: string } | null>(null);
     const [editValue, setEditValue] = useState<any>('');
     const [isSaving, setIsSaving] = useState(false);
+    const [isObjectSelectorOpen, setIsObjectSelectorOpen] = useState(false);
+    const [activeObjectCell, setActiveObjectCell] = useState<{ rowId: string, colName: string } | null>(null);
 
     const fetchRows = useCallback(async () => {
         setIsLoading(true);
@@ -39,8 +44,15 @@ export function EditableDataGrid({ tableId, columns, onDataChange }: EditableDat
     }, [fetchRows]);
 
     const handleCellClick = (rowId: string, colName: string, value: any) => {
-        setEditingCell({ rowId, colName });
-        setEditValue(value ?? '');
+        const col = columns.find(c => c.name === colName);
+        if (col?.type === 'object') {
+            setActiveObjectCell({ rowId, colName });
+            setEditValue(value || []);
+            setIsObjectSelectorOpen(true);
+        } else {
+            setEditingCell({ rowId, colName });
+            setEditValue(value ?? '');
+        }
     };
 
     const handleSaveCell = async (rowId: string, colName: string) => {
@@ -67,6 +79,32 @@ export function EditableDataGrid({ tableId, columns, onDataChange }: EditableDat
             toast.error('Error al guardar el cambio.');
         } finally {
             setIsSaving(false);
+        }
+    };
+
+    const handleSaveObjectTags = async (selectedTags: TaggedObject[]) => {
+        if (!activeObjectCell) return;
+        const { rowId, colName } = activeObjectCell;
+
+        setIsSaving(true);
+        const row = rows.find(r => r.id === rowId);
+        if (!row) {
+            setIsSaving(false);
+            return;
+        }
+
+        const newData = { ...row.data, [colName]: selectedTags };
+
+        try {
+            await apiClient.patch(`/api/tables/${tableId}/rows/${rowId}`, { data: newData });
+            setRows(prev => prev.map(r => r.id === rowId ? { ...r, data: newData } : r));
+            if (onDataChange) onDataChange();
+            toast.success('Objetos vinculados actualizados.');
+        } catch (error) {
+            toast.error('Error al guardar las vinculaciones.');
+        } finally {
+            setIsSaving(false);
+            setActiveObjectCell(null);
         }
     };
 
@@ -176,6 +214,25 @@ export function EditableDataGrid({ tableId, columns, onDataChange }: EditableDat
                                                 <div className="px-2 text-sm flex items-center h-full">
                                                     {col.type === 'boolean' ? (
                                                         <Checkbox checked={!!row.data[col.name]} disabled className="opacity-70" />
+                                                    ) : col.type === 'object' ? (
+                                                        <div className="flex flex-wrap gap-1 max-w-[300px] overflow-hidden">
+                                                            {Array.isArray(row.data[col.name]) && row.data[col.name].length > 0 ? (
+                                                                row.data[col.name].map((item: any, idx: number) => {
+                                                                    const Icon = item.type === 'note' ? FileText : item.type === 'event' ? Calendar : User;
+                                                                    let colorClass = "bg-blue-500/10 text-blue-500 border-blue-500/20";
+                                                                    if (item.type === 'event') colorClass = "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
+                                                                    if (item.type === 'profile') colorClass = "bg-purple-500/10 text-purple-500 border-purple-500/20";
+                                                                    return (
+                                                                        <Badge key={idx} variant="outline" className={cn("text-[10px] py-0 px-1.5 flex items-center gap-1", colorClass)}>
+                                                                            <Icon className="h-2.5 w-2.5" />
+                                                                            <span className="truncate max-w-[80px]">{item.title}</span>
+                                                                        </Badge>
+                                                                    );
+                                                                })
+                                                            ) : (
+                                                                <span className="text-muted-foreground italic text-xs">Vincular...</span>
+                                                            )}
+                                                        </div>
                                                     ) : (
                                                         <span className="truncate max-w-[200px]">
                                                             {row.data[col.name] !== null ? String(row.data[col.name]) : <span className="text-muted-foreground italic">null</span>}
@@ -200,6 +257,13 @@ export function EditableDataGrid({ tableId, columns, onDataChange }: EditableDat
                 <Plus className="h-4 w-4" />
                 Añadir Fila
             </Button>
+
+            <ObjectTagSelectorDialog
+                isOpen={isObjectSelectorOpen}
+                onOpenChange={setIsObjectSelectorOpen}
+                initialSelected={editValue as TaggedObject[]}
+                onSave={handleSaveObjectTags}
+            />
         </div>
     );
 }

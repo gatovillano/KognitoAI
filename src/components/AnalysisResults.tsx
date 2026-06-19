@@ -544,9 +544,15 @@ export function AnalysisResults() {
                                                                 e.stopPropagation();
                                                                 if (confirm('¿Eliminar insight?')) {
                                                                     try {
-                                                                        await apiClient.delete('/api/delete-analysis', { 
-                                                                            data: { task_id: analysis.id } 
-                                                                        });
+                                                                        if (analysis.type === 'insight' || analysis.type === 'neural_insight' || analysis.type === 'proactive_insight') {
+                                                                            await apiClient.delete('/api/delete-proactive-insight', { 
+                                                                                data: { insight_id: analysis.id } 
+                                                                            });
+                                                                        } else {
+                                                                            await apiClient.delete('/api/delete-analysis', { 
+                                                                                data: { task_id: analysis.id } 
+                                                                            });
+                                                                        }
                                                                         toast.success('Insight eliminado');
                                                                         handleAnalysisDeleted(analysis.id);
                                                                     } catch (err) {

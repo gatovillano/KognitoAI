@@ -231,7 +231,7 @@ async def request_verification_code(request: Request, request_data: AuthRequestC
     await db.commit()
 
     # Ahora, intenta enviar el mensaje haciendo una llamada HTTP al servicio del bot
-    telegram_service_url = "http://kognito_telegram_client:9090/internal/send-message"
+    telegram_service_url = f"{settings.telegram_bot_url}/internal/send-message"
     message_payload = {
         "chat_id": telegram_id,
         "text": f"Tu código de acceso para Kognito es: <b>{code}</b>"

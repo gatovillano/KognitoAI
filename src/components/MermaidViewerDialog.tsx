@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef } from 'react';
-import mermaid from 'mermaid';
 import {
   Dialog,
   DialogContent,
@@ -18,15 +17,6 @@ interface MermaidViewerDialogProps {
   description?: string;
 }
 
-if (typeof window !== 'undefined') {
-  mermaid.initialize({
-    startOnLoad: false,
-    theme: 'dark',
-    securityLevel: 'loose',
-    fontFamily: 'Inter, system-ui, sans-serif',
-  });
-}
-
 export function MermaidViewerDialog({
   isOpen,
   onOpenChange,
@@ -40,6 +30,15 @@ export function MermaidViewerDialog({
     if (!container || !mermaidCode) return;
 
     try {
+      const mermaidModule = await import('mermaid');
+      const mermaid = mermaidModule.default;
+      mermaid.initialize({
+        startOnLoad: false,
+        theme: 'dark',
+        securityLevel: 'loose',
+        fontFamily: 'Inter, system-ui, sans-serif',
+      });
+      
       const { svg } = await mermaid.render(id, mermaidCode);
       container.innerHTML = svg;
 

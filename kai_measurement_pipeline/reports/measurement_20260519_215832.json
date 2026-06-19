@@ -1,0 +1,27 @@
+{
+  "timestamp": "2026-05-19T21:58:32.405933",
+  "api_base": "http://localhost:8889",
+  "measurements": {
+    "health": false,
+    "endpoint_docs": {
+      "status": 200,
+      "time_ms": 17.6,
+      "success": true
+    },
+    "endpoint_api_v1_models": {
+      "status": 404,
+      "time_ms": 12.98,
+      "success": false
+    },
+    "endpoint_api_v1_skills": {
+      "status": 404,
+      "time_ms": 8.61,
+      "success": false
+    },
+    "generation_test": {
+      "status": 404,
+      "time_ms": 11.55,
+      "success": false
+    }
+  }
+}

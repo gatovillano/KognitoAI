@@ -15,6 +15,8 @@ import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 import { Source, SourceButton, ContentPart } from '@/components/SourceButton';
 import { processMessageWithCitations, collectSourcesFromMessage, getSourceIdentityKey } from '@/lib/chatUtils';
 import { useUserSettings } from '@/contexts/UserSettingsContext';
+import PtyTerminalEmbedded from '@/components/terminal/PtyTerminalEmbedded';
+import { useAuth } from '@/contexts/AuthContext';
 
 export interface Artifact {
   id: number;
@@ -29,6 +31,7 @@ export interface MessageContentPart {
   id?: string;
   status?: 'start' | 'end' | 'error';
   tool_name?: string;
+  pty_session?: { session_id: string };
 }
 
 interface ChatMessageProps {
@@ -47,6 +50,7 @@ interface ChatMessageProps {
     reasoning?: string;
     reasoning_chunks?: string[];
     content_parts?: MessageContentPart[];
+    pty_session?: any;
     tool_code?: string;
   };
   index: number;
@@ -175,8 +179,16 @@ const stripHtml = (text: string) => {
 };
 
 const ToolCallBlock = ({ part, scrollToBottom }: { part: MessageContentPart, scrollToBottom?: (behavior?: 'smooth' | 'auto', force?: boolean) => void }) => {
-  const [isExpanded, setIsExpanded] = useState(false);
-  const hasContent = !!part.content && part.status !== 'start';
+  const { user, token } = useAuth();
+  const isTerminal = part.tool_name === 'terminal_executor' && !!part.pty_session;
+  const [isExpanded, setIsExpanded] = useState(isTerminal);
+  const hasContent = (!!part.content && part.status !== 'start') || isTerminal;
+
+  useEffect(() => {
+    if (isTerminal) {
+      setIsExpanded(true);
+    }
+  }, [isTerminal]);
 
   useEffect(() => {
     if (isExpanded) {
@@ -227,15 +239,26 @@ const ToolCallBlock = ({ part, scrollToBottom }: { part: MessageContentPart, scr
               <div className="px-4 py-3 border-t border-primary/10 bg-background/50">
                 <div className="flex items-center gap-2 mb-2 text-[10px] font-bold uppercase tracking-widest text-primary/60">
                    <ExternalLink className="h-3 w-3" />
-                   Salida de la herramienta
+                   {isTerminal ? 'Terminal Interactiva en tiempo real' : 'Salida de la herramienta'}
                 </div>
-                <div className="max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
-                  <MarkdownRenderer
-                    content={part.content}
-                    fontSize="text-[12px]"
-                    style={{ color: 'var(--foreground)', opacity: 0.9 }}
-                  />
-                </div>
+                {isTerminal ? (
+                  <div className="mb-2">
+                    <PtyTerminalEmbedded
+                      accountId={(user?.account_id || user?.id) as string || ''}
+                      token={token || ''}
+                      sessionId={part.pty_session!.session_id}
+                      apiBaseUrl={typeof window !== 'undefined' ? window.location.origin : ''}
+                    />
+                  </div>
+                ) : (
+                  <div className="max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                    <MarkdownRenderer
+                      content={part.content}
+                      fontSize="text-[12px]"
+                      style={{ color: 'var(--foreground)', opacity: 0.9 }}
+                    />
+                  </div>
+                )}
               </div>
             </motion.div>
           )}
@@ -263,6 +286,7 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
   onNextResponse,
 }) => {
   const { settings } = useUserSettings();
+  const { user, token } = useAuth();
   const [isEditing, setIsEditing] = useState(false);
   const [editedText, setEditedText] = useState(msg.text);
 
@@ -305,11 +329,47 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
     : (citationSources.length > 0 ? citationSources : additionalSources);
 
   const imagesToShow = useMemo(() => {
-    return Array.from(new Set([
+    const urls: string[] = [];
+    
+    // Extract images from markdown text
+    if (msg.text) {
+      const matches = msg.text.matchAll(/!\[.*?\]\((.*?)\)/g);
+      for (const match of matches) {
+        if (match[1]) {
+          urls.push(match[1]);
+        }
+      }
+    }
+    
+    // Extract images from content parts if any
+    if (msg.content_parts) {
+      msg.content_parts.forEach(part => {
+        if (part.type === 'text' && part.content) {
+          const matches = part.content.matchAll(/!\[.*?\]\((.*?)\)/g);
+          for (const match of matches) {
+            if (match[1]) {
+              urls.push(match[1]);
+            }
+          }
+        }
+      });
+    }
+
+    const rawImages = Array.from(new Set([
       ...(msg.image_base64 ? [msg.image_base64] : []),
       ...(msg.images_base64 || []),
+      ...urls,
     ]));
-  }, [msg.image_base64, msg.images_base64]);
+
+    // Prepend API URL to relative paths if necessary
+    return rawImages.map(img => {
+      if (img.startsWith('/tmp/') || img.startsWith('/media/')) {
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+        return `${apiUrl}${img}`;
+      }
+      return img;
+    });
+  }, [msg.image_base64, msg.images_base64, msg.text, msg.content_parts]);
 
   const handleEdit = () => setIsEditing(true);
   const handleSave = () => {
@@ -467,6 +527,14 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
                   </>
                 )}
 
+
+                    {/* Embedded PTY terminal if the tool provided a session */}
+                    {msg.pty_session && (
+                      <div className="mb-4">
+                        <PtyTerminalEmbedded accountId={(user?.account_id || user?.id) as string} token={token || ''} sessionId={msg.pty_session.session_id} apiBaseUrl={typeof window !== 'undefined' ? window.location.origin : ''} />
+                      </div>
+                    )}
+
                 {/* Imágenes de la IA */}
                 {imagesToShow.length > 0 && msg.sender === 'ai' && (
                   <div className="mt-3 flex flex-wrap gap-2">
@@ -608,25 +676,26 @@ const SourcesList: React.FC<{
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
             transition={{ duration: 0.28, ease: 'easeInOut' }}
-            className="overflow-hidden mt-5 pt-2 flex flex-col gap-2 pl-1"
+            className="overflow-hidden mt-3 pt-2"
           >
-            {sources.map((source, idx) => (
-              <motion.div
-                key={idx}
-                initial={{ opacity: 0, x: -12 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -12 }}
-                transition={{ duration: 0.18, delay: idx * 0.03, ease: 'easeOut' }}
-                className="flex items-center gap-2"
-              >
-                <SourceButton
-                  source={source}
-                  citationNumber={citationNumberBySource.get(getSourceIdentityKey(source)) ?? idx + 1}
-                  onSourceClick={onSourceClick}
-                />
-                <span className="text-xs text-muted-foreground">{source.title}</span>
-              </motion.div>
-            ))}
+            <div className="flex flex-col gap-2 pl-1 max-w-xl w-full">
+              {sources.map((source, idx) => (
+                <motion.div
+                  key={idx}
+                  initial={{ opacity: 0, y: -8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  transition={{ duration: 0.2, delay: idx * 0.03, ease: 'easeOut' }}
+                >
+                  <SourceButton
+                    source={source}
+                    citationNumber={citationNumberBySource.get(getSourceIdentityKey(source)) ?? idx + 1}
+                    onSourceClick={onSourceClick}
+                    showTitle={true}
+                  />
+                </motion.div>
+              ))}
+            </div>
           </motion.div>
         )}
       </AnimatePresence>

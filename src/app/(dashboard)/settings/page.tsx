@@ -14,10 +14,11 @@ import { useAuth } from '@/contexts/AuthContext';
 import apiClient from '@/lib/api'; // Importar apiClient
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Edit, Trash2, Eye, Calendar, User, Sparkles, Brain, Zap, Image as ImageIcon, Wrench, Puzzle, Info, RefreshCw, Globe } from 'lucide-react';
+import { Plus, Edit, Trash2, Eye, Calendar, User, Sparkles, Brain, Zap, Image as ImageIcon, Wrench, Puzzle, Info, RefreshCw, Globe, Github, Slack, ShieldCheck, Menu, X, Server } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { MCPSettings } from '@/components/settings/MCPSettings';
 
 interface Memory {
   id: string;
@@ -56,12 +57,8 @@ const MODELS_BY_PROVIDER: Record<string, string[]> = {
   'ollama-cloud': ['ollama_chat/llama3.1', 'ollama_chat/mistral', 'ollama_chat/phi3', 'ollama_chat/gemma2', 'ollama_chat/qwen2.5'],
   'openai-compatible': [],
   mistral: ['mistral/mistral-large-latest', 'mistral/mistral-small-latest'],
-  kilocode: [
-    'kilocode/kilo/auto',
-    'kilocode/anthropic/claude-sonnet-4',
-    'kilocode/openai/gpt-5.5',
-    'kilocode/google/gemini-3.1-pro-preview',
-  ],
+  kilocode: [],
+
 };
 
 const TTS_PROVIDERS = [
@@ -232,6 +229,127 @@ const SkillsSettings: React.FC = () => {
   );
 };
 
+const IntegrationsSettings: React.FC = () => {
+  const [loading, setLoading] = useState<Record<string, boolean>>({ github: false, slack: false, notion: false });
+  const [status, setStatus] = useState<Record<string, { is_configured: boolean, updated_at: string | null }>>({
+    github: { is_configured: false, updated_at: null },
+    slack: { is_configured: false, updated_at: null },
+    notion: { is_configured: false, updated_at: null }
+  });
+  const [tokens, setTokens] = useState<Record<string, string>>({ github: '', slack: '', notion: '' });
+
+  const fetchStatus = async () => {
+    try {
+      const [gh, sl, nt] = await Promise.all([
+        apiClient.get('/api/github/status'),
+        apiClient.get('/api/slack/status'),
+        apiClient.get('/api/notion/status')
+      ]);
+      setStatus({ github: gh.data, slack: sl.data, notion: nt.data });
+    } catch (error) {
+      console.error('Error fetching integrations status:', error);
+    }
+  };
+
+  useEffect(() => {
+    fetchStatus();
+  }, []);
+
+  const handleSave = async (platform: string) => {
+    setLoading(prev => ({ ...prev, [platform]: true }));
+    try {
+      const endpoint = `/api/${platform}/credentials`;
+      let payload = {};
+      if (platform === 'github') payload = { github_token: tokens[platform] };
+      else if (platform === 'slack') payload = { bot_token: tokens[platform] };
+      else if (platform === 'notion') payload = { api_key: tokens[platform] };
+
+      await apiClient.post(endpoint, payload);
+      toast.success(`Configuración de ${platform.toUpperCase()} guardada correctamente.`);
+      setTokens(prev => ({ ...prev, [platform]: '' }));
+      fetchStatus();
+    } catch (error) {
+      toast.error(`Error al guardar configuración de ${platform.toUpperCase()}.`);
+    } finally {
+      setLoading(prev => ({ ...prev, [platform]: false }));
+    }
+  };
+
+  const handleDelete = async (platform: string) => {
+    if (!confirm(`¿Estás seguro de que quieres eliminar la integración con ${platform.toUpperCase()}?`)) return;
+    try {
+      await apiClient.delete(`/api/${platform}/credentials`);
+      toast.success(`Integración con ${platform.toUpperCase()} eliminada.`);
+      fetchStatus();
+    } catch (error) {
+      toast.error(`Error al eliminar integración de ${platform.toUpperCase()}.`);
+    }
+  };
+
+  const platforms = [
+    { id: 'github', name: 'GitHub', icon: <Github className="h-5 w-5" />, placeholder: 'ghp_xxxxxxxxxxxx' },
+    { id: 'slack', name: 'Slack', icon: <Slack className="h-5 w-5" />, placeholder: 'xoxb-xxxxxxxxxxxx' },
+    { id: 'notion', name: 'Notion', icon: <Puzzle className="h-5 w-5" />, placeholder: 'secret_xxxxxxxxxxxx' }
+  ];
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {platforms.map(p => (
+          <Card key={p.id} className="border-primary/10 bg-card/50">
+            <CardHeader className="pb-3">
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-lg bg-primary/10 text-primary">
+                    {p.icon}
+                  </div>
+                  <CardTitle className="text-lg">{p.name}</CardTitle>
+                </div>
+                <Badge variant={status[p.id].is_configured ? "default" : "secondary"}>
+                  {status[p.id].is_configured ? "Conectado" : "No configurado"}
+                </Badge>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor={`${p.id}-token`}>
+                  {p.id === 'github' ? 'Personal Access Token' : p.id === 'slack' ? 'Bot User OAuth Token' : 'Internal Integration Secret'}
+                </Label>
+                <div className="flex gap-2">
+                  <Input
+                    id={`${p.id}-token`}
+                    type="password"
+                    placeholder={p.placeholder}
+                    value={tokens[p.id]}
+                    onChange={(e) => setTokens(prev => ({ ...prev, [p.id]: e.target.value }))}
+                  />
+                  <Button 
+                    size="sm" 
+                    onClick={() => handleSave(p.id)} 
+                    disabled={loading[p.id] || !tokens[p.id]}
+                  >
+                    {loading[p.id] ? <RefreshCw className="h-4 w-4 animate-spin" /> : "Guardar"}
+                  </Button>
+                </div>
+              </div>
+              {status[p.id].is_configured && (
+                <div className="flex justify-between items-center pt-2 border-t border-primary/5">
+                  <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">
+                    Configurado el {status[p.id].updated_at ? new Date(status[p.id].updated_at!).toLocaleDateString() : 'N/A'}
+                  </span>
+                  <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive hover:bg-destructive/10 h-8" onClick={() => handleDelete(p.id)}>
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+};
+
 const LLMSettingsForm: React.FC = () => {
   const { settings, updateSettings } = useUserSettings();
   const [loading, setLoading] = useState(false);
@@ -348,10 +466,11 @@ const LLMSettingsForm: React.FC = () => {
     const name = isString ? m : (m.name || m.id);
     const isGemini = currentProvider === 'gemini' || id.startsWith('gemini/');
     const isOpenRouter = currentProvider === 'openrouter' || id.startsWith('openrouter/');
+    const isKilocode = currentProvider === 'kilocode' || id.startsWith('kilocode/');
 
-    if (isOpenRouter || isGemini) {
+    if (isOpenRouter || isGemini || isKilocode) {
       let badgeColor = "bg-blue-500/10 text-blue-500 border-blue-500/20";
-      let badgeText = "OpenRouter";
+      let badgeText = isKilocode ? "KiloCode" : "OpenRouter";
       let borderColor = "border-blue-500";
       let bgColor = "bg-blue-500/5";
 
@@ -380,6 +499,11 @@ const LLMSettingsForm: React.FC = () => {
         badgeColor = "bg-purple-500/10 text-purple-500 border-purple-500/20";
         borderColor = "border-purple-500";
         bgColor = "bg-purple-500/5";
+      } else if (isKilocode && id.toLowerCase().includes('kilo')) {
+        badgeText = "KiloCode";
+        badgeColor = "bg-blue-600/10 text-blue-600 border-blue-600/20";
+        borderColor = "border-blue-600";
+        bgColor = "bg-blue-600/5";
       }
 
       return (
@@ -580,15 +704,15 @@ const LLMSettingsForm: React.FC = () => {
                   <Label className="text-[11px] font-bold uppercase text-muted-foreground">Proveedor</Label>
                   <Select
                     value={localLLM.llm_provider}
-                    onValueChange={(v) => {
-                      const firstModel = MODELS_BY_PROVIDER[v]?.[0] || '';
-                      setLocalLLM(prev => ({
-                        ...prev,
-                        llm_provider: v,
-                        llm_model: firstModel,
-                        llm_api_base: v === 'ollama-cloud' ? '' : prev.llm_api_base
-                      }));
-                    }}
+                     onValueChange={(v) => {
+                       setLocalLLM(prev => ({
+                         ...prev,
+                         llm_provider: v,
+                         llm_model: '',
+                         llm_api_base: v === 'ollama-cloud' ? '' : prev.llm_api_base
+                       }));
+                     }}
+
                   >
                     <SelectTrigger className="w-full bg-background/50 backdrop-blur-sm border-primary/20">
                       <SelectValue placeholder="Proveedor" />
@@ -647,14 +771,14 @@ const LLMSettingsForm: React.FC = () => {
                   <Label className="text-[11px] font-bold uppercase text-muted-foreground">Proveedor</Label>
                   <Select
                     value={localLLM.fast_llm_provider}
-                    onValueChange={(v) => {
-                      const firstModel = MODELS_BY_PROVIDER[v]?.[0] || '';
-                      setLocalLLM(prev => ({
-                        ...prev,
-                        fast_llm_provider: v,
-                        fast_llm_model: firstModel
-                      }));
-                    }}
+                     onValueChange={(v) => {
+                       setLocalLLM(prev => ({
+                         ...prev,
+                         fast_llm_provider: v,
+                         fast_llm_model: ''
+                       }));
+                     }}
+
                   >
                     <SelectTrigger className="w-full bg-background/50 backdrop-blur-sm border-orange-500/20">
                       <SelectValue placeholder="Proveedor" />
@@ -702,14 +826,14 @@ const LLMSettingsForm: React.FC = () => {
                   <Label className="text-[11px] font-bold uppercase text-muted-foreground">Proveedor</Label>
                   <Select
                     value={localLLM.vision_llm_provider}
-                    onValueChange={(v) => {
-                      const firstModel = MODELS_BY_PROVIDER[v]?.[0] || '';
-                      setLocalLLM(prev => ({
-                        ...prev,
-                        vision_llm_provider: v,
-                        vision_llm_model: firstModel
-                      }));
-                    }}
+                     onValueChange={(v) => {
+                       setLocalLLM(prev => ({
+                         ...prev,
+                         vision_llm_provider: v,
+                         vision_llm_model: ''
+                       }));
+                     }}
+
                   >
                     <SelectTrigger className="w-full bg-background/50 backdrop-blur-sm border-blue-500/20">
                       <SelectValue placeholder="Proveedor" />
@@ -1213,11 +1337,28 @@ const PasswordUpdateForm: React.FC = () => {
   );
 };
 
+const SETTINGS_MENU = [
+  { id: 'personal-data', label: 'Datos Personales', icon: User },
+  { id: 'ai-profile', label: 'Perfil de IA', icon: Brain },
+  { id: 'llm-config', label: 'Modelos e IA', icon: Sparkles },
+  { id: 'modules-preferences', label: 'Módulos y Preferencias', icon: Wrench },
+  { id: 'memories', label: 'Memorias', icon: Brain },
+  { id: 'skills', label: 'Skills', icon: Puzzle },
+  { id: 'mcp', label: 'Servidores MCP', icon: Server },
+  { id: 'heartbeat', label: 'Heartbeat Autónomo', icon: Zap },
+  { id: 'security', label: 'Seguridad', icon: ShieldCheck },
+  { id: 'remote', label: 'Acceso Remoto / SSH', icon: Globe },
+  { id: 'sync', label: 'Sincronización', icon: RefreshCw },
+  { id: 'integrations', label: 'Integraciones', icon: Puzzle },
+];
+
 const SettingsPage: React.FC = () => {
   const { settings, loading, error, getSettings, updateSettings } = useUserSettings();
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('personal-data');
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [localSettings, setLocalSettings] = useState(settings);
+
   const [memories, setMemories] = useState<Memory[]>([]);
   const [memoryLoading, setMemoryLoading] = useState(false);
   const [showAddMemory, setShowAddMemory] = useState(false);
@@ -1230,6 +1371,35 @@ const SettingsPage: React.FC = () => {
   const [workspaces, setWorkspaces] = useState<any[]>([]);
   const [availableTools, setAvailableTools] = useState<{name: string, description: string}[]>([]);
   const [heartbeatTriggering, setHeartbeatTriggering] = useState(false);
+  
+  // States for multiple custom heartbeats
+  const [customHeartbeats, setCustomHeartbeats] = useState<any[]>([]);
+  const [heartbeatsLoading, setHeartbeatsLoading] = useState(false);
+  const [isHeartbeatModalOpen, setIsHeartbeatModalOpen] = useState(false);
+  const [isEditingHeartbeat, setIsEditingHeartbeat] = useState(false);
+  const [editingHeartbeatId, setEditingHeartbeatId] = useState<string | null>(null);
+  const [heartbeatTriggeringIds, setHeartbeatTriggeringIds] = useState<Record<string, boolean>>({});
+  const [heartbeatForm, setHeartbeatForm] = useState({
+    name: '',
+    instructions: '',
+    schedule_type: 'interval',
+    interval_minutes: 60,
+    hour: 8,
+    minute: 0,
+    day_of_week: 1,
+    allowed_tools: [] as string[],
+    is_active: true,
+  });
+
+  const [profileData, setProfileData] = useState({
+    nombre: '',
+    gustos: '',
+    intereses: '',
+    otros_datos: '',
+    system_prompt: ''
+  });
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
 
   useEffect(() => {
     getSettings();
@@ -1239,6 +1409,123 @@ const SettingsPage: React.FC = () => {
     setLocalSettings(settings);
   }, [settings]);
 
+  // Fetch functions for custom heartbeats
+  const fetchCustomHeartbeats = async () => {
+    setHeartbeatsLoading(true);
+    try {
+      const response = await apiClient.get('/api/scheduled-tools/custom-heartbeats');
+      setCustomHeartbeats(response.data || []);
+    } catch (error) {
+      console.error('Error fetching custom heartbeats:', error);
+      toast.error('No se pudieron cargar los heartbeats personalizados');
+    } finally {
+      setHeartbeatsLoading(false);
+    }
+  };
+
+  const handleSaveHeartbeat = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!heartbeatForm.name || !heartbeatForm.instructions) {
+      toast.error('El nombre y las instrucciones son requeridos');
+      return;
+    }
+
+    const payload: any = {
+      name: heartbeatForm.name,
+      instructions: heartbeatForm.instructions,
+      schedule_type: heartbeatForm.schedule_type,
+      allowed_tools: heartbeatForm.allowed_tools,
+      is_active: heartbeatForm.is_active,
+    };
+
+    if (heartbeatForm.schedule_type === 'interval') {
+      payload.interval_minutes = Number(heartbeatForm.interval_minutes) || 60;
+    } else if (heartbeatForm.schedule_type === 'daily') {
+      payload.hour = Number(heartbeatForm.hour) || 0;
+      payload.minute = Number(heartbeatForm.minute) || 0;
+    } else if (heartbeatForm.schedule_type === 'weekly') {
+      payload.hour = Number(heartbeatForm.hour) || 0;
+      payload.minute = Number(heartbeatForm.minute) || 0;
+      payload.day_of_week = Number(heartbeatForm.day_of_week) || 0;
+    }
+
+    try {
+      if (isEditingHeartbeat && editingHeartbeatId) {
+        await apiClient.put(`/api/scheduled-tools/custom-heartbeats/${editingHeartbeatId}`, payload);
+        toast.success('Heartbeat actualizado exitosamente');
+      } else {
+        await apiClient.post('/api/scheduled-tools/custom-heartbeats', payload);
+        toast.success('Heartbeat creado exitosamente');
+      }
+      setIsHeartbeatModalOpen(false);
+      fetchCustomHeartbeats();
+    } catch (error: any) {
+      console.error('Error saving heartbeat:', error);
+      toast.error(error.response?.data?.detail || 'Error al guardar el heartbeat');
+    }
+  };
+
+  const handleDeleteHeartbeat = async (id: string) => {
+    if (!confirm('¿Estás seguro de que deseas eliminar este heartbeat?')) {
+      return;
+    }
+    try {
+      await apiClient.delete(`/api/scheduled-tools/custom-heartbeats/${id}`);
+      toast.success('Heartbeat eliminado exitosamente');
+      fetchCustomHeartbeats();
+    } catch (error: any) {
+      console.error('Error deleting heartbeat:', error);
+      toast.error('Error al eliminar el heartbeat');
+    }
+  };
+
+  const handleTriggerHeartbeat = async (id: string) => {
+    setHeartbeatTriggeringIds(prev => ({ ...prev, [id]: true }));
+    try {
+      await apiClient.post(`/api/scheduled-tools/custom-heartbeats/${id}/trigger`);
+      toast.success('Heartbeat lanzado manualmente con éxito');
+    } catch (error: any) {
+      console.error('Error triggering heartbeat:', error);
+      toast.error(error.response?.data?.detail || 'Error al lanzar heartbeat');
+    } finally {
+      setHeartbeatTriggeringIds(prev => ({ ...prev, [id]: false }));
+    }
+  };
+
+  const openCreateHeartbeatModal = () => {
+    setHeartbeatForm({
+      name: '',
+      instructions: '',
+      schedule_type: 'interval',
+      interval_minutes: 60,
+      hour: 8,
+      minute: 0,
+      day_of_week: 1,
+      allowed_tools: [],
+      is_active: true,
+    });
+    setIsEditingHeartbeat(false);
+    setEditingHeartbeatId(null);
+    setIsHeartbeatModalOpen(true);
+  };
+
+  const openEditHeartbeatModal = (hb: any) => {
+    setHeartbeatForm({
+      name: hb.name,
+      instructions: hb.instructions,
+      schedule_type: hb.schedule_type,
+      interval_minutes: hb.interval_minutes || 60,
+      hour: hb.hour !== null ? hb.hour : 8,
+      minute: hb.minute !== null ? hb.minute : 0,
+      day_of_week: hb.day_of_week !== null ? hb.day_of_week : 1,
+      allowed_tools: hb.allowed_tools || [],
+      is_active: hb.is_active,
+    });
+    setIsEditingHeartbeat(true);
+    setEditingHeartbeatId(hb.id);
+    setIsHeartbeatModalOpen(true);
+  };
+
   useEffect(() => {
     if (activeTab === 'memories' && !memories.length) {
       fetchMemories();
@@ -1246,10 +1533,50 @@ const SettingsPage: React.FC = () => {
     if (activeTab === 'sync' && !workspaces.length) {
       fetchWorkspaces();
     }
-    if (activeTab === 'heartbeat' && !availableTools.length) {
-      fetchAvailableTools();
+    if (activeTab === 'heartbeat') {
+      if (!availableTools.length) {
+        fetchAvailableTools();
+      }
+      fetchCustomHeartbeats();
+    }
+    if (activeTab === 'ai-profile') {
+      fetchProfile();
     }
   }, [activeTab]);
+
+  const fetchProfile = async () => {
+    setProfileLoading(true);
+    try {
+      const response = await apiClient.get('/api/users/me/profile');
+      setProfileData({
+        nombre: response.data.nombre || '',
+        gustos: response.data.gustos || '',
+        intereses: response.data.intereses || '',
+        otros_datos: response.data.otros_datos || '',
+        system_prompt: response.data.system_prompt || ''
+      });
+    } catch (error) {
+      console.error('Error fetching profile:', error);
+      toast.error('Error al cargar el perfil de IA.');
+    } finally {
+      setProfileLoading(false);
+    }
+  };
+
+  const handleProfileSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingProfile(true);
+    try {
+      await apiClient.put('/api/users/me/profile', profileData);
+      toast.success('Perfil de IA guardado exitosamente.');
+      fetchProfile();
+    } catch (error) {
+      console.error('Error saving profile:', error);
+      toast.error('Error al guardar el perfil de IA.');
+    } finally {
+      setSavingProfile(false);
+    }
+  };
 
   const fetchWorkspaces = async () => {
     try {
@@ -1304,21 +1631,13 @@ const SettingsPage: React.FC = () => {
   };
 
   const deleteMemory = async (memoryId: string) => {
+    if (!confirm('¿Estás seguro de que deseas eliminar esta memoria? Esta acción no se puede deshacer.')) {
+      return;
+    }
     try {
-      // Necesitaremos un endpoint DELETE para memorias si queremos esta funcionalidad
-      // Por ahora, solo loguearemos que no está implementado
-      toast.info('La eliminación de memorias aún no está implementada.');
-      console.warn(`Intento de eliminar memoria con ID: ${memoryId}. Funcionalidad no implementada.`);
-      // const response = await fetch(`/api/memories/${memoryId}`, { // Esto sería el futuro endpoint
-      //   method: 'DELETE',
-      // });
-
-      // if (response.ok) {
-      //   toast.success('Memoria eliminada exitosamente');
-      //   fetchMemories();
-      // } else {
-      //   throw new Error('Error al eliminar memoria');
-      // }
+      await apiClient.delete(`/api/memories/${memoryId}`);
+      toast.success('Memoria eliminada exitosamente');
+      fetchMemories();
     } catch (error) {
       toast.error('No se pudo eliminar la memoria');
     }
@@ -1391,20 +1710,161 @@ const SettingsPage: React.FC = () => {
     return <div>No se pudo cargar la configuración.</div>;
   }
 
+  const activeMenuItem = SETTINGS_MENU.find(item => item.id === activeTab);
+
   return (
-    <div className="container mx-auto p-4">
-      <h1 className="text-2xl font-bold mb-4">Configuración de Usuario</h1>
+    <div className="flex h-full min-h-screen bg-background">
+      {/* ── SIDEBAR DESKTOP (lg+) ── */}
+      <aside className="hidden lg:flex flex-col w-64 shrink-0 border-r border-border/40 bg-card/30 backdrop-blur-sm sticky top-0 h-screen overflow-y-auto">
+        {/* Sidebar Header */}
+        <div className="px-5 py-6 border-b border-border/30">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-xl bg-primary/10 text-primary">
+              <Wrench className="h-5 w-5" />
+            </div>
+            <div>
+              <h1 className="text-sm font-bold text-foreground tracking-tight">Configuración</h1>
+              <p className="text-[10px] text-muted-foreground uppercase tracking-widest">Panel de ajustes</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Nav Items */}
+        <nav className="flex-1 px-3 py-4 space-y-0.5">
+          {SETTINGS_MENU.map((item) => {
+            const Icon = item.icon;
+            const isActive = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => setActiveTab(item.id)}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm font-medium transition-all duration-200 group relative ${
+                  isActive
+                    ? 'bg-primary/10 text-primary'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-accent/60'
+                }`}
+              >
+                {isActive && (
+                  <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-primary rounded-full" />
+                )}
+                <Icon className={`h-4 w-4 shrink-0 transition-colors ${isActive ? 'text-primary' : 'text-muted-foreground group-hover:text-foreground'}`} />
+                <span className="truncate">{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* Sidebar Footer */}
+        <div className="px-4 py-4 border-t border-border/30">
+          <p className="text-[10px] text-muted-foreground/60 text-center">KognitoAI · Ajustes</p>
+        </div>
+      </aside>
+
+      {/* ── MOBILE MENU OVERLAY ── */}
+      {isMobileMenuOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-background/80 backdrop-blur-sm lg:hidden"
+          onClick={() => setIsMobileMenuOpen(false)}
+        />
+      )}
+
+      {/* ── MOBILE DRAWER ── */}
+      <div
+        className={`fixed inset-y-0 left-0 z-50 w-72 bg-card border-r border-border/40 shadow-2xl flex flex-col transition-transform duration-300 ease-in-out lg:hidden ${
+          isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
+        {/* Drawer Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border/30">
+          <div className="flex items-center gap-3">
+            <div className="p-1.5 rounded-lg bg-primary/10 text-primary">
+              <Wrench className="h-4 w-4" />
+            </div>
+            <span className="text-sm font-bold">Configuración</span>
+          </div>
+          <button
+            onClick={() => setIsMobileMenuOpen(false)}
+            className="p-1.5 rounded-lg hover:bg-accent transition-colors text-muted-foreground"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Drawer Nav */}
+        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-0.5">
+          {SETTINGS_MENU.map((item) => {
+            const Icon = item.icon;
+            const isActive = activeTab === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => {
+                  setActiveTab(item.id);
+                  setIsMobileMenuOpen(false);
+                }}
+                className={`w-full flex items-center gap-3 px-3 py-3 rounded-lg text-left text-sm font-medium transition-all duration-200 ${
+                  isActive
+                    ? 'bg-primary/10 text-primary'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-accent/60'
+                }`}
+              >
+                <Icon className={`h-4 w-4 shrink-0 ${isActive ? 'text-primary' : ''}`} />
+                <span>{item.label}</span>
+                {isActive && <span className="ml-auto w-1.5 h-1.5 rounded-full bg-primary" />}
+              </button>
+            );
+          })}
+        </nav>
+      </div>
+
+      {/* ── MAIN CONTENT ── */}
+      <div className="flex-1 flex flex-col min-w-0 overflow-auto">
+        {/* Mobile Top Bar */}
+        <div className="lg:hidden sticky top-0 z-30 flex items-center gap-3 px-4 py-3 bg-background/80 backdrop-blur-sm border-b border-border/30">
+          <button
+            onClick={() => setIsMobileMenuOpen(true)}
+            className="p-2 rounded-lg hover:bg-accent transition-colors text-muted-foreground"
+            aria-label="Abrir menú de configuración"
+          >
+            <Menu className="h-5 w-5" />
+          </button>
+          <div className="flex-1 min-w-0">
+            <h1 className="text-sm font-bold truncate">
+              {activeMenuItem?.label || 'Configuración'}
+            </h1>
+            <p className="text-[10px] text-muted-foreground uppercase tracking-widest">Configuración</p>
+          </div>
+        </div>
+
+        {/* Desktop Page Header */}
+        <div className="hidden lg:block px-8 pt-8 pb-2">
+          <div className="flex items-center gap-3 mb-1">
+            {activeMenuItem && (
+              <div className="p-1.5 rounded-lg bg-primary/10 text-primary">
+                {React.createElement(activeMenuItem.icon, { className: 'h-4 w-4' })}
+              </div>
+            )}
+            <h1 className="text-xl font-bold text-foreground">{activeMenuItem?.label || 'Configuración'}</h1>
+          </div>
+          <div className="h-px bg-gradient-to-r from-primary/30 via-primary/10 to-transparent mt-4" />
+        </div>
+
+        {/* Content Area */}
+        <main className="flex-1 px-4 py-4 lg:px-8 lg:py-6">
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="mb-4">
+        <TabsList className="mb-4 sr-only">
           <TabsTrigger value="personal-data">Datos Personales</TabsTrigger>
+          <TabsTrigger value="ai-profile">Perfil de IA</TabsTrigger>
           <TabsTrigger value="llm-config">Modelos e IA</TabsTrigger>
           <TabsTrigger value="modules-preferences">Módulos y Preferencias</TabsTrigger>
           <TabsTrigger value="memories">Memorias</TabsTrigger>
           <TabsTrigger value="skills">Skills</TabsTrigger>
+          <TabsTrigger value="mcp">Servidores MCP</TabsTrigger>
           <TabsTrigger value="heartbeat">Heartbeat Autónomo</TabsTrigger>
           <TabsTrigger value="security">Seguridad</TabsTrigger>
           <TabsTrigger value="remote">Acceso Remoto / SSH</TabsTrigger>
           <TabsTrigger value="sync">Sincronización</TabsTrigger>
+          <TabsTrigger value="integrations">Integraciones</TabsTrigger>
         </TabsList>
         <TabsContent value="personal-data">
           <h2 className="text-xl font-semibold mb-3">Datos Personales</h2>
@@ -1429,6 +1889,140 @@ const SettingsPage: React.FC = () => {
               {loading ? 'Guardando...' : 'Guardar Cambios'}
             </Button>
           </form>
+        </TabsContent>
+        <TabsContent value="ai-profile">
+          <Card className="border-primary/20 bg-background/50 backdrop-blur-md shadow-xl transition-all duration-300">
+            <CardHeader className="border-b border-primary/10 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-primary/10 text-primary">
+                  <Brain className="h-6 w-6 animate-pulse" />
+                </div>
+                <div>
+                  <CardTitle className="text-xl font-bold flex items-center gap-2">
+                    Perfil de IA (Memoria Estructurada)
+                    <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20 animate-pulse">
+                      Dinámico & Autónomo
+                    </Badge>
+                  </CardTitle>
+                  <CardDescription className="mt-1">
+                    Esta es la memoria estructurada y el prompt de sistema personalizado que tu agente de IA (Kognito/Fito) mantiene sobre ti de forma autónoma a lo largo de las conversaciones. Puedes modificarla manualmente aquí.
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="pt-6">
+              {profileLoading ? (
+                <div className="flex flex-col items-center justify-center py-12 space-y-4">
+                  <RefreshCw className="h-8 w-8 animate-spin text-primary" />
+                  <p className="text-sm text-muted-foreground animate-pulse">Cargando perfil y recuerdos de IA...</p>
+                </div>
+              ) : (
+                <form onSubmit={handleProfileSubmit} className="space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="profile-nombre" className="text-sm font-semibold flex items-center gap-1.5 text-foreground/90">
+                          <User className="h-4 w-4 text-primary" />
+                          Cómo te llamas (Nombre del Perfil)
+                        </Label>
+                        <Input
+                          id="profile-nombre"
+                          placeholder="Tu nombre o apodo para el Agente"
+                          value={profileData.nombre}
+                          onChange={(e) => setProfileData({ ...profileData, nombre: e.target.value })}
+                          className="bg-background/80 border-primary/10 focus:border-primary focus:ring-1 focus:ring-primary transition-all duration-300"
+                        />
+                        <p className="text-[11px] text-muted-foreground">El nombre por el cual el agente se dirigirá a ti.</p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="profile-gustos" className="text-sm font-semibold flex items-center gap-1.5 text-foreground/90">
+                          <Sparkles className="h-4 w-4 text-primary" />
+                          Gustos y Preferencias
+                        </Label>
+                        <Textarea
+                          id="profile-gustos"
+                          placeholder="Tus gustos culinarios, temas favoritos, pasatiempos, estilo de comunicación preferido..."
+                          value={profileData.gustos}
+                          onChange={(e) => setProfileData({ ...profileData, gustos: e.target.value })}
+                          className="min-h-[120px] bg-background/80 border-primary/10 focus:border-primary focus:ring-1 focus:ring-primary transition-all duration-300"
+                        />
+                        <p className="text-[11px] text-muted-foreground">Cosas que te agradan o prefieres en tu día a día.</p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="profile-intereses" className="text-sm font-semibold flex items-center gap-1.5 text-foreground/90">
+                          <Globe className="h-4 w-4 text-primary" />
+                          Intereses y Foco de Estudio/Trabajo
+                        </Label>
+                        <Textarea
+                          id="profile-intereses"
+                          placeholder="Tecnologías que estás aprendiendo, proyectos en los que trabajas, temas que investigas..."
+                          value={profileData.intereses}
+                          onChange={(e) => setProfileData({ ...profileData, intereses: e.target.value })}
+                          className="min-h-[120px] bg-background/80 border-primary/10 focus:border-primary focus:ring-1 focus:ring-primary transition-all duration-300"
+                        />
+                        <p className="text-[11px] text-muted-foreground">Temas en los que estás enfocado actualmente o deseas aprender.</p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="profile-otros" className="text-sm font-semibold flex items-center gap-1.5 text-foreground/90">
+                          <Info className="h-4 w-4 text-primary" />
+                          Otros Datos Persistentes
+                        </Label>
+                        <Textarea
+                          id="profile-otros"
+                          placeholder="Cualquier otra información relevante, contexto familiar, metas a largo plazo, etc."
+                          value={profileData.otros_datos}
+                          onChange={(e) => setProfileData({ ...profileData, otros_datos: e.target.value })}
+                          className="min-h-[120px] bg-background/80 border-primary/10 focus:border-primary focus:ring-1 focus:ring-primary transition-all duration-300"
+                        />
+                        <p className="text-[11px] text-muted-foreground">Notas adicionales que el Agente debería recordar permanentemente.</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-primary/10 pt-6 space-y-2">
+                    <Label htmlFor="profile-prompt" className="text-sm font-semibold flex items-center gap-1.5 text-foreground/90">
+                      <Wrench className="h-4 w-4 text-primary" />
+                      Prompt de Sistema Personalizado (Instrucciones Directas)
+                    </Label>
+                    <Textarea
+                      id="profile-prompt"
+                      placeholder="Escribe instrucciones de comportamiento explícitas para tu IA. Ej: 'Háblame de forma concisa', 'Prioriza siempre dar ejemplos de código', 'Sé sumamente empático'..."
+                      value={profileData.system_prompt}
+                      onChange={(e) => setProfileData({ ...profileData, system_prompt: e.target.value })}
+                      className="min-h-[120px] bg-background/80 font-mono text-xs border-primary/10 focus:border-primary focus:ring-1 focus:ring-primary transition-all duration-300"
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      Estas directrices se inyectan en el prompt del sistema del agente en cada interacción y guían directamente su personalidad y comportamiento.
+                    </p>
+                  </div>
+
+                  <div className="flex justify-end gap-3 border-t border-primary/10 pt-4">
+                    <Button 
+                      type="button" 
+                      variant="outline" 
+                      onClick={fetchProfile}
+                      disabled={savingProfile || profileLoading}
+                      className="border-primary/20 text-primary hover:bg-primary/5 transition-all duration-300"
+                    >
+                      Descartar Cambios
+                    </Button>
+                    <Button 
+                      type="submit" 
+                      disabled={savingProfile || profileLoading}
+                      className="bg-primary hover:bg-primary/90 text-primary-foreground shadow-md shadow-primary/20 transition-all duration-300"
+                    >
+                      {savingProfile ? 'Guardando...' : 'Guardar Perfil de IA'}
+                    </Button>
+                  </div>
+                </form>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
         <TabsContent value="llm-config">
           <LLMSettingsForm />
@@ -1643,6 +2237,9 @@ const SettingsPage: React.FC = () => {
             )}
           </div>
         </TabsContent>
+        <TabsContent value="mcp">
+          <MCPSettings />
+        </TabsContent>
         <TabsContent value="skills">
           <div className="space-y-6">
             <div>
@@ -1656,47 +2253,292 @@ const SettingsPage: React.FC = () => {
         </TabsContent>
         <TabsContent value="heartbeat">
           <div className="space-y-6">
-            <div>
-              <h2 className="text-xl font-semibold mb-1">Heartbeat Autónomo Personalizado</h2>
-              <p className="text-sm text-muted-foreground mb-6">
-                Configura tareas que el agente realizará de forma proactiva cada cierto tiempo.
-              </p>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-semibold mb-1">Heartbeats Autónomos Personalizados</h2>
+                <p className="text-sm text-muted-foreground">
+                  Configura múltiples tareas recurrentes para que tus agentes las realicen en segundo plano.
+                </p>
+              </div>
+              <Button onClick={openCreateHeartbeatModal} className="flex items-center gap-2 self-start sm:self-auto">
+                <Plus className="h-4 w-4" />
+                Nuevo Heartbeat
+              </Button>
             </div>
 
-            <Card className="border-none shadow-md bg-secondary/5">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
+            {heartbeatsLoading ? (
+              <div className="flex justify-center p-8">
+                <RefreshCw className="h-8 w-8 animate-spin text-primary" />
+              </div>
+            ) : customHeartbeats.length === 0 ? (
+              <Card className="border border-dashed border-border/60 bg-secondary/5">
+                <CardContent className="flex flex-col items-center justify-center p-8 text-center space-y-4">
+                  <div className="p-4 bg-primary/10 rounded-full text-primary">
+                    <Brain className="h-8 w-8" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-base mb-1">No hay heartbeats personalizados</CardTitle>
+                    <CardDescription className="max-w-md">
+                      Crea tu primera tarea automatizada para que el agente ejecute tus instrucciones de forma periódica usando herramientas permitidas.
+                    </CardDescription>
+                  </div>
+                  <Button onClick={openCreateHeartbeatModal} variant="outline" size="sm">
+                    Crear mi primer heartbeat
+                  </Button>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {customHeartbeats.map((hb) => {
+                  const isTriggering = !!heartbeatTriggeringIds[hb.id];
+                  return (
+                    <Card key={hb.id} className="border-none shadow-md bg-secondary/5 hover:bg-secondary/10 transition-colors flex flex-col justify-between">
+                      <CardHeader className="pb-3">
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex items-center gap-2">
+                            <div className="p-2 bg-primary/10 rounded-lg text-primary">
+                              <Zap className="h-4 w-4" />
+                            </div>
+                            <div>
+                              <CardTitle className="text-base font-bold line-clamp-1">{hb.name}</CardTitle>
+                              <CardDescription className="text-xs flex items-center gap-1.5 mt-0.5">
+                                <span className={`h-2 w-2 rounded-full ${hb.is_active ? 'bg-green-500' : 'bg-gray-400'}`} />
+                                {hb.is_active ? 'Activo' : 'Pausado'}
+                              </CardDescription>
+                            </div>
+                          </div>
+                          <Badge variant="outline" className="bg-background/40">
+                            {hb.schedule_type === 'interval' && 'Intervalo'}
+                            {hb.schedule_type === 'daily' && 'Diario'}
+                            {hb.schedule_type === 'weekly' && 'Semanal'}
+                          </Badge>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="space-y-4 flex-grow">
+                        <div>
+                          <Label className="text-xs text-muted-foreground font-semibold">Instrucciones</Label>
+                          <p className="text-xs text-gray-700 dark:text-gray-300 line-clamp-3 bg-background/30 p-2 rounded-md border border-border/30 mt-1 whitespace-pre-wrap">
+                            {hb.instructions}
+                          </p>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4 text-xs">
+                          <div>
+                            <span className="text-muted-foreground font-semibold block">Frecuencia</span>
+                            <span className="font-medium mt-0.5 block">
+                              {hb.schedule_type === 'interval' && `Cada ${hb.interval_minutes} minutos`}
+                              {hb.schedule_type === 'daily' && `Todos los días a las ${String(hb.hour).padStart(2, '0')}:${String(hb.minute).padStart(2, '0')}`}
+                              {hb.schedule_type === 'weekly' && (
+                                <>
+                                  {['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'][hb.day_of_week] || 'Día'} a las {String(hb.hour).padStart(2, '0')}:${String(hb.minute).padStart(2, '0')}
+                                </>
+                              )}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground font-semibold block">Siguiente Ejecución</span>
+                            <span className="font-medium mt-0.5 block line-clamp-1 text-primary">
+                              {hb.next_run ? new Date(hb.next_run).toLocaleString() : 'No programada'}
+                            </span>
+                          </div>
+                        </div>
+
+                        {hb.allowed_tools && hb.allowed_tools.length > 0 && (
+                          <div>
+                            <Label className="text-xs text-muted-foreground font-semibold">Herramientas</Label>
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {hb.allowed_tools.map((tool: string) => (
+                                <Badge key={tool} variant="secondary" className="text-[10px] px-1.5 py-0.5">
+                                  {tool}
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </CardContent>
+                      <CardContent className="pt-0 pb-4 flex gap-2">
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          className="flex-1 text-xs"
+                          disabled={isTriggering}
+                          onClick={() => handleTriggerHeartbeat(hb.id)}
+                        >
+                          <RefreshCw className={`h-3 w-3 mr-1.5 ${isTriggering ? 'animate-spin' : ''}`} />
+                          Lanzar
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1 text-xs"
+                          onClick={() => openEditHeartbeatModal(hb)}
+                        >
+                          <Edit className="h-3 w-3 mr-1.5" />
+                          Editar
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-destructive hover:bg-destructive/10 text-xs px-2"
+                          onClick={() => handleDeleteHeartbeat(hb.id)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Dialog Modal for Creating/Editing Heartbeats */}
+          <Dialog open={isHeartbeatModalOpen} onOpenChange={setIsHeartbeatModalOpen}>
+            <DialogContent className="max-w-2xl bg-card border border-border/40 shadow-2xl">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 text-lg">
                   <Brain className="h-5 w-5 text-primary" />
-                  Configuración del Ciclo
-                </CardTitle>
-                <CardDescription>Define qué debe hacer el agente y con qué frecuencia.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
+                  {isEditingHeartbeat ? 'Editar Heartbeat Autónomo' : 'Nuevo Heartbeat Autónomo'}
+                </DialogTitle>
+              </DialogHeader>
+              <form onSubmit={handleSaveHeartbeat} className="space-y-4 mt-2">
                 <div className="grid w-full gap-1.5">
-                  <Label htmlFor="custom_heartbeat_instructions">Instrucciones Ejecutivas</Label>
-                  <Textarea
-                    id="custom_heartbeat_instructions"
-                    placeholder="Ej: Revisa mis correos pendientes y resume los más importantes..."
-                    value={localSettings.custom_heartbeat_instructions || ''}
-                    onChange={handleChange}
-                    rows={4}
-                    className="bg-background/50 border-border/40 focus:border-primary/50 transition-colors"
+                  <Label htmlFor="hb_name">Nombre de la Configuración</Label>
+                  <Input
+                    id="hb_name"
+                    required
+                    placeholder="Ej. Resumen Diario de Noticias, Escáner de Emails..."
+                    value={heartbeatForm.name}
+                    onChange={(e) => setHeartbeatForm(prev => ({ ...prev, name: e.target.value }))}
+                    className="bg-background/50 border-border/40 focus:border-primary/50"
                   />
-                  <p className="text-[10px] text-muted-foreground italic">
-                    Estas instrucciones se inyectarán al agente cada vez que se active el heartbeat.
-                  </p>
                 </div>
 
-                <div className="grid w-full max-w-sm items-center gap-1.5">
-                  <Label htmlFor="custom_heartbeat_interval_minutes">Frecuencia (minutos)</Label>
-                  <Input
-                    type="number"
-                    id="custom_heartbeat_interval_minutes"
-                    value={localSettings.custom_heartbeat_interval_minutes || 60}
-                    onChange={(e) => handleSelectChange('custom_heartbeat_interval_minutes', parseInt(e.target.value))}
-                    min={5}
-                    className="bg-background/50 border-border/40"
+                <div className="grid w-full gap-1.5">
+                  <Label htmlFor="hb_instructions">Instrucciones Ejecutivas</Label>
+                  <Textarea
+                    id="hb_instructions"
+                    required
+                    placeholder="Describe detalladamente qué debe hacer el agente en cada ejecución..."
+                    value={heartbeatForm.instructions}
+                    onChange={(e) => setHeartbeatForm(prev => ({ ...prev, instructions: e.target.value }))}
+                    rows={4}
+                    className="bg-background/50 border-border/40 focus:border-primary/50"
                   />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid w-full gap-1.5">
+                    <Label htmlFor="hb_schedule_type">Tipo de Programación</Label>
+                    <Select
+                      value={heartbeatForm.schedule_type}
+                      onValueChange={(value) => setHeartbeatForm(prev => ({ ...prev, schedule_type: value }))}
+                    >
+                      <SelectTrigger className="bg-background/50 border-border/40">
+                        <SelectValue placeholder="Selecciona tipo" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="interval">Intervalo de tiempo</SelectItem>
+                        <SelectItem value="daily">Diario (Hora fija)</SelectItem>
+                        <SelectItem value="weekly">Semanal (Día y hora fijos)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {heartbeatForm.schedule_type === 'interval' && (
+                    <div className="grid w-full gap-1.5">
+                      <Label htmlFor="hb_interval">Intervalo de ejecución (minutos)</Label>
+                      <Input
+                        id="hb_interval"
+                        type="number"
+                        min={5}
+                        required
+                        value={heartbeatForm.interval_minutes}
+                        onChange={(e) => setHeartbeatForm(prev => ({ ...prev, interval_minutes: parseInt(e.target.value) || 60 }))}
+                        className="bg-background/50 border-border/40"
+                      />
+                    </div>
+                  )}
+
+                  {heartbeatForm.schedule_type === 'daily' && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="grid gap-1.5">
+                        <Label>Hora (0-23)</Label>
+                        <Input
+                          type="number"
+                          min={0}
+                          max={23}
+                          required
+                          value={heartbeatForm.hour}
+                          onChange={(e) => setHeartbeatForm(prev => ({ ...prev, hour: parseInt(e.target.value) || 0 }))}
+                          className="bg-background/50 border-border/40"
+                        />
+                      </div>
+                      <div className="grid gap-1.5">
+                        <Label>Minuto (0-59)</Label>
+                        <Input
+                          type="number"
+                          min={0}
+                          max={59}
+                          required
+                          value={heartbeatForm.minute}
+                          onChange={(e) => setHeartbeatForm(prev => ({ ...prev, minute: parseInt(e.target.value) || 0 }))}
+                          className="bg-background/50 border-border/40"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {heartbeatForm.schedule_type === 'weekly' && (
+                    <div className="grid grid-cols-2 gap-2 col-span-2 md:col-span-1">
+                      <div className="grid gap-1.5">
+                        <Label>Día de la semana</Label>
+                        <Select
+                          value={String(heartbeatForm.day_of_week)}
+                          onValueChange={(value) => setHeartbeatForm(prev => ({ ...prev, day_of_week: parseInt(value) }))}
+                        >
+                          <SelectTrigger className="bg-background/50 border-border/40">
+                            <SelectValue placeholder="Día" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="0">Lunes</SelectItem>
+                            <SelectItem value="1">Martes</SelectItem>
+                            <SelectItem value="2">Miércoles</SelectItem>
+                            <SelectItem value="3">Jueves</SelectItem>
+                            <SelectItem value="4">Viernes</SelectItem>
+                            <SelectItem value="5">Sábado</SelectItem>
+                            <SelectItem value="6">Domingo</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="grid grid-cols-2 gap-1">
+                        <div className="grid gap-1.5">
+                          <Label>Hora</Label>
+                          <Input
+                            type="number"
+                            min={0}
+                            max={23}
+                            required
+                            value={heartbeatForm.hour}
+                            onChange={(e) => setHeartbeatForm(prev => ({ ...prev, hour: parseInt(e.target.value) || 0 }))}
+                            className="bg-background/50 border-border/40"
+                          />
+                        </div>
+                        <div className="grid gap-1.5">
+                          <Label>Min</Label>
+                          <Input
+                            type="number"
+                            min={0}
+                            max={59}
+                            required
+                            value={heartbeatForm.minute}
+                            onChange={(e) => setHeartbeatForm(prev => ({ ...prev, minute: parseInt(e.target.value) || 0 }))}
+                            className="bg-background/50 border-border/40"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-2">
@@ -1704,21 +2546,21 @@ const SettingsPage: React.FC = () => {
                     <Wrench className="h-4 w-4" />
                     Herramientas Permitidas
                   </Label>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-60 overflow-y-auto p-3 border rounded-xl bg-background/40 border-border/50">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-40 overflow-y-auto p-3 border rounded-xl bg-background/40 border-border/50">
                     {availableTools.map((tool) => (
                       <div key={tool.name} className="flex items-center space-x-2 p-1 hover:bg-primary/5 rounded-lg transition-colors">
                         <Switch
-                          id={`tool-${tool.name}`}
-                          checked={(localSettings.custom_heartbeat_allowed_tools || []).includes(tool.name)}
+                          id={`modal-tool-${tool.name}`}
+                          checked={heartbeatForm.allowed_tools.includes(tool.name)}
                           onCheckedChange={(checked) => {
-                            const currentTools = localSettings.custom_heartbeat_allowed_tools || [];
+                            const currentTools = heartbeatForm.allowed_tools;
                             const newTools = checked
                               ? [...currentTools, tool.name]
                               : currentTools.filter(t => t !== tool.name);
-                            handleSelectChange('custom_heartbeat_allowed_tools', newTools);
+                            setHeartbeatForm(prev => ({ ...prev, allowed_tools: newTools }));
                           }}
                         />
-                        <Label htmlFor={`tool-${tool.name}`} className="text-xs cursor-pointer flex flex-col">
+                        <Label htmlFor={`modal-tool-${tool.name}`} className="text-xs cursor-pointer flex flex-col">
                           <span className="font-bold">{tool.name}</span>
                           <span className="text-[9px] text-muted-foreground line-clamp-1">{tool.description}</span>
                         </Label>
@@ -1727,45 +2569,26 @@ const SettingsPage: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="flex flex-col sm:flex-row gap-4 pt-4">
-                  <Button onClick={async () => {
-                    try {
-                      await updateSettings({
-                        custom_heartbeat_instructions: localSettings.custom_heartbeat_instructions,
-                        custom_heartbeat_interval_minutes: localSettings.custom_heartbeat_interval_minutes,
-                        custom_heartbeat_allowed_tools: localSettings.custom_heartbeat_allowed_tools,
-                      });
-                      toast.success('Configuración de Heartbeat guardada');
-                    } catch (err) {
-                      toast.error('Error al guardar configuración');
-                    }
-                  }} disabled={loading} className="flex-1">
-                    {loading ? 'Guardando...' : 'Guardar Configuración'}
+                <div className="flex items-center space-x-2 py-2">
+                  <Switch
+                    id="hb_active"
+                    checked={heartbeatForm.is_active}
+                    onCheckedChange={(checked) => setHeartbeatForm(prev => ({ ...prev, is_active: checked }))}
+                  />
+                  <Label htmlFor="hb_active" className="cursor-pointer">Programación Activa (Ejecutar de forma recurrente)</Label>
+                </div>
+
+                <div className="flex justify-end gap-3 pt-4 border-t border-border/20">
+                  <Button type="button" variant="outline" onClick={() => setIsHeartbeatModalOpen(false)}>
+                    Cancelar
                   </Button>
-                  
-                  <Button 
-                    variant="secondary" 
-                    onClick={async () => {
-                      setHeartbeatTriggering(true);
-                      try {
-                        await apiClient.post('/api/scheduled-tools/custom-heartbeat/trigger');
-                        toast.success('Heartbeat manual lanzado con éxito');
-                      } catch (err: any) {
-                        toast.error(err.response?.data?.detail || 'Error al lanzar heartbeat');
-                      } finally {
-                        setHeartbeatTriggering(false);
-                      }
-                    }} 
-                    disabled={heartbeatTriggering || !localSettings.custom_heartbeat_instructions}
-                    className="flex-1"
-                  >
-                    <RefreshCw className={`mr-2 h-4 w-4 ${heartbeatTriggering ? 'animate-spin' : ''}`} />
-                    Lanzar Ahora Manualmente
+                  <Button type="submit">
+                    {isEditingHeartbeat ? 'Guardar Cambios' : 'Crear Heartbeat'}
                   </Button>
                 </div>
-              </CardContent>
-            </Card>
-          </div>
+              </form>
+            </DialogContent>
+          </Dialog>
         </TabsContent>
 
         <TabsContent value="security">
@@ -1984,7 +2807,26 @@ const SettingsPage: React.FC = () => {
             </CardContent>
           </Card>
         </TabsContent>
+
+        <TabsContent value="integrations">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Puzzle className="h-5 w-5 text-primary" />
+                Integraciones Externas
+              </CardTitle>
+              <CardDescription>
+                Conecta KognitoAI con tus herramientas favoritas para ampliar sus capacidades.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <IntegrationsSettings />
+            </CardContent>
+          </Card>
+        </TabsContent>
       </Tabs>
+        </main>
+      </div>
     </div>
   );
 };

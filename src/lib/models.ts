@@ -100,7 +100,15 @@ export interface DocumentAnalysisResult {
   central_concepts?: string[];
   discipline?: string[];
   authorial_tone?: string;
-  knowledge_gaps?: Array<{ gap: string; description: string }>;
+  knowledge_gaps?: Array<{
+    gap_title?: string;
+    gap?: string;
+    title?: string;
+    explanation?: string;
+    description?: string;
+    related_context?: string;
+    context?: string;
+  }>;
   exploration_questions?: string[];
   problematic_areas?: string[];
   final_reflections?: string[];
@@ -125,6 +133,20 @@ export interface DocumentAnalysisResult {
   generated_questions?: string[];
   keywords?: string[];
   relevance_score?: number;
+}
+
+export interface DocumentSummaryResult {
+  tool_used?: string;
+  executive_summary?: string;
+  document_structure?: Array<
+    | string
+    | {
+        section?: string;
+        summary?: string;
+      }
+  >;
+  main_ideas?: string[];
+  kai_synthesis?: string;
 }
 
 export interface CodeAnalysisResultFrontend {
@@ -287,7 +309,7 @@ export interface Analysis {
   file_name?: string;
   topic?: string;
   author?: string;
-  result?: DocumentAnalysisResult | CodeAnalysisResultFrontend | CollectionAnalysis | NoteAnalysisResult | NoteCollectionAnalysisResult | SemanticAnalysisResult | DeepResearchAnalysisResult | ProactiveInsightResult | ComprehensiveWebAnalysisResult | ScopedRagAnalysisResult | any;
+  result?: DocumentAnalysisResult | DocumentSummaryResult | CodeAnalysisResultFrontend | CollectionAnalysis | NoteAnalysisResult | NoteCollectionAnalysisResult | SemanticAnalysisResult | DeepResearchAnalysisResult | ProactiveInsightResult | ComprehensiveWebAnalysisResult | ScopedRagAnalysisResult | any;
   full_data?: any; // Añadido para que coincida con la implementación existente
   status?: 'pending' | 'in_progress' | 'completed' | 'failed';
   error_message?: string;
@@ -331,6 +353,8 @@ export type AnalysisType =
   | 'note_collection_analysis'
   | 'knowledge_graph_analysis'
   | 'custom_analysis'
+  | 'custom'
+  | 'knowledge_graph'
   | 'repository_update'
   | 'gap_development'
   | 'comprehensive_web_analysis'
@@ -339,3 +363,18 @@ export type AnalysisType =
   | 'deep_research'
   | 'proactive_insight'
   | 'neural_insight';
+
+export interface Note {
+  id: number;
+  title: string | null;
+  content: string;
+  category: string;
+  created_at: string;
+  is_starred?: boolean;
+  team_shared?: boolean | string;
+  team_id?: string;
+  workspace_id?: string;
+  workspace_name?: string;
+  workspace_color?: string;
+  workspace_role?: string;
+}

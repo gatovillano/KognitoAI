@@ -7,7 +7,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, validator, root_validator
 
 class KnowledgeSearchInput(BaseModel):
     query: str = Field(description="La consulta de búsqueda para encontrar información relevante.")
@@ -19,6 +19,16 @@ class KnowledgeSearchInput(BaseModel):
     reranking: bool = Field(True, description="Si se deben reordenar los resultados para mejorar la relevancia.")
     document_name: Optional[str] = Field(None, description="Nombre exacto de un documento para focalizar la búsqueda.")
     document_id: Optional[str] = Field(None, description="ID único de un documento para focalizar la búsqueda.")
+
+    @root_validator(pre=True)
+    def map_aliases(cls, values: dict[str, Any]) -> dict[str, Any]:
+        """Permite mapear alias comunes para el parámetro 'query'."""
+        if "query" not in values:
+            for alias in ["question", "search", "text", "search_query", "content", "prompt", "input"]:
+                if alias in values:
+                    values["query"] = values[alias]
+                    break
+        return values
 
     @validator('filter_topics', 'content_types', pre=True, allow_reuse=True)
     def parse_stringified_list(cls, v):

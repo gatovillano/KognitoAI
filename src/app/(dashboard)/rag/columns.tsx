@@ -21,6 +21,7 @@ export type Document = {
   error?: string;
   document_type?: 'placeholder';
   document_id?: string; // ID del documento físico si está disponible
+  physical_document_id?: string; // ID físico en OnlyOffice para preview/descarga
 };
 
 // La función ahora recibe los handlers para cada acción
@@ -31,7 +32,8 @@ export const getColumns = (
   onAnalyze?: (doc: Document) => void,
   onShare?: (doc: Document) => void,
   onExtractTitle?: (doc: Document) => void,
-  onMoveToCollection?: (doc: Document) => void
+  onMoveToCollection?: (doc: Document) => void,
+  onSummarize?: (doc: Document) => void
 ): ColumnDef<Document>[] => [
     {
       accessorKey: 'title',
@@ -119,6 +121,11 @@ export const getColumns = (
               {onAnalyze && (
                 <DropdownMenuItem onClick={() => onAnalyze(document)}>
                   Analizar Documento
+                </DropdownMenuItem>
+              )}
+              {onSummarize && (
+                <DropdownMenuItem onClick={() => onSummarize(document)}>
+                  Resumir Documento
                 </DropdownMenuItem>
               )}
               {onShare && (
