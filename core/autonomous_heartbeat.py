@@ -1,3 +1,4 @@
+import difflib
 import json
 import logging
 import re
@@ -16,6 +17,7 @@ from core.database import (
     Nota,
     ProactiveInsight,
     SessionLocal,
+    Task,
     Workspace,
 )
 from core.llm_manager import get_fallback_llm, get_llm_for_user
@@ -150,6 +152,9 @@ def _is_retryable_heartbeat_llm_error(exc: Exception) -> bool:
         "serviceunavailableerror",
         "maximum context length",
         "context_length_exceeded",
+        "expecting value",
+        "internalservererror",
+        "openaiexception",
     ]
     return any(marker in error_text for marker in retry_markers)
 
@@ -276,59 +281,47 @@ async def _collect_autonomous_heartbeat_context(
 
     async with DBSession(SessionLocal) as db:
         account = await db.get(Account, account_uuid)
-        workspace_name = None
-        if workspace_id:
-            workspace = await db.get(Workspace, uuid.UUID(workspace_id))
-            workspace_name = workspace.name if workspace else None
+        
+        # Obtener mapa de workspaces para nombrar el origen de cada item
+        workspaces_stmt = select(Workspace).where(Workspace.account_id == account_uuid)
+        all_workspaces = (await db.execute(workspaces_stmt)).scalars().all()
+        workspace_map = {str(w.id): w.name for w in all_workspaces}
+        
+        workspace_name = workspace_map.get(str(workspace_id)) if workspace_id else None
 
-        notes_stmt = (
-            select(Nota)
-            .where(
-                Nota.account_id == account_uuid,
-                Nota.workspace_id == (uuid.UUID(workspace_id) if workspace_id else None)
-            )
-            .order_by(Nota.updated_at.desc())
-            .limit(6)
+        notes_stmt = select(Nota).where(Nota.account_id == account_uuid)
+        analyses_stmt = select(AnalysisTask).where(
+            AnalysisTask.account_id == account_uuid,
+            AnalysisTask.status == "completed",
         )
-        analyses_stmt = (
-            select(AnalysisTask)
-            .where(
-                AnalysisTask.account_id == account_uuid,
-                AnalysisTask.status == "completed",
-            )
-            .order_by(AnalysisTask.created_at.desc())
-            .limit(6)
+        events_stmt = select(AgendaEvent).where(
+            AgendaEvent.account_id == account_uuid,
+            AgendaEvent.is_active == True,
+            AgendaEvent.event_datetime_utc >= now,
         )
-        events_stmt = (
-            select(AgendaEvent)
-            .where(
-                AgendaEvent.account_id == account_uuid,
-                AgendaEvent.workspace_id == (uuid.UUID(workspace_id) if workspace_id else None),
-                AgendaEvent.is_active == True,
-                AgendaEvent.event_datetime_utc >= now,
-            )
-            .order_by(AgendaEvent.event_datetime_utc.asc())
-            .limit(6)
+        threads_stmt = select(ChatThread).where(ChatThread.account_id == account_uuid)
+        
+        if workspace_id:
+            ws_uuid = uuid.UUID(workspace_id)
+            notes_stmt = notes_stmt.where(Nota.workspace_id == ws_uuid)
+            events_stmt = events_stmt.where(AgendaEvent.workspace_id == ws_uuid)
+            threads_stmt = threads_stmt.where(ChatThread.workspace_id == ws_uuid)
+            # AnalysisTask puede o no tener workspace_id, así que no lo filtramos o lo hacemos seguro:
+            if hasattr(AnalysisTask, "workspace_id"):
+                analyses_stmt = analyses_stmt.where(AnalysisTask.workspace_id == ws_uuid)
+
+        notes_stmt = notes_stmt.order_by(Nota.updated_at.desc()).limit(6)
+        analyses_stmt = analyses_stmt.order_by(AnalysisTask.created_at.desc()).limit(6)
+        events_stmt = events_stmt.order_by(AgendaEvent.event_datetime_utc.asc()).limit(6)
+        threads_stmt = threads_stmt.order_by(ChatThread.created_at.desc()).limit(6)
+        prior_insights_stmt = select(ProactiveInsight).where(
+            ProactiveInsight.account_id == account_uuid,
+            ProactiveInsight.created_at >= lookback_start,
         )
-        threads_stmt = (
-            select(ChatThread)
-            .where(
-                ChatThread.account_id == account_uuid,
-                ChatThread.workspace_id == (uuid.UUID(workspace_id) if workspace_id else None)
-            )
-            .order_by(ChatThread.created_at.desc())
-            .limit(6)
-        )
-        prior_insights_stmt = (
-            select(ProactiveInsight)
-            .where(
-                ProactiveInsight.account_id == account_uuid,
-                ProactiveInsight.workspace_id == (uuid.UUID(workspace_id) if workspace_id else None),
-                ProactiveInsight.created_at >= lookback_start,
-            )
-            .order_by(ProactiveInsight.created_at.desc())
-            .limit(10)
-        )
+        if workspace_id:
+            prior_insights_stmt = prior_insights_stmt.where(ProactiveInsight.workspace_id == uuid.UUID(workspace_id))
+            
+        prior_insights_stmt = prior_insights_stmt.order_by(ProactiveInsight.created_at.desc()).limit(10)
 
         notes = (await db.execute(notes_stmt)).scalars().all()
         analyses = (await db.execute(analyses_stmt)).scalars().all()
@@ -400,6 +393,7 @@ async def _collect_autonomous_heartbeat_context(
                 "id": note.id,
                 "title": note.title,
                 "category": note.category,
+                "workspace_name": workspace_map.get(str(note.workspace_id), "Global") if getattr(note, "workspace_id", None) else "Global",
                 "updated_at": note.updated_at.isoformat() if note.updated_at else None,
                 "content_preview": (note.content or "")[:500],
             }
@@ -410,6 +404,7 @@ async def _collect_autonomous_heartbeat_context(
                 "id": str(task.id),
                 "file_name": task.file_name,
                 "analysis_type": task.analysis_type,
+                "workspace_name": workspace_map.get(str(task.workspace_id), "Global") if getattr(task, "workspace_id", None) else "Global",
                 "created_at": task.created_at.isoformat() if task.created_at else None,
                 "result_excerpt": json.dumps(task.result_payload, ensure_ascii=False)[:800] if task.result_payload else None,
             }
@@ -421,6 +416,7 @@ async def _collect_autonomous_heartbeat_context(
                 "summary": event.summary,
                 "description": event.description,
                 "status": event.status,
+                "workspace_name": workspace_map.get(str(event.workspace_id), "Global") if getattr(event, "workspace_id", None) else "Global",
                 "event_datetime_utc": event.event_datetime_utc.isoformat() if event.event_datetime_utc else None,
                 "duration_minutes": event.duration_minutes,
             }
@@ -431,6 +427,7 @@ async def _collect_autonomous_heartbeat_context(
                 "id": str(thread.id),
                 "title": thread.title,
                 "platform": thread.platform,
+                "workspace_name": workspace_map.get(str(thread.workspace_id), "Global") if getattr(thread, "workspace_id", None) else "Global",
                 "created_at": thread.created_at.isoformat() if thread.created_at else None,
             }
             for thread in threads
@@ -440,6 +437,7 @@ async def _collect_autonomous_heartbeat_context(
                 "type": insight.type,
                 "insight_message": insight.insight_message,
                 "action_suggestion": insight.action_suggestion,
+                "workspace_name": workspace_map.get(str(insight.workspace_id), "Global") if getattr(insight, "workspace_id", None) else "Global",
                 "created_at": insight.created_at.isoformat() if insight.created_at else None,
             }
             for insight in prior_insights
@@ -480,8 +478,26 @@ async def _save_autonomous_heartbeat_insights(
                 continue
 
             normalized_key = _normalize_insight_key(insight_message)
-            if normalized_key in known_keys:
-                continue
+            
+            # Contar repeticiones basadas en recent_insights
+            similar_count = 1  # Incluye el actual que vamos a guardar
+            matched_original_insight = None
+            
+            for item in recent_insights:
+                item_normalized = _normalize_insight_key(item.insight_message)
+                if item_normalized == normalized_key:
+                    similar_count += 1
+                    if not matched_original_insight:
+                        matched_original_insight = item
+                elif (item.title and insight.get("title") and 
+                      difflib.SequenceMatcher(None, item.title.strip().lower(), insight.get("title").strip().lower()).ratio() > 0.82):
+                    similar_count += 1
+                    if not matched_original_insight:
+                        matched_original_insight = item
+                elif difflib.SequenceMatcher(None, item_normalized, normalized_key).ratio() > 0.85:
+                    similar_count += 1
+                    if not matched_original_insight:
+                        matched_original_insight = item
 
             confidence_raw = insight.get("confidence_score", 0.65)
             try:
@@ -493,10 +509,57 @@ async def _save_autonomous_heartbeat_insights(
             if not isinstance(related_items, list):
                 related_items = []
 
+            # Si es repetido, guardamos metadatos de la repetición
+            if similar_count > 1:
+                logger.info(f"Insight repetido detectado (frecuencia actual: {similar_count}): '{insight.get('title')}'")
+                related_items.append({
+                    "kind": "repetition_tracker",
+                    "is_repeated": True,
+                    "repetition_count": similar_count,
+                    "parent_insight_id": str(matched_original_insight.id) if (matched_original_insight and getattr(matched_original_insight, 'id', None)) else None
+                })
+                
+                # Si se repite más de 2 veces (es decir, similar_count >= 3), convertimos automáticamente en Tarea de 48 horas!
+                if similar_count >= 3:
+                    task_desc_title = insight.get("title") or insight_message[:50]
+                    task_desc_prefix = f"[Tablero de Resolución] Actuar sobre insight recurrente: {task_desc_title}"
+                    
+                    # Verificar si ya existe una tarea activa/pendiente para este insight
+                    task_exists_stmt = select(Task).where(
+                        Task.account_id == account_uuid,
+                        Task.is_completed == False,
+                        Task.description.like(f"{task_desc_prefix}%")
+                    )
+                    task_exists_result = await db.execute(task_exists_stmt)
+                    existing_task = task_exists_result.scalars().first()
+                    
+                    if not existing_task:
+                        action_sugg = insight.get("action_suggestion") or "Definir un plan de resolución e implementarlo."
+                        # Crear la tarea
+                        new_task = Task(
+                            account_id=account_uuid,
+                            workspace_id=uuid.UUID(workspace_id) if workspace_id else None,
+                            description=f"{task_desc_prefix}. Acción recomendada: {action_sugg}",
+                            start_date=datetime.now(timezone.utc),
+                            end_date=datetime.now(timezone.utc) + timedelta(hours=48),
+                            status="Pendiente",
+                            is_completed=False
+                        )
+                        db.add(new_task)
+                        await db.flush()  # Para obtener el ID de la nueva tarea
+                        
+                        logger.info(f"Creada tarea del Tablero de Resolución ID: {new_task.id} para insight recurrente.")
+                        related_items.append({
+                            "kind": "task",
+                            "reference": str(new_task.id),
+                            "reason": "Tarea creada automáticamente por recurrencia >= 3 del insight."
+                        })
+
+            # Forzar type='insight' para máxima compatibilidad frontend/backend
             record = ProactiveInsight(
                 account_id=account_uuid,
                 workspace_id=uuid.UUID(workspace_id) if workspace_id else None,
-                type=str(insight.get("type") or "insight")[:50],
+                type="insight",
                 title=(insight.get("title") or "").strip() or None,
                 insight_message=insight_message,
                 confidence_score=confidence_score,
@@ -566,10 +629,23 @@ async def _run_heartbeat_tool_phase(
         return []
 
     # Construir descripción de herramientas para el planning prompt
-    tools_description = "\\n".join([
-        f"- **{t.name}**: {(t.description or '').strip()[:200]}"
-        for t in selected_tools
-    ])
+    tools_description_lines = []
+    for t in selected_tools:
+        desc = (t.description or '').strip()[:200]
+        args_desc = ""
+        try:
+            if t.args:
+                args_list = []
+                for arg_name, arg_info in t.args.items():
+                    arg_type = arg_info.get("type", "any")
+                    arg_desc_text = arg_info.get("description", "")
+                    args_list.append(f"    * `{arg_name}` ({arg_type}): {arg_desc_text}")
+                if args_list:
+                    args_desc = "\n  Parámetros:\n" + "\n".join(args_list)
+        except Exception:
+            pass
+        tools_description_lines.append(f"- **{t.name}**: {desc}{args_desc}")
+    tools_description = "\n".join(tools_description_lines)
 
     tool_selection_note = (
         "Tienes acceso a TODAS las herramientas disponibles del sistema. Elige las que mejor sirvan a las instrucciones."
@@ -595,6 +671,9 @@ async def _run_heartbeat_tool_phase(
 Analiza las instrucciones y decide qué herramientas ejecutar. Puedes hacer DOS tipos de llamadas:
 1. **Consulta/búsqueda**: para obtener información y enriquecer el análisis
 2. **Acción**: para publicar, crear o enviar algo (ej: postear una reflexión, crear una nota)
+
+### REGLA CRÍTICA OBLIGATORIA PARA GUARDAR NOTAS (`add_note`):
+Si decides crear o guardar una nota utilizando la herramienta `add_note`, debes establecer OBLIGATORIAMENTE el parámetro `send_as_agent_message` en `true`. Esto garantiza que el contenido se guarde como un mensaje enviado al usuario en su Bandeja de entrada. Nunca dejes este parámetro en `false` o ausente.
 
 Si las instrucciones piden una acción (como "postea una reflexión en Moltbook"), DEBES incluirla como tool_call generando el contenido apropiado en los args basándote en el contexto disponible.
 
@@ -664,6 +743,77 @@ Máximo {max_iterations} tool calls. Para acciones con contenido generado, crea 
     return tool_results
 
 
+async def _check_and_escalate_expired_tasks(account_id: str, db: Any) -> None:
+    """
+    Busca todas las tareas no completadas creadas por el Tablero de Resolución
+    que hayan expirado (más de 48 horas / end_date pasado) y las escala
+    a decisión explícita actualizando su estado a 'Escalada'.
+    """
+    now = datetime.now(timezone.utc)
+    stmt = select(Task).where(
+        Task.account_id == uuid.UUID(account_id),
+        Task.is_completed == False,
+        Task.end_date < now,
+        Task.status != "Escalada",
+        Task.status != "Cancelada",
+        Task.status != "Postergada",
+        Task.description.like("[Tablero de Resolución]%")
+    )
+    result = await db.execute(stmt)
+    expired_tasks = result.scalars().all()
+
+    escalations_count = 0
+    for task in expired_tasks:
+        task.status = "Escalada"
+        task.updated_at = now
+        escalations_count += 1
+        logger.info(f"Heartbeat: tarea ID {task.id} marcada como Escalada (venció su plazo de 48h).")
+
+    if escalations_count > 0:
+        await db.commit()
+        logger.info(f"Heartbeat autónomo: escaladas {escalations_count} tareas expiradas.")
+
+
+async def _log_to_heartbeat_thread(thread_id: uuid.UUID, content: str):
+    """Persiste un mensaje AI en el hilo de heartbeat usando inserción SQL directa async."""
+    try:
+        import json as _json
+        from sqlalchemy import text as _text
+        from core.database import SessionLocal
+        from utils.db_session import DBSession
+
+        now_utc = datetime.now(timezone.utc).isoformat()
+        # El formato que langchain_chat_history espera: {"type": "ai", "data": {...}}
+        message_payload = _json.dumps({
+            "type": "ai",
+            "data": {
+                "content": content,
+                "additional_kwargs": {"created_at": now_utc},
+                "type": "ai",
+                "name": None,
+                "id": None,
+                "example": False,
+            }
+        })
+
+        async with DBSession(SessionLocal) as session:
+            from sqlalchemy.dialects.postgresql import JSONB
+            from sqlalchemy import type_coerce
+            await session.execute(
+                _text(
+                    "INSERT INTO langchain_chat_history (session_id, message) "
+                    "VALUES (:session_id, cast(:message as jsonb))"
+                ),
+                {
+                    "session_id": str(thread_id),
+                    "message": message_payload,
+                },
+            )
+            await session.commit()
+    except Exception as e:
+        logger.warning(f"Error logging to heartbeat thread {thread_id}: {e}")
+
+
 async def run_autonomous_agent_heartbeat(
     account_id: str,
     workspace_id: Optional[str] = None,
@@ -675,6 +825,63 @@ async def run_autonomous_agent_heartbeat(
 ) -> str:
     if not settings.get_proactive_insights_enabled or not settings.autonomous_heartbeat_enabled:
         return "Heartbeat autónomo deshabilitado por configuración"
+
+    # --- Crear un hilo nuevo para este heartbeat al inicio para poder registrar logs en él ---
+    thread_id = uuid.uuid4()
+    thread_created = False
+    try:
+        async with DBSession(SessionLocal) as db:
+            thread = ChatThread(
+                id=thread_id,
+                account_id=uuid.UUID(account_id),
+                workspace_id=uuid.UUID(workspace_id) if workspace_id else None,
+                title=(f"Heartbeat autónomo - {datetime.now(timezone.utc).strftime('%d/%m/%Y %H:%M:%S')}"),
+                platform="system",
+                hidden_from_sidebar=True,
+            )
+            db.add(thread)
+            await db.commit()
+            thread_created = True
+    except Exception as exc:
+        logger.warning(f"Heartbeat: no se pudo crear hilo oculto para el heartbeat: {exc}")
+
+    if thread_created:
+        await _log_to_heartbeat_thread(thread_id, "⚙️ **Iniciando ciclo autónomo de heartbeat.**\nSe buscarán tareas expiradas, se ejecutarán herramientas y se analizará el contexto del usuario para buscar nuevos insights.")
+
+    # --- Ejecutar escalación de tareas expiradas del Tablero de Resolución ---
+    escalations_logged = "No se detectaron tareas expiradas."
+    try:
+        async with DBSession(SessionLocal) as db:
+            now = datetime.now(timezone.utc)
+            stmt = select(Task).where(
+                Task.account_id == uuid.UUID(account_id),
+                Task.is_completed == False,
+                Task.end_date < now,
+                Task.status != "Escalada",
+                Task.status != "Cancelada",
+                Task.status != "Postergada",
+                Task.description.like("[Tablero de Resolución]%")
+            )
+            result = await db.execute(stmt)
+            expired_tasks = result.scalars().all()
+
+            escalations_count = 0
+            for task in expired_tasks:
+                task.status = "Escalada"
+                task.updated_at = now
+                escalations_count += 1
+                logger.info(f"Heartbeat: tarea ID {task.id} marcada como Escalada (venció su plazo de 48h).")
+
+            if escalations_count > 0:
+                await db.commit()
+                escalations_logged = f"Se detectaron y escalaron **{escalations_count}** tareas que superaron el plazo de 48 horas."
+                logger.info(f"Heartbeat autónomo: escaladas {escalations_count} tareas expiradas.")
+    except Exception as esc_err:
+        logger.warning(f"Error al verificar escalación de tareas: {esc_err}")
+        escalations_logged = f"Error al verificar escalación de tareas: {esc_err}"
+
+    if thread_created:
+        await _log_to_heartbeat_thread(thread_id, f"📋 **[Fase 1: Tareas del Tablero de Resolución]**\n{escalations_logged}")
 
     max_insights = max_insights or settings.autonomous_heartbeat_max_insights
     heartbeat_instructions = heartbeat_instructions or settings.autonomous_heartbeat_instructions
@@ -696,10 +903,10 @@ async def run_autonomous_agent_heartbeat(
     )
 
     # --- PHASE 1: Tool Execution ---
-    # Si allowed_tools es None, el LLM elige libremente de todas las herramientas disponibles.
-    # Si allowed_tools es una lista vacía [], se omite la fase de herramientas.
     tool_results: List[Dict[str, Any]] = []
     if allowed_tools != []:
+        if thread_created:
+            await _log_to_heartbeat_thread(thread_id, "🔧 **[Fase 2: Ejecución de Herramientas]**\nIniciando planificación y ejecución de herramientas...")
         tool_results = await _run_heartbeat_tool_phase(
             account_id=account_id,
             workspace_id=workspace_id,
@@ -709,68 +916,115 @@ async def run_autonomous_agent_heartbeat(
             llm=llm,
             main_llm=main_llm,
         )
+        if thread_created:
+            if tool_results:
+                tools_summary = "\n".join([
+                    f"- **{tr['tool']}** (Motivo: *{tr['reason']}*):\n  ```\n  {tr['result'][:500]}...\n  ```"
+                    for tr in tool_results
+                ])
+                await _log_to_heartbeat_thread(thread_id, f"🔧 **[Fase 2: Ejecución de Herramientas]**\nSe ejecutaron **{len(tool_results)}** herramienta(s):\n{tools_summary}")
+            else:
+                await _log_to_heartbeat_thread(thread_id, "🔧 **[Fase 2: Ejecución de Herramientas]**\nNo se requirió la ejecución de ninguna herramienta.")
+
+    if thread_created:
+        await _log_to_heartbeat_thread(thread_id, "🧠 **[Fase 3: Análisis Cualitativo de Contexto]**\nIniciando el análisis cognitivo para detectar brechas de conocimiento y patrones...")
 
     prompt = f"""{f'''PERSONALIDAD BASE KAI (compartida con agent.py):
     {kai_personality_preamble}
 
     ---
-    ''' if kai_personality_preamble else ''}KAI heartbeat: análisis cualitativo y creativo.
+    ''' if kai_personality_preamble else ''}🧠 **KAI AUTONOMOUS HEARTBEAT - COGNITIVE PROCESSOR SYSTEM PROMPT** 🧠
 
-Objetivo:
-- Detectar ideas valiosas, oportunidades de innovación y conexiones no obvias.
-- Priorizar señales humanas y estratégicas por sobre chequeos técnicos.
-- Solo reportar riesgos técnicos cuando tengan impacto claro en decisiones, plazos o valor.
+Eres KAI, el exocerebro digital de Inteligencia Aumentada del usuario. Te encuentras en tu ciclo de **Heartbeat Autónomo**, un proceso de pensamiento reflexivo en segundo plano donde tu rol principal es actuar como un procesador cognitivo profundo, conectando cabos susueltos, identificando brechas de conocimiento y encontrando oportunidades estratégicas o de innovación para el usuario.
 
-Importante - Reconocimiento de contexto de trabajo:
-- El contexto actual puede ser de un workspace específico o global.
-- Si el contexto es de un workspace específico (workspace_id presente), todo lo que analizas pertenece a ese mismo espacio de trabajo.
-- Si el contexto es global (workspace_id no especificado), los elementos pueden estar en diferentes workspaces o ser globales.
-- Relaciona SOLO elementos que pertenezan al MISMO contexto de trabajo.
-- Si notas elementos de diferentes workspaces en un contexto global, menciona explícitamente que pertenecen a contextos distintos.
-- El contexto actual es: workspace_id={workspace_id or 'global'}.
+### 1. OBJETIVOS COGNITIVOS DEL HEARTBEAT
+Tu análisis no debe ser una simple lista de tareas o resúmenes directos de lo que ha pasado. Debes generar **insights cuantitativos y cualitativos de alto valor**. Busca:
+- **Conexiones Inter-contextuales:** Relaciones no obvias entre notas recientes, tareas de análisis, eventos y conversaciones.
+- **Detección de Brechas de Conocimiento:** Identificar temas o ideas de los que el usuario habla o investiga pero de los que no tiene notas guardadas o estructuradas.
+- **Oportunidades de Innovación:** Detectar ideas emergentes en las conversaciones o notas que puedan transformarse en experimentos prácticos, herramientas o mejoras de flujo.
+- **Tensiones y Bloqueos:** Detectar riesgos reales (bloqueos operativos, plazos vencidos, falta de seguimiento en acuerdos) priorizando siempre el impacto humano y estratégico sobre los simples fallos técnicos.
 
-Instrucciones personalizadas:
+### 2. PROTOCOLO DE AISLAMIENTO DE CONTEXTOS (WORKSPACES)
+- El contexto actual es: **workspace_id={workspace_id or 'global'}**.
+- **Si workspace_id NO es global (es un UUID específico):** Toda la información suministrada pertenece estrictamente a este espacio de trabajo. No asumas ni inventes conexiones con otros espacios de trabajo. Tus insights deben enfocarse únicamente en el valor dentro de este workspace.
+- **Si el contexto es global (workspace_id = global):** Los elementos del contexto pueden provenir de diferentes workspaces. Debes ser extremadamente cuidadoso: relaciona elementos solo si pertenecen al mismo contexto, o si cruzan workspaces, adviértelo de forma explícita ("Este elemento de Workspace A se relaciona con este de Workspace B").
+
+### 3. METODOLOGÍA DE ANÁLISIS DE INFORMACIÓN (INPUTS)
+Analiza minuciosamente los siguientes bloques en el payload de contexto:
+1. **Notas Recientes (`notes`):** Representan el conocimiento estructurado y reflexiones del usuario.
+2. **Tareas de Análisis (`analysis_tasks`):** Muestran datos procesados y reportes detallados que el usuario ha solicitado (fíjate en los resúmenes y resultados).
+3. **Eventos de Agenda (`upcoming_events`):** Representan el tiempo del usuario, hitos clave y compromisos.
+4. **Conversaciones Recientes (`recent_threads` y `conversation_review`):** La voz viva del usuario. Aquí radican sus preocupaciones, intenciones inmediatas, frustraciones y focos actuales.
+5. **Resultados de Herramientas (`tool_results`):** Resultados de búsquedas o acciones que ejecutaste en la fase previa de este heartbeat. Úsalos como datos duros para enriquecer tus insights.
+
+### 4. INSTRUCCIONES PERSONALIZADAS DE ESTA CUENTA
+Aplica con máxima prioridad estas directrices definidas por el usuario:
 {heartbeat_instructions}
 
-Prioriza este orden:
-1) Oportunidades e innovación aplicable
-2) Síntesis de patrones (temas repetidos, tensión, momentum)
-3) Acciones concretas de alto impacto
-4) Riesgos operativos relevantes (sin caer en auditoría de integridad)
+### 5. JERARQUÍA DE VALOR (PRIORIZACIÓN DE INSIGHTS)
+Al redactar tus insights, prioriza en este orden:
+1. **Oportunidades e Innovación:** Ideas que añaden valor estratégico o sugieren experimentos útiles (`opportunity`, `innovation`).
+2. **Síntesis y Patrones:** Agrupación de temas repetidos o tensiones a lo largo de los días (`synthesis`).
+3. **Seguimientos de Alto Impacto:** Hilos o compromisos de reuniones que quedaron en el aire (`follow_up`, `deadline`).
+4. **Alertas y Riesgos Estratégicos:** Bloqueos críticos o plazos de entrega en peligro (`alert`).
 
-Formato de salida (JSON válido):
+### 6. GUARDARRAÍLES Y EVITACIÓN DE RUIDO
+- **Cero obviedades:** No generes insights como "Tienes una reunión mañana" o "Escribiste una nota sobre X". Cada insight debe aportar una lectura cualitativa ("por qué importa esto ahora" o "qué patrón revela").
+- **Evita duplicados:** Compara tus hallazgos con los `recent_insights` provistos. Si un insight ya fue reportado recientemente con el mismo enfoque, no lo repitas a menos que haya evolucionado significativamente o se haya convertido en un problema crítico.
+- **Cantidad máxima:** Genera un máximo de {max_insights} insights (solo los de mayor calidad y relevancia).
+- **Cita y Vínculo Preciso (`related_items`):** Cada elemento relacionado debe mapear a objetos reales en el contexto. Especifica su tipo (`kind`) y su identificador o título exacto (`reference`), explicando brevemente la razón de su vínculo.
+- **Creación Autónoma de Tareas y Eventos:** Si a partir de tu revisión detectas compromisos, reuniones a programar o pendientes claros (que el usuario no haya registrado aún), DEBES crear tareas o eventos en las listas `auto_created_tasks` y `auto_created_events`. Estima las fechas de manera lógica usando la fecha actual. Usa tu criterio estratégico para decidir cuándo conviene agendarlos.
+- **Salida:** Si no hay hallazgos con suficiente solidez, devuelve una lista vacía `{{"insights": []}}`. No inventes datos ni asumas hechos.
+- **Idioma y Tono:** Redacta exclusivamente en **español**, con un tono profesional, ejecutivo, claro y accionable.
+
+### 7. FORMATO DE SALIDA (ESQUEMA JSON ESTRICTO)
+Tu respuesta debe ser un objeto JSON válido y estructurado exactamente así. No envíes bloques de código Markdown alrededor del JSON, responde únicamente con el texto del JSON. Asegúrate de escapar correctamente las comillas dobles y los caracteres especiales.
+
 {{
-    "insights": [
+  "insights": [
+    {{
+      "type": "opportunity|innovation|synthesis|follow_up|deadline|alert|insight",
+      "title": "Título descriptivo, corto y potente (máx 10 palabras)",
+      "insight_message": "Explicación profunda de 1 a 2 párrafos. Explica qué pasa, por qué es relevante estratégicamente y qué patrón cognitivo revela.",
+      "confidence_score": 0.85,
+      "action_suggestion": "Propuesta de acción concreta, realista y accionable para resolver o aprovechar este insight.",
+      "innovation_potential": "Descripción de cómo este insight abre una puerta a la innovación, un nuevo experimento o una mejora del flujo de trabajo.",
+      "related_items": [
         {{
-            "type": "opportunity|innovation|synthesis|follow_up|deadline|alert|insight",
-            "title": "Título breve y claro",
-            "insight_message": "1-2 párrafos con lectura cualitativa: qué pasa, por qué importa y qué patrón revela.",
-            "confidence_score": 0.75,
-            "action_suggestion": "Siguiente paso concreto y realista",
-            "innovation_potential": "Cómo esta idea puede abrir una mejora o experimento útil",
-            "related_items": [
-                {{"kind": "note|analysis|event|memory|thread", "reference": "id o título", "reason": "vínculo breve"}}
-            ]
+          "kind": "note|analysis|event|memory|thread",
+          "reference": "ID_DE_REFERENCIA_O_TITULO_EXACTO",
+          "reason": "Vínculo explicativo muy breve de por qué se asocia este elemento."
         }}
-    ]
+      ]
+    }}
+  ],
+  "auto_created_tasks": [
+    {{
+      "description": "Texto descriptivo de la tarea identificada a partir de los insights",
+      "start_date": "YYYY-MM-DDTHH:MM:SSZ",
+      "end_date": "YYYY-MM-DDTHH:MM:SSZ"
+    }}
+  ],
+  "auto_created_events": [
+    {{
+      "summary": "Resumen de la reunión o compromiso",
+      "description": "Descripción más detallada del evento",
+      "event_datetime_utc": "YYYY-MM-DDTHH:MM:SSZ",
+      "duration_minutes": 60
+    }}
+  ]
 }}
 
-Guardarraíles:
-- Máximo {max_insights} insights
-- No inventes hechos
-- Evita duplicar insights recientes
-- Si no hay hallazgos sólidos, devuelve {{"insights": []}}
-- Tono: ejecutivo, claro, creativo y accionable
-- Idioma: español (genera todos los insights en español)
-
-Contexto:
+### 8. DATOS DE CONTEXTO ACTUAL
 {json.dumps(context_payload, ensure_ascii=False, indent=2)}
+
 {f'''
-Revisión de conversaciones recientes ({context_payload.get("window", {}).get("lookback_days", "N/A")} días):
+### 9. REVISIÓN DE CONVERSACIONES RECIENTES (Últimos {context_payload.get("window", {}).get("lookback_days", "N/A")} días)
 {context_payload.get("conversation_review", "")}
 ''' if context_payload.get("conversation_review") else ''}
+
 {f'''
-Resultados de herramientas ejecutadas:
+### 10. RESULTADOS DE HERRAMIENTAS EJECUTADAS EN LA FASE 2
 {json.dumps(tool_results, ensure_ascii=False, indent=2)}
 ''' if tool_results else ''}
 """
@@ -782,6 +1036,68 @@ Resultados de herramientas ejecutadas:
     )
     response_text = response.content if hasattr(response, "content") else str(response)
     parsed = _extract_json_dict(str(response_text)) or {"insights": []}
+    
+    # --- PROCESAMIENTO DE TAREAS Y EVENTOS AUTOMÁTICOS ---
+    auto_tasks = parsed.get("auto_created_tasks", [])
+    if isinstance(auto_tasks, list) and auto_tasks:
+        tasks_created_count = 0
+        async with DBSession(SessionLocal) as db:
+            for t_data in auto_tasks:
+                if not isinstance(t_data, dict): continue
+                desc = t_data.get("description")
+                if not desc: continue
+                try:
+                    start_d = datetime.fromisoformat(t_data.get("start_date").replace("Z", "+00:00")) if t_data.get("start_date") else datetime.now(timezone.utc)
+                    end_d = datetime.fromisoformat(t_data.get("end_date").replace("Z", "+00:00")) if t_data.get("end_date") else None
+                except Exception:
+                    start_d = datetime.now(timezone.utc)
+                    end_d = None
+                new_task = Task(
+                    account_id=uuid.UUID(account_id),
+                    workspace_id=uuid.UUID(workspace_id) if workspace_id else None,
+                    description=desc,
+                    start_date=start_d,
+                    end_date=end_d,
+                    status="Pendiente",
+                    is_completed=False
+                )
+                db.add(new_task)
+                tasks_created_count += 1
+            if tasks_created_count > 0:
+                await db.commit()
+                if thread_created:
+                    await _log_to_heartbeat_thread(thread_id, f"✅ **Tareas Automáticas**: Se crearon {tasks_created_count} tareas nuevas detectadas en el análisis.")
+
+    auto_events = parsed.get("auto_created_events", [])
+    if isinstance(auto_events, list) and auto_events:
+        events_created_count = 0
+        async with DBSession(SessionLocal) as db:
+            for e_data in auto_events:
+                if not isinstance(e_data, dict): continue
+                summary = e_data.get("summary")
+                if not summary: continue
+                try:
+                    evt_date = datetime.fromisoformat(e_data.get("event_datetime_utc").replace("Z", "+00:00")) if e_data.get("event_datetime_utc") else datetime.now(timezone.utc)
+                except Exception:
+                    evt_date = datetime.now(timezone.utc)
+                new_evt = AgendaEvent(
+                    account_id=uuid.UUID(account_id),
+                    workspace_id=uuid.UUID(workspace_id) if workspace_id else None,
+                    summary=summary,
+                    description=e_data.get("description"),
+                    event_datetime_utc=evt_date,
+                    duration_minutes=e_data.get("duration_minutes") or 60,
+                    is_active=True,
+                    status="Pendiente"
+                )
+                db.add(new_evt)
+                events_created_count += 1
+            if events_created_count > 0:
+                await db.commit()
+                if thread_created:
+                    await _log_to_heartbeat_thread(thread_id, f"📅 **Eventos Automáticos**: Se crearon {events_created_count} eventos nuevos en la agenda.")
+    
+    # --- PROCESAMIENTO DE INSIGHTS ---
     raw_insights = parsed.get("insights") if isinstance(parsed, dict) else []
     if not isinstance(raw_insights, list):
         raw_insights = []
@@ -810,15 +1126,41 @@ Resultados de herramientas ejecutadas:
 
     created_insights = await _save_autonomous_heartbeat_insights(account_id, normalized_insights, workspace_id)
 
+    if created_insights:
+        titles = [i.get('title') or i.get('insight_message', '')[:60] for i in created_insights]
+        logger.info(
+            f"Heartbeat autónomo: {len(created_insights)} insight(s) guardados: "
+            + " | ".join(titles)
+        )
+
     if created_insights and notify:
-        await send_personal_message(account_id, {
-            "type": "proactive_insight_created",
-            "source": "autonomous_heartbeat",
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "insights": created_insights,
-        })
+        try:
+            await send_personal_message(account_id, {
+                "type": "proactive_insight_created",
+                "source": "autonomous_heartbeat",
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "insights": created_insights,
+            })
+        except Exception as ws_err:
+            logger.warning(f"Error al enviar notificación de insights proactivos vía WebSocket: {ws_err}")
+
+    if thread_created:
+        if created_insights:
+            insights_summary = "\n".join([
+                f"- **{i.get('title') or 'Sin título'}** ({i.get('type')}):\n  {i.get('insight_message')}\n  *Sugerencia:* {i.get('action_suggestion')}"
+                for i in created_insights
+            ])
+            await _log_to_heartbeat_thread(
+                thread_id,
+                f"🧠 **[Fase 3: Análisis Cualitativo de Contexto]**\nAnálisis completado. Se generaron y guardaron **{len(created_insights)}** insight(s) nuevos:\n\n{insights_summary}"
+            )
+        else:
+            await _log_to_heartbeat_thread(
+                thread_id,
+                "🧠 **[Fase 3: Análisis Cualitativo de Contexto]**\nAnálisis completado. No se detectaron patrones ni oportunidades lo suficientemente sólidos para reportar o todos eran duplicados de insights recientes."
+            )
 
     return (
         f"Heartbeat autónomo completado para {account_id}: "
-        f"{len(created_insights)} insight(s) nuevos guardado"
+        f"{len(created_insights)} insight(s) nuevos guardados"
     )

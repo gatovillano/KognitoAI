@@ -1,0 +1,16 @@
+[0;32mIniciando el servidor Backend (Kognito API)...[0m
+[0;32m  → Logs: ./logs/backend.log[0m
+[0;34mIniciando el servidor Frontend (Next.js)...[0m
+[0;34m  → Logs: ./logs/frontend.log[0m
+==========================================================
+Servicios en ejecución:
+- API Backend:  http://localhost:8889
+- Web Frontend: http://localhost:3002
+
+Para ver logs en tiempo real:
+  tail -f logs/backend.log    # Backend Python
+  tail -f logs/frontend.log   # Frontend Next.js
+  tail -f logs/backend.log logs/frontend.log  # Ambos juntos
+Presiona Ctrl+C para detener ambos servicios.
+==========================================================
+./start_local.sh: line 53: 511982 Killed                  npm run dev >> logs/frontend.log 2>&1

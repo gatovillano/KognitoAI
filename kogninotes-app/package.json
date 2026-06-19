@@ -26,6 +26,7 @@
     "expo-status-bar": "~3.0.9",
     "expo-web-browser": "~15.0.10",
     "jwt-decode": "^4.0.0",
+    "lines-and-columns": "^2.0.4",
     "lucide-react-native": "^0.562.0",
     "markdown-it": "^14.1.0",
     "react": "19.1.0",
@@ -37,5 +38,8 @@
     "react-native-svg": "^15.12.1",
     "react-native-webview": "^13.16.1"
   },
-  "private": true
+  "private": true,
+  "devDependencies": {
+    "@react-native-community/cli": "^20.1.3"
+  }
 }

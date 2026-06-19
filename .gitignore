@@ -34,6 +34,36 @@ cuda-keyring_1.1-1_all.deb
 # Docker Secrets
 secrets/
 venv
-kogninotes-app
 .kilo
 venv_host
+
+# Build cache and outputs
+tsconfig.tsbuildinfo
+*.apk
+*.aab
+
+# Local uploads and data storage
+storage/
+media/
+
+# Temporary scratch/debug files
+scratch/
+mindmap_*
+*.bak
+*.backup
+*.bak_*
+**/.backups/
+
+# Skill reports and metrics
+skills/**/reports/
+skills/**/.env
+
+# Core Agents Backups
+core/agents_langgraph_backup/
+core/agents/*_backup.py
+
+# Root-level test/debug scripts
+/test_*.py
+/check_*.py
+/add_*.py
+/create_mcp_table.py

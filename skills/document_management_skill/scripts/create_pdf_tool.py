@@ -349,8 +349,68 @@ class CreatePDFTool(BaseTool):
             
             # 1. Create directory for generated media using absolute MEDIA_ROOT
             from api.galleries import MEDIA_ROOT
-            output_dir = os.path.join(MEDIA_ROOT, "generated_pdfs")
-            os.makedirs(output_dir, exist_ok=True)
+            
+            # Ensure MEDIA_ROOT is absolute
+            absolute_media_root = os.path.abspath(MEDIA_ROOT)
+            output_dir = os.path.abspath(os.path.join(absolute_media_root, "generated_pdfs"))
+            
+            # Security check: verify that output_dir is within MEDIA_ROOT (prevent path traversal)
+            try:
+                common_path = os.path.commonpath([absolute_media_root, output_dir])
+                if common_path != absolute_media_root:
+                    raise ValueError("El directorio de salida no está dentro de MEDIA_ROOT.")
+            except Exception as path_err:
+                logger.error(f"❌ Error de validación de seguridad de ruta: {path_err}")
+                raise ValueError(f"Acceso denegado: El directorio de salida debe estar aislado dentro de MEDIA_ROOT. Detalle: {path_err}")
+            
+            # Fallback and validation mechanism for write permissions
+            is_writable = False
+            
+            # Check if exists and test write permission
+            if os.path.exists(output_dir):
+                test_file = os.path.join(output_dir, f".write_test_{uuid.uuid4().hex}")
+                try:
+                    with open(test_file, "w") as f:
+                        f.write("test")
+                    os.remove(test_file)
+                    is_writable = True
+                except (PermissionError, OSError) as write_err:
+                    logger.warning(f"⚠️ El directorio {output_dir} existe pero no es escribible: {write_err}. Intentando resolver...")
+                    # Parent directory is usually writable. Try to rename it.
+                    try:
+                        backup_dir = os.path.join(absolute_media_root, f"generated_pdfs_backup_{uuid.uuid4().hex[:6]}")
+                        os.rename(output_dir, backup_dir)
+                        logger.info(f"✅ Se renombró el directorio no escribible a: {backup_dir}")
+                    except Exception as rename_err:
+                        logger.error(f"❌ No se pudo renombrar el directorio no escribible: {rename_err}")
+                        # Fallback to a fallback folder name under MEDIA_ROOT
+                        output_dir = os.path.abspath(os.path.join(absolute_media_root, "generated_pdfs_fallback"))
+            
+            # Ensure output directory exists
+            try:
+                os.makedirs(output_dir, exist_ok=True)
+                # Test write on the newly created or fallback directory
+                test_file = os.path.join(output_dir, f".write_test_{uuid.uuid4().hex}")
+                with open(test_file, "w") as f:
+                    f.write("test")
+                os.remove(test_file)
+                is_writable = True
+            except (PermissionError, OSError) as create_err:
+                logger.error(f"❌ No se pudo crear o escribir en el directorio ({output_dir}): {create_err}. Usando fallback local en el workspace.")
+                # Local workspace fallback
+                output_dir = os.path.abspath("media/generated_pdfs")
+                os.makedirs(output_dir, exist_ok=True)
+                
+                # Test write on the local fallback
+                test_file = os.path.join(output_dir, f".write_test_{uuid.uuid4().hex}")
+                try:
+                    with open(test_file, "w") as f:
+                        f.write("test")
+                    os.remove(test_file)
+                    is_writable = True
+                except (PermissionError, OSError) as local_err:
+                    logger.critical(f"❌ ERROR CRÍTICO: Tampoco es posible escribir en el fallback local ({output_dir}): {local_err}")
+                    raise PermissionError(f"No hay permisos de escritura en ningún directorio de salida disponible: {local_err}")
             
             # 2. Determine final filename with uniqueness to avoid caching
             suffix = uuid.uuid4().hex[:4]
@@ -365,7 +425,16 @@ class CreatePDFTool(BaseTool):
             
             # Clean filename
             filename = re.sub(r'[^\w\.-]', '_', filename)
-            file_path = os.path.join(output_dir, filename)
+            file_path = os.path.abspath(os.path.join(output_dir, filename))
+            
+            # Security check: verify that file_path is within output_dir
+            try:
+                common_path = os.path.commonpath([output_dir, file_path])
+                if common_path != output_dir:
+                    raise ValueError("El archivo destino no está dentro del directorio de salida.")
+            except Exception as path_err:
+                logger.error(f"❌ Error de validación de seguridad de archivo: {path_err}")
+                raise ValueError(f"Acceso denegado: El archivo destino debe estar aislado dentro del directorio de salida.")
             
             # 3. Process content based on is_html flag
             
@@ -461,14 +530,70 @@ class CreatePDFTool(BaseTool):
             
             logger.info(f"✅ PDF successfully generated at: {file_path}")
             
+            # Automatically save to OnlyOffice documents cloud if account_id is present
+            onlyoffice_saved = False
+            onlyoffice_doc_id = None
+            if self.account_id:
+                try:
+                    import shutil
+                    from core.database import SessionLocal, Document
+                    from core.config import settings
+                    
+                    onlyoffice_docs_root = settings.onlyoffice_docs_root
+                    onlyoffice_user_dir = os.path.join(onlyoffice_docs_root, self.account_id)
+                    os.makedirs(onlyoffice_user_dir, exist_ok=True)
+                    
+                    onlyoffice_unique_filename = f"{uuid.uuid4().hex}.pdf"
+                    onlyoffice_file_path = os.path.join(onlyoffice_user_dir, onlyoffice_unique_filename)
+                    
+                    # Copy the generated PDF file to OnlyOffice documents path
+                    shutil.copy2(file_path, onlyoffice_file_path)
+                    
+                    # DB Registration
+                    acc_id = uuid.UUID(self.account_id)
+                    wsp_id = None
+                    if self.workspace_id and self.workspace_id != "null":
+                        try:
+                            wsp_id = uuid.UUID(self.workspace_id)
+                        except ValueError:
+                            pass
+                    
+                    display_filename = filename
+                    if not display_filename.lower().endswith(".pdf"):
+                        display_filename = f"{display_filename}.pdf"
+                    
+                    async with SessionLocal() as db:
+                        new_doc = Document(
+                            account_id=acc_id,
+                            workspace_id=wsp_id,
+                            folder_id=None,
+                            filename=display_filename,
+                            extension="pdf",
+                            file_path=os.path.join(self.account_id, onlyoffice_unique_filename)
+                        )
+                        db.add(new_doc)
+                        await db.commit()
+                        await db.refresh(new_doc)
+                        onlyoffice_saved = True
+                        onlyoffice_doc_id = str(new_doc.id)
+                        logger.info(f"PDF automatically saved to OnlyOffice documents cloud. ID: {new_doc.id}")
+                except Exception as oo_err:
+                    logger.error(f"Error automatically saving PDF to OnlyOffice documents cloud: {oo_err}", exc_info=True)
+
             # Construct the download URL using the absolute API server URL
             from core.config import settings
             base_url = settings.api_server_url.rstrip("/")
-            download_url = f"{base_url}/media/generated_pdfs/{filename}"
+            folder_name = os.path.basename(output_dir)
+            download_url = f"{base_url}/media/{folder_name}/{filename}"
             
+            context_msg = f"PDF generado exitosamente: '{title}'."
+            if onlyoffice_saved:
+                context_msg += f" El documento también se guardó automáticamente en la nube de OnlyOffice (ID: {onlyoffice_doc_id})."
+            context_msg += f" La URL de descarga es: {download_url}. El usuario puede descargarlo desde el archivo adjunto o usando este enlace."
+
             # Return structured output with sources so it renders as an attachment
             return {
-                "context_for_llm": f"PDF generado exitosamente: '{title}'. La URL de descarga es: {download_url}. El usuario puede descargarlo desde el archivo adjunto o usando este enlace.",
+                "context_for_llm": context_msg,
                 "sources": [
                     {
                         "id": 1,
@@ -480,7 +605,8 @@ class CreatePDFTool(BaseTool):
                             "filename": filename,
                             "file_path": file_path,
                             "generated_at": datetime.now().isoformat(),
-                            "size_hint": "A4"
+                            "size_hint": "A4",
+                            "onlyoffice_document_id": onlyoffice_doc_id if onlyoffice_saved else None
                         }
                     }
                 ]

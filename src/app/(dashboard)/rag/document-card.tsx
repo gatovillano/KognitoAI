@@ -15,7 +15,7 @@ interface DocumentCardProps {
   onDelete: (doc: Document) => void;
   onAnalyze: (doc: Document) => void;
   onShare: (doc: Document) => void;
-  onSummarize: (doc: Document) => void;
+  onSummarize?: (doc: Document) => void;
   onExtractTitle: (doc: Document) => void;
   onMoveToCollection?: (doc: Document) => void;
 }
@@ -60,10 +60,12 @@ export function DocumentCard({
               <DropdownMenuItem onClick={() => onAnalyze(document)}>
                 Analizar Documento
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => onSummarize(document)}>
-                <Sparkles className="mr-2 h-4 w-4" />
-                Resumir
-              </DropdownMenuItem>
+              {onSummarize && (
+                <DropdownMenuItem onClick={() => onSummarize(document)}>
+                  <Sparkles className="mr-2 h-4 w-4" />
+                  Resumir
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem onClick={() => onExtractTitle(document)}>
                 Extraer Título
               </DropdownMenuItem>

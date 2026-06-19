@@ -1,6 +1,5 @@
 # skills/onlyoffice_skill/scripts/read_onlyoffice_document_tool.py
 
-import os
 import logging
 import uuid
 import csv
@@ -10,7 +9,7 @@ from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 from sqlalchemy import select
 from core.database import SessionLocal, Document
-from core.config import settings
+from core.onlyoffice_storage import resolve_onlyoffice_file_path
 from utils.document_parser import extract_text_and_metadata_from_document
 
 try:
@@ -24,15 +23,6 @@ except ImportError:
     Presentation = None
 
 logger = logging.getLogger(__name__)
-
-# Intentar importar settings, con fallback si no está disponible
-try:
-    from core.config import settings
-    DEFAULT_DOCS_ROOT = os.path.join(settings.media_root, "documents")
-except ImportError:
-    DEFAULT_DOCS_ROOT = os.path.join(os.getenv("MEDIA_ROOT", "/media/documents"), "documents")
-DOCUMENTS_ROOT = os.environ.get("ONLYOFFICE_DOCS_ROOT", DEFAULT_DOCS_ROOT)
-
 
 class ReadOnlyOfficeInput(BaseModel):
     document_id: str = Field(..., description="ID UUID del documento que se desea leer.")
@@ -65,24 +55,16 @@ class ReadOnlyOfficeDocumentTool(BaseTool):
                 return f"Documento con ID '{document_id}' no encontrado o no tienes permiso para leerlo."
 
             # Resolver ruta física
-            file_path = doc.file_path
-            if not os.path.isabs(file_path):
-                file_path = os.path.join(DOCUMENTS_ROOT, file_path)
+            try:
+                file_path = resolve_onlyoffice_file_path(doc.file_path)
+            except ValueError as exc:
+                return f"Ruta física inválida para '{doc.filename}': {exc}"
 
-            if not os.path.exists(file_path):
-                # Fallback: buscar relativo al cwd
-                for candidate in [
-                    os.path.join(os.getcwd(), "media", "documents", doc.file_path),
-                    os.path.join(os.getcwd(), doc.file_path),
-                ]:
-                    if os.path.exists(candidate):
-                        file_path = candidate
-                        break
-                else:
-                    return (
-                        f"El archivo físico '{doc.filename}' no se encuentra en el servidor. "
-                        f"Ruta buscada: {file_path}"
-                    )
+            if not file_path.exists():
+                return (
+                    f"El archivo físico '{doc.filename}' no se encuentra en el servidor. "
+                    f"Ruta buscada: {file_path}"
+                )
 
             with open(file_path, "rb") as f:
                 file_bytes = f.read()

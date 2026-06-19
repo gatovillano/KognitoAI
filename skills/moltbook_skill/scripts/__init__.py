@@ -1,0 +1,1 @@
+# Moltbook Skill scripts package

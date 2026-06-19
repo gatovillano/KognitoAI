@@ -5,7 +5,7 @@ from typing import List, Optional, cast, Dict
 import asyncio
 from datetime import datetime, timedelta, timezone
 
-from core.llm_manager import get_fast_llm
+from core.llm_manager import get_fast_llm, get_llm_for_user
 
 from fastapi import APIRouter, HTTPException, Depends, status, Form, BackgroundTasks
 from pydantic import BaseModel
@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.memory_manager import list_user_documents, get_full_document_content
 from core.database import GitHubDocument
 from utils.advanced_text_analyzer import text_analyzer
+from utils.document_summarizer import run_document_summary_and_save
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 import numpy as np
@@ -27,6 +28,10 @@ from core.dependencies import get_db_session
 from utils.db_session import DBSession
 from core.notes_manager import NotesManager
 from utils.note_analysis_utils import analyze_single_note, analyze_note_collection, summarize_note
+from utils.analysis_progress import (
+    send_analysis_progress,
+    persist_analysis_progress,
+)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -177,7 +182,7 @@ async def get_saved_analyses_endpoint(
             return all_analyses[:50] # Esto no debería ocurrir si req.workspace_id es Optional[str]
 
 class DeleteAnalysisRequest(BaseModel):
-    task_id: str
+    task_id: uuid.UUID
 
 class DeleteProactiveInsightRequest(BaseModel):
     insight_id: int
@@ -193,7 +198,7 @@ async def delete_analysis_endpoint(
     """
     try:
         account_uuid = uuid.UUID(current_account_id)
-        task_uuid = uuid.UUID(req.task_id)
+        task_uuid = req.task_id
     except ValueError:
         raise HTTPException(status_code=400, detail="ID de tarea inválido. Debe ser un UUID válido.")
     
@@ -229,6 +234,24 @@ async def delete_proactive_insight_endpoint(
     await db.delete(insight)
     await db.commit()
     return {"message": f"Insight con ID {req.insight_id} eliminado correctamente."}
+
+class AcceptProactiveInsightRequest(BaseModel):
+    insight_id: int
+
+@router.post("/accept-proactive-insight", summary="Aceptar un insight proactivo")
+async def accept_proactive_insight_endpoint(
+    req: AcceptProactiveInsightRequest,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    account_uuid = uuid.UUID(current_account_id)
+    insight = await db.get(ProactiveInsight, req.insight_id)
+    if insight is None or str(insight.account_id) != str(account_uuid):
+        raise HTTPException(status_code=404, detail="Insight no encontrado.")
+    
+    insight.status = "accepted"
+    await db.commit()
+    return {"message": "Insight aceptado correctamente."}
 
 class DashboardInsightsRequest(BaseModel):
     all: bool = False
@@ -654,26 +677,147 @@ async def run_document_analysis_and_save(task_id: str, account_id: str, file_nam
     """Función pesada que se ejecuta en segundo plano."""
     async with DBSession(SessionLocal) as db_session: # type: ignore
         try:
-            # 1. Marcar la tarea como 'processing'
-            stmt_processing = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(status="processing")
-            await db_session.execute(stmt_processing)
-            await db_session.commit()
-            
+            await persist_analysis_progress(
+                db_session,
+                task_id,
+                status="processing",
+                phase="initializing",
+                message=f'Preparando análisis de "{file_name}"...',
+                progress_percent=5,
+                analysis_type="document",
+                file_name=file_name,
+            )
+            await send_analysis_progress(
+                account_id,
+                task_id,
+                phase="initializing",
+                message=f'Preparando análisis de "{file_name}"...',
+                progress_percent=5,
+                file_name=file_name,
+                analysis_type="document",
+            )
+
             logger.info(f"Iniciando análisis para tarea {task_id}...")
+            await persist_analysis_progress(
+                db_session,
+                task_id,
+                phase="reconstructing_content",
+                message="Cargando contenido completo del documento...",
+                progress_percent=18,
+                analysis_type="document",
+                file_name=file_name,
+            )
+            await send_analysis_progress(
+                account_id,
+                task_id,
+                phase="reconstructing_content",
+                message="Cargando contenido completo del documento...",
+                progress_percent=18,
+                file_name=file_name,
+                analysis_type="document",
+            )
             text_content = await get_full_document_content(account_id, file_name)
-            if not text_content: raise ValueError("Contenido del documento no encontrado.")
-            # 2. Realizar el análisis pesado
-            analysis_result = await text_analyzer.analyze_single_text(text_content, document_title=file_name, account_id=str(account_id))
+            if not text_content:
+                raise ValueError("Contenido del documento no encontrado.")
+
+            await persist_analysis_progress(
+                db_session,
+                task_id,
+                phase="analyzing",
+                message="Analizando estructura, conceptos y brechas del documento...",
+                progress_percent=35,
+                analysis_type="document",
+                file_name=file_name,
+            )
+            await send_analysis_progress(
+                account_id,
+                task_id,
+                phase="analyzing",
+                message="Analizando estructura, conceptos y brechas del documento...",
+                progress_percent=35,
+                file_name=file_name,
+                analysis_type="document",
+            )
+
+            _llm_done = asyncio.Event()
+
+            async def _progress_ticker():
+                steps = [
+                    (42, "Extrayendo ideas principales..."),
+                    (50, "Identificando temas clave..."),
+                    (58, "Detectando conceptos centrales..."),
+                    (66, "Buscando brechas de conocimiento..."),
+                    (74, "Formulando preguntas de exploración..."),
+                    (82, "Redactando síntesis estratégica..."),
+                    (88, "Revisando consistencia del análisis..."),
+                ]
+                for pct, msg in steps:
+                    try:
+                        await asyncio.wait_for(_llm_done.wait(), timeout=6.0)
+                        break
+                    except asyncio.TimeoutError:
+                        pass
+                    if _llm_done.is_set():
+                        break
+                    await persist_analysis_progress(
+                        db_session,
+                        task_id,
+                        phase="analyzing",
+                        message=msg,
+                        progress_percent=pct,
+                        analysis_type="document",
+                        file_name=file_name,
+                    )
+                    await send_analysis_progress(
+                        account_id,
+                        task_id,
+                        phase="analyzing",
+                        message=msg,
+                        progress_percent=pct,
+                        file_name=file_name,
+                        analysis_type="document",
+                    )
+
+            async def _run_llm():
+                result = await text_analyzer.analyze_single_text(
+                    text_content,
+                    document_title=file_name,
+                    account_id=str(account_id),
+                )
+                _llm_done.set()
+                return result
+
+            analysis_result, _ = await asyncio.gather(_run_llm(), _progress_ticker())
 
             # 3. Guardar el resultado y marcar como 'completed'
             # Asegurarse de que el resultado sea un diccionario
             result_payload = analysis_result if isinstance(analysis_result, dict) else analysis_result.dict()
+
+            await persist_analysis_progress(
+                db_session,
+                task_id,
+                phase="saving_to_neo4j",
+                message="Guardando resultado final del análisis...",
+                progress_percent=94,
+                analysis_type="document",
+                file_name=file_name,
+            )
+            await send_analysis_progress(
+                account_id,
+                task_id,
+                phase="saving_to_neo4j",
+                message="Guardando resultado final del análisis...",
+                progress_percent=94,
+                file_name=file_name,
+                analysis_type="document",
+            )
 
             # Agregar metadata de herramienta utilizada
             result_payload["tool_used"] = "advanced_text_analyzer.py"
             result_payload["analysis_metadata"] = {
                 "tool_used": "advanced_text_analyzer.py",
                 "analysis_type": "document",
+                "file_name": file_name,
                 "created_at": datetime.now().isoformat()
             }
 
@@ -682,6 +826,16 @@ async def run_document_analysis_and_save(task_id: str, account_id: str, file_nam
             await db_session.execute(stmt_completed)
             await db_session.commit()
             logger.info(f"Análisis para tarea {task_id} completado.")
+            await send_analysis_progress(
+                account_id,
+                task_id,
+                phase="completed",
+                message="¡Análisis del documento completado!",
+                progress_percent=100,
+                file_name=file_name,
+                analysis_type="document",
+                is_complete=True,
+            )
 
         except Exception as e:
             logger.error(f"Fallo en tarea de análisis {task_id}: {e}", exc_info=True)
@@ -689,6 +843,29 @@ async def run_document_analysis_and_save(task_id: str, account_id: str, file_nam
                 status="failed", error_message=str(e))
             await db_session.execute(stmt_failed)
             await db_session.commit()
+            await persist_analysis_progress(
+                db_session,
+                task_id,
+                phase="error",
+                message="El análisis del documento falló.",
+                progress_percent=100,
+                status="failed",
+                analysis_type="document",
+                file_name=file_name,
+                has_error=True,
+                error=str(e),
+            )
+            await send_analysis_progress(
+                account_id,
+                task_id,
+                phase="error",
+                message="El análisis del documento falló.",
+                progress_percent=100,
+                file_name=file_name,
+                analysis_type="document",
+                has_error=True,
+                error=str(e),
+            )
 
 @router.post("/start-document-analysis", status_code=202)
 async def start_document_analysis_endpoint(
@@ -717,6 +894,42 @@ async def start_document_analysis_endpoint(
     
     return {"task_id": str(new_task.id)}
 
+class SummarizeDocumentRequest(BaseModel):
+    file_name: str
+    workspace_id: Optional[str] = None
+
+@router.post("/start-document-summary", status_code=202)
+async def start_document_summary_endpoint(
+    req: SummarizeDocumentRequest,
+    background_tasks: BackgroundTasks,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """Inicia un resumen estructurado de un documento y devuelve un ID de tarea."""
+    content_check = await get_full_document_content(current_account_id, req.file_name)
+    if content_check is None:
+        raise HTTPException(status_code=404, detail="Documento no encontrado.")
+
+    new_task = AnalysisTask(
+        account_id=uuid.UUID(current_account_id),
+        file_name=req.file_name,
+        status="pending",
+        analysis_type="document_summary"
+    )
+    db.add(new_task)
+    await db.commit()
+    await db.refresh(new_task)
+
+    background_tasks.add_task(
+        run_document_summary_and_save,
+        str(new_task.id),
+        current_account_id,
+        req.file_name,
+        req.workspace_id
+    )
+
+    return {"task_id": str(new_task.id)}
+
 @router.get("/get-analysis-result/{task_id}")
 async def get_analysis_result_endpoint(
     task_id: str,
@@ -733,12 +946,24 @@ async def get_analysis_result_endpoint(
         logger.warning(f"Tarea {task_id} encontrada, pero account_id no coincide. Task account: {task.account_id}, Current account: {current_account_id}")
         raise HTTPException(status_code=404, detail="Tarea no pertenece al usuario.")
     logger.info(f"Tarea {task_id} encontrada. Estado: {task.status}")
+    progress_info = {}
+    if isinstance(task.result_payload, dict):
+        progress_info = task.result_payload.get("analysis_progress") or {}
+
+    progress_percent = progress_info.get("progress_percent")
+    if progress_percent is None and task.status == "completed":
+        progress_percent = 100
+
+    current_step = progress_info.get("message") or progress_info.get("phase")
     return {
         "id": str(task.id),
         "status": task.status,
         "result": task.result_payload,
         "result_payload": task.result_payload, # Redundant but safe
         "error": task.error_message,
+        "progress": progress_percent,
+        "current_step": current_step,
+        "progress_info": progress_info,
         "analysis_type": task.analysis_type,
         "file_name": task.file_name,
         "created_at": task.created_at.isoformat() if task.created_at else None
@@ -772,25 +997,17 @@ async def _send_analysis_progress(
     error: Optional[str] = None,
 ):
     """Emite un evento analysis_progress vía WebSocket al cliente."""
-    try:
-        from core.websocket_manager import send_personal_message
-        payload = {
-            "type": "analysis_progress",
-            "data": {
-                "task_id": task_id,
-                "phase": phase,
-                "message": message,
-                "progress_percent": progress_percent,
-                "is_complete": is_complete,
-                "has_error": has_error,
-                "error": error,
-                "processing_mode": "conceptual",
-                "topic": topic,
-            }
-        }
-        await send_personal_message(account_id, payload)
-    except Exception as ws_err:
-        logger.warning(f"No se pudo enviar progreso de análisis vía WebSocket: {ws_err}")
+    await send_analysis_progress(
+        account_id,
+        task_id,
+        phase=phase,
+        message=message,
+        progress_percent=progress_percent,
+        topic=topic,
+        is_complete=is_complete,
+        has_error=has_error,
+        error=error,
+    )
 
 
 async def run_collection_analysis_and_save(task_id: str, account_id: str, topic: str, workspace_id: Optional[str] = None):
@@ -2379,6 +2596,7 @@ async def get_all_analysis_endpoint(
                 "confidence_score": insight.confidence_score,
                 "action_suggestion": insight.action_suggestion,
                 "related_items": actual_items,
+                "status": insight.status,
                 "workspace_id": str(insight.workspace_id) if getattr(insight, 'workspace_id', None) else None,
                 "workspace_name": insight.workspace.name if getattr(insight, 'workspace', None) else None,
                 "workspace_color": insight.workspace.color if getattr(insight, 'workspace', None) else None,
@@ -2393,43 +2611,7 @@ async def get_all_analysis_endpoint(
                     "tool_used": tool_used
                 }
             })
-
-    # 4. Obtener GapDevelopmentAnalysis
-    if not req.analysis_type or req.analysis_type == 'gap_development':
-        gap_stmt = select(GapDevelopmentAnalysis).where(
-            GapDevelopmentAnalysis.account_id == account_uuid,
-            GapDevelopmentAnalysis.status == "completed"
-        ).order_by(GapDevelopmentAnalysis.updated_at.desc())
-
-        if req.search_query:
-            gap_stmt = gap_stmt.where(
-                or_(
-                    func.cast(GapDevelopmentAnalysis.report, String).ilike(f"%{req.search_query}%")
-                )
-            )
-
-        gap_results = await db.execute(gap_stmt)
-        gap_tasks = gap_results.scalars().all()
-
-        for task in gap_tasks:
-            report_obj = task.report or {}
-            summary = "Sin resumen disponible"
-            if isinstance(report_obj, dict):
-                summary = report_obj.get("summary", "Informe de investigación profunda")
-            else:
-                summary = str(report_obj)[:200]
-
-            all_analysis.append({
-                "id": str(task.id),
-                "type": "gap_development",
-                "title": f"Desarrollo de Brecha",
-                "summary": summary,
-                "created_at": task.created_at.isoformat(),
-                "updated_at": task.updated_at.isoformat(),
-                "source_table": "gap_development_analysis",
-                "tool_used": "deep_researcher.py",
-                "full_data": {"report": task.report}
-            })
+    # 4. Obtener GapDevelopmentAnalysis (Comentado para evitar duplicados en el listado, ya que se registran y retornan a través de AnalysisTask)
 
     # 5. Ordenar por fecha de actualización y aplicar paginación
     all_analysis.sort(key=lambda x: x['updated_at'], reverse=True)

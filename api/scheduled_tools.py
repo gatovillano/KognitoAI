@@ -103,6 +103,47 @@ class CustomHeartbeatConfig(BaseModel):
     interval_minutes: Optional[int] = Field(60, ge=5, le=1440, description="Frecuencia en minutos.")
     allowed_tools: List[str] = Field(default_factory=list, description="Herramientas permitidas.")
 
+class CustomHeartbeatResponse(BaseModel):
+    id: uuid.UUID
+    name: str
+    instructions: str
+    schedule_type: str # "interval", "daily", "weekly"
+    interval_minutes: Optional[int] = None
+    hour: Optional[int] = None
+    minute: Optional[int] = None
+    day_of_week: Optional[int] = None
+    allowed_tools: List[str]
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+    next_run: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+class CreateCustomHeartbeatRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=255)
+    instructions: str = Field(..., min_length=1)
+    schedule_type: str = Field(default="interval") # "interval", "daily", "weekly"
+    interval_minutes: Optional[int] = Field(None, ge=5, le=1440)
+    hour: Optional[int] = Field(None, ge=0, le=23)
+    minute: Optional[int] = Field(None, ge=0, le=59)
+    day_of_week: Optional[int] = Field(None, ge=0, le=6)
+    allowed_tools: List[str] = Field(default_factory=list)
+    is_active: bool = Field(default=True)
+
+class UpdateCustomHeartbeatRequest(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=255)
+    instructions: Optional[str] = Field(None, min_length=1)
+    schedule_type: Optional[str] = Field(None)
+    interval_minutes: Optional[int] = Field(None, ge=5, le=1440)
+    hour: Optional[int] = Field(None, ge=0, le=23)
+    minute: Optional[int] = Field(None, ge=0, le=59)
+    day_of_week: Optional[int] = Field(None, ge=0, le=6)
+    allowed_tools: Optional[List[str]] = None
+    is_active: Optional[bool] = None
+
+
 # --- Helpers de configuración persistente del heartbeat admin ---
 
 _HEARTBEAT_KEYS = {
@@ -212,6 +253,248 @@ async def trigger_my_custom_heartbeat(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/scheduled-tools/custom-heartbeats", response_model=List[CustomHeartbeatResponse], summary="Obtener todos mis heartbeats personalizados")
+async def list_my_custom_heartbeats(
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """Obtiene la lista de todos los heartbeats personalizados del usuario actual."""
+    from core.database import CustomHeartbeat
+    account_uuid = uuid.UUID(current_account_id)
+    stmt = select(CustomHeartbeat).where(CustomHeartbeat.account_id == account_uuid).order_by(CustomHeartbeat.created_at.desc())
+    result = await db.execute(stmt)
+    hbs = result.scalars().all()
+    
+    response = []
+    for hb in hbs:
+        job_id = f"custom_{hb.id}"
+        job = tool_scheduler.scheduler.get_job(job_id)
+        next_run = _get_next_run_time(job) if job else None
+        
+        response.append(CustomHeartbeatResponse(
+            id=hb.id,
+            name=hb.name,
+            instructions=hb.instructions,
+            schedule_type=hb.schedule_type,
+            interval_minutes=hb.interval_minutes,
+            hour=hb.hour,
+            minute=hb.minute,
+            day_of_week=hb.day_of_week,
+            allowed_tools=hb.allowed_tools or [],
+            is_active=hb.is_active,
+            created_at=hb.created_at,
+            updated_at=hb.updated_at,
+            next_run=next_run
+        ))
+    return response
+
+
+@router.post("/scheduled-tools/custom-heartbeats", response_model=CustomHeartbeatResponse, summary="Crear un nuevo heartbeat personalizado")
+async def create_custom_heartbeat(
+    request: CreateCustomHeartbeatRequest,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """Crea un nuevo heartbeat personalizado para el usuario actual y lo programa."""
+    from core.database import CustomHeartbeat
+    account_uuid = uuid.UUID(current_account_id)
+    
+    new_hb = CustomHeartbeat(
+        account_id=account_uuid,
+        name=request.name,
+        instructions=request.instructions,
+        schedule_type=request.schedule_type,
+        interval_minutes=request.interval_minutes,
+        hour=request.hour,
+        minute=request.minute,
+        day_of_week=request.day_of_week,
+        allowed_tools=request.allowed_tools,
+        is_active=request.is_active
+    )
+    db.add(new_hb)
+    await db.commit()
+    await db.refresh(new_hb)
+    
+    # Programar el job si está activo
+    if new_hb.is_active:
+        from utils.tool_scheduler import schedule_custom_heartbeat
+        await schedule_custom_heartbeat(
+            heartbeat_id=str(new_hb.id),
+            account_id=current_account_id,
+            schedule_type=new_hb.schedule_type,
+            instructions=new_hb.instructions,
+            allowed_tools=new_hb.allowed_tools,
+            interval_minutes=new_hb.interval_minutes,
+            hour=new_hb.hour,
+            minute=new_hb.minute,
+            day_of_week=new_hb.day_of_week
+        )
+        
+    job_id = f"custom_{new_hb.id}"
+    job = tool_scheduler.scheduler.get_job(job_id)
+    next_run = _get_next_run_time(job) if job else None
+    
+    return CustomHeartbeatResponse(
+        id=new_hb.id,
+        name=new_hb.name,
+        instructions=new_hb.instructions,
+        schedule_type=new_hb.schedule_type,
+        interval_minutes=new_hb.interval_minutes,
+        hour=new_hb.hour,
+        minute=new_hb.minute,
+        day_of_week=new_hb.day_of_week,
+        allowed_tools=new_hb.allowed_tools or [],
+        is_active=new_hb.is_active,
+        created_at=new_hb.created_at,
+        updated_at=new_hb.updated_at,
+        next_run=next_run
+    )
+
+
+@router.put("/scheduled-tools/custom-heartbeats/{heartbeat_id}", response_model=CustomHeartbeatResponse, summary="Actualizar un heartbeat personalizado")
+async def update_custom_heartbeat(
+    heartbeat_id: str,
+    request: UpdateCustomHeartbeatRequest,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """Actualiza un heartbeat personalizado existente."""
+    from core.database import CustomHeartbeat
+    hb_uuid = uuid.UUID(heartbeat_id)
+    account_uuid = uuid.UUID(current_account_id)
+    
+    hb = await db.get(CustomHeartbeat, hb_uuid)
+    if not hb or hb.account_id != account_uuid:
+        raise HTTPException(status_code=404, detail="Heartbeat no encontrado")
+        
+    if request.name is not None:
+        hb.name = request.name
+    if request.instructions is not None:
+        hb.instructions = request.instructions
+    if request.schedule_type is not None:
+        hb.schedule_type = request.schedule_type
+    if request.interval_minutes is not None:
+        hb.interval_minutes = request.interval_minutes
+    if request.hour is not None:
+        hb.hour = request.hour
+    if request.minute is not None:
+        hb.minute = request.minute
+    if request.day_of_week is not None:
+        hb.day_of_week = request.day_of_week
+    if request.allowed_tools is not None:
+        hb.allowed_tools = request.allowed_tools
+    if request.is_active is not None:
+        hb.is_active = request.is_active
+        
+    await db.commit()
+    await db.refresh(hb)
+    
+    # Actualizar la programación
+    from utils.tool_scheduler import cancel_custom_heartbeat, schedule_custom_heartbeat
+    if hb.is_active:
+        await schedule_custom_heartbeat(
+            heartbeat_id=str(hb.id),
+            account_id=current_account_id,
+            schedule_type=hb.schedule_type,
+            instructions=hb.instructions,
+            allowed_tools=hb.allowed_tools,
+            interval_minutes=hb.interval_minutes,
+            hour=hb.hour,
+            minute=hb.minute,
+            day_of_week=hb.day_of_week
+        )
+    else:
+        cancel_custom_heartbeat(str(hb.id))
+        
+    job_id = f"custom_{hb.id}"
+    job = tool_scheduler.scheduler.get_job(job_id)
+    next_run = _get_next_run_time(job) if job else None
+    
+    return CustomHeartbeatResponse(
+        id=hb.id,
+        name=hb.name,
+        instructions=hb.instructions,
+        schedule_type=hb.schedule_type,
+        interval_minutes=hb.interval_minutes,
+        hour=hb.hour,
+        minute=hb.minute,
+        day_of_week=hb.day_of_week,
+        allowed_tools=hb.allowed_tools or [],
+        is_active=hb.is_active,
+        created_at=hb.created_at,
+        updated_at=hb.updated_at,
+        next_run=next_run
+    )
+
+
+@router.delete("/scheduled-tools/custom-heartbeats/{heartbeat_id}", response_model=Dict[str, str], summary="Eliminar un heartbeat personalizado")
+async def delete_custom_heartbeat(
+    heartbeat_id: str,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """Elimina un heartbeat personalizado."""
+    from core.database import CustomHeartbeat
+    hb_uuid = uuid.UUID(heartbeat_id)
+    account_uuid = uuid.UUID(current_account_id)
+    
+    hb = await db.get(CustomHeartbeat, hb_uuid)
+    if not hb or hb.account_id != account_uuid:
+        raise HTTPException(status_code=404, detail="Heartbeat no encontrado")
+        
+    from utils.tool_scheduler import cancel_custom_heartbeat
+    cancel_custom_heartbeat(str(hb.id))
+    
+    await db.delete(hb)
+    await db.commit()
+    
+    return {"status": "success", "message": "Heartbeat personalizado eliminado con éxito"}
+
+
+@router.post("/scheduled-tools/custom-heartbeats/{heartbeat_id}/trigger", response_model=Dict[str, str], summary="Lanzar un heartbeat personalizado manualmente")
+async def trigger_custom_heartbeat(
+    heartbeat_id: str,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """Lanza un heartbeat personalizado específico del usuario inmediatamente."""
+    from core.database import CustomHeartbeat
+    hb_uuid = uuid.UUID(heartbeat_id)
+    account_uuid = uuid.UUID(current_account_id)
+    
+    hb = await db.get(CustomHeartbeat, hb_uuid)
+    if not hb or hb.account_id != account_uuid:
+        raise HTTPException(status_code=404, detail="Heartbeat no encontrado")
+        
+    logger.info(f"Usuario {current_account_id} lanzando heartbeat manual '{hb.name}' ({hb.id})")
+    try:
+        from core.agent import run_custom_user_heartbeat
+        result = await run_custom_user_heartbeat(
+            account_id=current_account_id,
+            heartbeat_id=str(hb.id)
+        )
+        return {"status": "success", "message": "Heartbeat iniciado", "detail": result}
+    except Exception as e:
+        logger.error(f"Error en trigger manual de heartbeat {hb.id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@router.post("/scheduled-tools/autonomous-heartbeat/trigger", response_model=Dict[str, str], summary="Lanzar mi heartbeat autónomo manualmente")
+async def trigger_my_autonomous_heartbeat(
+    current_account_id: str = Depends(get_current_account_id),
+):
+    """Lanza el heartbeat autónomo del usuario actual inmediatamente."""
+    logger.info(f"Usuario {current_account_id} lanzando heartbeat autónomo manual")
+    try:
+        from core.autonomous_heartbeat import run_autonomous_agent_heartbeat
+        result = await run_autonomous_agent_heartbeat(account_id=current_account_id)
+        return {"status": "success", "message": "Heartbeat autónomo iniciado", "detail": result}
+    except Exception as e:
+        logger.error(f"Error en trigger manual de heartbeat autónomo: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/scheduled-tools/available-tools", response_model=Dict[str, Any], summary="Listar herramientas disponibles para mi")
 async def list_my_available_tools(
     current_account_id: str = Depends(get_current_account_id),
@@ -250,32 +533,52 @@ async def list_scheduled_tools(
         # Sincronizar caché en memoria con jobs reales del scheduler.
         tool_scheduler._sync_scheduled_jobs()
 
-        # Obtener trabajos programados del scheduler
+        # Obtener trabajos programados del scheduler y precargar custom heartbeats
+        from core.database import CustomHeartbeat
+        result = await db.execute(select(CustomHeartbeat))
+        custom_hbs = {str(hb.id): hb for hb in result.scalars().all()}
+
         for job in tool_scheduler.scheduler.get_jobs():
             try:
                 job_name = job.id
-                # Extraer información del nombre del trabajo
-                parts = job_name.split('_')
-                if len(parts) >= 2:
-                    schedule_type = parts[0]  # daily, weekly, interval
-                    tool_name = parts[1]
-                    account_id = parts[2] if len(parts) > 2 and parts[2] != 'all' else None
+                # Verificar si es un heartbeat personalizado
+                if job_name.startswith("custom_"):
+                    heartbeat_id = job_name.replace("custom_", "")
+                    hb = custom_hbs.get(heartbeat_id)
+                    if hb:
+                        schedule_type = hb.schedule_type
+                        tool_name = hb.name
+                        account_id = str(hb.account_id)
+                    else:
+                        schedule_type = "custom"
+                        tool_name = f"Custom Heartbeat ({heartbeat_id[:8]})"
+                        account_id = None
+                else:
+                    # Extraer información del nombre del trabajo estándar
+                    # Formato: {schedule_type}_{tool_name}_{account_id_or_all}
+                    parts = job_name.split('_')
+                    if len(parts) >= 2:
+                        schedule_type = parts[0]  # daily, weekly, interval
+                        account_id = parts[-1] if parts[-1] != 'all' else None
+                        tool_name = "_".join(parts[1:-1])
+                    else:
+                        continue
 
-                    # Obtener información de programación
-                    schedule_info = _get_schedule_info(job, schedule_type)
-                    next_run = _get_next_run_time(job)
+                # Obtener información de programación
+                schedule_info = _get_schedule_info(job, schedule_type)
+                next_run = _get_next_run_time(job)
 
-                    scheduled_tools.append(ScheduledToolResponse(
-                        job_name=job_name,
-                        tool_name=tool_name,
-                        schedule_type=schedule_type,
-                        account_id=account_id,
-                        schedule_info=schedule_info,
-                        next_run=next_run,
-                        is_active=job.enabled if hasattr(job, 'enabled') else True
-                    ))
+                scheduled_tools.append(ScheduledToolResponse(
+                    job_name=job_name,
+                    tool_name=tool_name,
+                    schedule_type=schedule_type,
+                    account_id=account_id,
+                    schedule_info=schedule_info,
+                    next_run=next_run,
+                    is_active=job.enabled if hasattr(job, 'enabled') else True
+                ))
             except Exception as e:
-                logger.warning(f"Error procesando trabajo {job_name}: {e}")
+                logger.warning(f"Error procesando trabajo: {e}")
                 continue
 
         return scheduled_tools
@@ -643,8 +946,8 @@ async def update_scheduled_tool(
                 detail="Formato de nombre de trabajo inválido"
             )
 
-        tool_name = parts[1]
-        account_id = parts[2] if len(parts) > 2 and parts[2] != 'all' else None
+        account_id = parts[-1] if parts[-1] != 'all' else None
+        tool_name = "_".join(parts[1:-1])
 
         # Reprogramar la herramienta
         success = await scheduled_tools_manager.reschedule_tool(
@@ -724,16 +1027,54 @@ async def delete_scheduled_tool(
 def _get_schedule_info(job, schedule_type: str) -> str:
     """Obtiene información legible de la programación de un trabajo."""
     try:
-        if schedule_type == "daily":
-            return "Diario"
-        elif schedule_type == "weekly":
-            return "Semanal"
-        elif schedule_type == "interval":
-            return "Por intervalo"
-        else:
-            return "Desconocido"
-    except:
-        return "No disponible"
+        from apscheduler.triggers.cron import CronTrigger
+        from apscheduler.triggers.interval import IntervalTrigger
+
+        trigger = job.trigger
+        if isinstance(trigger, CronTrigger):
+            hour_field = next((f for f in trigger.fields if f.name == 'hour'), None)
+            minute_field = next((f for f in trigger.fields if f.name == 'minute'), None)
+            day_of_week_field = next((f for f in trigger.fields if f.name == 'day_of_week'), None)
+            
+            h = int(str(hour_field)) if hour_field and str(hour_field).isdigit() else 0
+            m = int(str(minute_field)) if minute_field and str(minute_field).isdigit() else 0
+            
+            if schedule_type == "weekly":
+                days = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+                day_str = str(day_of_week_field) if day_of_week_field else "0"
+                day_idx = 0
+                if day_str.isdigit():
+                    day_idx = int(day_str)
+                else:
+                    day_map = {'mon': 0, 'tue': 1, 'wed': 2, 'thu': 3, 'fri': 4, 'sat': 5, 'sun': 6}
+                    day_idx = day_map.get(day_str.lower()[:3], 0)
+                
+                day_name = days[day_idx % 7]
+                return f"semanalmente los ({day_name}) a las {h:02d}:{m:02d}"
+            else:
+                return f"diariamente a las {h:02d}:{m:02d}"
+                
+        elif isinstance(trigger, IntervalTrigger):
+            interval = trigger.interval
+            total_seconds = int(interval.total_seconds())
+            hours = total_seconds // 3600
+            minutes = (total_seconds % 3600) // 60
+            
+            if hours > 0:
+                return f"cada {hours} horas"
+            else:
+                return f"cada {minutes} minutos"
+    except Exception as e:
+        logger.warning(f"Error parseando schedule info para job {job.id}: {e}")
+        
+    # Fallback
+    if schedule_type == "daily":
+        return "diariamente a las 00:00"
+    elif schedule_type == "weekly":
+        return "semanalmente los (Lunes) a las 00:00"
+    elif schedule_type == "interval":
+        return "cada 1 horas"
+    return "Desconocido"
 
 def _get_next_run_time(job) -> Optional[str]:
     """Obtiene la próxima hora de ejecución de un trabajo."""

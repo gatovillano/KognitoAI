@@ -4,7 +4,7 @@ import { toast } from 'sonner';
 
 const apiClient = axios.create({
   // Usar variable de entorno o fallback a desarrollo local
-  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000', // Cambiado a localhost para desarrollo
+  baseURL: process.env.NEXT_PUBLIC_API_URL || 'https://apibase.cuerpolibre.cl',
   headers: {
     // 'Content-Type': 'application/json', // Removed to allow axios to handle FormData correctly
   },
@@ -81,11 +81,11 @@ apiClient.interceptors.response.use(
 
 export const userSettings = {
   get: async () => {
-    const response = await apiClient.get('/users/me/settings');
+    const response = await apiClient.get('/api/users/me/settings');
     return response.data;
   },
   update: async (settings: any) => {
-    const response = await apiClient.put('/users/me/settings', settings);
+    const response = await apiClient.put('/api/users/me/settings', settings);
     return response.data;
   },
 };

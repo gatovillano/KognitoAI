@@ -161,22 +161,13 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, on
     try {
       if (activeTab === 'web' && values.web_url) {
         onUploadStart([values.web_url], topicForUpload);
-        onOpenChange(false);
-
-        apiClient.post('/api/skills/run', {
+        await apiClient.post('/api/skills/run', {
           tool_name: 'add_web_to_rag',
           url: values.web_url,
           topic: topicForUpload,
           workspace_id: workspaceId,
-        }).catch((error: any) => {
-          // Captura errores de la petición inicial (ej. red, 4xx)
-          // Los errores de procesamiento de la tarea se reciben por WebSocket
-          toast.error('Error al iniciar el procesamiento de la URL.', {
-            description: error.response?.data?.detail || 'Por favor, revisa la URL y tu conexión.',
-          });
-          // Aquí podrías querer enviar un evento de fallo por WS si el backend no lo hace
         });
-
+        onOpenChange(false);
       } else if (activeTab === 'files' && values.files && values.files.length > 0) {
         const fileNames = (Array.from(values.files) as File[]).map(f => f.name);
         const formData = new FormData();
@@ -189,20 +180,13 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, on
         });
 
         onUploadStart(fileNames, topicForUpload);
-        onOpenChange(false);
 
-        apiClient.post('/api/documents/upload-document', formData, {
+        await apiClient.post('/api/documents/upload-document', formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
-        }).then(() => {
-          console.log('Upload request sent successfully for', fileNames);
-          // onUploadSuccess es llamado por el websocket en este caso
-        }).catch(error => {
-          toast.error('Error al iniciar la subida de documentos.', {
-            description: 'Por favor, revisa tu conexión e inténtalo de nuevo.',
-          });
-          console.error(error);
         });
 
+        console.log('Upload request sent successfully for', fileNames);
+        onOpenChange(false);
       } else if (activeTab === 'text' && values.text_content) {
         const textFile = new File([values.text_content], `texto-${Date.now()}.md`, { type: 'text/markdown' });
         const formData = new FormData();
@@ -215,28 +199,35 @@ export function UploadDocumentDialog({ isOpen, onOpenChange, onUploadSuccess, on
         });
 
         onUploadStart([textFile.name], topicForUpload);
-        onOpenChange(false);
 
-        apiClient.post('/api/documents/upload-document', formData, {
+        await apiClient.post('/api/documents/upload-document', formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
-        }).then(() => {
-          console.log('Text content sent successfully');
-        }).catch(error => {
-          toast.error('Error al guardar el texto.', {
-            description: 'Por favor, inténtalo de nuevo.',
-          });
-          console.error(error);
         });
 
+        console.log('Text content sent successfully');
+        onOpenChange(false);
       } else {
-        // Este caso debería ser prevenido por la validación del schema
         toast.error('Por favor, proporciona una fuente de datos.');
       }
-    } catch (error) {
-      toast.error('Ha ocurrido un error inesperado.', {
-        description: 'Por favor, inténtalo de nuevo.',
-      });
+    } catch (error: any) {
       console.error(error);
+      if (activeTab === 'web') {
+        toast.error('Error al iniciar el procesamiento de la URL.', {
+          description: error.response?.data?.detail || 'Por favor, revisa la URL y tu conexión.',
+        });
+      } else if (activeTab === 'files') {
+        toast.error('Error al iniciar la subida de documentos.', {
+          description: error.response?.data?.detail || 'Por favor, revisa tu conexión e inténtalo de nuevo.',
+        });
+      } else if (activeTab === 'text') {
+        toast.error('Error al guardar el texto.', {
+          description: error.response?.data?.detail || 'Por favor, inténtalo de nuevo.',
+        });
+      } else {
+        toast.error('Ha ocurrido un error inesperado.', {
+          description: 'Por favor, inténtalo de nuevo.',
+        });
+      }
     } finally {
       setIsSubmitting(false);
     }

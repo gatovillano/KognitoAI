@@ -60,6 +60,7 @@ from core.database import (
 from utils.db_session import DBSession
 from utils.embeddings import get_embedding_model
 from core.config import settings
+from core.onlyoffice_storage import resolve_onlyoffice_file_path
 from urllib.parse import unquote
 from core.citation_models import ToolOutputWithSources, Source, SourceType, create_document_source, format_context_with_sources
 from core.reranker import Reranker # Importación aquí para evitar circularidad
@@ -104,21 +105,36 @@ async def _attach_physical_document_ids(
     physical_docs = (await db.execute(physical_docs_query)).scalars().all()
 
     physical_doc_map: Dict[Tuple[str, Optional[str]], str] = {}
+    physical_doc_by_id: Dict[str, Document] = {}
     for physical_doc in physical_docs:
+        file_full_path = resolve_onlyoffice_file_path(physical_doc.file_path)
+        if not file_full_path.exists():
+            continue
+
+        physical_doc_id = str(physical_doc.id)
         key = (physical_doc.filename, str(physical_doc.workspace_id) if physical_doc.workspace_id else None)
-        physical_doc_map.setdefault(key, str(physical_doc.id))
+        physical_doc_map.setdefault(key, physical_doc_id)
+        physical_doc_by_id[physical_doc_id] = physical_doc
 
     enriched_documents: List[Dict[str, Any]] = []
     for document in documents:
         normalized_document_id = _normalize_document_id_value(document.get("document_id"))
         workspace_key = str(document.get("workspace_id")) if document.get("workspace_id") else None
+        file_name = document.get("file_name")
+        matched_physical_id = physical_doc_map.get((file_name, workspace_key))
+        physical_document_id = matched_physical_id
 
-        if not normalized_document_id:
-            normalized_document_id = physical_doc_map.get((document.get("file_name"), workspace_key))
+        if normalized_document_id:
+            physical_doc = physical_doc_by_id.get(normalized_document_id)
+            if physical_doc is not None:
+                physical_workspace_key = str(physical_doc.workspace_id) if physical_doc.workspace_id else None
+                if physical_doc.filename == file_name and physical_workspace_key == workspace_key:
+                    physical_document_id = normalized_document_id
 
         enriched_documents.append({
             **document,
             "document_id": normalized_document_id,
+            "physical_document_id": physical_document_id,
         })
 
     return enriched_documents
@@ -264,22 +280,22 @@ async def _run_semantic_search(
                     note_results = await session.execute(note_query)
                     note_rows = note_results.all()
 
-                for nota, score in note_rows:
-                    # El score de l2_distance es menor cuanto más similar, lo convertimos a similitud
-                    similarity = 1.0 / (1.0 + score) if score is not None else 0.0
-                    if similarity >= similarity_threshold:
-                        doc = LCDocument(
-                            page_content=nota.content,
-                            metadata={
-                                "type": "user_notes",
-                                "note_id": str(nota.id),
-                                "title": nota.title,
-                                "created_at": nota.created_at.isoformat(),
-                                "document_id": f"note_{nota.id}",
-                                "file_name": f"Nota: {nota.title}"
-                            }
-                        )
-                        processed_results.append((doc, similarity))
+            for nota, score in note_rows:
+                # El score de l2_distance es menor cuanto más similar, lo convertimos a similitud
+                similarity = 1.0 / (1.0 + score) if score is not None else 0.0
+                if similarity >= similarity_threshold:
+                    doc = LCDocument(
+                        page_content=nota.content,
+                        metadata={
+                            "type": "user_notes",
+                            "note_id": str(nota.id),
+                            "title": nota.title,
+                            "created_at": nota.created_at.isoformat(),
+                            "document_id": f"note_{nota.id}",
+                            "file_name": f"Nota: {nota.title}"
+                        }
+                    )
+                    processed_results.append((doc, similarity))
 
         # Ordenar todos los resultados combinados por score
         processed_results.sort(key=lambda x: x[1], reverse=True)
@@ -425,20 +441,20 @@ async def _run_fts_search(
                     note_results = await session.execute(note_query)
                     note_rows = note_results.all()
 
-                for nota, score in note_rows:
-                    doc = LCDocument(
-                        page_content=nota.content,
-                        metadata={
-                            "type": "user_notes",
-                            "note_id": str(nota.id),
-                            "title": nota.title,
-                            "created_at": nota.created_at.isoformat(),
-                            "rank_score": score,
-                            "document_id": f"note_{nota.id}",
-                            "file_name": f"Nota: {nota.title}"
-                        }
-                    )
-                    processed_results.append(doc)
+            for nota, score in note_rows:
+                doc = LCDocument(
+                    page_content=nota.content,
+                    metadata={
+                        "type": "user_notes",
+                        "note_id": str(nota.id),
+                        "title": nota.title,
+                        "created_at": nota.created_at.isoformat(),
+                        "rank_score": score,
+                        "document_id": f"note_{nota.id}",
+                        "file_name": f"Nota: {nota.title}"
+                    }
+                )
+                processed_results.append(doc)
 
         # Ordenar todos los resultados combinados por rank_score
         processed_results.sort(key=lambda doc: doc.metadata.get('rank_score', 0), reverse=True)
@@ -472,7 +488,8 @@ async def get_all_user_memories(
                     cmetadata,
                     topic,
                     category,
-                    workspace_id
+                    workspace_id,
+                    id
                 FROM langchain_pg_embedding
                 WHERE (
                     account_id = :account_id
@@ -497,7 +514,7 @@ async def get_all_user_memories(
             
             docs = []
             for row in rows:
-                doc_content, doc_metadata, topic, cat, ws_id = row
+                doc_content, doc_metadata, topic, cat, ws_id, embed_id = row
                 
                 if isinstance(doc_metadata, str):
                     try:
@@ -510,6 +527,7 @@ async def get_all_user_memories(
                 if topic is not None: doc_metadata['topic'] = topic
                 if cat is not None: doc_metadata['category'] = cat
                 if ws_id is not None: doc_metadata['workspace_id'] = str(ws_id)
+                if embed_id is not None: doc_metadata['document_id'] = str(embed_id)
                 
                 docs.append(LCDocument(page_content=doc_content, metadata=doc_metadata))
                 
@@ -750,13 +768,28 @@ async def get_relevant_memories(
                 db_session=session_fts
             )
 
-            try:
-                from langchain.retrievers.ensemble import EnsembleRetriever
-            except ImportError:
-                try:
-                    from langchain_community.retrievers.ensemble import EnsembleRetriever
-                except ImportError:
-                    from langchain_classic.retrievers.ensemble import EnsembleRetriever
+            class LocalEnsembleRetriever:
+                def __init__(self, retrievers, weights):
+                    self.retrievers = retrievers
+                    self.weights = weights
+                
+                async def ainvoke(self, query: str):
+                    import asyncio
+                    results = await asyncio.gather(*[r.ainvoke(query) for r in self.retrievers])
+                    
+                    # RRF (Reciprocal Rank Fusion)
+                    rrf_score = {}
+                    for weight, docs in zip(self.weights, results):
+                        for rank, doc in enumerate(docs):
+                            doc_content = doc.page_content
+                            if doc_content not in rrf_score:
+                                rrf_score[doc_content] = {"score": 0.0, "doc": doc}
+                            rrf_score[doc_content]["score"] += weight * (1.0 / (rank + 60))
+                            
+                    sorted_docs = sorted(rrf_score.values(), key=lambda x: x["score"], reverse=True)
+                    return [item["doc"] for item in sorted_docs]
+
+            EnsembleRetriever = LocalEnsembleRetriever
 
             final_retrieved_docs: List[LCDocument] = []
             if hybrid_search:
@@ -951,6 +984,7 @@ async def update_user_profile(
     gustos: Optional[str] = None,
     intereses: Optional[str] = None,
     otros_datos: Optional[str] = None,
+    system_prompt: Optional[str] = None,
 ):
     """
     Actualiza los campos del perfil de un usuario.
@@ -974,6 +1008,8 @@ async def update_user_profile(
                 updates['intereses'] = intereses
             if otros_datos is not None:
                 updates['otros_datos'] = otros_datos
+            if system_prompt is not None:
+                updates['system_prompt'] = system_prompt
 
             if updates:
                 await db.execute(update(Perfil).where(Perfil.account_id == account_id).values(**updates))
@@ -1076,6 +1112,33 @@ async def add_memory_to_vector_db(
             f"❌ Error al añadir memoria a la DB vectorial para la cuenta {account_id}: {e}",
             exc_info=True,
         )
+
+
+async def delete_memory_from_vector_db(account_id: str, memory_id: str) -> bool:
+    """
+    Elimina una memoria específica por su ID y account_id de la base de datos.
+    """
+    logger.info(f"🗑️ Eliminando memoria con ID {memory_id} para la cuenta {account_id}")
+    try:
+        async with DBSession(SessionLocal) as session:
+            # Eliminar la memoria de langchain_pg_embedding
+            # Usando account_id para seguridad adicional
+            sql_query = """
+                DELETE FROM langchain_pg_embedding
+                WHERE id = :memory_id
+                AND (
+                    account_id = :account_id
+                    OR cmetadata->>'account_id' = CAST(:account_id AS TEXT)
+                )
+            """
+            result = await session.execute(text(sql_query), {"memory_id": memory_id, "account_id": account_id})
+            await session.commit()
+            rowcount = result.rowcount or 0
+            logger.info(f"🗑️ Memorias eliminadas: {rowcount}")
+            return rowcount > 0
+    except Exception as e:
+        logger.error(f"❌ Error al eliminar la memoria {memory_id}: {e}", exc_info=True)
+        return False
 
 
 async def process_document_for_rag(

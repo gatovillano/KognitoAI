@@ -221,6 +221,8 @@ class Account(Base):
     forms = relationship("Form", back_populates="account", cascade="all, delete-orphan")
     workspace_permissions = relationship("WorkspacePermission", back_populates="account", cascade="all, delete-orphan") # NUEVA RELACIÓN
     gap_development_analysis = relationship("GapDevelopmentAnalysis", back_populates="account", cascade="all, delete-orphan")
+    custom_heartbeats = relationship("CustomHeartbeat", back_populates="account", cascade="all, delete-orphan")
+    mcp_servers = relationship("MCPServer", back_populates="account", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Account(id={self.id}, name='{self.name}')>"
@@ -248,6 +250,31 @@ class PlatformIdentity(Base):
 
     def __repr__(self):
         return f"<PlatformIdentity(platform='{self.platform}', platform_user_id='{self.platform_user_id}')>"
+
+
+class MCPServer(Base):
+    """
+    Representa un servidor MCP (Model Context Protocol) conectado por el usuario.
+    """
+    __tablename__ = "mcp_servers"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
+    name = Column(String(255), nullable=False, comment="Nombre amigable para el servidor MCP")
+    status = Column(String(50), default="disconnected", nullable=False, comment="connected, disconnected, error")
+    transport_type = Column(String(50), nullable=False, comment="stdio, sse")
+    command = Column(String(512), nullable=True, comment="Comando a ejecutar para transporte stdio")
+    args = Column(JSONB, nullable=True, comment="Argumentos JSON para el comando stdio")
+    url = Column(String(512), nullable=True, comment="URL para transporte SSE")
+    
+    created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
+
+    # Relación inversa
+    account = relationship("Account", back_populates="mcp_servers")
+
+    def __repr__(self):
+        return f"<MCPServer(id={self.id}, name='{self.name}', transport='{self.transport_type}')>"
 
 
 # --- Modelo de Espacio de Trabajo ---
@@ -598,6 +625,7 @@ class Nota(Base):
     visual_content = Column(Text, nullable=True, comment="Contenido HTML generado preservando el diseño visual.")
     category = Column(String, default="General")
     is_starred = Column(Boolean, default=False, nullable=False, server_default=text('false'))
+    is_agent_message = Column(Boolean, default=False, nullable=False, server_default=text('false'), index=True)
     created_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"))
     updated_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
     etag = Column(String, nullable=True)
@@ -810,6 +838,8 @@ class ChatThread(Base):
     platform = Column(String, default="web", nullable=False, comment="Plataforma de origen: 'web', 'telegram'")
     created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
     is_pinned = Column(Boolean, default=False, nullable=False)
+    # Si es True, el hilo no debe mostrarse en el sidebar del cliente
+    hidden_from_sidebar = Column(Boolean, default=False, nullable=False, server_default=text('false'))
     # Usamos JSONB para almacenar una lista flexible de etiquetas.
     tags = Column(JSONB, nullable=True)
     persistent_rag_context = Column(JSONB, nullable=True, default=[])
@@ -830,6 +860,7 @@ class ProactiveInsight(Base):
     action_suggestion = Column(Text, nullable=True)
     innovation_potential = Column(Text, nullable=True)  # Potencial de innovación o mejora transformadora
     related_items = Column(JSONB, nullable=True)  # Se almacena la lista de ítems como JSON (incluye tool_used en metadata)
+    status = Column(String(50), nullable=False, default="pending") # pending, accepted, rejected
     created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"), nullable=False)
 
     account = relationship("Account", back_populates="proactive_insights")
@@ -847,6 +878,26 @@ class VerificationCode(Base):
     created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
 
     account = relationship("Account")
+
+
+class CustomHeartbeat(Base):
+    __tablename__ = "custom_heartbeats"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    instructions = Column(Text, nullable=False)
+    schedule_type = Column(String(50), nullable=False, default="interval", comment="interval, daily, weekly")
+    interval_minutes = Column(Integer, nullable=True, default=60)
+    hour = Column(Integer, nullable=True) # 0-23
+    minute = Column(Integer, nullable=True, default=0) # 0-59
+    day_of_week = Column(Integer, nullable=True) # 0-6 (0=Lunes, 6=Domingo)
+    allowed_tools = Column(JSONB, nullable=True, server_default=text("'[]'::jsonb"))
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
+
+    account = relationship("Account", back_populates="custom_heartbeats")
 
 
 class AnalysisTask(Base):
@@ -1537,6 +1588,39 @@ class SystemSettings(Base):
 
     def __repr__(self):
         return f"<SystemSettings(key='{self.key}', value='{self.value}')>"
+
+
+class AnalyticsEvent(Base):
+    """
+    Tabla para el registro de eventos de uso y tráfico web.
+    Permite evaluar el tráfico de la web de presentación y el software central.
+    """
+    __tablename__ = "analytics_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(String(255), nullable=False, index=True, comment="ID único de sesión web")
+    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id", ondelete="SET NULL"), nullable=True, index=True, comment="Usuario que ejecuta el evento (opcional)")
+    event_type = Column(String(50), nullable=False, index=True, comment="Tipo de evento (pageview, click, form_submit, action)")
+    path = Column(String(255), nullable=False, index=True, comment="Ruta/URL de la página")
+    referrer = Column(String(255), nullable=True, comment="Referidor externo de origen")
+    user_agent = Column(Text, nullable=True, comment="User agent del navegador")
+    ip_address = Column(String(100), nullable=True, comment="Dirección IP (para unicidad geográfica/proveedor)")
+    event_metadata = Column(JSONB, nullable=True, comment="Metadatos estructurados del evento")
+    timestamp = Column(
+        DateTime(timezone=True),
+        server_default=text("CURRENT_TIMESTAMP"),
+        index=True,
+        comment="Fecha y hora del evento"
+    )
+
+    account = relationship("Account", backref=backref("analytics_events", lazy="dynamic"))
+
+    def __repr__(self):
+        return f"<AnalyticsEvent(id={self.id}, type='{self.event_type}', path='{self.path}')>"
+
+
+# --- Al final del archivo, asegúrate de que todos los modelos estén definidos antes de exportar ---
+
 
 
 # --- Al final del archivo, asegúrate de que todos los modelos estén definidos antes de exportar ---

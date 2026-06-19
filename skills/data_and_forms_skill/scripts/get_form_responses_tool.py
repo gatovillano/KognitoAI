@@ -1,6 +1,5 @@
 import logging
-import asyncio
-from typing import Type, Any, Optional, List, Dict
+from typing import Type, Any, Optional, Dict
 from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 
@@ -137,8 +136,12 @@ class GetFormResponsesTool(BaseTool):
                         if responses:
                             for res in responses:
                                 response_message += f"  - Respuesta (ID: {res.id}, Fecha: {res.submitted_at.strftime('%Y-%m-%d %H:%M')}):\n"
-                                for field_name, field_value in res.answers.items():
-                                    response_message += f"    • {field_name}: {field_value}\n"
+                                formatted_answers = self._format_answers(res.answers)
+                                response_message += (
+                                    f"{formatted_answers}\n"
+                                    if formatted_answers
+                                    else "    • Sin respuestas registradas.\n"
+                                )
                         else:
                             response_message += "  No hay respuestas para este formulario.\n"
                         response_message += "\n"
@@ -146,8 +149,28 @@ class GetFormResponsesTool(BaseTool):
                 else:
                     return "No tienes ningún formulario creado en tu base de conocimiento."
 
+    def _format_answers(self, answers: Any) -> str:
+        if isinstance(answers, dict):
+            return "\n".join(
+                f"    • {field_name}: {field_value}"
+                for field_name, field_value in answers.items()
+            )
+
+        if isinstance(answers, list):
+            formatted_items = []
+            for answer in answers:
+                if isinstance(answer, dict):
+                    field_name = answer.get("field_id") or answer.get("name") or answer.get("label") or "campo"
+                    field_value = answer.get("value")
+                    formatted_items.append(f"    • {field_name}: {field_value}")
+                else:
+                    formatted_items.append(f"    • {answer}")
+            return "\n".join(formatted_items)
+
+        return f"    • {answers}"
+
     def _format_single_response(self, response: FormResponse) -> str:
-        formatted_data = "\n".join([f"    • {field_name}: {field_value}" for field_name, field_value in response.answers.items()])
+        formatted_data = self._format_answers(response.answers)
         return (
             f"Respuesta (ID: {response.id}, Fecha: {response.submitted_at.strftime('%Y-%m-%d %H:%M')}):\n"
             f"{formatted_data}"

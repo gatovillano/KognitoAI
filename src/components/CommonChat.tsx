@@ -142,10 +142,11 @@ const areSameRetryPrompt = (first: ChatMessageType, second: ChatMessageType): bo
 
 interface SelectedContextItem {
   id: string;
-  type: 'document' | 'collection';
+  type: 'document' | 'collection' | 'repository';
   name: string;
   title?: string;
   topic?: string;
+  content?: string;
   file_name?: string;
 }
 
@@ -185,194 +186,146 @@ function LoadingIndicator({
   const [thoughtIndex, setThoughtIndex] = useState(0);
 
   const thoughts = useMemo(() => [
-    "Descifrando intencionalidad...",
-    "Explorando red semántica...",
-    "Sintetizando vectores de conocimiento...",
-    "Formulando respuesta lógica...",
-    "Verificando consistencia cognitiva..."
+    "Descifrando intencionalidad",
+    "Explorando red semántica",
+    "Sintetizando vectores de conocimiento",
+    "Formulando respuesta lógica",
+    "Verificando consistencia cognitiva",
+    "Mapeando conexiones neuronales",
+    "Procesando patrones contextuales",
+    "Optimizando árbol de inferencia",
+    "Analizando grafo de conocimiento",
+    "Recuperando memorias asociativas",
   ], []);
 
   useEffect(() => {
-    const interval = setInterval(() => {
+    const thoughtTimer = setInterval(() => {
       setThoughtIndex((prev) => (prev + 1) % thoughts.length);
-    }, 2500);
-    return () => clearInterval(interval);
+    }, 3000);
+    return () => {
+      clearInterval(thoughtTimer);
+    };
   }, [thoughts.length]);
 
-  let text = 'Kognito está pensando';
-
-  if (isDeepResearchActive) {
-    text = 'Realizando investigación profunda';
-  } else if (isComprehensiveAnalysisActive) {
-    text = 'Realizando análisis comprensivo';
-  } else if (isKnowledgeAnalysisActive) {
-    text = 'Consultando la base de conocimiento';
-  }
-
-  if (toolName) {
-    text = `Usando herramienta: ${toolName}`;
-  }
-
-  if (reactState) {
-    text += ` - ${reactState}`;
-  }
-
-  // Define theme colors based on state
-  const getStatusTheme = () => {
-    if (isDeepResearchActive) {
-      return {
-        gradient: 'from-amber-500 via-orange-500 to-red-500',
-        glow: 'shadow-orange-500/20',
-        bgGlow: 'bg-orange-500/5 dark:bg-orange-500/10',
-        border: 'border-orange-500/20 dark:border-orange-500/30',
-        text: 'text-orange-600 dark:text-orange-400',
-        subtext: 'text-orange-500/70 dark:text-orange-300/60',
-        dotColor: 'bg-orange-500',
-        iconColor: 'text-orange-500 dark:text-orange-400'
-      };
-    }
-    if (isComprehensiveAnalysisActive) {
-      return {
-        gradient: 'from-emerald-400 via-teal-500 to-cyan-500',
-        glow: 'shadow-emerald-500/20',
-        bgGlow: 'bg-emerald-500/5 dark:bg-emerald-500/10',
-        border: 'border-emerald-500/20 dark:border-emerald-500/30',
-        text: 'text-emerald-600 dark:text-emerald-400',
-        subtext: 'text-emerald-500/70 dark:text-emerald-300/60',
-        dotColor: 'bg-emerald-500',
-        iconColor: 'text-emerald-500 dark:text-emerald-400'
-      };
-    }
-    if (isKnowledgeAnalysisActive) {
-      return {
-        gradient: 'from-cyan-400 via-blue-500 to-indigo-500',
-        glow: 'shadow-cyan-500/20',
-        bgGlow: 'bg-cyan-500/5 dark:bg-cyan-500/10',
-        border: 'border-cyan-500/20 dark:border-cyan-500/30',
-        text: 'text-cyan-600 dark:text-cyan-400',
-        subtext: 'text-cyan-500/70 dark:text-cyan-300/60',
-        dotColor: 'bg-cyan-500',
-        iconColor: 'text-cyan-500 dark:text-cyan-400'
-      };
-    }
-    if (toolName) {
-      return {
-        gradient: 'from-fuchsia-400 via-rose-500 to-violet-500',
-        glow: 'shadow-fuchsia-500/20',
-        bgGlow: 'bg-fuchsia-500/5 dark:bg-fuchsia-500/10',
-        border: 'border-fuchsia-500/20 dark:border-fuchsia-500/30',
-        text: 'text-fuchsia-600 dark:text-fuchsia-400',
-        subtext: 'text-fuchsia-500/70 dark:text-fuchsia-300/60',
-        dotColor: 'bg-fuchsia-500',
-        iconColor: 'text-fuchsia-500 dark:text-fuchsia-400'
-      };
-    }
-    return {
-      gradient: 'from-indigo-500 via-purple-500 to-pink-500',
-      glow: 'shadow-indigo-500/20',
-      bgGlow: 'bg-indigo-500/5 dark:bg-indigo-500/10',
-      border: 'border-indigo-500/20 dark:border-indigo-500/30',
-      text: 'text-indigo-600 dark:text-indigo-400',
-      subtext: 'text-indigo-500/70 dark:text-indigo-300/60',
-      dotColor: 'bg-indigo-500',
-      iconColor: 'text-indigo-500 dark:text-indigo-400'
-    };
-  };
-
-  const theme = getStatusTheme();
+  const palette = useMemo(() => {
+    // Usando el color primario real de la app: hsl(200, 100%, 50%) ≈ #00aaff
+    if (isDeepResearchActive)          return { c1: '#00aaff', c2: '#0077cc', label: 'Investigación Profunda' };
+    if (isComprehensiveAnalysisActive) return { c1: '#00ccff', c2: '#00aaff', label: 'Análisis Comprensivo' };
+    if (isKnowledgeAnalysisActive)     return { c1: '#0088dd', c2: '#005faa', label: 'Consultando Conocimiento' };
+    if (toolName)                      return { c1: '#33bbff', c2: '#0099ee', label: `Ejecutando: ${toolName}` };
+    return                                    { c1: '#00aaff', c2: '#0088cc', label: 'Kognito está pensando' };
+  }, [isDeepResearchActive, isComprehensiveAnalysisActive, isKnowledgeAnalysisActive, toolName]);
 
   return (
-    <div className="flex flex-col items-center py-4 w-full px-4">
-      {/* Outer Container with dynamic glow */}
-      <div className="relative group max-w-sm w-full">
-        {/* Glow effect */}
-        <div className={`absolute -inset-1 bg-gradient-to-r ${theme.gradient} opacity-20 blur-lg rounded-2xl animate-pulse transition duration-1000`} />
-        
-        {/* Main Glassmorphic Card */}
-        <div className={`relative flex items-center space-x-4 p-4 rounded-2xl bg-white/40 dark:bg-slate-900/60 backdrop-blur-xl border ${theme.border} shadow-lg shadow-black/5 dark:shadow-black/20 overflow-hidden`}>
-          
-          {/* Orbital Neural Core */}
-          <div className="relative flex items-center justify-center w-14 h-14 flex-shrink-0">
-            {/* Pulsing Back Glow */}
-            <span className={`absolute inline-flex h-10 w-10 rounded-full ${theme.dotColor} opacity-20 animate-ping`} />
-            
-            {/* Outer Spinning Ring (Dashed border) */}
-            <motion.div
-              className={`absolute inset-0 rounded-full border border-dashed border-t-transparent border-r-transparent ${theme.iconColor} opacity-70`}
-              animate={{ rotate: 360 }}
-              transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
-            />
-            
-            {/* Inner Counter-spinning Gradient Ring */}
-            <motion.div
-              className={`absolute inset-1.5 rounded-full border border-t-transparent border-l-transparent bg-gradient-to-tr ${theme.gradient} opacity-25`}
-              animate={{ rotate: -360 }}
-              transition={{ duration: 6, repeat: Infinity, ease: "linear" }}
-            />
-            
-            {/* Floating Cognitive Particles */}
-            {[...Array(3)].map((_, i) => (
-              <motion.div
-                key={i}
-                className={`absolute w-1 h-1 rounded-full bg-gradient-to-tr ${theme.gradient}`}
-                initial={{ x: 0, y: 0, opacity: 0 }}
-                animate={{
-                  x: [0, (i - 1) * 12, (i - 1) * 22, 0],
-                  y: [0, -18 - i * 6, -35 - i * 4, 0],
-                  opacity: [0, 0.9, 0.4, 0],
-                  scale: [0.6, 1.3, 0.7, 0]
-                }}
-                transition={{
-                  duration: 2.5 + i * 0.5,
-                  repeat: Infinity,
-                  ease: "easeInOut",
-                  delay: i * 0.7
-                }}
-              />
-            ))}
-            
-            {/* Core Neural Icon */}
-            <div className={`relative flex items-center justify-center w-9 h-9 rounded-full bg-white dark:bg-slate-950 border border-slate-100 dark:border-slate-800 shadow-inner z-10`}>
-              <motion.div
-                animate={{ scale: [0.95, 1.05, 0.95] }}
-                transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
-              >
-                <BrainCircuit className={`w-5 h-5 ${theme.iconColor} stroke-[2.2px]`} />
-              </motion.div>
-            </div>
-          </div>
-          
-          {/* Status Details */}
-          <div className="flex flex-col flex-1 min-w-0 pr-1 select-none">
-            {/* Primary Status Message (with subtle shimmer) */}
-            <h4 className={`text-sm font-semibold tracking-wide ${theme.text} truncate`}>
-              {text}
-            </h4>
-            
-            {/* Secondary Rotating Thought Subtitle */}
-            <div className="h-4 overflow-hidden mt-0.5">
-              <AnimatePresence mode="wait">
-                <motion.p
-                  key={thoughtIndex}
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -8 }}
-                  transition={{ duration: 0.35, ease: "easeOut" }}
-                  className={`text-[10px] sm:text-[11px] font-medium ${theme.subtext} tracking-wider uppercase font-mono`}
-                >
-                  {thoughts[thoughtIndex]}
-                </motion.p>
-              </AnimatePresence>
-            </div>
-          </div>
-          
-          {/* Subtle Activity Grid indicator (far right) */}
-          <div className="flex items-center space-x-0.5 opacity-40">
-            <span className={`w-1 h-3 rounded-full ${theme.dotColor} animate-pulse [animation-delay:0.2s]`} />
-            <span className={`w-1 h-4 rounded-full ${theme.dotColor} animate-pulse [animation-delay:0.4s]`} />
-            <span className={`w-1 h-2 rounded-full ${theme.dotColor} animate-pulse [animation-delay:0.6s]`} />
-          </div>
+    <div className="flex flex-col items-center py-5 w-full select-none">
 
+      {/* --- Diffuse Plasma Orb --- */}
+      <motion.div
+        className="relative flex-shrink-0"
+        style={{ width: 44, height: 44 }}
+        animate={{ y: [0, -2.5, 0] }}
+        transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+      >
+        {/* Far outer atmospheric bleed */}
+        <motion.div
+          className="absolute rounded-full"
+          style={{
+            inset: '-60%',
+            background: `radial-gradient(circle, ${palette.c1}18 0%, transparent 70%)`,
+            filter: 'blur(12px)',
+          }}
+          animate={{ scale: [1, 1.15, 1], opacity: [0.6, 1, 0.6] }}
+          transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+        />
+
+        {/* Secondary color cloud — offset, slower */}
+        <motion.div
+          className="absolute rounded-full"
+          style={{
+            inset: '-40%',
+            background: `radial-gradient(circle at 60% 40%, ${palette.c2}22 0%, transparent 65%)`,
+            filter: 'blur(10px)',
+          }}
+          animate={{ scale: [1.1, 0.9, 1.1], opacity: [0.5, 0.9, 0.5] }}
+          transition={{ duration: 3.8, repeat: Infinity, ease: "easeInOut", delay: 0.5 }}
+        />
+
+        {/* Core plasma body — rotating energy blob */}
+        <motion.div
+          className="absolute inset-0 rounded-full"
+          style={{
+            background: `conic-gradient(from 0deg, ${palette.c1}cc, ${palette.c2}99, ${palette.c1}55, ${palette.c2}bb, ${palette.c1}cc)`,
+            filter: 'blur(8px)',
+          }}
+          animate={{ rotate: 360 }}
+          transition={{ duration: 8, repeat: Infinity, ease: "linear" }}
+        />
+
+        {/* Inner hot core — brightest point */}
+        <motion.div
+          className="absolute rounded-full"
+          style={{
+            inset: '20%',
+            background: `radial-gradient(circle, ${palette.c2}ff 0%, ${palette.c1}88 50%, transparent 100%)`,
+            filter: 'blur(5px)',
+          }}
+          animate={{ scale: [0.85, 1.2, 0.85], opacity: [0.7, 1, 0.7] }}
+          transition={{ duration: 2.2, repeat: Infinity, ease: "easeInOut" }}
+        />
+
+        {/* Chromatic fringe */}
+        <motion.div
+          className="absolute rounded-full"
+          style={{
+            inset: '-8%',
+            background: `radial-gradient(circle at 42% 42%, ${palette.c1}33 0%, transparent 60%)`,
+            filter: 'blur(6px)',
+          }}
+          animate={{ rotate: [-15, 15, -15], scale: [1, 1.08, 1] }}
+          transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
+        />
+      </motion.div>
+
+      {/* --- Text below orb, centered --- */}
+      <div className="flex flex-col items-center mt-3 gap-1">
+
+        {/* Primary label */}
+        <div className="flex items-center gap-1.5">
+          <AnimatePresence mode="wait">
+            <motion.span
+              key={palette.label}
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 4 }}
+              transition={{ duration: 0.25 }}
+              className="text-[13px] font-medium tracking-tight"
+              style={{ color: palette.c1 }}
+            >
+              {palette.label}
+            </motion.span>
+          </AnimatePresence>
+
+          {reactState && (
+            <span className="text-[8px] font-mono tracking-widest text-neutral-400 dark:text-neutral-500 uppercase px-1.5 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 border border-neutral-200/30 dark:border-neutral-700/30">
+              {reactState}
+            </span>
+          )}
+        </div>
+
+        {/* Rotating thought subtitle */}
+        <div className="h-[14px] relative overflow-hidden flex items-center">
+          <AnimatePresence mode="wait">
+            <motion.p
+              key={thoughtIndex}
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 0.45, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.35, ease: "easeOut" }}
+              className="text-[10px] font-mono tracking-wider uppercase text-neutral-600 dark:text-neutral-400"
+            >
+              {thoughts[thoughtIndex]}
+            </motion.p>
+          </AnimatePresence>
         </div>
       </div>
     </div>
@@ -420,6 +373,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
   const [threadTitle, setThreadTitle] = useState<string>('');
   const [renderedMessageCount, setRenderedMessageCount] = useState(INITIAL_RENDERED_MESSAGES);
   const [activeRetryResponseMap, setActiveRetryResponseMap] = useState<Record<string, number>>({});
+  const [researchCompletedEvent, setResearchCompletedEvent] = useState(false);
 
   const serializeSelectedContext = useCallback(
     (items: SelectedContextItem[]) => items.map((item) => ({
@@ -548,7 +502,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
           setIsThinking(false);
           setToolName(undefined);
           setReactState(undefined);
-          setIsDeepResearchActive(false);
+          
           if (taskId && taskId === currentTaskIdRef.current) {
             setCurrentTaskId(null);
           }
@@ -557,6 +511,9 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
           const toolStartMessage = data as ToolStatusMessage;
           if (toolStartMessage.tool_name === 'deep_research') {
             setIsDeepResearchActive(true);
+            if (threadIdRef.current) {
+              localStorage.setItem('deep_research_active_' + threadIdRef.current, 'true');
+            }
           }
           setToolName(toolStartMessage.tool_name);
           setReactState('ejecutando');
@@ -580,8 +537,21 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         case 'tool_end':
         case 'tool_error': {
           const toolEndMessage = data as ToolStatusMessage;
+          const isBackgroundCompletion = (data as any).background_completion === true;
+
+          // Si es deep_research pero NO es la finalización del hilo de fondo (es decir, es el retorno síncrono inicial), lo ignoramos.
+          if (toolEndMessage.tool_name === 'deep_research' && !isBackgroundCompletion) {
+            setToolName(undefined);
+            setReactState(undefined);
+            setIsThinking(false);
+            break;
+          }
+
           if (toolEndMessage.tool_name === 'deep_research') {
             setIsDeepResearchActive(false);
+            if (threadIdRef.current) {
+              localStorage.removeItem('deep_research_active_' + threadIdRef.current);
+            }
           }
           setToolName(undefined);
           setReactState(undefined);
@@ -593,6 +563,13 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
           
           if (toolEndMessage.tool_name !== 'deep_research') {
             toast[type === 'tool_end' ? 'success' : 'error'](`Herramienta ${toolEndMessage.tool_name || 'una herramienta'} ${type === 'tool_end' ? 'completada' : 'falló'}.`);
+          } else {
+            if (type === 'tool_end') {
+              toast.success("Investigación profunda completada de forma exitosa.", { duration: 5000 });
+              setResearchCompletedEvent(true);
+            } else {
+              toast.error("La investigación profunda falló o fue cancelada.");
+            }
           }
           break;
         }
@@ -745,10 +722,6 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
             const toolStartMessage = data as ToolStatusMessage;
             const toolContent = toolStartMessage.message || `Usando ${toolStartMessage.tool_name}...`;
 
-            // Handle background tasks inside setMessages? No, we moved it, but let's check if we missed something.
-            // Wait, we need to setBackgroundTasks from inside setMessages? No, outside! Let's do it outside.
-            // But I forgot to copy the toast and setBackgroundTasks for tool_start. I will add it to the outside switch.
-            
             let chunkMessageIndex = updatedMessages.findIndex(msg => msg.taskId === taskId);
             if (chunkMessageIndex !== -1) {
               const existingMessage = updatedMessages[chunkMessageIndex];
@@ -758,9 +731,27 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                   type: 'tool_call',
                   content: toolContent,
                   tool_name: toolStartMessage.tool_name,
-                  status: 'start'
-                });
+                  status: 'start',
+                  pty_session: (toolStartMessage as any).pty_session
+                } as any);
                 updatedMessages[chunkMessageIndex] = { ...existingMessage, content_parts: newParts };
+              } else {
+                const lastPartIndex = findLatestToolCallIndex(newParts, toolStartMessage.tool_name);
+                if (lastPartIndex !== -1 && (toolStartMessage as any).pty_session) {
+                  newParts[lastPartIndex] = {
+                    ...newParts[lastPartIndex],
+                    pty_session: (toolStartMessage as any).pty_session,
+                  } as any;
+                  updatedMessages[chunkMessageIndex] = { ...existingMessage, content_parts: newParts };
+                }
+              }
+
+              // Adjuntar metadata de pty_session si la herramienta la provee (p. ej. terminal_executor)
+              if ((toolStartMessage as any).pty_session) {
+                updatedMessages[chunkMessageIndex] = {
+                  ...updatedMessages[chunkMessageIndex],
+                  pty_session: (toolStartMessage as any).pty_session,
+                } as any;
               }
             }
 
@@ -982,12 +973,60 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
 
       if (!supportedMimeType) {
         toast.error('Tu navegador no soporta los formatos de audio necesarios para la grabación.');
+        stream.getTracks().forEach(track => track.stop());
+        audioStreamRef.current = null;
         return;
       }
 
       console.log(`DEBUG: Usando el tipo de MIME soportado: ${supportedMimeType}`);
       const recorder = new MediaRecorder(stream, { mimeType: supportedMimeType });
       let localAudioChunks: Blob[] = [];
+      const finalizeRecording = async () => {
+        const mimeType = recorder.mimeType || supportedMimeType;
+        const totalBytes = localAudioChunks.reduce((sum, chunk) => sum + chunk.size, 0);
+        console.log(`DEBUG: Finalizando grabación. Chunks: ${localAudioChunks.length}, tamaño total: ${totalBytes} bytes, mime: ${mimeType}`);
+
+        setIsRecording(false);
+        setIsProcessingAudio(true);
+        toast.info('Deteniendo grabación de audio y procesando...');
+
+        if (totalBytes <= 110) {
+          toast.error('La grabación quedó incompleta. Mantén presionado un poco más e intenta de nuevo.');
+          setIsProcessingAudio(false);
+          audioStreamRef.current?.getTracks().forEach(track => track.stop());
+          audioStreamRef.current = null;
+          return;
+        }
+
+        const audioBlob = new Blob(localAudioChunks, { type: mimeType });
+        if (audioBlob.size === 0) {
+          toast.error('El audio grabado está vacío. Intenta de nuevo.');
+          setIsProcessingAudio(false);
+          audioStreamRef.current?.getTracks().forEach(track => track.stop());
+          audioStreamRef.current = null;
+          return;
+        }
+
+        const fileExtension = mimeType.split('/')[1]?.split(';')[0] || 'webm';
+        const formData = new FormData();
+        formData.append('file', audioBlob, `audio.${fileExtension}`);
+
+        try {
+          const response = await apiClient.post('/api/transcribe-audio', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+          });
+          const { transcription } = response.data;
+          setNewMessage(prev => prev + transcription); // Usar función de actualización para evitar problemas de closure
+          toast.success('Audio transcrito y listo para enviar.');
+        } catch (error: any) {
+          console.error('DEBUG: Error en la llamada a /transcribe-audio:', error);
+          toast.error('Error al transcribir el audio.');
+        } finally {
+          setIsProcessingAudio(false);
+          audioStreamRef.current?.getTracks().forEach(track => track.stop());
+          audioStreamRef.current = null;
+        }
+      };
 
       recorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
@@ -998,45 +1037,18 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
 
       recorder.onstop = async () => {
         console.log('DEBUG: MediaRecorder onstop event fired.');
-        const mimeType = recorder.mimeType;
-        console.log(`DEBUG: Mime type obtenido del MediaRecorder: ${mimeType}`);
-
-        setIsRecording(false);
-        setIsProcessingAudio(true);
-        toast.info('Deteniendo grabación de audio y procesando...');
-
+        await new Promise(resolve => window.setTimeout(resolve, 0));
         if (localAudioChunks.length > 0) {
-          const audioBlob = new Blob(localAudioChunks, { type: mimeType });
-          if (audioBlob.size === 0) {
-            toast.error('El audio grabado está vacío. Intenta de nuevo.');
-            setIsProcessingAudio(false);
-            return;
-          }
-
-          const fileExtension = mimeType.split('/')[1].split(';')[0] || 'webm';
-          const formData = new FormData();
-          formData.append('file', audioBlob, `audio.${fileExtension}`);
-
-          try {
-            const response = await apiClient.post('/api/transcribe-audio', formData, {
-              headers: { 'Content-Type': 'multipart/form-data' },
-            });
-            const { transcription } = response.data;
-            setNewMessage(prev => prev + transcription); // Usar función de actualización para evitar problemas de closure
-            toast.success('Audio transcrito y listo para enviar.');
-          } catch (error: any) {
-            console.error('DEBUG: Error en la llamada a /transcribe-audio:', error);
-            toast.error('Error al transcribir el audio.');
-          } finally {
-            setIsProcessingAudio(false);
-          }
+          await finalizeRecording();
         } else {
           toast.error('No se grabó audio.');
           setIsProcessingAudio(false);
+          audioStreamRef.current?.getTracks().forEach(track => track.stop());
+          audioStreamRef.current = null;
         }
       };
 
-      recorder.start();
+      recorder.start(500);
       setMediaRecorder(recorder);
       setIsRecording(true);
       toast.info('Iniciando grabación de audio...');
@@ -1050,9 +1062,8 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
   const handleStopRecording = useCallback(async () => {
     if (mediaRecorder && mediaRecorder.state === 'recording') {
       console.log('DEBUG: Deteniendo MediaRecorder. Estado actual:', mediaRecorder.state);
+      mediaRecorder.requestData();
       mediaRecorder.stop();
-      audioStreamRef.current?.getTracks().forEach(track => track.stop());
-      audioStreamRef.current = null;
       // La lógica de procesamiento se ha movido a recorder.onstop
     }
   }, [mediaRecorder]); // Dependencias actualizadas
@@ -1409,6 +1420,26 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
     }
   }, [isLoading, scrollToBottom]);
 
+  // Effect to automatically send a message when deep research completes
+  useEffect(() => {
+    if (researchCompletedEvent) {
+      setResearchCompletedEvent(false);
+      handleSendMessage(undefined, "*(Sistema)*: La investigación profunda ha concluido en segundo plano. Por favor, notifícame un breve resumen de los hallazgos principales.");
+    }
+  }, [researchCompletedEvent, handleSendMessage]);
+
+  // Effect to load persistent deep research state across reloads
+  useEffect(() => {
+    if (threadId) {
+      const isPersistent = localStorage.getItem('deep_research_active_' + threadId) === 'true';
+      if (isPersistent) {
+        setIsDeepResearchActive(true);
+      } else {
+        setIsDeepResearchActive(false);
+      }
+    }
+  }, [threadId]);
+
   // ... (other effects and handlers remain the same) ...
 
   const { searchTerm } = useSearch();
@@ -1717,7 +1748,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                   </div>
                 );
               })}
-              {(isResponding || toolName) && (
+              {(isResponding || toolName || isDeepResearchActive) && (
                 <div className="-mt-4">
                   {isDeepResearchActive ? (
                     <DeepResearchVisualizer

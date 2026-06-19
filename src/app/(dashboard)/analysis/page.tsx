@@ -77,8 +77,9 @@ const getAnalysisIcon = (type: string) => {
   }
 };
 
-const getAnalysisTypeLabel = (analysis: Analysis) => {
-    switch (analysis.type) {
+const getAnalysisTypeLabel = (analysisOrType: Analysis | string) => {
+    const type = typeof analysisOrType === 'string' ? analysisOrType : analysisOrType.type;
+    switch (type) {
         case 'document': return 'Documento';
         case 'collection': return 'Colección';
         case 'insight':
@@ -92,7 +93,10 @@ const getAnalysisTypeLabel = (analysis: Analysis) => {
         case 'note_analysis': return 'Nota';
         case 'note_collection_analysis': return 'Colección de Notas';
         case 'gap_development':
-            const mode = (analysis.result as any)?.mode || (analysis.result_payload as any)?.mode;
+            if (typeof analysisOrType === 'string') {
+                return 'Investigación Profunda';
+            }
+            const mode = (analysisOrType.result as any)?.mode || (analysisOrType.result_payload as any)?.mode;
             return mode === 'draft' ? 'Documento Borrador' : 'Investigación Profunda';
         case 'deep_research': return 'Investigación Profunda';
         case 'comprehensive_web_analysis': return 'Análisis Web Integral';
@@ -823,9 +827,15 @@ export default function AnalysisPage() {
                                   onClick={async () => {
                                     if (confirm('¿Eliminar insight?')) {
                                       try {
-                                        await apiClient.delete('/api/delete-analysis', { 
-                                          data: { task_id: analysis.id } 
-                                        });
+                                        if (analysis.type === 'insight' || analysis.type === 'neural_insight' || analysis.type === 'proactive_insight') {
+                                          await apiClient.delete('/api/delete-proactive-insight', { 
+                                            data: { insight_id: analysis.id } 
+                                          });
+                                        } else {
+                                          await apiClient.delete('/api/delete-analysis', { 
+                                            data: { task_id: analysis.id } 
+                                          });
+                                        }
                                         handleAnalysisDeleted(analysis.id);
                                       } catch (err) {
                                         toast.error('Error al eliminar');

@@ -51,8 +51,14 @@ try:
     litellm.suppress_debug_info = True
     # Desactivar logs ruidosos de proveedores
     logging.getLogger("litellm").setLevel(logging.WARNING)
+    from litellm.exceptions import MidStreamFallbackError as _LiteLLMMidStreamFallbackError
 except ImportError:
-    pass
+    _LiteLLMMidStreamFallbackError = None
+
+try:
+    from litellm.exceptions import APIError as _LiteLLMAPIError
+except ImportError:
+    _LiteLLMAPIError = None
 
 # langchain.agents no se usa en esta versión
 # Las funcionalidades se han movido a langgraph o langchain_core
@@ -94,6 +100,35 @@ THREAD_TITLE_UPDATE_SEMAPHORE = asyncio.Semaphore(settings.thread_title_update_c
 # Evita saturar APIs externas cuando el LLM solicita muchas tools a la vez.
 MAX_PARALLEL_TOOLS = getattr(settings, "max_parallel_tools", 5)
 _TOOL_EXECUTION_SEMAPHORE = asyncio.Semaphore(MAX_PARALLEL_TOOLS)
+
+def is_multimodal_model(model_name: Optional[str]) -> bool:
+    """
+    Determina si un modelo es multimodal (soporta visión) según su nombre.
+    """
+    if not model_name:
+        return False
+    model_name_lower = model_name.lower()
+    multimodal_indicators = [
+        "gemini",
+        "gpt-4o",
+        "gpt-4-turbo",
+        "gpt-4-vision",
+        "claude-3",
+        "claude-3-5",
+        "vision",
+        "pixtral",
+        "llava",
+        "bakllava",
+        "nova-canvas",
+        "nova-pro",
+        "nova-lite",
+        "qwen-vl",
+        "qwen2.5-vl",
+        "deepseek-vl",
+        "step-"
+    ]
+    return any(indicator in model_name_lower for indicator in multimodal_indicators)
+
 
 def filter_relevant_tools(query: str, tools: List[Any], limit: int = 12) -> List[Any]:
     """
@@ -691,6 +726,22 @@ async def update_thread_title_if_needed(thread_id: str, messages: list):
             logger.info(f"[TÍTULO] Título generado para hilo {thread_id}.")
             async with DBSession(SessionLocal) as db:
                 await db.execute(update(ChatThread).where(ChatThread.id == uuid.UUID(thread_id)).values(title=new_title))
+                await db.commit()  # FIX: commit para que el cambio se persista
+
+            # FIX: enviar notificación WebSocket para que el sidebar se actualice en tiempo real
+            if account_id:
+                try:
+                    await send_personal_message(
+                        account_id,
+                        {
+                            "type": "thread_title_updated",
+                            "thread_id": thread_id,
+                            "new_title": new_title,
+                        }
+                    )
+                    logger.info(f"📡 [TÍTULO] Notificación WebSocket enviada para hilo {thread_id}")
+                except Exception as ws_err:
+                    logger.warning(f"[TÍTULO] No se pudo enviar notificación WebSocket para el hilo {thread_id}: {ws_err}")
         except Exception as e:
             logger.error(f"[TÍTULO] Error actualizando título del hilo {thread_id}: {e}")
     else:
@@ -841,6 +892,37 @@ async def get_or_create_heartbeat_thread(account_id: str) -> str:
         await db.refresh(new_thread)
         return str(new_thread.id)
 
+
+async def get_or_create_specific_heartbeat_thread(account_id: str, heartbeat_id: str, heartbeat_name: str) -> str:
+    """
+    Retorna el ID del hilo de heartbeat específico para la cuenta y heartbeat dados.
+    """
+    account_uuid = uuid.UUID(account_id)
+    async with DBSession(SessionLocal) as db:
+        existing_stmt = (
+            select(ChatThread)
+            .where(
+                ChatThread.account_id == account_uuid,
+                ChatThread.platform == f"heartbeat_{heartbeat_id}",
+            )
+            .order_by(ChatThread.created_at.asc())
+            .limit(1)
+        )
+        result = await db.execute(existing_stmt)
+        existing = result.scalars().first()
+        if existing:
+            return str(existing.id)
+
+        new_thread = ChatThread(
+            account_id=account_uuid,
+            title=f"Heartbeat - {heartbeat_name}",
+            platform=f"heartbeat_{heartbeat_id}",
+        )
+        db.add(new_thread)
+        await db.commit()
+        await db.refresh(new_thread)
+        return str(new_thread.id)
+
 # ==============================================================================
 # SECCIÓN 4: AGENTE LANGGRAPH REFACTORIZADO
 # ==============================================================================
@@ -980,27 +1062,55 @@ async def call_model_node(state: AgentState):
 
     def get_source_identifier(s: Dict[str, Any]) -> str:
         s_type = s.get('type', 'web')
+        if hasattr(s_type, 'value'):
+            s_type = s_type.value
+        s_type = str(s_type)
+        
         s_url = s.get('url') or s.get('id') or ''
+        s_url = str(s_url)
+        
         s_snippet = s.get('snippet', '')
         # Usar un hash del snippet para permitir múltiples fragmentos del mismo documento
         import hashlib
         snippet_hash = hashlib.md5(s_snippet.strip().encode()).hexdigest()[:8] if s_snippet.strip() else "empty"
         return f"{s_type}:{s_url}:{snippet_hash}"
 
+    # Identificar el índice del último HumanMessage para filtrar fuentes de turnos previos
+    last_human_idx = -1
+    if state.get("messages"):
+        for idx in range(len(state["messages"]) - 1, -1, -1):
+            if isinstance(state["messages"][idx], HumanMessage):
+                last_human_idx = idx
+                break
+
+    # Recopilar identificadores de fuentes de ToolMessages del turno actual
+    current_turn_tool_source_idents = set()
+    messages_to_scan = state["messages"][last_human_idx + 1:] if last_human_idx != -1 else state.get("messages", [])
+    for msg in messages_to_scan:
+        if isinstance(msg, ToolMessage):
+            t_sources = msg.additional_kwargs.get("sources") or []
+            for ts in t_sources:
+                ts_dict = ts.dict() if hasattr(ts, 'dict') else (ts.model_dump() if hasattr(ts, 'model_dump') else ts)
+                current_turn_tool_source_idents.add(get_source_identifier(ts_dict))
+
     raw_sources = []
 
     # 1. Procesar Fuentes de RAG General y Herramientas (vienen en state['sources'])
-    # PRIORIDAD ALTA: Estos son resultados directos de herramientas activadas por el usuario o el agente
+    # PRIORIDAD ALTA: Estos son resultados directos de herramientas activadas por el usuario o el agente.
+    # Filtrados para incluir únicamente fuentes del turno actual (evitando referencias antiguas/acumuladas)
     if state.get('sources'):
         for s in state['sources']:
             ident = get_source_identifier(s)
-            if ident not in seen_source_identifiers:
-                raw_sources.append(s)
-                seen_source_identifiers.add(ident)
-                # Marcar documento como "con contenido"
-                if s.get('type') == 'document' or s.get('type') == SourceType.DOCUMENT:
-                    doc_id = s.get('url') or s.get('id')
-                    if doc_id: documents_with_content.add(str(doc_id))
+            if ident in current_turn_tool_source_idents:
+                if ident not in seen_source_identifiers:
+                    raw_sources.append(s)
+                    seen_source_identifiers.add(ident)
+                    # Marcar documento como "con contenido"
+                    if s.get('type') == 'document' or s.get('type') == SourceType.DOCUMENT:
+                        doc_id = s.get('url') or s.get('id')
+                        if doc_id: documents_with_content.add(str(doc_id))
+            else:
+                logger.debug(f"[Consolidación Fuentes] Ignorando fuente acumulada de turnos previos: {ident}")
 
     # 2. Procesar Fuentes de Grafo (vienen en state['graph_sources'])
     # PRIORIDAD MEDIA: Contexto relacional del grafo
@@ -1057,6 +1167,65 @@ async def call_model_node(state: AgentState):
         except Exception as e:
             logger.error(f"Error procesando fuente {i} para LLM: {e}")
 
+    # 2.5. Actualizar los mensajes de tipo ToolMessage en el historial para que usen los IDs consolidados
+    try:
+        # Construir mapa de búsqueda por identificador de fuente
+        consolidated_source_by_ident = {}
+        for source_obj in all_sources_for_llm:
+            s_dict = source_obj.dict() if hasattr(source_obj, 'dict') else source_obj.model_dump()
+            ident = get_source_identifier(s_dict)
+            consolidated_source_by_ident[ident] = source_obj
+
+        # Buscar en el historial de mensajes de state
+        if state.get("messages"):
+            for msg in state["messages"]:
+                if isinstance(msg, ToolMessage):
+                    tool_sources = msg.additional_kwargs.get("sources")
+                    if tool_sources and isinstance(tool_sources, list):
+                        updated_tool_sources = []
+                        id_replacement_map = {}
+                        
+                        for ts in tool_sources:
+                            ts_dict = ts.dict() if hasattr(ts, 'dict') else (ts.model_dump() if hasattr(ts, 'model_dump') else ts)
+                            ident = get_source_identifier(ts_dict)
+                            local_id = ts_dict.get('id')
+                            
+                            if ident in consolidated_source_by_ident:
+                                new_source_obj = consolidated_source_by_ident[ident]
+                                updated_tool_sources.append(new_source_obj)
+                                if local_id is not None:
+                                    id_replacement_map[local_id] = new_source_obj.id
+                                    logger.debug(f"[Consolidación Fuentes] Alineando ID de fuente: {ident} | Local ID: {local_id} -> Nuevo ID: {new_source_obj.id}")
+                            else:
+                                logger.debug(f"Source {ident} in ToolMessage not found in consolidated list, leaving as is.")
+                                try:
+                                    if isinstance(ts, dict):
+                                        updated_tool_sources.append(Source(**ts))
+                                    else:
+                                        updated_tool_sources.append(ts)
+                                except Exception as parse_err:
+                                    logger.error(f"Error fallback parsing source: {parse_err}")
+                                    updated_tool_sources.append(ts)
+                        
+                        # Guardar las fuentes actualizadas
+                        msg.additional_kwargs["sources"] = [
+                            s.dict() if hasattr(s, 'dict') else s.model_dump() if hasattr(s, 'model_dump') else s
+                            for s in updated_tool_sources
+                        ]
+                        
+                        # Actualizar texto del ToolMessage con los nuevos IDs
+                        content_str = msg.content
+                        if isinstance(content_str, str) and id_replacement_map:
+                            # Ordenar viejos IDs de forma descendente para evitar colisiones parciales (ej: 10 vs 1)
+                            sorted_old_ids = sorted(id_replacement_map.keys(), key=lambda x: int(x) if str(x).isdigit() else 0, reverse=True)
+                            for old_id in sorted_old_ids:
+                                new_id = id_replacement_map[old_id]
+                                content_str = content_str.replace(f"[{old_id}]", f"[{new_id}]")
+                                content_str = content_str.replace(f"Contexto [{old_id}]", f"Contexto [{new_id}]")
+                            msg.content = content_str
+    except Exception as update_err:
+        logger.error(f"Error actualizando ToolMessages con IDs consolidados: {update_err}", exc_info=True)
+
     # 3. Generar el contexto formateado con los nuevos IDs [1], [2], ...
     if all_sources_for_llm:
         relevant_memories_text = format_context_with_sources(all_sources_for_llm)
@@ -1110,7 +1279,12 @@ async def call_model_node(state: AgentState):
     # Soporte multimodal (visión) si hay imágenes en el último mensaje
     has_image = any(_message_has_image_parts(msg) for msg in state["messages"][-1:])
     if has_image:
-        llm = await get_llm_for_user(state['account_id'], purpose="vision")
+        main_model_name = getattr(llm, 'model_name', getattr(llm, 'model', ''))
+        if not is_multimodal_model(main_model_name):
+            logger.info(f"🔄 El modelo principal '{main_model_name}' no es multimodal. Activando vision_model.")
+            llm = await get_llm_for_user(state['account_id'], purpose="vision")
+        else:
+            logger.info(f"👁️ El modelo principal '{main_model_name}' es multimodal, se utilizará directamente para procesar las imágenes.")
 
     if not llm: raise ValueError("El LLM no está disponible.")
     
@@ -1504,38 +1678,45 @@ async def call_model_node(state: AgentState):
     
     # Si hay imagenes usamos el modelo vision explicitamente, no el LLM principal
     if has_images:
-        account_id = state.get("account_id")
-        
-        if account_id:
-            try:
-                vision_llm = await get_llm_for_user(account_id, purpose="vision")
-                if vision_llm:
-                    logger.info(
-                        f"🔍 Vision routing resolved | account_id={account_id} | "
-                        f"model_name={getattr(vision_llm, 'model_name', None)} | "
-                        f"model={getattr(vision_llm, 'model', None)}"
-                    )
-                else:
-                    logger.debug(f"🔍 No se encontró modelo VISION para la cuenta {account_id}, usando LLM principal como fallback")
-                    vision_llm = get_main_llm()
-            except Exception as e:
-                logger.warning(f"⚠️ Error al obtener LLM de visión para cuenta {account_id}: {e}. Usando LLM principal.")
-                vision_llm = get_main_llm()
-        else:
-            logger.debug(f"🔍 No hay account_id, usando get_vision_llm() global")
-            vision_llm = get_vision_llm()
-            
-        if vision_llm:
+        if is_multimodal_model(model_name):
             logger.info(
-                f"🔍 Detectadas imagenes en el historial, usando modelo VISION final | "
-                f"account_id={account_id} | model_name={getattr(vision_llm, 'model_name', 'desconocido')} | "
-                f"model={getattr(vision_llm, 'model', 'desconocido')}"
+                f"👁️ El modelo principal '{model_name}' es multimodal. "
+                "Conservando la cadena con herramientas vinculadas y tag 'vision_model'."
             )
-            # Reconstruimos la cadena con el modelo vision manteniendo el resto de la pipeline
-            chain = (
-                chain.first
-                | vision_llm.with_config(tags=["vision_model"])
-            )
+            chain = chain.with_config(tags=["vision_model"])
+        else:
+            account_id = state.get("account_id")
+            
+            if account_id:
+                try:
+                    vision_llm = await get_llm_for_user(account_id, purpose="vision")
+                    if vision_llm:
+                        logger.info(
+                            f"🔍 Vision routing resolved | account_id={account_id} | "
+                            f"model_name={getattr(vision_llm, 'model_name', None)} | "
+                            f"model={getattr(vision_llm, 'model', None)}"
+                        )
+                    else:
+                        logger.debug(f"🔍 No se encontró modelo VISION para la cuenta {account_id}, usando LLM principal como fallback")
+                        vision_llm = get_main_llm()
+                except Exception as e:
+                    logger.warning(f"⚠️ Error al obtener LLM de visión para cuenta {account_id}: {e}. Usando LLM principal.")
+                    vision_llm = get_main_llm()
+            else:
+                logger.debug(f"🔍 No hay account_id, usando get_vision_llm() global")
+                vision_llm = get_vision_llm()
+                
+            if vision_llm:
+                logger.info(
+                    f"🔍 Detectadas imagenes en el historial, usando modelo VISION final | "
+                    f"account_id={account_id} | model_name={getattr(vision_llm, 'model_name', 'desconocido')} | "
+                    f"model={getattr(vision_llm, 'model', 'desconocido')}"
+                )
+                # Reconstruimos la cadena con el modelo vision manteniendo el resto de la pipeline
+                chain = (
+                    chain.first
+                    | vision_llm.with_config(tags=["vision_model"])
+                )
     
     full_ai_message_content = ""
     full_reasoning_content = "" # Acumulador para razonamiento
@@ -1555,194 +1736,243 @@ async def call_model_node(state: AgentState):
                 if not getattr(target_llm, 'custom_llm_provider', None):
                     target_llm.custom_llm_provider = "openai"
 
-    async for chunk in chain.astream({"messages": cleaned_messages}):
-        if isinstance(chunk, AIMessage):
-            # DEBUG: Log del chunk completo para ver el formato crudo
-            if logger.isEnabledFor(logging.DEBUG):
-                logger.debug(f"🔍 CHUNK CRUDO: content={chunk.content}, tool_calls={chunk.tool_calls}, additional_kwargs={chunk.additional_kwargs}")
-            
-            # 1. Detectar razonamiento (Chain of Thought) en metadatos (OpenRouter / LiteLLM / DeepSeek)
-            reasoning_chunk = ""
-            add_kwargs = getattr(chunk, 'additional_kwargs', {})
-            resp_meta = getattr(chunk, 'response_metadata', {})
-            
-            # Lista de claves posibles donde los proveedores esconden el razonamiento
-            reasoning_keys = ["reasoning", "reasoning_content", "thought", "thinking", "reflection", "chain_of_thought"]
-            
-            # Buscar en additional_kwargs
-            for key in reasoning_keys:
-                if key in add_kwargs and isinstance(add_kwargs[key], str) and add_kwargs[key]:
-                    reasoning_chunk = add_kwargs[key]
-                    break
-            
-            # Buscar en response_metadata si no se encontró
-            if not reasoning_chunk:
-                for key in reasoning_keys:
-                    if key in resp_meta and isinstance(resp_meta[key], str) and resp_meta[key]:
-                        reasoning_chunk = resp_meta[key]
-                        break
-            
-            if reasoning_chunk:
-                full_reasoning_content += reasoning_chunk
-                await send_personal_message(target_account_id, {
-                    "type": "reasoning_chunk",
-                    "thread_id": state['thread_id'],
-                    "taskId": state.get("task_id"),
-                    "chunk": reasoning_chunk,
-                    "full_reasoning": full_reasoning_content
-                }, connection_type=conn_type)
+    # --- Streaming con reintentos para errores transitorios de proveedor ---
+    _MAX_STREAM_RETRIES = 2
+    _STREAM_RETRY_DELAY = 3.0  # segundos entre reintentos
 
-            # 2. Procesar contenido normal y DETECCIÓN DE ETIQUETAS 认 robusta
-            current_content = ""
-            if isinstance(chunk.content, str):
-                current_content = chunk.content
-            elif isinstance(chunk.content, list):
-                for part in chunk.content:
-                    if isinstance(part, dict) and part.get("type") == "text":
-                        current_content += part.get("text", "")
-            
-            # Buffer para tags cortados (simple: si termina en <, <t, <th... o </, </t...)
-            # Nota: Implementar un buffer completo es complejo aqui, usamos heuristica de tags
-            
-            if current_content:
-                # Lógica de detección de etiquetas 认 para modelos como DeepSeek-R1
-                processed_content = ""
-                
-                # Caso simple: El chunk contiene 认
-                if "认" in current_content:
-                    parts = current_content.split("认")
-                    processed_content += parts[0] # Texto antes de 认
-                    in_thinking_tag = True
-                    thinking_part = parts[1] if len(parts) > 1 else ""
+    def _is_transient_provider_error(exc: Exception) -> bool:
+        """Detecta si una excepción es un error transitorio del proveedor (timeout, unavailable)."""
+        exc_str = str(exc).lower()
+        transient_keywords = [
+            "upstream idle timeout",
+            "provider_unavailable",
+            "timeout",
+            "connection reset",
+            "service unavailable",
+            "overloaded",
+            "rate limit",
+        ]
+        if any(kw in exc_str for kw in transient_keywords):
+            return True
+        if _LiteLLMMidStreamFallbackError and isinstance(exc, _LiteLLMMidStreamFallbackError):
+            return True
+        if _LiteLLMAPIError and isinstance(exc, _LiteLLMAPIError):
+            return True
+        return False
+
+    for _stream_attempt in range(_MAX_STREAM_RETRIES + 1):
+        try:
+            async for chunk in chain.astream({"messages": cleaned_messages}):
+                if isinstance(chunk, AIMessage):
+                    # DEBUG: Log del chunk completo para ver el formato crudo
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(f"🔍 CHUNK CRUDO: content={chunk.content}, tool_calls={chunk.tool_calls}, additional_kwargs={chunk.additional_kwargs}")
                     
-                    # Si también contiene 认 en el mismo chunk
-                    if "认" in thinking_part:
-                        subparts = thinking_part.split("认")
-                        reasoning_to_send = subparts[0]
-                        full_reasoning_content += reasoning_to_send
-                        in_thinking_tag = False
-                        processed_content += subparts[1] if len(subparts) > 1 else ""
-                        
-                        # Enviar el razonamiento acumulado en el tag
-                        await send_personal_message(target_account_id, {
-                            "type": "reasoning_chunk",
-                            "thread_id": state['thread_id'],
-                            "taskId": state.get("task_id"),
-                            "chunk": reasoning_to_send,
-                            "full_reasoning": full_reasoning_content
-                        }, connection_type=conn_type)
-                    else:
-                        # Todo el resto del chunk es razonamiento
-                        full_reasoning_content += thinking_part
-                        await send_personal_message(target_account_id, {
-                            "type": "reasoning_chunk",
-                            "thread_id": state['thread_id'],
-                            "taskId": state.get("task_id"),
-                            "chunk": thinking_part,
-                            "full_reasoning": full_reasoning_content
-                        }, connection_type=conn_type)
-                
-                # Caso: Estamos dentro de un tag de pensamiento abierto en chunks anteriores
-                elif in_thinking_tag:
-                    if "认" in current_content:
-                        parts = current_content.split("认")
-                        reasoning_to_send = parts[0]
-                        full_reasoning_content += reasoning_to_send
-                        in_thinking_tag = False
-                        processed_content += parts[1] if len(parts) > 1 else ""
-                        
-                        await send_personal_message(target_account_id, {
-                            "type": "reasoning_chunk",
-                            "thread_id": state['thread_id'],
-                            "taskId": state.get("task_id"),
-                            "chunk": reasoning_to_send,
-                            "full_reasoning": full_reasoning_content
-                        }, connection_type=conn_type)
-                    else:
-                        # Todo el chunk sigue siendo razonamiento
-                        full_reasoning_content += current_content
-                        await send_personal_message(target_account_id, {
-                            "type": "reasoning_chunk",
-                            "thread_id": state['thread_id'],
-                            "taskId": state.get("task_id"),
-                            "chunk": current_content,
-                            "full_reasoning": full_reasoning_content
-                        }, connection_type=conn_type)
-                
-                # Caso: Posible tag cortado al final (heurística simple para evitar mostrar <t etc)
-                # Si no estamos pensando y el chunk termina en <, <t, <th... no lo procesamos aun
-                # (Esta es una mejora compleja, por ahora asumimos atomicidad razonable)
-                else:
-                    processed_content = current_content
-
-
-                if processed_content:
-                    full_ai_message_content += processed_content
-                    logger.debug(f"DEBUG (agent.py): Enviando stream_chunk para taskId {state.get('task_id')}")
-                    await send_personal_message(target_account_id, {
-                        "type": "stream_chunk",
-                        "thread_id": state['thread_id'],
-                        "taskId": state.get("task_id"),
-                        "chunk": processed_content,
-                        "full_text": full_ai_message_content
-                    }, connection_type=conn_type)
-            
-            # 3. Procesar tool calls nativos (USANDO ACUMULADOR MANUAL PARA EVITAR FRAGMENTACIÓN)
-            if hasattr(chunk, 'tool_call_chunks') and chunk.tool_call_chunks:
-                for tc_chunk in chunk.tool_call_chunks:
-                    # Buscar si ya tenemos esta llamada (por su index o ID)
-                    idx = tc_chunk.get("index")
-                    found = False
+                    # 1. Detectar razonamiento (Chain of Thought) en metadatos (OpenRouter / LiteLLM / DeepSeek)
+                    reasoning_chunk = ""
+                    add_kwargs = getattr(chunk, 'additional_kwargs', {})
+                    resp_meta = getattr(chunk, 'response_metadata', {})
                     
-                    for existing_tc in tool_calls_from_llm:
-                        if (idx is not None and existing_tc.get("index") == idx) or (tc_chunk.get("id") and existing_tc.get("id") == tc_chunk.get("id")):
-                            found = True
-                            # Actualizar el existente
-                            if tc_chunk.get("name"):
-                                existing_tc["name"] = tc_chunk["name"]
-                            if tc_chunk.get("args"):
-                                # Unir strings de argumentos (vienen fragmentados)
-                                current_args_str = existing_tc.get("_args_str", "")
-                                new_args_str = tc_chunk["args"]
-                                existing_tc["_args_str"] = current_args_str + new_args_str
-                                try:
-                                    # Intentar parsear el acumulado
-                                    existing_tc["args"] = json.loads(existing_tc["_args_str"])
-                                except:
-                                    pass
-                            if tc_chunk.get("id"):
-                                existing_tc["id"] = tc_chunk["id"]
+                    # Lista de claves posibles donde los proveedores esconden el razonamiento
+                    reasoning_keys = ["reasoning", "reasoning_content", "thought", "thinking", "reflection", "chain_of_thought"]
+                    
+                    # Buscar en additional_kwargs
+                    for key in reasoning_keys:
+                        if key in add_kwargs and isinstance(add_kwargs[key], str) and add_kwargs[key]:
+                            reasoning_chunk = add_kwargs[key]
                             break
                     
-                    if not found:
-                        new_tc = {
-                            "name": tc_chunk.get("name", ""),
-                            "args": {},
-                            "_args_str": tc_chunk.get("args", ""),
-                            "id": tc_chunk.get("id"),
-                            "index": idx
-                        }
-                        if new_tc["_args_str"]:
-                            try:
-                                new_tc["args"] = json.loads(new_tc["_args_str"])
-                            except:
-                                pass
-                        tool_calls_from_llm.append(new_tc)
+                    # Buscar en response_metadata si no se encontró
+                    if not reasoning_chunk:
+                        for key in reasoning_keys:
+                            if key in resp_meta and isinstance(resp_meta[key], str) and resp_meta[key]:
+                                reasoning_chunk = resp_meta[key]
+                                break
+                    
+                    if reasoning_chunk:
+                        full_reasoning_content += reasoning_chunk
+                        await send_personal_message(target_account_id, {
+                            "type": "reasoning_chunk",
+                            "thread_id": state['thread_id'],
+                            "taskId": state.get("task_id"),
+                            "chunk": reasoning_chunk,
+                            "full_reasoning": full_reasoning_content
+                        }, connection_type=conn_type)
 
-            elif chunk.tool_calls:
-                for tc in chunk.tool_calls:
-                    if tc not in tool_calls_from_llm:
-                        tool_calls_from_llm.append(tc)
-            
-            # Guardamos texto parcial para poder recuperarlo si el usuario cancela (Botón Stop)
-            if state.get("task_id"):
-                from core.websocket_manager import partial_task_messages, partial_task_reasoning
-                if full_ai_message_content:
-                    partial_task_messages[state.get("task_id")] = full_ai_message_content
-                if full_reasoning_content:
-                    partial_task_reasoning[state.get("task_id")] = full_reasoning_content
+                    # 2. Procesar contenido normal y DETECCIÓN DE ETIQUETAS 认 robusta
+                    current_content = ""
+                    if isinstance(chunk.content, str):
+                        current_content = chunk.content
+                    elif isinstance(chunk.content, list):
+                        for part in chunk.content:
+                            if isinstance(part, dict) and part.get("type") == "text":
+                                current_content += part.get("text", "")
+                    
+                    # Buffer para tags cortados (simple: si termina en <, <t, <th... o </, </t...)
+                    # Nota: Implementar un buffer completo es complejo aqui, usamos heuristica de tags
+                    
+                    if current_content:
+                        # Lógica de detección de etiquetas 认 para modelos como DeepSeek-R1
+                        processed_content = ""
+                        
+                        # Caso simple: El chunk contiene 认
+                        if "认" in current_content:
+                            parts = current_content.split("认")
+                            processed_content += parts[0] # Texto antes de 认
+                            in_thinking_tag = True
+                            thinking_part = parts[1] if len(parts) > 1 else ""
+                            
+                            # Si también contiene 认 en el mismo chunk
+                            if "认" in thinking_part:
+                                subparts = thinking_part.split("认")
+                                reasoning_to_send = subparts[0]
+                                full_reasoning_content += reasoning_to_send
+                                in_thinking_tag = False
+                                processed_content += subparts[1] if len(subparts) > 1 else ""
+                                
+                                # Enviar el razonamiento acumulado en el tag
+                                await send_personal_message(target_account_id, {
+                                    "type": "reasoning_chunk",
+                                    "thread_id": state['thread_id'],
+                                    "taskId": state.get("task_id"),
+                                    "chunk": reasoning_to_send,
+                                    "full_reasoning": full_reasoning_content
+                                }, connection_type=conn_type)
+                            else:
+                                # Todo el resto del chunk es razonamiento
+                                full_reasoning_content += thinking_part
+                                await send_personal_message(target_account_id, {
+                                    "type": "reasoning_chunk",
+                                    "thread_id": state['thread_id'],
+                                    "taskId": state.get("task_id"),
+                                    "chunk": thinking_part,
+                                    "full_reasoning": full_reasoning_content
+                                }, connection_type=conn_type)
+                        
+                        # Caso: Estamos dentro de un tag de pensamiento abierto en chunks anteriores
+                        elif in_thinking_tag:
+                            if "认" in current_content:
+                                parts = current_content.split("认")
+                                reasoning_to_send = parts[0]
+                                full_reasoning_content += reasoning_to_send
+                                in_thinking_tag = False
+                                processed_content += parts[1] if len(parts) > 1 else ""
+                                
+                                await send_personal_message(target_account_id, {
+                                    "type": "reasoning_chunk",
+                                    "thread_id": state['thread_id'],
+                                    "taskId": state.get("task_id"),
+                                    "chunk": reasoning_to_send,
+                                    "full_reasoning": full_reasoning_content
+                                }, connection_type=conn_type)
+                            else:
+                                # Todo el chunk sigue siendo razonamiento
+                                full_reasoning_content += current_content
+                                await send_personal_message(target_account_id, {
+                                    "type": "reasoning_chunk",
+                                    "thread_id": state['thread_id'],
+                                    "taskId": state.get("task_id"),
+                                    "chunk": current_content,
+                                    "full_reasoning": full_reasoning_content
+                                }, connection_type=conn_type)
+                        
+                        # Caso: Posible tag cortado al final (heurística simple para evitar mostrar <t etc)
+                        # Si no estamos pensando y el chunk termina en <, <t, <th... no lo procesamos aun
+                        # (Esta es una mejora compleja, por ahora asumimos atomicidad razonable)
+                        else:
+                            processed_content = current_content
 
-            final_response_message = chunk
+
+                        if processed_content:
+                            full_ai_message_content += processed_content
+                            logger.debug(f"DEBUG (agent.py): Enviando stream_chunk para taskId {state.get('task_id')}")
+                            await send_personal_message(target_account_id, {
+                                "type": "stream_chunk",
+                                "thread_id": state['thread_id'],
+                                "taskId": state.get("task_id"),
+                                "chunk": processed_content,
+                                "full_text": full_ai_message_content
+                            }, connection_type=conn_type)
+                    
+                    # 3. Procesar tool calls nativos (USANDO ACUMULADOR MANUAL PARA EVITAR FRAGMENTACIÓN)
+                    if hasattr(chunk, 'tool_call_chunks') and chunk.tool_call_chunks:
+                        for tc_chunk in chunk.tool_call_chunks:
+                            # Buscar si ya tenemos esta llamada (por su index o ID)
+                            idx = tc_chunk.get("index")
+                            found = False
+                            
+                            for existing_tc in tool_calls_from_llm:
+                                if (idx is not None and existing_tc.get("index") == idx) or (tc_chunk.get("id") and existing_tc.get("id") == tc_chunk.get("id")):
+                                    found = True
+                                    # Actualizar el existente
+                                    if tc_chunk.get("name"):
+                                        existing_tc["name"] = tc_chunk["name"]
+                                    if tc_chunk.get("args"):
+                                        # Unir strings de argumentos (vienen fragmentados)
+                                        current_args_str = existing_tc.get("_args_str", "")
+                                        new_args_str = tc_chunk["args"]
+                                        existing_tc["_args_str"] = current_args_str + new_args_str
+                                        try:
+                                            # Intentar parsear el acumulado
+                                            existing_tc["args"] = json.loads(existing_tc["_args_str"])
+                                        except:
+                                            pass
+                                    if tc_chunk.get("id"):
+                                        existing_tc["id"] = tc_chunk["id"]
+                                    break
+                            
+                            if not found:
+                                new_tc = {
+                                    "name": tc_chunk.get("name", ""),
+                                    "args": {},
+                                    "_args_str": tc_chunk.get("args", ""),
+                                    "id": tc_chunk.get("id"),
+                                    "index": idx
+                                }
+                                if new_tc["_args_str"]:
+                                    try:
+                                        new_tc["args"] = json.loads(new_tc["_args_str"])
+                                    except:
+                                        pass
+                                tool_calls_from_llm.append(new_tc)
+
+                    elif chunk.tool_calls:
+                        for tc in chunk.tool_calls:
+                            if tc not in tool_calls_from_llm:
+                                tool_calls_from_llm.append(tc)
+                    
+                    # Guardamos texto parcial para poder recuperarlo si el usuario cancela (Botón Stop)
+                    if state.get("task_id"):
+                        from core.websocket_manager import partial_task_messages, partial_task_reasoning
+                        if full_ai_message_content:
+                            partial_task_messages[state.get("task_id")] = full_ai_message_content
+                        if full_reasoning_content:
+                            partial_task_reasoning[state.get("task_id")] = full_reasoning_content
+
+                    final_response_message = chunk
+            break  # Stream completó sin error, salir del bucle de reintentos
+        except asyncio.CancelledError:
+            raise  # No reintentar si fue cancelado por el usuario
+        except Exception as _stream_exc:
+            if _is_transient_provider_error(_stream_exc) and _stream_attempt < _MAX_STREAM_RETRIES:
+                logger.warning(
+                    f"⚠️ Error transitorio del proveedor en stream (intento {_stream_attempt + 1}/{_MAX_STREAM_RETRIES + 1}): "
+                    f"{type(_stream_exc).__name__}: {_stream_exc}. "
+                    f"Reintentando en {_STREAM_RETRY_DELAY}s..."
+                )
+                # Limpiar estado parcial antes de reintentar
+                full_ai_message_content = ""
+                full_reasoning_content = ""
+                tool_calls_from_llm = []
+                final_response_message = None
+                in_thinking_tag = False
+                await asyncio.sleep(_STREAM_RETRY_DELAY)
+            else:
+                logger.error(
+                    f"❌ Error en stream del LLM (intento {_stream_attempt + 1}/{_MAX_STREAM_RETRIES + 1}): "
+                    f"{type(_stream_exc).__name__}: {_stream_exc}"
+                )
+                raise
 
 
     logger.debug(f"DEBUG (agent.py - call_model_node): Respuesta cruda del LLM acumulada.")
@@ -2141,6 +2371,7 @@ async def tool_node(state: AgentState):
             }, connection_type=conn_type)
 
             tool_message = ToolMessage(content=context_content, tool_call_id=tool_call.get("id") or str(uuid.uuid4()))
+            tool_message.additional_kwargs["sources"] = tool_sources
             if visual_schema:
                 tool_message.additional_kwargs["visual_schema"] = visual_schema
             if recommendations:
@@ -2163,7 +2394,9 @@ async def tool_node(state: AgentState):
                 "type": "tool_end", "taskId": state.get("task_id"), "tool_name": tool_name,
                 "status": "error", "result": error_text, "error": True, "sources": []
             }, connection_type=conn_type)
-            return ToolMessage(content=error_text, tool_call_id=tool_call.get("id") or str(uuid.uuid4())), []
+            tool_msg = ToolMessage(content=error_text, tool_call_id=tool_call.get("id") or str(uuid.uuid4()))
+            tool_msg.additional_kwargs["sources"] = []
+            return tool_msg, []
 
     # 2. Ejecutar todas las llamadas en paralelo.
     # return_exceptions=True garantiza aislamiento: el fallo de una herramienta
@@ -2187,19 +2420,36 @@ async def tool_node(state: AgentState):
             tool_messages.append(msg)
             all_new_sources.extend(sources)
 
-    # 4. Re-indexación global secuencial
-    # 4. Inserción de nuevas fuentes (evitando duplicados)
+    # 4. Inserción de nuevas fuentes (evitando duplicados mediante identificador robusto)
+    def get_source_identifier(s: Dict[str, Any]) -> str:
+        s_type = s.get('type', 'web')
+        if hasattr(s_type, 'value'):
+            s_type = s_type.value
+        s_type = str(s_type)
+        
+        s_url = s.get('url') or s.get('id') or ''
+        s_url = str(s_url)
+        
+        s_snippet = s.get('snippet', '')
+        # Usar un hash del snippet para permitir múltiples fragmentos del mismo documento
+        import hashlib
+        snippet_hash = hashlib.md5(s_snippet.strip().encode()).hexdigest()[:8] if s_snippet.strip() else "empty"
+        return f"{s_type}:{s_url}:{snippet_hash}"
+
+    logger.debug(f"[Tool Node] Consolidando fuentes de herramientas ejecutadas. Total nuevas recibidas: {len(all_new_sources)}")
     actual_new_sources_to_return = []
     current_sources = state.get("sources") or []
-    # Crear conjunto de URLs ya vistas en el estado actual para no duplicar
-    seen_urls = {s.get('url') for s in current_sources if s.get('url')}
+    seen_identifiers = {get_source_identifier(s) for s in current_sources}
     
     for s in all_new_sources:
-        url = s.get('url')
-        # Si no tiene URL o la URL no ha sido vista, es nueva
-        if not url or url not in seen_urls:
-            actual_new_sources_to_return.append(s)
-            if url: seen_urls.add(url)
+        s_dict = s.model_dump() if hasattr(s, 'model_dump') else (s.dict() if hasattr(s, 'dict') else s)
+        ident = get_source_identifier(s_dict)
+        if ident not in seen_identifiers:
+            actual_new_sources_to_return.append(s_dict)
+            seen_identifiers.add(ident)
+            logger.debug(f"[Tool Node] Agregando nueva fuente única: {ident}")
+        else:
+            logger.debug(f"[Tool Node] Omitiendo fuente duplicada: {ident}")
     
     logger.info(f"✅ tool_node: Añadiendo {len(actual_new_sources_to_return)} nuevas fuentes al estado. (Total previo: {len(current_sources)})")
 
@@ -2915,29 +3165,44 @@ async def retrieve_proactive_memories_node(state: AgentState):
         logger.error(f"❌ Error recuperando memorias proactivas: {e}", exc_info=True)
         return {"sources": []}
 
-async def run_custom_user_heartbeat(account_id: str, workspace_id: Optional[str] = None, allowed_tools: Optional[list] = None) -> str:
+async def run_custom_user_heartbeat(account_id: str, workspace_id: Optional[str] = None, allowed_tools: Optional[list] = None, heartbeat_id: Optional[str] = None) -> str:
     """
     Ejecuta el heartbeat personalizado del usuario utilizando el agente LangGraph.
     Crea un hilo dedicado y ejecuta las instrucciones del usuario.
     """
+    from core.database import CustomHeartbeat
+    instructions = ""
+    hb_name = "Heartbeat Personalizado"
+
     async with DBSession(SessionLocal) as db:
-        account = await db.get(Account, uuid.UUID(account_id))
-        if not account or not account.custom_heartbeat_instructions:
-            return "No hay heartbeat personalizado configurado."
-            
-        instructions = account.custom_heartbeat_instructions
-        
-        # Merge allowed tools from account if none provided explicitly
-        if allowed_tools is None:
-            allowed_tools = account.custom_heartbeat_allowed_tools or []
+        if heartbeat_id:
+            # Buscar heartbeat específico
+            hb = await db.get(CustomHeartbeat, uuid.UUID(heartbeat_id))
+            if not hb or not hb.is_active:
+                return f"Heartbeat '{heartbeat_id}' no encontrado o inactivo."
+            instructions = hb.instructions
+            hb_name = hb.name
+            if allowed_tools is None:
+                allowed_tools = hb.allowed_tools or []
+        else:
+            # Fallback a la cuenta
+            account = await db.get(Account, uuid.UUID(account_id))
+            if not account or not account.custom_heartbeat_instructions:
+                return "No hay heartbeat personalizado configurado."
+            instructions = account.custom_heartbeat_instructions
+            if allowed_tools is None:
+                allowed_tools = account.custom_heartbeat_allowed_tools or []
         
         if allowed_tools:
             instructions += f"\n\nATENCIÓN: Para esta tarea, SOLO tienes permitido utilizar las siguientes herramientas: {', '.join(allowed_tools)}. Limita tu ejecución a estas capacidades."
 
-    logger.info(f"🚀 Iniciando heartbeat personalizado para la cuenta {account_id}")
+    logger.info(f"🚀 Iniciando heartbeat personalizado '{hb_name}' para la cuenta {account_id}")
 
-    # Reutilizar el hilo único de heartbeat (platform='heartbeat') en vez de crear uno nuevo cada vez
-    thread_id = await get_or_create_heartbeat_thread(account_id)
+    # Reutilizar el hilo único de heartbeat en vez de crear uno nuevo cada vez
+    if heartbeat_id:
+        thread_id = await get_or_create_specific_heartbeat_thread(account_id, heartbeat_id, hb_name)
+    else:
+        thread_id = await get_or_create_heartbeat_thread(account_id)
 
     # Importaciones necesarias
     from langchain_core.messages import HumanMessage, AIMessage
@@ -2991,10 +3256,102 @@ async def run_custom_user_heartbeat(account_id: str, workspace_id: Optional[str]
         final_ai_message = next((msg for msg in reversed(final_messages) if isinstance(msg, AIMessage)), None)
         
         if final_ai_message:
+            # Reconstruir content_parts para persistencia en base de datos
+            ai_content_parts: List[Dict[str, Any]] = []
+            
+            # 1. Extraer razonamiento si existe
+            reasoning_text = final_ai_message.additional_kwargs.get("reasoning") or final_ai_message.additional_kwargs.get("think")
+            if reasoning_text:
+                ai_content_parts.append({
+                    "type": "reasoning",
+                    "content": reasoning_text
+                })
+                
+            # 2. Identificar el último HumanMessage para procesar solo el turno actual
+            last_human_idx = -1
+            for idx in range(len(final_messages) - 1, -1, -1):
+                if isinstance(final_messages[idx], HumanMessage):
+                    last_human_idx = idx
+                    break
+                    
+            # 3. Extraer mensajes intermedios del turno actual
+            intermediate_messages = []
+            if last_human_idx != -1:
+                intermediate_messages = final_messages[last_human_idx + 1 : -1]
+                
+            # 4. Agrupar resultados de herramientas
+            tool_results = {}
+            for msg in intermediate_messages:
+                if isinstance(msg, ToolMessage):
+                    tool_results[msg.tool_call_id] = msg
+                    
+            # 5. Parsear llamadas de herramientas
+            for msg in intermediate_messages:
+                if isinstance(msg, AIMessage) and msg.tool_calls:
+                    for tool_call in msg.tool_calls:
+                        tool_call_id = tool_call.get("id")
+                        tool_name = tool_call.get("name")
+                        
+                        tool_msg = tool_results.get(tool_call_id)
+                        status = "end"
+                        content = f"Usando {tool_name}..."
+                        pty_session = None
+                        
+                        if tool_msg:
+                            content = str(tool_msg.content)
+                            if tool_name == "terminal_executor":
+                                import re
+                                match = re.search(r'data-session-id="([^"]+)"', content)
+                                if match:
+                                    pty_session = {"session_id": match.group(1)}
+                        else:
+                            status = "error"
+                            
+                        ai_content_parts.append({
+                            "type": "tool_call",
+                            "content": content,
+                            "tool_name": tool_name,
+                            "status": status,
+                            "pty_session": pty_session,
+                            "id": tool_call_id
+                        })
+                        
+            # 6. Extraer texto final del AI
+            def _extract_text(message: AIMessage) -> str:
+                if isinstance(message.content, str):
+                    return message.content
+                if isinstance(message.content, list):
+                    text = ""
+                    for part in message.content:
+                        if isinstance(part, dict) and part.get("type") == "text":
+                            text += part.get("text", "")
+                    return text
+                return ""
+                
+            final_text = _extract_text(final_ai_message)
+            if final_text:
+                ai_content_parts.append({
+                    "type": "text",
+                    "content": final_text
+                })
+                
+            # 7. Obtener la sesión PTY para el nivel raíz si aplica
+            root_pty_session = None
+            for part in ai_content_parts:
+                if part.get("type") == "tool_call" and part.get("pty_session"):
+                    root_pty_session = part["pty_session"]
+                    break
+                    
+            # 8. Modificar additional_kwargs
+            additional_kwargs = dict(final_ai_message.additional_kwargs)
+            additional_kwargs["content_parts"] = ai_content_parts
+            if root_pty_session:
+                additional_kwargs["pty_session"] = root_pty_session
+
             sanitized_ai_message = AIMessage(
                 content=sanitize_json_content(final_ai_message.content),
                 tool_calls=final_ai_message.tool_calls,
-                additional_kwargs=final_ai_message.additional_kwargs
+                additional_kwargs=additional_kwargs
             )
             await chat_message_history.aadd_messages([sanitized_ai_message])
             

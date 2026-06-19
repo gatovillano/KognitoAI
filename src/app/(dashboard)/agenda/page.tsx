@@ -3,10 +3,14 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
-import { PlusCircle, Clock, Trash2, Users, MoreHorizontal, Info, CheckCircle2, Link as LinkIcon, CalendarIcon, Bot } from 'lucide-react';
+import { PlusCircle, Clock, Trash2, Users, MoreHorizontal, Info, CheckCircle2, Link as LinkIcon, CalendarIcon, Bot, Notebook } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import NotesPage from '../notes/page';
+import ProfilesPage from '../profiles/page';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { EventDialog } from './event-dialog';
 import { Calendar } from '@/components/ui/calendar';
@@ -30,6 +34,22 @@ import { AgendaEvent, TaskResponse } from './types';
 
 
 export default function AgendaPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const tabParam = searchParams?.get('tab');
+  const [activeTab, setActiveTab] = useState<'calendar' | 'notes' | 'contacts'>('calendar');
+
+  useEffect(() => {
+    if (tabParam === 'calendar' || tabParam === 'notes' || tabParam === 'contacts') {
+      setActiveTab(tabParam);
+    }
+  }, [tabParam]);
+
+  const handleTabChange = (newTab: string) => {
+    setActiveTab(newTab as any);
+    router.push(`/agenda?tab=${newTab}`, { scroll: false });
+  };
+
   const [allEvents, setAllEvents] = useState<AgendaEvent[]>([]);
   const [allTasks, setAllTasks] = useState<TaskResponse[]>([]); // Nuevo estado para todas las tareas
   const [isLoading, setIsLoading] = useState(true);
@@ -46,6 +66,7 @@ export default function AgendaPage() {
   const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
   const [isEventEditDialogOpen, setIsEventEditDialogOpen] = useState(false); // Nuevo estado para el diálogo de edición
   const [isInfoSheetOpen, setIsInfoSheetOpen] = useState(false); // Nuevo estado para controlar la visibilidad del Sheet
+  const [isCalendarInfoOpen, setIsCalendarInfoOpen] = useState(false); // Nuevo estado para controlar la visibilidad del Sheet de Calendario
   const [kanbanInitialStatus, setKanbanInitialStatus] = useState<'Pendiente' | 'En Progreso' | 'Hecho' | undefined>(undefined);
 
   // Detectar workspace_id desde la URL
@@ -359,238 +380,275 @@ export default function AgendaPage() {
                 <Info className="h-5 w-5" />
               </Button>
             </div>
-            <p className="text-muted-foreground font-medium">Gestiona tus eventos, reuniones y tareas con inteligencia.</p>
+            <p className="text-muted-foreground font-medium">Gestiona tu tiempo, tareas, notas y contactos con inteligencia.</p>
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="bg-card/40 backdrop-blur-md p-1 rounded-2xl border border-border/40 flex gap-1">
-              {(['day', 'week', 'month', 'kanban', 'gantt'] as const).map((type) => (
-                <Button
-                  key={type}
-                  variant={viewType === type ? 'default' : 'ghost'}
-                  size="sm"
-                  onClick={() => setViewType(type)}
-                  className={`rounded-xl px-4 font-bold text-xs uppercase tracking-widest transition-all ${viewType === type ? 'shadow-lg shadow-primary/20' : 'text-muted-foreground hover:text-foreground'}`}
-                >
-                  {type === 'day' ? 'Día' : type === 'week' ? 'Semana' : type === 'month' ? 'Mes' : type === 'kanban' ? 'Kanban' : 'Gantt'}
-                </Button>
-              ))}
+          {activeTab === 'calendar' && (
+            <div className="flex items-center gap-3 animate-in fade-in duration-300">
+              <div className="bg-card/40 backdrop-blur-md p-1 rounded-2xl border border-border/40 flex gap-1">
+                {(['day', 'week', 'month', 'kanban', 'gantt'] as const).map((type) => (
+                  <Button
+                    key={type}
+                    variant={viewType === type ? 'default' : 'ghost'}
+                    size="sm"
+                    onClick={() => setViewType(type)}
+                    className={`rounded-xl px-4 font-bold text-xs uppercase tracking-widest transition-all ${viewType === type ? 'shadow-lg shadow-primary/20' : 'text-muted-foreground hover:text-foreground'}`}
+                  >
+                    {type === 'day' ? 'Día' : type === 'week' ? 'Semana' : type === 'month' ? 'Mes' : type === 'kanban' ? 'Kanban' : 'Gantt'}
+                  </Button>
+                ))}
+              </div>
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button className="h-12 px-6 rounded-2xl bg-primary shadow-lg shadow-primary/20 hover:shadow-primary/40 transition-all gap-2 font-bold">
+                    <PlusCircle className="h-5 w-5" />
+                    <span className="hidden md:inline">Crear</span>
+                    <MoreHorizontal className="h-4 w-4 opacity-50" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56 bg-card/95 backdrop-blur-xl border-border/40 rounded-2xl p-2">
+                  <DropdownMenuItem onClick={() => setIsEventDialogOpen(true)} className="rounded-xl focus:bg-primary/10 focus:text-primary cursor-pointer py-2.5 gap-3">
+                    <PlusCircle className="h-4 w-4" /> Agendar Evento
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => { setSelectedTask(null); setIsTaskDialogOpen(true); }} className="rounded-xl focus:bg-primary/10 focus:text-primary cursor-pointer py-2.5 gap-3">
+                    <CheckCircle2 className="h-4 w-4" /> Añadir Tarea
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
-
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button className="h-12 px-6 rounded-2xl bg-primary shadow-lg shadow-primary/20 hover:shadow-primary/40 transition-all gap-2 font-bold">
-                  <PlusCircle className="h-5 w-5" />
-                  <span className="hidden md:inline">Crear</span>
-                  <MoreHorizontal className="h-4 w-4 opacity-50" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-56 bg-card/95 backdrop-blur-xl border-border/40 rounded-2xl p-2">
-                <DropdownMenuItem onClick={() => setIsEventDialogOpen(true)} className="rounded-xl focus:bg-primary/10 focus:text-primary cursor-pointer py-2.5 gap-3">
-                  <PlusCircle className="h-4 w-4" /> Agendar Evento
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => { setSelectedTask(null); setIsTaskDialogOpen(true); }} className="rounded-xl focus:bg-primary/10 focus:text-primary cursor-pointer py-2.5 gap-3">
-                  <CheckCircle2 className="h-4 w-4" /> Añadir Tarea
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+          )}
         </div>
-        
-        <div className={`flex-grow grid gap-8 min-h-0 ${viewType === 'week' || viewType === 'month' || viewType === 'kanban' || viewType === 'gantt' ? 'md:grid-cols-1' : 'md:grid-cols-12'}`}>
-          <div className={`${viewType === 'week' || viewType === 'month' || viewType === 'kanban' || viewType === 'gantt' ? 'hidden' : 'md:col-span-4'} flex flex-col gap-6`}>
-            <Card className="border-border/40 bg-card/40 backdrop-blur-xl rounded-[2rem] overflow-hidden shadow-sm">
-              <Calendar
-                mode="single"
-                selected={selectedDate}
-                onSelect={setSelectedDate}
-                className="p-4"
-                classNames={{
-                  month: "space-y-4",
-                  caption_label: "text-sm font-black uppercase tracking-widest",
-                  day_selected: "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground rounded-xl shadow-lg shadow-primary/30",
-                  day_today: "bg-primary/10 text-primary font-bold rounded-xl",
-                  day: "h-10 w-10 p-0 font-medium aria-selected:opacity-100 hover:bg-primary/5 rounded-xl transition-colors",
-                }}
-              />
-            </Card>
 
-            {/* Mini estadísticas o info adicional podría ir aquí */}
-            <div className="bg-gradient-to-br from-primary/10 to-secondary/10 p-6 rounded-[2rem] border border-primary/10">
-              <h4 className="text-xs font-black uppercase tracking-widest text-primary mb-3">Resumen del día</h4>
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium text-muted-foreground">Eventos</span>
-                  <span className="text-sm font-bold">{eventsForSelectedPeriod.length}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium text-muted-foreground">Tareas</span>
-                  <span className="text-sm font-bold">{tasksForSelectedPeriod.length}</span>
-                </div>
+        <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full space-y-6">
+          <TabsList className="grid grid-cols-3 max-w-md bg-muted/50 p-1 rounded-2xl border border-border/50 backdrop-blur-md h-12">
+            <TabsTrigger value="calendar" className="rounded-xl font-bold text-sm transition-all gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-lg">
+              <CalendarIcon className="h-4 w-4" />
+              Calendario
+            </TabsTrigger>
+            <TabsTrigger value="notes" className="rounded-xl font-bold text-sm transition-all gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-lg">
+              <Notebook className="h-4 w-4" />
+              Notas
+            </TabsTrigger>
+            <TabsTrigger value="contacts" className="rounded-xl font-bold text-sm transition-all gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-lg">
+              <Users className="h-4 w-4" />
+              Contactos
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="calendar" className="space-y-6 animate-in fade-in duration-300 outline-none">
+            <div className="flex items-center justify-between gap-4 mb-4">
+              <div className="flex items-center gap-2">
+                <h2 className="text-xl font-black uppercase tracking-widest text-muted-foreground/70">Calendario</h2>
+                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-xl bg-primary/5 text-primary hover:bg-primary/10 transition-all" onClick={() => setIsCalendarInfoOpen(true)}>
+                  <Info className="h-4 w-4" />
+                </Button>
               </div>
             </div>
-          </div>
 
-          <div className={`${viewType === 'week' || viewType === 'month' || viewType === 'kanban' ? 'md:col-span-1' : 'md:col-span-8'} flex flex-col min-h-0`}>
-            {viewType === 'week' ? (
-              <WeeklyScheduleView
-                currentDate={selectedDate || new Date()}
-                events={allEvents}
-                tasks={allTasks}
-                onDateChange={setSelectedDate}
-                onEditEvent={(event) => { setSelectedEvent(event); setIsDetailsDialogOpen(true); }}
-                onDeleteEvent={(event) => setDeletingEvent(event)}
-                onEditTask={(task) => { setSelectedTask(task); setIsTaskDialogOpen(true); }}
-                onDeleteTask={(task) => setDeletingTask(task)}
-                onToggleTaskCompleted={handleToggleTaskCompleted}
-                onMoveEvent={handleMoveEvent}
-                onMoveTask={handleMoveTask}
-              />
-            ) : viewType === 'month' ? (
-              <MonthlyScheduleView
-                currentDate={selectedDate || new Date()}
-                events={allEvents}
-                tasks={allTasks}
-                onDateChange={setSelectedDate}
-                onEditEvent={(event) => { setSelectedEvent(event); setIsDetailsDialogOpen(true); }}
-                onEditTask={(task) => { setSelectedTask(task); setIsTaskDialogOpen(true); }}
-                onToggleTaskCompleted={handleToggleTaskCompleted}
-                onCreateEvent={handleCreateEvent}
-                onMoveEvent={handleMoveEvent}
-                onMoveTask={handleMoveTask}
-              />
-            ) : viewType === 'kanban' ? (
-              <KanbanView 
-                onCreateEvent={handleCreateEventFromKanban}
-                onCreateTask={handleCreateTaskFromKanban}
-              />
-            ) : viewType === 'gantt' ? (
-              <GanttView />
-            ) : (
-              <div className="space-y-6">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-2xl font-black tracking-tight">
-                    {selectedDate ? format(selectedDate, "EEEE, d 'de' MMMM", { locale: es }) : "Cargando..."}
-                  </h2>
-                  <div className="h-px flex-1 bg-gradient-to-r from-border/60 to-transparent ml-6" />
-                </div>
+            <div className={`grid gap-8 min-h-0 ${viewType === 'week' || viewType === 'month' || viewType === 'kanban' || viewType === 'gantt' ? 'md:grid-cols-1' : 'md:grid-cols-12'}`}>
+              <div className={`${viewType === 'week' || viewType === 'month' || viewType === 'kanban' || viewType === 'gantt' ? 'hidden' : 'md:col-span-4'} flex flex-col gap-6`}>
+                <Card className="border-border/40 bg-card/40 backdrop-blur-xl rounded-[2rem] overflow-hidden shadow-sm">
+                  <Calendar
+                    mode="single"
+                    selected={selectedDate}
+                    onSelect={setSelectedDate}
+                    className="p-4"
+                    classNames={{
+                      month: "space-y-4",
+                      caption_label: "text-sm font-black uppercase tracking-widest",
+                      day_selected: "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground rounded-xl shadow-lg shadow-primary/30",
+                      day_today: "bg-primary/10 text-primary font-bold rounded-xl",
+                      day: "h-10 w-10 p-0 font-medium aria-selected:opacity-100 hover:bg-primary/5 rounded-xl transition-colors",
+                    }}
+                  />
+                </Card>
 
-                <div className="flex-grow overflow-y-auto pr-2 space-y-8 custom-scrollbar">
-                  {isLoading ? (
-                    <div className="flex flex-col items-center justify-center py-20 gap-4">
-                      <div className="h-10 w-10 border-4 border-primary/30 border-t-primary rounded-full animate-spin" />
-                      <p className="text-muted-foreground font-medium">Sincronizando tu agenda...</p>
+                <div className="bg-gradient-to-br from-primary/10 to-secondary/10 p-6 rounded-[2rem] border border-primary/10">
+                  <h4 className="text-xs font-black uppercase tracking-widest text-primary mb-3">Resumen del día</h4>
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-muted-foreground">Eventos</span>
+                      <span className="text-sm font-bold">{eventsForSelectedPeriod.length}</span>
                     </div>
-                  ) : (
-                    <>
-                      {/* Sección de Tareas */}
-                      <div className="space-y-4">
-                        <div className="flex items-center gap-2">
-                          <CheckCircle2 className="h-5 w-5 text-green-500" />
-                          <h3 className="text-sm font-black uppercase tracking-widest text-muted-foreground/70">Tareas Prioritarias</h3>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-muted-foreground">Tareas</span>
+                      <span className="text-sm font-bold">{tasksForSelectedPeriod.length}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className={`${viewType === 'week' || viewType === 'month' || viewType === 'kanban' ? 'md:col-span-1' : 'md:col-span-8'} flex flex-col min-h-0`}>
+                {viewType === 'week' ? (
+                  <WeeklyScheduleView
+                    currentDate={selectedDate || new Date()}
+                    events={allEvents}
+                    tasks={allTasks}
+                    onDateChange={setSelectedDate}
+                    onEditEvent={(event) => { setSelectedEvent(event); setIsDetailsDialogOpen(true); }}
+                    onDeleteEvent={(event) => setDeletingEvent(event)}
+                    onEditTask={(task) => { setSelectedTask(task); setIsTaskDialogOpen(true); }}
+                    onDeleteTask={(task) => setDeletingTask(task)}
+                    onToggleTaskCompleted={handleToggleTaskCompleted}
+                    onMoveEvent={handleMoveEvent}
+                    onMoveTask={handleMoveTask}
+                  />
+                ) : viewType === 'month' ? (
+                  <MonthlyScheduleView
+                    currentDate={selectedDate || new Date()}
+                    events={allEvents}
+                    tasks={allTasks}
+                    onDateChange={setSelectedDate}
+                    onEditEvent={(event) => { setSelectedEvent(event); setIsDetailsDialogOpen(true); }}
+                    onEditTask={(task) => { setSelectedTask(task); setIsTaskDialogOpen(true); }}
+                    onToggleTaskCompleted={handleToggleTaskCompleted}
+                    onCreateEvent={handleCreateEvent}
+                    onMoveEvent={handleMoveEvent}
+                    onMoveTask={handleMoveTask}
+                  />
+                ) : viewType === 'kanban' ? (
+                  <KanbanView 
+                    onCreateEvent={handleCreateEventFromKanban}
+                    onCreateTask={handleCreateTaskFromKanban}
+                  />
+                ) : viewType === 'gantt' ? (
+                  <GanttView />
+                ) : (
+                  <div className="space-y-6">
+                    <div className="flex items-center justify-between">
+                      <h2 className="text-2xl font-black tracking-tight">
+                        {selectedDate ? format(selectedDate, "EEEE, d 'de' MMMM", { locale: es }) : "Cargando..."}
+                      </h2>
+                      <div className="h-px flex-1 bg-gradient-to-r from-border/60 to-transparent ml-6" />
+                    </div>
+
+                    <div className="flex-grow overflow-y-auto pr-2 space-y-8 custom-scrollbar">
+                      {isLoading ? (
+                        <div className="flex flex-col items-center justify-center py-20 gap-4">
+                          <div className="h-10 w-10 border-4 border-primary/30 border-t-primary rounded-full animate-spin" />
+                          <p className="text-muted-foreground font-medium">Sincronizando tu agenda...</p>
                         </div>
+                      ) : (
+                        <>
+                          {/* Sección de Tareas */}
+                          <div className="space-y-4">
+                            <div className="flex items-center gap-2">
+                              <CheckCircle2 className="h-5 w-5 text-green-500" />
+                              <h3 className="text-sm font-black uppercase tracking-widest text-muted-foreground/70">Tareas Prioritarias</h3>
+                            </div>
 
-                        {tasksForSelectedPeriod.length > 0 ? (
-                          <div className="grid gap-3">
-                            {tasksForSelectedPeriod.map((task) => (
-                              <Card key={task.id} className="group relative overflow-hidden border-border/40 bg-card/40 backdrop-blur-md rounded-2xl hover:bg-card/60 transition-all duration-300 hover:shadow-lg hover:shadow-primary/5">
-                                <div className="p-4 flex items-center justify-between gap-4">
-                                  <div className="flex items-center gap-4 min-w-0">
-                                    <Checkbox
-                                      checked={task.is_completed}
-                                      onCheckedChange={() => handleToggleTaskCompleted(task)}
-                                      className="h-6 w-6 rounded-lg border-2 border-primary/20 data-[state=checked]:bg-primary data-[state=checked]:border-primary transition-all"
-                                    />
-                                    <div className={task.is_completed ? "opacity-50" : ""}>
-                                      <p className={`font-bold text-sm sm:text-base truncate ${task.is_completed ? "line-through" : ""}`}>
-                                        {task.description}
-                                      </p>
-                                      {task.end_date && (
-                                        <div className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-wider flex items-center gap-1.5 mt-1">
-                                          <Clock className="h-3 w-3" />
-                                          {format(new Date(task.end_date!), "p", { locale: es })}
+                            {tasksForSelectedPeriod.length > 0 ? (
+                              <div className="grid gap-3">
+                                {tasksForSelectedPeriod.map((task) => (
+                                  <Card key={task.id} className="group relative overflow-hidden border-border/40 bg-card/40 backdrop-blur-md rounded-2xl hover:bg-card/60 transition-all duration-300 hover:shadow-lg hover:shadow-primary/5">
+                                    <div className="p-4 flex items-center justify-between gap-4">
+                                      <div className="flex items-center gap-4 min-w-0">
+                                        <Checkbox
+                                          checked={task.is_completed}
+                                          onCheckedChange={() => handleToggleTaskCompleted(task)}
+                                          className="h-6 w-6 rounded-lg border-2 border-primary/20 data-[state=checked]:bg-primary data-[state=checked]:border-primary transition-all"
+                                        />
+                                        <div className={task.is_completed ? "opacity-50" : ""}>
+                                          <p className={`font-bold text-sm sm:text-base truncate ${task.is_completed ? "line-through" : ""}`}>
+                                            {task.description}
+                                          </p>
+                                          {task.end_date && (
+                                            <div className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-wider flex items-center gap-1.5 mt-1">
+                                              <Clock className="h-3 w-3" />
+                                              {format(new Date(task.end_date!), "p", { locale: es })}
+                                            </div>
+                                          )}
                                         </div>
-                                      )}
-                                    </div>
-                                  </div>
-                                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <Button variant="ghost" size="icon" className="h-8 w-8 rounded-xl hover:bg-primary/10 hover:text-primary" onClick={() => { setSelectedTask(task); setIsTaskDialogOpen(true); }}>
-                                      <MoreHorizontal className="h-4 w-4" />
-                                    </Button>
-                                    <Button variant="ghost" size="icon" className="h-8 w-8 rounded-xl hover:bg-destructive/10 hover:text-destructive" onClick={() => setDeletingTask(task)}>
-                                      <Trash2 className="h-4 w-4" />
-                                    </Button>
-                                  </div>
-                                </div>
-                              </Card>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="py-8 text-center border-2 border-dashed border-border/40 rounded-3xl bg-card/20">
-                            <p className="text-xs font-bold text-muted-foreground/60 uppercase tracking-widest">Sin tareas pendientes</p>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Sección de Eventos */}
-                      <div className="space-y-4">
-                        <div className="flex items-center gap-2">
-                          <CalendarIcon className="h-5 w-5 text-primary" />
-                          <h3 className="text-sm font-black uppercase tracking-widest text-muted-foreground/70">Eventos Programados</h3>
-                        </div>
-
-                        {eventsForSelectedPeriod.length > 0 ? (
-                          <div className="grid gap-4">
-                            {eventsForSelectedPeriod.map((event) => (
-                              <Card
-                                key={event.id}
-                                className="group relative overflow-hidden border-border/40 bg-card/40 backdrop-blur-md rounded-[2rem] hover:bg-card/60 transition-all duration-500 hover:shadow-xl hover:shadow-primary/5 cursor-pointer"
-                                onClick={() => { setSelectedEvent(event); setIsDetailsDialogOpen(true); }}
-                              >
-                                <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-                                <div className="p-5 flex items-center justify-between gap-4 relative z-10">
-                                  <div className="flex items-center gap-5 min-w-0">
-                                    <div className="p-3 rounded-2xl bg-background/50 border border-border/40 shadow-inner group-hover:scale-110 transition-transform duration-500">
-                                      <Clock className="h-5 w-5 text-primary" />
-                                    </div>
-                                    <div className="min-w-0">
-                                      <p className="font-black text-lg tracking-tight truncate group-hover:text-primary transition-colors">
-                                        {event.summary}
-                                      </p>
-                                      <div className="flex items-center gap-3 mt-1.5">
-                                        <div className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-widest flex items-center gap-1.5">
-                                          {new Date(event.event_datetime_local).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
-                                        </div>
-                                        {event.workspace_name && (
-                                          <Badge variant="outline" className="text-[9px] font-black uppercase tracking-tighter px-2 py-0 border-none" style={{ backgroundColor: `${event.workspace_color}15`, color: event.workspace_color }}>
-                                            {event.workspace_name}
-                                          </Badge>
-                                        )}
+                                      </div>
+                                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-xl hover:bg-primary/10 hover:text-primary" onClick={() => { setSelectedTask(task); setIsTaskDialogOpen(true); }}>
+                                          <MoreHorizontal className="h-4 w-4" />
+                                        </Button>
+                                        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-xl hover:bg-destructive/10 hover:text-destructive" onClick={() => setDeletingTask(task)}>
+                                          <Trash2 className="h-4 w-4" />
+                                        </Button>
                                       </div>
                                     </div>
-                                  </div>
-                                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all duration-300 translate-x-2 group-hover:translate-x-0" onClick={(e) => e.stopPropagation()}>
-                                    <Button variant="ghost" size="icon" className="h-9 w-9 rounded-xl hover:bg-destructive/10 hover:text-destructive" onClick={() => setDeletingEvent(event)}>
-                                      <Trash2 className="h-4 w-4" />
-                                    </Button>
-                                  </div>
-                                </div>
-                              </Card>
-                            ))}
+                                  </Card>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="py-8 text-center border-2 border-dashed border-border/40 rounded-3xl bg-card/20">
+                                <p className="text-xs font-bold text-muted-foreground/60 uppercase tracking-widest">Sin tareas pendientes</p>
+                              </div>
+                            )}
                           </div>
-                        ) : (
-                          <div className="py-12 text-center border-2 border-dashed border-border/40 rounded-[2rem] bg-card/20">
-                            <p className="text-xs font-bold text-muted-foreground/60 uppercase tracking-widest">No hay eventos para hoy</p>
+
+                          {/* Sección de Eventos */}
+                          <div className="space-y-4">
+                            <div className="flex items-center gap-2">
+                              <CalendarIcon className="h-5 w-5 text-primary" />
+                              <h3 className="text-sm font-black uppercase tracking-widest text-muted-foreground/70">Eventos Programados</h3>
+                            </div>
+
+                            {eventsForSelectedPeriod.length > 0 ? (
+                              <div className="grid gap-4">
+                                {eventsForSelectedPeriod.map((event) => (
+                                  <Card
+                                    key={event.id}
+                                    className="group relative overflow-hidden border-border/40 bg-card/40 backdrop-blur-md rounded-[2rem] hover:bg-card/60 transition-all duration-500 hover:shadow-xl hover:shadow-primary/5 cursor-pointer"
+                                    onClick={() => { setSelectedEvent(event); setIsDetailsDialogOpen(true); }}
+                                  >
+                                    <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+                                    <div className="p-5 flex items-center justify-between gap-4 relative z-10">
+                                      <div className="flex items-center gap-5 min-w-0">
+                                        <div className="p-3 rounded-2xl bg-background/50 border border-border/40 shadow-inner group-hover:scale-110 transition-transform duration-500">
+                                          <Clock className="h-5 w-5 text-primary" />
+                                        </div>
+                                        <div className="min-w-0">
+                                          <p className="font-black text-lg tracking-tight truncate group-hover:text-primary transition-colors">
+                                            {event.summary}
+                                          </p>
+                                          <div className="flex items-center gap-3 mt-1.5">
+                                            <div className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-widest flex items-center gap-1.5">
+                                              {new Date(event.event_datetime_local).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
+                                            </div>
+                                            {event.workspace_name && (
+                                              <Badge variant="outline" className="text-[9px] font-black uppercase tracking-tighter px-2 py-0 border-none" style={{ backgroundColor: `${event.workspace_color}15`, color: event.workspace_color }}>
+                                                {event.workspace_name}
+                                              </Badge>
+                                            )}
+                                          </div>
+                                        </div>
+                                      </div>
+                                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all duration-300 translate-x-2 group-hover:translate-x-0" onClick={(e) => e.stopPropagation()}>
+                                        <Button variant="ghost" size="icon" className="h-9 w-9 rounded-xl hover:bg-destructive/10 hover:text-destructive" onClick={() => setDeletingEvent(event)}>
+                                          <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  </Card>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="py-12 text-center border-2 border-dashed border-border/40 rounded-[2rem] bg-card/20">
+                                <p className="text-xs font-bold text-muted-foreground/60 uppercase tracking-widest">No hay eventos para hoy</p>
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </div>
-                    </>
-                  )}
-                </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        </div>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="notes" className="space-y-6 animate-in fade-in duration-300 outline-none">
+            <NotesPage isEmbedded={true} />
+          </TabsContent>
+
+          <TabsContent value="contacts" className="space-y-6 animate-in fade-in duration-300 outline-none">
+            <ProfilesPage isEmbedded={true} />
+          </TabsContent>
+        </Tabs>
       </div>
 
       <EventDialog
@@ -670,6 +728,41 @@ export default function AgendaPage() {
             <SheetTitle className="text-2xl font-bold flex items-center gap-2">
               <CalendarIcon className="h-6 w-6 text-primary" />
               Guía de Agenda
+            </SheetTitle>
+            <SheetDescription>
+              Tu centro de productividad y organización personal.
+            </SheetDescription>
+          </SheetHeader>
+          
+          <div className="py-6 space-y-8">
+            <section className="space-y-3">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-primary">Un paraguas de productividad</h3>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                El módulo de <strong>Agenda</strong> unifica tres herramientas esenciales en un solo lugar:
+              </p>
+              <ul className="text-sm space-y-3 text-muted-foreground list-disc pl-5 leading-relaxed">
+                <li><strong>Calendario:</strong> Gestiona tu tiempo, compromisos, reuniones y tareas con múltiples vistas y flujos Kanban/Gantt.</li>
+                <li><strong>Notas:</strong> Redacta ideas rápidas, apuntes enriquecidos y asócialos con tus proyectos o áreas de interés.</li>
+                <li><strong>Contactos:</strong> Organiza a las personas clave en tu red, con perfiles detallados y vinculados a tus tareas o notas.</li>
+              </ul>
+            </section>
+
+            <section className="space-y-3">
+              <h3 className="text-sm font-bold uppercase tracking-wider text-primary">Asistente Integrado de IA</h3>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                El Agente de IA analiza tus notas, eventos y contactos para ayudarte a programar automáticamente, encontrar conexiones semánticas y ofrecerte sugerencias personalizadas de forma proactiva.
+              </p>
+            </section>
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      <Sheet open={isCalendarInfoOpen} onOpenChange={setIsCalendarInfoOpen}>
+        <SheetContent side="right" className="w-[400px] sm:w-[540px] overflow-y-auto">
+          <SheetHeader className="pb-6 border-b">
+            <SheetTitle className="text-2xl font-bold flex items-center gap-2">
+              <CalendarIcon className="h-6 w-6 text-primary" />
+              Guía de Calendario
             </SheetTitle>
             <SheetDescription>
               Organización inteligente de eventos y tareas.

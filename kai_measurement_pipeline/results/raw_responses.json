@@ -1,0 +1,32 @@
+[
+  {
+    "response": "HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x70fea39b75f0>: Failed to establish a new connection: [Errno 111] Connection refused'))",
+    "tool_used": null,
+    "latency": 0,
+    "success": false,
+    "prompt": "\u00bfCu\u00e1l es la capital de Francia?",
+    "expected_tool": "null",
+    "expected_answer": "Par\u00eds",
+    "category": "trivia"
+  },
+  {
+    "response": "HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x70fea37b2030>: Failed to establish a new connection: [Errno 111] Connection refused'))",
+    "tool_used": null,
+    "latency": 0,
+    "success": false,
+    "prompt": "Resume el texto adjunto.",
+    "expected_tool": "summarize",
+    "expected_answer": "null",
+    "category": "summarization"
+  },
+  {
+    "response": "HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /v1/chat/completions (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x70fea37b2900>: Failed to establish a new connection: [Errno 111] Connection refused'))",
+    "tool_used": null,
+    "latency": 0,
+    "success": false,
+    "prompt": "Agrega un recordatorio para ma\u00f1ana.",
+    "expected_tool": "reminder",
+    "expected_answer": "null",
+    "category": "productivity"
+  }
+]

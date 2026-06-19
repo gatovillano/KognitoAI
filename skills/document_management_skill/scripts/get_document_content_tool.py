@@ -25,7 +25,7 @@ from langchain_core.tools import BaseTool
 
 # Importaciones de la lógica de negocio y gestión de estado
 from core.memory_manager import get_full_document_content
-from telegram_client.bot_manager import bot_manager
+from utils.telegram_api import store_telegram_user_data
 
 
 # Configuración del logger para este módulo.
@@ -88,9 +88,11 @@ class GetDocumentContentTool(BaseTool):
 
             if full_content:
                 if self.telegram_id is not None:
-                    user_data = bot_manager.get_user_data(self.telegram_id)
-                    user_data[DOCUMENT_NAME_KEY] = file_name
-                    await bot_manager.flush_persistence()
+                    await store_telegram_user_data(
+                        telegram_id=int(self.telegram_id),
+                        key=DOCUMENT_NAME_KEY,
+                        data=file_name
+                    )
                     logger.info(f"Guardado '{file_name}' en user_data para el usuario de Telegram {self.telegram_id} para paginación.")
                 
                 workspace_info = f" (Workspace: {self.workspace_id})" if self.workspace_id else ""

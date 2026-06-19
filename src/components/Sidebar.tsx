@@ -4,12 +4,12 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Plus, MessageSquare, Brain, Notebook, Calendar, LogOut, Bot, ChevronDown, ChevronRight, Pin, Users, Sparkles, MoreVertical, FolderKanban, Settings, BarChart3, Smartphone, User, Image as ImageIcon, ClipboardList, FileText } from 'lucide-react';
+import { Plus, MessageSquare, Brain, Notebook, Calendar, LogOut, Bot, ChevronDown, ChevronRight, Pin, Users, Sparkles, MoreVertical, FolderKanban, Settings, BarChart3, Smartphone, User, Image as ImageIcon, ClipboardList, FileText, Inbox } from 'lucide-react';
 import Image from 'next/image';
 import apiClient from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
@@ -33,6 +33,7 @@ interface ChatThread {
   isPinned?: boolean;
   platform?: string;
   workspace_id?: string | null;
+  hidden_from_sidebar?: boolean;
   created_at: string;
 }
 
@@ -46,6 +47,7 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
   const { settings, loading: settingsLoading } = useUserSettings(); // Obtener settings
   const pathname = usePathname();
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState<string>("");
@@ -92,8 +94,12 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
             allThreads = allThreads.filter((thread: ChatThread) => !thread.workspace_id);
           }
 
-          setThreads(allThreads.filter((thread: ChatThread) => !thread.isPinned));
-          setPinnedThreads(allThreads.filter((thread: ChatThread) => thread.isPinned));
+          // Excluir hilos que estén marcados como ocultos desde el backend
+          // Ocultar hilos marcados como ocultos o hilos generados por el sistema ('system')
+          const visibleThreads = allThreads.filter((thread: ChatThread) => !thread.hidden_from_sidebar && thread.platform !== 'system');
+
+          setThreads(visibleThreads.filter((thread: ChatThread) => !thread.isPinned));
+          setPinnedThreads(visibleThreads.filter((thread: ChatThread) => thread.isPinned));
         } catch (error) {
           console.error('Error fetching threads:', error);
         }
@@ -118,6 +124,9 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
         setPinnedThreads(prev => prev.map(updateThreadTitle));
       } else if (type === 'thread_created') {
         const newThread: ChatThread = data.thread;
+        // No mostrar hilos que el backend marque como ocultos o hilos del sistema
+        if (newThread.hidden_from_sidebar || newThread.platform === 'system') return;
+
         const shouldAdd = (activeWorkspaceId && newThread.workspace_id === activeWorkspaceId) || (!activeWorkspaceId && !newThread.workspace_id);
         if (shouldAdd) {
           setThreads(prev => {
@@ -234,81 +243,81 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
 
     return (
       <div ref={drag as any} className={cn('opacity-100', isDragging && 'opacity-50')}>
-        <Link href={`/chat/${thread.id}`} passHref onClick={onLinkClick} title={isCollapsed ? thread.title : undefined}>
+        <Link href={`/chat/${thread.id}`} passHref onClick={onLinkClick} title={isCollapsed ? thread.title : undefined} className="w-full block">
           <Button
             variant={pathname === `/chat/${thread.id}` ? "secondary" : "ghost"}
             className={cn(
-              "w-full font-normal items-start text-left transition-all duration-200 hover:bg-muted rounded-xl",
+              "w-full font-normal items-start text-left transition-all duration-200 hover:bg-muted rounded-xl overflow-hidden",
               isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-auto py-1.5 px-2",
               pathname === `/chat/${thread.id}` && "bg-primary/10 text-primary border border-primary/20"
             )}
           >
-            <div className="flex items-center">
+            <div className="flex w-full items-start gap-2 overflow-hidden">
               {!isCollapsed && thread.platform === 'telegram' && (
-                <div title="Telegram">
-                  <Smartphone className="h-2.5 w-2.5 text-blue-500 mr-1 flex-shrink-0" />
+                <div title="Telegram" className="mt-1 shrink-0">
+                  <Smartphone className="h-2.5 w-2.5 text-blue-500 flex-shrink-0" />
+                </div>
+              )}
+              {!isCollapsed && (
+                <div className="whitespace-pre-wrap break-words flex-grow text-sm py-1 min-w-0 overflow-hidden">
+                  <InlineMarkdownRenderer content={thread.title} />
+                </div>
+              )}
+              {!isCollapsed && (
+                <div className="ml-auto relative shrink-0">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <div
+                        className="h-5 w-5 p-0 cursor-pointer flex items-center justify-center"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                        }}
+                      >
+                        <MoreVertical className="h-3 w-3 text-muted-foreground" />
+                      </div>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-40 text-sm">
+                      <DropdownMenuItem
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          isPinned ? handleUnpinThread(thread) : handlePinThread(thread);
+                        }}
+                      >
+                        <Pin className={cn("h-3.5 w-3.5 mr-1.5", isPinned && "text-primary")} />
+                        {isPinned ? "Desfijar" : "Fijar"}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={async (e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          toast.info("Generando un nuevo título para la conversación...");
+                          try {
+                            await apiClient.post(`/api/threads/${thread.id}/generate-title`);
+                          } catch (error) {
+                            console.error('Error generating title for thread:', error);
+                            toast.error("No se pudo generar un nuevo título.");
+                          }
+                        }}
+                      >
+                        <Sparkles className="h-3.5 w-3.5 mr-1.5 text-yellow-500" />
+                        <span>Nombrar</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleDeleteThread(thread);
+                        }}
+                      >
+                        <span className="text-red-500">Eliminar</span>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               )}
             </div>
-            {!isCollapsed && (
-              <div className="whitespace-normal break-words flex-grow text-sm">
-                <InlineMarkdownRenderer content={thread.title} />
-              </div>
-            )}
-            {!isCollapsed && (
-              <div className="ml-auto relative">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <div
-                      className="h-5 w-5 p-0 cursor-pointer flex items-center justify-center"
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                      }}
-                    >
-                      <MoreVertical className="h-3 w-3 text-muted-foreground" />
-                    </div>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-40 text-sm">
-                    <DropdownMenuItem
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        isPinned ? handleUnpinThread(thread) : handlePinThread(thread);
-                      }}
-                    >
-                      <Pin className={cn("h-3.5 w-3.5 mr-1.5", isPinned && "text-primary")} />
-                      {isPinned ? "Desfijar" : "Fijar"}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={async (e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        toast.info("Generando un nuevo título para la conversación...");
-                        try {
-                          await apiClient.post(`/api/threads/${thread.id}/generate-title`);
-                        } catch (error) {
-                          console.error('Error generating title for thread:', error);
-                          toast.error("No se pudo generar un nuevo título.");
-                        }
-                      }}
-                    >
-                      <Sparkles className="h-3.5 w-3.5 mr-1.5 text-yellow-500" />
-                      <span>Nombrar</span>
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        handleDeleteThread(thread);
-                      }}
-                    >
-                      <span className="text-red-500">Eliminar</span>
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </div>
-            )}
           </Button>
         </Link>
       </div>
@@ -327,7 +336,7 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
   };
 
   return (
-    <div className={cn("flex flex-col h-full", isCollapsed ? "items-center p-2" : "p-6")}>
+    <div className={cn("flex flex-col h-full overflow-x-hidden", isCollapsed ? "items-center p-2" : "p-6")}>
       {/* Header del sidebar */}
       <div className={cn("flex items-center w-full pb-4 mb-2 border-b border-border/50", isCollapsed ? "justify-center" : "justify-start")}>
         <Button
@@ -361,20 +370,46 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
         {!isToolsCollapsed && (
           <nav className="space-y-0.5 w-full">
 
-            <Link href="/dashboard" passHref onClick={onLinkClick} title="Escritorio">
+            <Link href="/dashboard" passHref onClick={onLinkClick} title="Escritorio" className="w-full block">
               <Button
-                variant={pathname?.startsWith('/dashboard') ? 'secondary' : 'ghost'}
+                variant={pathname === '/dashboard' ? 'secondary' : 'ghost'}
                 className={cn(
                   "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
                   isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-9 px-2",
-                  pathname?.startsWith('/dashboard') && "bg-primary/10 text-primary border border-primary/20"
+                  pathname === '/dashboard' && "bg-primary/10 text-primary border border-primary/20"
                 )}
               >
                 <FolderKanban className={cn("h-4 w-4 transition-transform group-hover:scale-110", showToolText && "mr-2")} />
                 {showToolText && <span className="text-sm font-medium">Escritorio</span>}
               </Button>
             </Link>
-            <Link href="/rag" passHref onClick={onLinkClick} title="Gestión de Conocimientos">
+            <Link href="/resolution-board" passHref onClick={onLinkClick} title="Tablero de Resolución" className="w-full block">
+              <Button
+                variant={pathname?.startsWith('/resolution-board') ? 'secondary' : 'ghost'}
+                className={cn(
+                  "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
+                  isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-9 px-2",
+                  pathname?.startsWith('/resolution-board') && "bg-primary/10 text-primary border border-primary/20"
+                )}
+              >
+                <ClipboardList className={cn("h-4 w-4 transition-transform group-hover:scale-110", showToolText && "mr-2")} />
+                {showToolText && <span className="text-sm font-medium">Resolución</span>}
+              </Button>
+            </Link>
+            <Link href="/inbox" passHref onClick={onLinkClick} title="Bandeja de entrada" className="w-full block">
+              <Button
+                variant={pathname?.startsWith('/inbox') ? 'secondary' : 'ghost'}
+                className={cn(
+                  "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
+                  isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-9 px-2",
+                  pathname?.startsWith('/inbox') && "bg-primary/10 text-primary border border-primary/20"
+                )}
+              >
+                <Inbox className={cn("h-4 w-4 transition-transform group-hover:scale-110", showToolText && "mr-2")} />
+                {showToolText && <span className="text-sm font-medium">Bandeja</span>}
+              </Button>
+            </Link>
+            <Link href="/rag" passHref onClick={onLinkClick} title="Gestión de Conocimientos" className="w-full block">
               <Button
                 variant={pathname?.startsWith('/rag') ? 'secondary' : 'ghost'}
                 className={cn(
@@ -387,7 +422,7 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
                 {showToolText && <span className="text-sm font-medium">Conocimientos</span>}
               </Button>
             </Link>
-            <Link href="/agenda" passHref onClick={onLinkClick} title="Agenda">
+            <Link href="/agenda" passHref onClick={onLinkClick} title="Agenda" className="w-full block">
               <Button
                 variant={pathname?.startsWith('/agenda') ? 'secondary' : 'ghost'}
                 className={cn(
@@ -400,36 +435,8 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
                 {showToolText && <span className="text-sm font-medium">Agenda</span>}
               </Button>
             </Link>
-            <Link href="/notes" passHref onClick={onLinkClick} title="Notas">
-              <Button
-                variant={pathname?.startsWith('/notes') ? 'secondary' : 'ghost'}
-                className={cn(
-                  "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
-                  isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-9 px-2",
-                  pathname?.startsWith('/notes') && "bg-primary/10 text-primary border border-primary/20"
-                )}
-              >
-                <Notebook className={cn("h-4 w-4 transition-transform group-hover:scale-110", showToolText && "mr-2")} />
-                {showToolText && <span className="text-sm font-medium">Notas</span>}
-              </Button>
-            </Link>
-            {settings?.profiles_enabled && (
-              <Link href="/profiles" passHref onClick={onLinkClick} title="Perfiles">
-                <Button
-                  variant={pathname?.startsWith('/profiles') ? 'secondary' : 'ghost'}
-                  className={cn(
-                    "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
-                    isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-9 px-2",
-                    pathname?.startsWith('/profiles') && "bg-primary/10 text-primary border border-primary/20"
-                  )}
-                >
-                  <User className={cn("h-4 w-4 transition-transform group-hover:scale-110", showToolText && "mr-2")} />
-                  {showToolText && <span className="text-sm font-medium">Perfiles</span>}
-                </Button>
-              </Link>
-            )}
             {settings?.galleries_enabled && (
-              <Link href="/galleries" passHref onClick={onLinkClick} title="Álbumes">
+              <Link href="/galleries" passHref onClick={onLinkClick} title="Álbumes" className="w-full block">
                 <Button
                   variant={pathname?.startsWith('/galleries') ? 'secondary' : 'ghost'}
                   className={cn(
@@ -444,7 +451,7 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
               </Link>
             )}
             {settings?.forms_enabled && (
-              <Link href="/forms" passHref onClick={onLinkClick} title="Formularios">
+              <Link href="/forms" passHref onClick={onLinkClick} title="Formularios" className="w-full block">
                 <Button
                   variant={pathname?.startsWith('/forms') ? 'secondary' : 'ghost'}
                   className={cn(
@@ -459,7 +466,7 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
               </Link>
             )}
 
-            <Link href="/documents" passHref onClick={onLinkClick} title="OnlyOffice">
+            <Link href="/documents" passHref onClick={onLinkClick} title="OnlyOffice" className="w-full block">
               <Button
                 variant={pathname?.startsWith('/documents') ? 'secondary' : 'ghost'}
                 className={cn(
@@ -473,7 +480,7 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
               </Button>
             </Link>
 
-            <Link href="/workspaces" passHref onClick={onLinkClick} title="Workspaces">
+            <Link href="/workspaces" passHref onClick={onLinkClick} title="Workspaces" className="w-full block">
               <Button
                 variant={pathname?.startsWith('/workspaces') ? 'secondary' : 'ghost'}
                 className={cn(

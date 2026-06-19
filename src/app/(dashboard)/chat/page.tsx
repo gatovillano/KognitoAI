@@ -13,9 +13,12 @@ const WelcomeDialog = dynamic(() => import('@/components/WelcomeDialog').then(mo
 
 interface SelectedContextItem {
   id: string;
-  type: 'document' | 'collection';
+  type: 'document' | 'collection' | 'repository';
   name: string;
   title?: string;
+  topic?: string;
+  content?: string;
+  file_name?: string;
 }
 
 export default function NewChatPage() {

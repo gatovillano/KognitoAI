@@ -1,13 +1,34 @@
 # utils/audio_transcriber.py
 
 import logging
+import os # Importar os para manejar archivos temporales
+import sys
+
+def _load_cuda_libs():
+    try:
+        import ctypes
+        for sp in sys.path:
+            if 'site-packages' not in sp:
+                continue
+            cublas_path = os.path.join(sp, "nvidia", "cublas", "lib", "libcublas.so.12")
+            cudnn_path = os.path.join(sp, "nvidia", "cudnn", "lib", "libcudnn.so.9")
+            
+            if os.path.exists(cublas_path):
+                ctypes.CDLL(cublas_path, mode=ctypes.RTLD_GLOBAL)
+            if os.path.exists(cudnn_path):
+                ctypes.CDLL(cudnn_path, mode=ctypes.RTLD_GLOBAL)
+    except Exception:
+        pass
+
+_load_cuda_libs()
+
 import torch # Importar torch
 import asyncio
 import functools
 from typing import Optional
 from io import BytesIO
 from pydub import AudioSegment # Importar pydub
-import os # Importar os para manejar archivos temporales
+from pydub.exceptions import CouldntDecodeError
 import numpy as np
 
 import tempfile
@@ -21,6 +42,15 @@ WHISPER_MODEL_SIZE = "small"
 # WHISPER_DEVICE = "cpu"
 # WHISPER_COMPUTE_TYPE = "int8"
 _whisper_model: Optional[WhisperModel] = None
+
+
+class AudioTranscriptionError(Exception):
+    """Base para errores controlados de transcripción."""
+
+
+class InvalidAudioFileError(AudioTranscriptionError):
+    """Se lanza cuando el archivo de audio recibido está vacío, corrupto o incompleto."""
+
 
 def load_whisper_model(force_cpu=False):
     """Carga el modelo de transcripción de forma síncrona al inicio de la aplicación."""
@@ -74,7 +104,7 @@ async def get_whisper_model() -> Optional[WhisperModel]:
         load_whisper_model()
     return _whisper_model
 
-async def transcribe_audio_file(audio_file: BytesIO, file_format: str) -> Optional[str]:
+async def transcribe_audio_file(audio_file: BytesIO, file_format: str) -> str:
     """
     Transcribe un archivo de audio usando el modelo Whisper.
 
@@ -83,13 +113,13 @@ async def transcribe_audio_file(audio_file: BytesIO, file_format: str) -> Option
         file_format: El formato del archivo de audio (ej. "webm", "ogg").
 
     Returns:
-        El texto transcrito, o None si ocurre un error.
+        El texto transcrito.
     """
     logger.critical("--- RUNNING NEW VERSION OF TRANSCRIBE AUDIO FILE ---")
     model = await get_whisper_model()
     if not model:
         logger.error("El modelo de transcripción no está disponible.")
-        return None
+        raise AudioTranscriptionError("El modelo de transcripción no está disponible.")
 
     temp_audio_path = None
     try:
@@ -99,6 +129,9 @@ async def transcribe_audio_file(audio_file: BytesIO, file_format: str) -> Option
         audio_file.seek(0)
         logger.info(f"Transcribiendo archivo de audio con tamaño: {file_size} bytes y formato: {file_format}.")
 
+        if file_size == 0:
+            raise InvalidAudioFileError("El archivo de audio está vacío.")
+
         # Crear un archivo temporal para procesar el audio.
         # Esto evita problemas con ffmpeg y pipes (seekback error) al leer desde memoria.
         with tempfile.NamedTemporaryFile(suffix=f".{file_format}", delete=False) as temp_file:
@@ -106,7 +139,17 @@ async def transcribe_audio_file(audio_file: BytesIO, file_format: str) -> Option
             temp_audio_path = temp_file.name
         
         logger.info(f"Procesando audio desde archivo temporal: {temp_audio_path}")
-        audio_segment = AudioSegment.from_file(temp_audio_path, format=file_format)
+        try:
+            audio_segment = AudioSegment.from_file(temp_audio_path, format=file_format)
+        except CouldntDecodeError as exc:
+            logger.warning(
+                "No se pudo decodificar el audio recibido. Tamaño=%s bytes, formato=%s.",
+                file_size,
+                file_format,
+            )
+            raise InvalidAudioFileError(
+                "El archivo de audio no es válido o está incompleto. Intenta grabarlo de nuevo."
+            ) from exc
         
         # Convertir a formato WAV en memoria, que es el formato esperado por Whisper.
         wav_file = BytesIO()
@@ -130,9 +173,11 @@ async def transcribe_audio_file(audio_file: BytesIO, file_format: str) -> Option
         logger.info(f"Audio transcrito. Idioma detectado: {info.language}")
         return transcribed_text
 
+    except InvalidAudioFileError:
+        raise
     except Exception as e:
         logger.error(f"Error durante la transcripción: {e}", exc_info=True)
-        return None
+        raise AudioTranscriptionError("Ocurrió un error al procesar el audio.") from e
     finally:
         # Limpiar el archivo temporal
         if temp_audio_path and os.path.exists(temp_audio_path):

@@ -12,7 +12,7 @@ from datetime import datetime
 
 from langchain_core.tools import BaseTool
 from langchain_core.messages import HumanMessage
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, root_validator
 from core.llm_manager import get_llm_for_user
 from core.memory_manager import get_relevant_memories
 
@@ -37,6 +37,16 @@ class InternalKnowledgeSearchInput(BaseModel):
         None,
         description="El ID único de un documento específico (UUID) para buscar solo en él."
     )
+
+    @root_validator(pre=True)
+    def map_aliases(cls, values: dict[str, Any]) -> dict[str, Any]:
+        """Permite mapear alias comunes para el parámetro 'query'."""
+        if "query" not in values:
+            for alias in ["question", "search", "text", "search_query", "content", "prompt", "input"]:
+                if alias in values:
+                    values["query"] = values[alias]
+                    break
+        return values
 
 class InternalKnowledgeSearchTool(BaseTool):
     name: str = "internal_knowledge_search"

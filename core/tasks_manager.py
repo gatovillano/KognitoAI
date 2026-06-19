@@ -58,6 +58,7 @@ class TasksManager:
         start_date: Optional[datetime] = None, # Nuevo campo
         end_date: Optional[datetime] = None, # Nuevo campo
         is_completed: Optional[bool] = False, # Añadido para consistencia con CalDAV
+        status: Optional[str] = "Pendiente", # Estado Kanban de la tarea
         workspace_id: Optional[str] = None,
         task_id: Optional[uuid.UUID] = None,
         caldav_uid: Optional[str] = None
@@ -73,6 +74,7 @@ class TasksManager:
             start_date=start_date, # Nuevo campo
             end_date=end_date, # Nuevo campo
             is_completed=is_completed,
+            status=status,
             caldav_uid=caldav_uid,
             workspace_id=uuid.UUID(workspace_id) if workspace_id else None
         )
