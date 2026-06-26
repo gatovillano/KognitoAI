@@ -31,9 +31,11 @@ const MODELS_BY_PROVIDER: Record<string, string[]> = {
   openai: ['openai/gpt-4o', 'openai/gpt-4o-mini', 'openai/gpt-4-turbo'],
   anthropic: ['anthropic/claude-3-5-sonnet-20240620', 'anthropic/claude-3-opus-20240229', 'anthropic/claude-3-haiku-20240307'],
   openrouter: [
+    'openrouter/google/gemini-2.5-flash-preview',
+    'openrouter/anthropic/claude-sonnet-4',
+    'openrouter/openai/gpt-4.1-mini',
+    'openrouter/google/gemini-2.5-pro-preview',
     'openrouter/mistralai/mistral-small-3.1-24b-instruct:free',
-    'openrouter/google/gemini-2.0-flash-001',
-    'openrouter/anthropic/claude-3.5-sonnet'
   ],
   ollama: ['ollama/llama3.1', 'ollama/mistral', 'ollama/phi3', 'ollama/gemma2'],
   'ollama-cloud': ['ollama_chat/llama3.1', 'ollama_chat/mistral', 'ollama_chat/phi3', 'ollama_chat/gemma2', 'ollama_chat/qwen2.5'],
@@ -87,6 +89,19 @@ const EMBEDDING_MODELS_BY_PROVIDER: Record<string, string[]> = {
   google: ['text-embedding-004', 'text-embedding-gecko'],
 };
 
+const RERANKER_PROVIDERS = [
+  { id: 'local', name: 'Local (HuggingFace)', env_key: null },
+  { id: 'openrouter', name: 'OpenRouter (Nvidia Llama / Cohere)', env_key: 'OPENROUTER_API_KEY' },
+  { id: 'cohere', name: 'Cohere Rerank', env_key: 'COHERE_API_KEY' },
+];
+
+const RERANKER_MODELS_BY_PROVIDER: Record<string, string[]> = {
+  local: ['BAAI/bge-reranker-base', 'BAAI/bge-reranker-large'],
+  openrouter: ['nvidia/llama-nemotron-rerank-vl-1b-v2:free', 'cohere/rerank-v3.0'],
+  cohere: ['rerank-english-v3.0', 'rerank-multilingual-v3.0'],
+};
+
+
 interface UserSecret {
   key_name: string;
   description?: string;
@@ -125,6 +140,12 @@ export const LLMSettingsForm: React.FC = () => {
     embedding_model: settings?.embedding_model || 'paraphrase-multilingual-mpnet-base-v2',
     embedding_api_key_name: settings?.embedding_api_key_name || '',
     embedding_api_base: settings?.embedding_api_base || '',
+  });
+
+  const [localReranker, setLocalReranker] = useState({
+    reranker_provider: settings?.reranker_provider || 'local',
+    reranker_model: settings?.reranker_model || 'BAAI/bge-reranker-base',
+    reranker_api_base: settings?.reranker_api_base || '',
   });
 
   const [mainModels, setMainModels] = useState<any[]>([]);
@@ -338,6 +359,11 @@ export const LLMSettingsForm: React.FC = () => {
         embedding_api_key_name: settings.embedding_api_key_name || '',
         embedding_api_base: settings.embedding_api_base || '',
       });
+      setLocalReranker({
+        reranker_provider: settings.reranker_provider || 'local',
+        reranker_model: settings.reranker_model || 'BAAI/bge-reranker-base',
+        reranker_api_base: settings.reranker_api_base || '',
+      });
     }
   }, [settings]);
 
@@ -362,9 +388,10 @@ export const LLMSettingsForm: React.FC = () => {
         ...localLLM,
         ...localTTS,
         ...localEmbedding,
+        ...localReranker,
         tts_region: localTTS.tts_provider === 'azure' ? localTTS.tts_region : undefined,
       });
-      toast.success('Configuración de IA, TTS y Embeddings guardada');
+      toast.success('Configuración de IA, TTS, Embeddings y Reranker guardada');
     } catch (e) {
       toast.error('Error al guardar configuración');
     } finally {
@@ -382,6 +409,7 @@ export const LLMSettingsForm: React.FC = () => {
     const ttsProvider = TTS_PROVIDERS.find(p => p.id === newKey.provider);
     const embeddingProvider = EMBEDDING_PROVIDERS.find(p => p.id === newKey.provider);
     const searchProvider = SEARCH_PROVIDERS.find(p => p.id === newKey.provider);
+    const rerankerProvider = RERANKER_PROVIDERS.find(p => p.id === newKey.provider);
 
     if (llmProvider) envKey = llmProvider.env_key;
     else if (ttsProvider) {
@@ -397,6 +425,10 @@ export const LLMSettingsForm: React.FC = () => {
     else if (searchProvider) {
       envKey = searchProvider.env_key;
       description = `API Key para ${searchProvider.name}`;
+    }
+    else if (rerankerProvider) {
+      envKey = rerankerProvider.env_key;
+      description = `API Key para ${rerankerProvider.name}`;
     }
 
     if (!envKey) {
@@ -658,6 +690,94 @@ export const LLMSettingsForm: React.FC = () => {
           </div>
         </CardContent>
       </Card>
+
+      {/* Configuración de Reranker */}
+      <Card className="border-none shadow-md bg-gradient-to-br from-card to-secondary/20">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Badge variant="outline" className="bg-orange-500/10 text-orange-500 border-orange-500/20">Reranker</Badge>
+            Reordenamiento de Resultados (Reranker)
+          </CardTitle>
+          <CardDescription>
+            Configura el modelo que optimiza la relevancia de los documentos recuperados de memoria o búsqueda web.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Proveedor del Reranker</Label>
+                <Select
+                  value={localReranker.reranker_provider}
+                  onValueChange={(v) => {
+                    const firstModel = RERANKER_MODELS_BY_PROVIDER[v]?.[0] || '';
+                    setLocalReranker(prev => ({ 
+                      ...prev, 
+                      reranker_provider: v, 
+                      reranker_model: firstModel 
+                    }));
+                  }}
+                >
+                  <SelectTrigger className="w-full bg-background/50 backdrop-blur-sm border-primary/20 hover:border-primary/50 transition-colors">
+                    <SelectValue placeholder="Selecciona un proveedor" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {RERANKER_PROVIDERS.map(p => (
+                      <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Modelo Reranker</Label>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Escribe o selecciona un modelo (ej. nvidia/llama-nemotron-rerank-vl-1b-v2:free)"
+                    value={localReranker.reranker_model}
+                    onChange={(e) => setLocalReranker(prev => ({ ...prev, reranker_model: e.target.value }))}
+                    className="bg-background/50 backdrop-blur-sm border-primary/20"
+                  />
+                  {RERANKER_MODELS_BY_PROVIDER[localReranker.reranker_provider] && (
+                    <Select
+                      value={localReranker.reranker_model}
+                      onValueChange={(v) => setLocalReranker(prev => ({ ...prev, reranker_model: v }))}
+                    >
+                      <SelectTrigger className="w-[180px] bg-background/50 backdrop-blur-sm border-primary/20 hover:border-primary/50 transition-colors">
+                        <SelectValue placeholder="Sugeridos" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {RERANKER_MODELS_BY_PROVIDER[localReranker.reranker_provider].map(m => (
+                          <SelectItem key={m} value={m}>{m.split('/').pop() || m}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>API Base URL (Opcional)</Label>
+                <Input
+                  placeholder={
+                    localReranker.reranker_provider === 'openrouter' ? 'https://openrouter.ai/api/v1' :
+                    localReranker.reranker_provider === 'cohere' ? 'https://api.cohere.ai/v1' :
+                    'http://localhost:8000/v1'
+                  }
+                  value={localReranker.reranker_api_base}
+                  onChange={(e) => setLocalReranker(prev => ({ ...prev, reranker_api_base: e.target.value }))}
+                  className="bg-background/50 backdrop-blur-sm border-primary/20 font-mono text-sm"
+                />
+                <p className="text-[11px] text-muted-foreground italic">
+                  URL base personalizada para llamadas HTTP. Útil si usas proxies o instancias privadas.
+                </p>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       <Card className="border-none shadow-md bg-secondary/5">
         <CardHeader>
           <CardTitle className="text-lg">Llaves de API (Secrets)</CardTitle>
@@ -671,7 +791,7 @@ export const LLMSettingsForm: React.FC = () => {
                 <SelectTrigger><SelectValue placeholder="Proveedor" /></SelectTrigger>
                 <SelectContent>
                   {Array.from(new Map(
-                    [...LLM_PROVIDERS, ...TTS_PROVIDERS, ...EMBEDDING_PROVIDERS, ...SEARCH_PROVIDERS]
+                    [...LLM_PROVIDERS, ...TTS_PROVIDERS, ...EMBEDDING_PROVIDERS, ...SEARCH_PROVIDERS, ...RERANKER_PROVIDERS]
                       .filter(p => p.env_key)
                       .map(p => [p.id, p])
                   ).values()).map(p => (

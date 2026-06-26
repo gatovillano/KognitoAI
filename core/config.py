@@ -235,7 +235,9 @@ class Config:
         self.embedding_chunk_overlap: int = int(os.getenv("EMBEDDING_CHUNK_OVERLAP", 20))
 
         # Reranking
+        self.reranker_provider: str = os.getenv("RERANKER_PROVIDER", "local")
         self.reranker_model_name: str = os.getenv("RERANKER_MODEL_NAME", "cross-encoder/ms-marco-MiniLM-L-6-v2")
+        self.reranker_api_base: Optional[str] = os.getenv("RERANKER_API_BASE")
         self.reranker_top_n: int = int(os.getenv("RERANKER_TOP_N", 5)) # Cuántos documentos rerankear
         self.reranker_threshold: float = float(os.getenv("RERANKER_THRESHOLD", 0.0)) # Umbral de relevancia para el reranker (logits)
 

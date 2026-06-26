@@ -16,6 +16,15 @@ from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
 
+
+def _to_uuid(val: Any) -> Any:
+    if val is None:
+        return None
+    if isinstance(val, uuid.UUID):
+        return val
+    return uuid.UUID(val)
+
+
 class NotesManager:
     """Gestiona la lógica de negocio relacionada con las notas."""
     def __init__(self, db: AsyncSession):
@@ -53,7 +62,7 @@ class NotesManager:
         workspace_uuid: Optional[uuid.UUID] = None
 
         try:
-            account_uuid = uuid.UUID(account_id)
+            account_uuid = _to_uuid(account_id)
         except ValueError:
             raise HTTPException(status_code=400, detail=f"El ID de cuenta '{account_id}' proporcionado no es un UUID válido.")
         
@@ -62,11 +71,11 @@ class NotesManager:
                 workspace_uuid = None
             else:
                 try:
-                    workspace_uuid = uuid.UUID(workspace_id)
+                    workspace_uuid = _to_uuid(workspace_id)
                 except ValueError:
                     raise HTTPException(status_code=400, detail=f"El ID de workspace '{workspace_id}' proporcionado no es un UUID válido.")
         else:
-            workspace_uuid = None
+            workspace_uuid = _to_uuid(workspace_id)
 
         new_note = Nota(
             account_id=account_uuid,
@@ -112,7 +121,7 @@ class NotesManager:
         workspace_uuid: Optional[uuid.UUID] = None
 
         try:
-            account_uuid = uuid.UUID(account_id)
+            account_uuid = _to_uuid(account_id)
         except ValueError:
             raise HTTPException(status_code=400, detail=f"El ID de cuenta '{account_id}' proporcionado no es un UUID válido.")
         
@@ -121,11 +130,11 @@ class NotesManager:
                 workspace_uuid = None
             else:
                 try:
-                    workspace_uuid = uuid.UUID(workspace_id)
+                    workspace_uuid = _to_uuid(workspace_id)
                 except ValueError:
                     raise HTTPException(status_code=400, detail=f"El ID de workspace '{workspace_id}' proporcionado no es un UUID válido.")
         else:
-            workspace_uuid = None
+            workspace_uuid = _to_uuid(workspace_id)
 
         # Si se especifica un workspace, mostrar TODAS las notas de ese workspace
         # (no solo las del usuario actual), después de verificar permisos
@@ -224,7 +233,7 @@ class NotesManager:
         """
         Actualiza una nota existente. Devuelve True si fue exitoso, False en caso contrario.
         """
-        stmt = select(Nota).where(Nota.id == note_id, Nota.account_id == uuid.UUID(account_id))
+        stmt = select(Nota).where(Nota.id == note_id, Nota.account_id == _to_uuid(account_id))
         note_to_update = (await self.db.execute(stmt)).scalars().first()
 
         if not note_to_update:
@@ -247,7 +256,7 @@ class NotesManager:
         if new_category is not None:
             update_data['category'] = sanitize_text(new_category)
         if new_workspace_id is not None:
-            update_data['workspace_id'] = uuid.UUID(new_workspace_id) if new_workspace_id else None
+            update_data['workspace_id'] = _to_uuid(new_workspace_id)
         if is_starred is not None:
             update_data['is_starred'] = is_starred
 
@@ -264,7 +273,7 @@ class NotesManager:
         if update_data:
             await self.db.execute(
                 update(Nota)
-                .where(Nota.id == note_id, Nota.account_id == uuid.UUID(account_id))
+                .where(Nota.id == note_id, Nota.account_id == _to_uuid(account_id))
                 .values(**update_data)
             )
             await self.db.commit()
@@ -275,7 +284,7 @@ class NotesManager:
         """
         Elimina una nota. Devuelve True si fue exitoso, False en caso contrario.
         """
-        stmt = select(Nota).where(Nota.id == note_id, Nota.account_id == uuid.UUID(account_id))
+        stmt = select(Nota).where(Nota.id == note_id, Nota.account_id == _to_uuid(account_id))
         note_to_delete = (await self.db.execute(stmt)).scalars().first()
         
         if not note_to_delete:
@@ -336,7 +345,7 @@ class NotesManager:
         """
         logger.info(f"Intentando desvincular la nota {note_id} de su workspace para la cuenta {account_id}")
 
-        stmt = select(Nota).where(Nota.id == note_id, Nota.account_id == uuid.UUID(account_id))
+        stmt = select(Nota).where(Nota.id == note_id, Nota.account_id == _to_uuid(account_id))
         note_to_unshare = (await self.db.execute(stmt)).scalars().first()
 
         if not note_to_unshare:
@@ -357,7 +366,7 @@ class NotesManager:
 
         update_stmt = (
             update(Nota)
-            .where(Nota.id == note_id, Nota.account_id == uuid.UUID(account_id))
+            .where(Nota.id == note_id, Nota.account_id == _to_uuid(account_id))
             .values(workspace_id=None)
         )
         await self.db.execute(update_stmt)
@@ -372,7 +381,7 @@ class NotesManager:
         
         update_stmt = (
             update(Nota)
-            .where(Nota.account_id == uuid.UUID(account_id))
+            .where(Nota.account_id == _to_uuid(account_id))
             .values(embedding=None)
         )
         
@@ -390,7 +399,7 @@ class NotesManager:
         """
         logger.info(f"Re-vectorizing all notes for account {account_id}")
         
-        select_stmt = select(Nota).where(Nota.account_id == uuid.UUID(account_id))
+        select_stmt = select(Nota).where(Nota.account_id == _to_uuid(account_id))
         result = await self.db.execute(select_stmt)
         notes_to_revectorize = result.scalars().all()
         
@@ -426,7 +435,7 @@ class NotesManager:
         logger.info(f"Intentando vincular perfil {profile_id} a la nota {note_id} para la cuenta {account_id}")
         
         # Verificar que la nota existe y pertenece al usuario
-        note_stmt = select(Nota).options(selectinload(Nota.contact_profiles)).where(Nota.id == note_id, Nota.account_id == uuid.UUID(account_id))
+        note_stmt = select(Nota).options(selectinload(Nota.contact_profiles)).where(Nota.id == note_id, Nota.account_id == _to_uuid(account_id))
         note = (await self.db.execute(note_stmt)).scalars().first()
         if not note:
             logger.warning(f"Nota {note_id} no encontrada o no pertenece a la cuenta {account_id}.")
@@ -439,7 +448,7 @@ class NotesManager:
                 return False
 
         # Verificar que el perfil existe y pertenece al usuario
-        profile_stmt = select(ContactProfile).where(ContactProfile.id == profile_id, ContactProfile.account_id == uuid.UUID(account_id)) # CAMBIO: Se usa profile_id directamente
+        profile_stmt = select(ContactProfile).where(ContactProfile.id == _to_uuid(profile_id), ContactProfile.account_id == _to_uuid(account_id)) # CAMBIO: Se usa profile_id directamente
         profile = (await self.db.execute(profile_stmt)).scalars().first()
         if not profile:
             logger.warning(f"Perfil {profile_id} no encontrado o no pertenece a la cuenta {account_id}.")
@@ -464,7 +473,7 @@ class NotesManager:
         logger.info(f"Intentando desvincular perfil {profile_id} de la nota {note_id} para la cuenta {account_id}")
 
         # Verificar que la nota existe y pertenece al usuario
-        note_stmt = select(Nota).options(selectinload(Nota.contact_profiles)).where(Nota.id == note_id, Nota.account_id == uuid.UUID(account_id))
+        note_stmt = select(Nota).options(selectinload(Nota.contact_profiles)).where(Nota.id == note_id, Nota.account_id == _to_uuid(account_id))
         note = (await self.db.execute(note_stmt)).scalars().first()
         if not note:
             logger.warning(f"Nota {note_id} no encontrada o no pertenece a la cuenta {account_id}.")
@@ -478,7 +487,7 @@ class NotesManager:
 
         # Eliminar el vínculo
         # Necesitamos obtener el objeto ContactProfile para poder removerlo de la lista
-        profile_to_remove_stmt = select(ContactProfile).where(ContactProfile.id == profile_id, ContactProfile.account_id == uuid.UUID(account_id)) # CAMBIO: Se usa profile_id directamente
+        profile_to_remove_stmt = select(ContactProfile).where(ContactProfile.id == _to_uuid(profile_id), ContactProfile.account_id == _to_uuid(account_id)) # CAMBIO: Se usa profile_id directamente
         profile_to_remove = (await self.db.execute(profile_to_remove_stmt)).scalars().first()
 
         if profile_to_remove and profile_to_remove in note.contact_profiles:
@@ -502,7 +511,7 @@ class NotesManager:
             selectinload(Nota.account)
         ).where(
             Nota.id == note_id,
-            Nota.account_id == uuid.UUID(account_id)
+            Nota.account_id == _to_uuid(account_id)
         )
         result = await self.db.execute(stmt)
         note = result.scalars().first()

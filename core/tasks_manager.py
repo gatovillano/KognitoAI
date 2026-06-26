@@ -9,15 +9,19 @@ from sqlalchemy import select, update, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from core.database import Task, Account, Workspace, ContactProfile # Importar los modelos necesarios
-from utils.db_session import DBSession # Para manejar la sesión de la base de datos
-
-logger = logging.getLogger(__name__)
-
 from core.database import SessionLocal, Task, Account, Workspace, ContactProfile # Importar los modelos necesarios
 from utils.db_session import DBSession # Para manejar la sesión de la base de datos
 
 logger = logging.getLogger(__name__)
+
+
+def _to_uuid(val: Any) -> Any:
+    if val is None:
+        return None
+    if isinstance(val, uuid.UUID):
+        return val
+    return uuid.UUID(val)
+
 
 class TasksManager:
     def __init__(self, db_session: AsyncSession):
@@ -68,7 +72,7 @@ class TasksManager:
         """
         new_task = Task(
             id=task_id, # Usar el ID proporcionado o dejar que la base de datos lo genere
-            account_id=uuid.UUID(account_id),
+            account_id=_to_uuid(account_id),
             description=description,
             due_date=due_date,
             start_date=start_date, # Nuevo campo
@@ -76,7 +80,7 @@ class TasksManager:
             is_completed=is_completed,
             status=status,
             caldav_uid=caldav_uid,
-            workspace_id=uuid.UUID(workspace_id) if workspace_id else None
+            workspace_id=_to_uuid(workspace_id)
         )
         self.db_session.add(new_task)
         await self.db_session.commit()
@@ -110,14 +114,14 @@ class TasksManager:
         from sqlalchemy import or_
         from core.database import WorkspacePermission
         
-        account_uuid = uuid.UUID(account_id)
+        account_uuid = _to_uuid(account_id)
         
         if workspace_id:
             # Si se especifica un workspace específico, verificar permisos primero
             from core.dependencies import check_workspace_permission
             from fastapi import HTTPException
             try:
-                await check_workspace_permission(db=self.db_session, workspace_id=uuid.UUID(workspace_id), account_id=account_uuid, required_roles=['owner', 'editor', 'viewer'])
+                await check_workspace_permission(db=self.db_session, workspace_id=_to_uuid(workspace_id), account_id=account_uuid, required_roles=['owner', 'editor', 'viewer'])
             except HTTPException as e:
                 logger.warning(f"Permission denied for account {account_id} on workspace {workspace_id}: {e.detail}")
                 return []
@@ -125,7 +129,7 @@ class TasksManager:
             # Mostrar TODAS las tareas de ese workspace
             # (no filtrar por account_id para permitir que los usuarios viewer vean tareas de otros)
             stmt = select(Task).options(selectinload(Task.contact_profiles)).where(
-                Task.workspace_id == uuid.UUID(workspace_id)
+                Task.workspace_id == _to_uuid(workspace_id)
             )
         else:
             # Si no se especifica workspace, obtener tareas personales y de todos los workspaces a los que tiene acceso
@@ -194,13 +198,13 @@ class TasksManager:
         if task.workspace_id:
             # Si la tarea pertenece a un workspace, verificar permisos de editor/owner
             try:
-                await check_workspace_permission(db=self.db_session, workspace_id=task.workspace_id, account_id=uuid.UUID(account_id), required_roles=['owner', 'editor'])
+                await check_workspace_permission(db=self.db_session, workspace_id=task.workspace_id, account_id=_to_uuid(account_id), required_roles=['owner', 'editor'])
             except HTTPException as e:
                 logger.warning(f"Acceso denegado para actualizar la tarea {task.id} en workspace {task.workspace_id} para la cuenta {account_id}: {e.detail}")
                 return None
         else:
             # Si la tarea no pertenece a un workspace, debe pertenecer al usuario
-            if task.account_id != uuid.UUID(account_id):
+            if task.account_id != _to_uuid(account_id):
                 logger.warning(f"Tarea {task_id} no pertenece a la cuenta {account_id} y no está en un workspace compartido.")
                 return None
 
@@ -217,7 +221,7 @@ class TasksManager:
         if is_completed is not None:
             task.is_completed = is_completed
         if workspace_id is not None:
-            task.workspace_id = uuid.UUID(workspace_id) if workspace_id else None
+            task.workspace_id = _to_uuid(workspace_id)
         if status is not None:
             task.status = status
         if caldav_uid is not None:
@@ -226,7 +230,7 @@ class TasksManager:
         # Lógica para linked_profiles
         if linked_profiles is not None:
             current_profile_uuids = {cp.id for cp in task.contact_profiles}
-            new_profile_uuids = {uuid.UUID(pid) for pid in linked_profiles}
+            new_profile_uuids = {_to_uuid(pid) for pid in linked_profiles}
 
             to_add_uuids = new_profile_uuids - current_profile_uuids
             to_remove_uuids = current_profile_uuids - new_profile_uuids
@@ -269,13 +273,13 @@ class TasksManager:
         if task.workspace_id:
             # Si la tarea pertenece a un workspace, verificar permisos de owner/editor
             try:
-                await check_workspace_permission(db=self.db_session, workspace_id=task.workspace_id, account_id=uuid.UUID(account_id), required_roles=['owner', 'editor'])
+                await check_workspace_permission(db=self.db_session, workspace_id=task.workspace_id, account_id=_to_uuid(account_id), required_roles=['owner', 'editor'])
             except HTTPException as e:
                 logger.warning(f"Acceso denegado para eliminar la tarea {task.id} en workspace {task.workspace_id} para la cuenta {account_id}: {e.detail}")
                 return False
         else:
             # Si la tarea no pertenece a un workspace, debe pertenecer al usuario
-            if task.account_id != uuid.UUID(account_id):
+            if task.account_id != _to_uuid(account_id):
                 logger.warning(f"Tarea {task_id} no pertenece a la cuenta {account_id} y no está en un workspace compartido.")
                 return False
 
@@ -306,13 +310,13 @@ class TasksManager:
         if task.workspace_id:
             # Si la tarea pertenece a un workspace, verificar permisos
             try:
-                await check_workspace_permission(db=self.db_session, workspace_id=task.workspace_id, account_id=uuid.UUID(account_id), required_roles=['owner', 'editor', 'viewer'])
+                await check_workspace_permission(db=self.db_session, workspace_id=task.workspace_id, account_id=_to_uuid(account_id), required_roles=['owner', 'editor', 'viewer'])
             except HTTPException as e:
                 logger.warning(f"Acceso denegado a la tarea {task.id} en workspace {task.workspace_id} para la cuenta {account_id}: {e.detail}")
                 return None
         else:
             # Si la tarea no pertenece a un workspace, debe pertenecer al usuario
-            if task.account_id != uuid.UUID(account_id):
+            if task.account_id != _to_uuid(account_id):
                 logger.warning(f"Tarea {task_id} no pertenece a la cuenta {account_id} y no está en un workspace compartido.")
                 return None
         
@@ -322,7 +326,7 @@ class TasksManager:
         """
         Obtiene una tarea por su CalDAV UID.
         """
-        account_uuid = uuid.UUID(account_id)
+        account_uuid = _to_uuid(account_id)
         stmt = select(Task).options(selectinload(Task.contact_profiles)).where(
             Task.caldav_uid == caldav_uid,
             Task.account_id == account_uuid
@@ -348,11 +352,11 @@ class TasksManager:
         from core.database import WorkspacePermission
         
         async with DBSession(SessionLocal) as db:
-            account_uuid = uuid.UUID(account_id)
+            account_uuid = _to_uuid(account_id)
             
             if workspace_id and workspace_id not in ["personal", "default"]:
                 # Filtrar por un workspace específico
-                workspace_uuid = uuid.UUID(workspace_id)
+                workspace_uuid = _to_uuid(workspace_id)
                 stmt = select(Task).options(selectinload(Task.contact_profiles)).where(
                     Task.workspace_id == workspace_uuid
                 )
@@ -396,7 +400,7 @@ class TasksManager:
         Vincula un perfil a una tarea existente.
         """
         logger.info(f"Intentando vincular perfil {profile_id} a la tarea {task_id} para la cuenta {account_id}")
-        account_uuid = uuid.UUID(account_id)
+        account_uuid = _to_uuid(account_id)
         task_stmt = select(Task).options(selectinload(Task.contact_profiles)).where(Task.id == task_id, Task.account_id == account_uuid)
         task = (await self.db_session.execute(task_stmt)).scalars().first()
         if not task:
@@ -427,7 +431,7 @@ class TasksManager:
         Desvincula un perfil de una tarea existente.
         """
         logger.info(f"Intentando desvincular perfil {profile_id} de la tarea {task_id} para la cuenta {account_id}")
-        account_uuid = uuid.UUID(account_id)
+        account_uuid = _to_uuid(account_id)
 
         # Verificar que la tarea existe y pertenece al usuario
         task_stmt = select(Task).options(selectinload(Task.contact_profiles)).where(Task.id == task_id, Task.account_id == account_uuid)
@@ -459,7 +463,8 @@ async def create_task(
     is_completed: Optional[bool] = False,
     workspace_id: Optional[str] = None,
     task_id: Optional[str] = None,
-    caldav_uid: Optional[str] = None
+    caldav_uid: Optional[str] = None,
+    status: Optional[str] = "Pendiente" # Nuevo campo
 ) -> Tuple[bool, str, Task | None]:
     """Wrapper para TasksManager.create_task."""
     async with DBSession(SessionLocal) as db:
@@ -469,10 +474,21 @@ async def create_task(
             task_uuid = None
             if task_id:
                 try:
-                    task_uuid = uuid.UUID(task_id)
+                    task_uuid = _to_uuid(task_id)
                 except ValueError:
                     pass # Dejar como None si no es un UUID válido
-            new_task = await manager.create_task(account_id, description, due_date, start_date, end_date, is_completed, workspace_id, task_uuid, caldav_uid)
+            new_task = await manager.create_task(
+                account_id=account_id,
+                description=description,
+                due_date=due_date,
+                start_date=start_date,
+                end_date=end_date,
+                is_completed=is_completed,
+                workspace_id=workspace_id,
+                task_id=task_uuid,
+                caldav_uid=caldav_uid,
+                status=status
+            )
             return True, "Tarea creada exitosamente.", new_task
         except Exception as e:
             logger.error(f"Error al crear tarea: {e}", exc_info=True)
@@ -484,7 +500,7 @@ async def get_task_by_id_db(account_id: str, task_id: str) -> Optional[Task]: # 
         manager = TasksManager(db)
         try:
             # Convertir task_id a UUID
-            task_uuid = uuid.UUID(task_id)
+            task_uuid = _to_uuid(task_id)
             return await manager.get_task_by_id(account_id, task_uuid)
         except ValueError:
             logger.warning(f"ID de tarea inválido: {task_id}")
@@ -509,7 +525,7 @@ async def update_task_db(
     manager = TasksManager(db_session)
     try:
         # Convertir task_id a UUID
-        task_uuid = uuid.UUID(task_id)
+        task_uuid = _to_uuid(task_id)
         return await manager.update_task(account_id, task_uuid, summary, description, due_date, start_date, end_date, is_completed, workspace_id, status, caldav_uid, linked_profiles)
     except ValueError:
         logger.warning(f"ID de tarea inválido: {task_id}")
@@ -521,7 +537,7 @@ async def delete_task(account_id: str, task_id: str) -> Tuple[bool, str]: # task
         manager = TasksManager(db)
         try:
             # Convertir task_id a UUID
-            task_uuid = uuid.UUID(task_id)
+            task_uuid = _to_uuid(task_id)
             success = await manager.delete_task(account_id, task_uuid)
             if success:
                 return True, "Tarea eliminada exitosamente."
@@ -542,6 +558,6 @@ async def get_task_by_caldav_uid(account_id: str, caldav_uid: str) -> Optional[T
 async def get_tasks_as_dicts(account_id: str, include_completed: bool = False, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None, workspace_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """Wrapper para TasksManager.get_tasks_as_dicts."""
     async with DBSession(SessionLocal) as db:
-        acc_uuid = uuid.UUID(account_id) if isinstance(account_id, str) else account_id
+        acc_uuid = _to_uuid(account_id)
         manager = TasksManager(db)
         return await manager.get_tasks_as_dicts(str(acc_uuid), include_completed, start_date, end_date, workspace_id)

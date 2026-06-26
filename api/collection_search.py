@@ -148,7 +148,7 @@ async def search_in_collection(
             all_results.sort(key=lambda x: (x.score or 0) + (x.rank_score or 0), reverse=True)
         
         # Antes de limitar, aplicar reranking si se solicita
-        if apply_rerank and reranker._model is not None:
+        if apply_rerank:
             logger.info("✨ Aplicando reranking a los resultados...")
             # Convertir SearchResult a un formato compatible con el reranker si es necesario
             # Por ahora, asumimos que el reranker puede trabajar con una lista de objetos con 'content'
@@ -179,7 +179,7 @@ async def search_in_collection(
                     }
                 ))
 
-            reranked_langchain_docs = await reranker.rerank(query, reranker_input_docs)
+            reranked_langchain_docs = await reranker.rerank(query, reranker_input_docs, account_id=account_id)
             
             # Mapear los documentos rerankeados de vuelta a SearchResult
             reranked_results = []

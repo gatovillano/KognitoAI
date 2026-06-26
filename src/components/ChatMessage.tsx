@@ -31,7 +31,7 @@ export interface MessageContentPart {
   id?: string;
   status?: 'start' | 'end' | 'error';
   tool_name?: string;
-  pty_session?: { session_id: string };
+  pty_session?: { session_id: string; command?: string };
 }
 
 interface ChatMessageProps {
@@ -247,7 +247,8 @@ const ToolCallBlock = ({ part, scrollToBottom }: { part: MessageContentPart, scr
                       accountId={(user?.account_id || user?.id) as string || ''}
                       token={token || ''}
                       sessionId={part.pty_session!.session_id}
-                      apiBaseUrl={typeof window !== 'undefined' ? window.location.origin : ''}
+                      apiBaseUrl={process.env.NEXT_PUBLIC_API_URL || ''}
+                      initialCommand={part.pty_session!.command}
                     />
                   </div>
                 ) : (
@@ -531,7 +532,13 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
                     {/* Embedded PTY terminal if the tool provided a session */}
                     {msg.pty_session && (
                       <div className="mb-4">
-                        <PtyTerminalEmbedded accountId={(user?.account_id || user?.id) as string} token={token || ''} sessionId={msg.pty_session.session_id} apiBaseUrl={typeof window !== 'undefined' ? window.location.origin : ''} />
+                        <PtyTerminalEmbedded
+                          accountId={(user?.account_id || user?.id) as string}
+                          token={token || ''}
+                          sessionId={msg.pty_session.session_id}
+                          apiBaseUrl={process.env.NEXT_PUBLIC_API_URL || ''}
+                          initialCommand={msg.pty_session.command}
+                        />
                       </div>
                     )}
 

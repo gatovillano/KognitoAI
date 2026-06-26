@@ -181,7 +181,7 @@ async def login_telegram(api_url):
                 resp = await client.post(f"{api_url}/api/auth/verify-code", json={"identifier": identifier, "code": code})
             if resp.status_code == 200:
                 config = load_config()
-                config["token"] = resp.json()["access_token"]
+                config["token"] = resp.json().get("access_token", "")
                 save_config(config)
                 console.print(Panel("[bold green]🎉 ¡Sesión iniciada![/bold green]", border_style="green"))
             else: console.print(f"[error]❌ Código inválido.[/error]")
@@ -196,7 +196,7 @@ async def login_email(api_url):
                 resp = await client.post(f"{api_url}/api/auth/login", json={"email": email, "password": password})
             if resp.status_code == 200:
                 config = load_config()
-                config["token"] = resp.json()["access_token"]
+                config["token"] = resp.json().get("access_token", "")
                 save_config(config)
                 console.print(Panel("[bold green]🎉 ¡Sesión iniciada![/bold green]", border_style="green"))
             else: console.print(f"[error]❌ Credenciales incorrectas.[/error]")
@@ -970,7 +970,7 @@ async def list_workspaces(api_url, token):
         try:
             resp = await client.get(f"{api_url}/api/workspaces", headers={"Authorization": f"Bearer {token}"})
             if resp.status_code == 200:
-                workspaces = resp.json()
+                workspaces = resp.json().get("workspaces", [])
                 table = Table(title="🏢 Espacios de Trabajo", border_style="cyan", box=ROUNDED)
                 table.add_column("ID", style="dim")
                 table.add_column("Nombre", style="bold magenta")
@@ -986,7 +986,7 @@ async def list_threads(api_url, token):
         try:
             resp = await client.get(f"{api_url}/api/threads?limit=10", headers={"Authorization": f"Bearer {token}"})
             if resp.status_code == 200:
-                threads = resp.json()["threads"]
+                threads = resp.json().get("threads", [])
                 table = Table(title="💬 Conversaciones Recientes", border_style="magenta", box=ROUNDED)
                 table.add_column("ID", style="dim")
                 table.add_column("Título", style="bold white")
@@ -1033,7 +1033,7 @@ async def show_note_content(api_url, token, note_id):
         try:
             resp = await client.get(f"{api_url}/api/notes/{note_id}", headers={"Authorization": f"Bearer {token}"})
             if resp.status_code == 200:
-                note = resp.json()
+                note = resp.json() if isinstance(resp.json(), dict) else {}
                 title = note.get("title") or "Nota sin título"
                 metadata = f"[dim]Categoría: {note.get('category') or '-'} | Workspace: {note.get('workspace_name') or 'Global'} | Creada: {format_datetime(note.get('created_at'))}[/dim]\n"
                 starred = " ⭐ (Favorita)" if note.get("is_starred") else ""
@@ -1058,7 +1058,7 @@ async def list_tasks_chat(api_url, token, workspace_id=None):
             if workspace_id: params["workspace_id"] = workspace_id
             resp = await client.get(f"{api_url}/api/tasks", params=params, headers={"Authorization": f"Bearer {token}"})
             if resp.status_code == 200:
-                tasks = resp.json()
+                tasks = resp.json().get("tasks", [])
                 if not tasks:
                     console.print("[info]No tienes tareas pendientes.[/info]")
                     return
@@ -1080,7 +1080,7 @@ async def list_events_chat(api_url, token, workspace_id=None):
             if workspace_id: params["workspace_id"] = workspace_id
             resp = await client.get(f"{api_url}/api/agenda/events", params=params, headers={"Authorization": f"Bearer {token}"})
             if resp.status_code == 200:
-                events = resp.json()
+                events = resp.json().get("events", [])
                 if not events:
                     console.print("[info]No tienes eventos en tu agenda.[/info]")
                     return
@@ -1100,7 +1100,7 @@ async def list_memories_chat(api_url, token):
         try:
             resp = await client.get(f"{api_url}/api/memories", headers={"Authorization": f"Bearer {token}"})
             if resp.status_code == 200:
-                memories = resp.json()
+                memories = resp.json().get("memories", [])
                 if not memories:
                     console.print("[info]No tienes memorias guardadas.[/info]")
                     return
@@ -1118,7 +1118,7 @@ async def show_dashboard_chat(api_url, token):
         try:
             resp = await client.get(f"{api_url}/api/resolution-board", headers={"Authorization": f"Bearer {token}"})
             if resp.status_code == 200:
-                data = resp.json()
+                data = resp.json() if isinstance(resp.json(), dict) else {}
                 tasks = data.get("tasks", [])
                 insights = data.get("insights", [])
                 
@@ -1354,7 +1354,7 @@ async def create_thread_chat(api_url, token, title, workspace_id=None):
             }
             resp = await client.post(f"{api_url}/api/threads", json=payload, headers={"Authorization": f"Bearer {token}"})
             if resp.status_code == 200:
-                new_id = resp.json()["id"]
+                new_id = resp.json().get("id", "")
                 console.print(f"[success]✅ Hilo creado exitosamente: {new_id[:8]}[/success]")
                 return new_id
             else:
@@ -1439,12 +1439,13 @@ async def interactive_chat():
         try:
             with Status("[dim]Sincronizando...", console=console):
                 resp = await client.get(f"{api_url}/api/threads?limit=1", headers={"Authorization": f"Bearer {token}"})
-                if resp.status_code == 200 and resp.json()["threads"]:
-                    thread_id = resp.json()["threads"][0]["id"]
+                threads_data = resp.json() if isinstance(resp.json(), dict) else {}
+                if resp.status_code == 200 and threads_data.get("threads"):
+                    thread_id = threads_data["threads"][0]["id"]
                 else:
                     resp = await client.post(f"{api_url}/api/threads", json={"title": "CLI Chat"}, headers={"Authorization": f"Bearer {token}"})
                     if resp.status_code == 200:
-                        thread_id = resp.json()["id"]
+                        thread_id = resp.json().get("id", "")
                     else:
                         console.print(f"[error]❌ Error creando hilo: {resp.text}[/error]")
                         return

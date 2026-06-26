@@ -10,6 +10,7 @@ from typing import Optional, Dict, Any, List
 from fastapi import Request, Response, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_
+from sqlalchemy.orm import selectinload
 
 from api.caldav_router import CalDAVRouter
 from core.database import (
@@ -161,7 +162,7 @@ async def propfind_caldav_root(current_account_id: str = Depends(get_current_acc
     principal_href = f"/api/caldav/principals/{current_account_id}/"
     ET.SubElement(ET.SubElement(prop, f"{{{DAV_NS}}}current-user-principal"), f"{{{DAV_NS}}}href").text = principal_href
     ET.SubElement(pstat, f"{{{DAV_NS}}}status").text = "HTTP/1.1 200 OK"
-    return Response(content=_pretty_print_xml(multistatus), media_type="application/xml")
+    return Response(content=_pretty_print_xml(multistatus), status_code=207, media_type="application/xml")
 
 @router.propfind("/caldav/principals/{account_id}", status_code=207)
 @router.propfind("/caldav/principals/{account_id}/", status_code=207)
@@ -181,7 +182,7 @@ async def propfind_caldav_principal(account_id: str, current_account_id: str = D
     ET.SubElement(rt, f"{{{DAV_NS}}}collection")
     ET.SubElement(ET.SubElement(prop, f"{{{CALDAV_NS}}}calendar-home-set"), f"{{{DAV_NS}}}href").text = f"/api/caldav/calendars/{account_id}/"
     ET.SubElement(pstat, f"{{{DAV_NS}}}status").text = "HTTP/1.1 200 OK"
-    return Response(content=_pretty_print_xml(multistatus), media_type="application/xml")
+    return Response(content=_pretty_print_xml(multistatus), status_code=207, media_type="application/xml")
 
 # --- Home-Set & Collection Endpoints ---
 
@@ -220,11 +221,17 @@ async def propfind_caldav_home_set(
         ET.SubElement(rt, "{DAV:}collection")
         ET.SubElement(rt, "{urn:ietf:params:xml:ns:caldav}calendar")
         ET.SubElement(cp, "{DAV:}displayname").text = name
+        
+        # Add supported component types (VEVENT, VTODO)
+        sccs = ET.SubElement(cp, "{urn:ietf:params:xml:ns:caldav}supported-calendar-component-set")
+        ET.SubElement(sccs, "{urn:ietf:params:xml:ns:caldav}comp", name="VEVENT")
+        ET.SubElement(sccs, "{urn:ietf:params:xml:ns:caldav}comp", name="VTODO")
+        
         ctag = ET.SubElement(cp, "{http://calendarserver.org/ns/}getctag")
         ctag.text = str(int(datetime.now().timestamp()))
         ET.SubElement(cp_ps, "{DAV:}status").text = "HTTP/1.1 200 OK"
 
-    return Response(content=_pretty_print_xml(multistatus), media_type="application/xml")
+    return Response(content=_pretty_print_xml(multistatus), status_code=207, media_type="application/xml")
 
 @router.options("/caldav/calendars/{account_id}/{calendar_id}")
 @router.options("/caldav/calendars/{account_id}/{calendar_id}/")
@@ -251,28 +258,85 @@ async def propfind_caldav_calendar_collection(
     body = await request.body()
     wants_data = b"calendar-data" in body.lower()
     
+    multiget_hrefs = None
+    if b"calendar-multiget" in body.lower() and body:
+        try:
+            root_el = ET.fromstring(body)
+            href_elements = root_el.findall(".//{DAV:}href") or root_el.findall(".//href")
+            if not href_elements:
+                href_elements = [el for el in root_el.iter() if el.tag.endswith("}href") or el.tag == "href"]
+            multiget_hrefs = {el.text.strip() for el in href_elements if el.text}
+        except Exception as e:
+            logger.warning(f"Error parsing calendar-multiget body: {e}")
+            
     multistatus = ET.Element("{DAV:}multistatus")
-    # Collection itself response
-    resp = ET.SubElement(multistatus, "{DAV:}response")
-    ET.SubElement(resp, "{DAV:}href").text = request.url.path
-    ps = ET.SubElement(resp, "{DAV:}propstat")
-    ET.SubElement(ps, "{DAV:}status").text = "HTTP/1.1 200 OK"
-    ET.SubElement(ET.SubElement(ps, "{DAV:}prop"), "{DAV:}resourcetype").append(ET.Element("{DAV:}collection"))
+    if multiget_hrefs is None:
+        # Collection itself response
+        resp = ET.SubElement(multistatus, "{DAV:}response")
+        ET.SubElement(resp, "{DAV:}href").text = request.url.path
+        ps = ET.SubElement(resp, "{DAV:}propstat")
+        prop = ET.SubElement(ps, "{DAV:}prop")
+        rt = ET.SubElement(prop, "{DAV:}resourcetype")
+        ET.SubElement(rt, "{DAV:}collection")
+        ET.SubElement(rt, "{urn:ietf:params:xml:ns:caldav}calendar")
+        
+        # Add supported component types (VEVENT, VTODO)
+        sccs = ET.SubElement(prop, "{urn:ietf:params:xml:ns:caldav}supported-calendar-component-set")
+        ET.SubElement(sccs, "{urn:ietf:params:xml:ns:caldav}comp", name="VEVENT")
+        ET.SubElement(sccs, "{urn:ietf:params:xml:ns:caldav}comp", name="VTODO")
+        
+        ET.SubElement(ps, "{DAV:}status").text = "HTTP/1.1 200 OK"
 
-    events = await get_events_as_dicts(current_account_id, workspace_id=workspace_id, include_past=True)
-    tasks = await get_tasks_as_dicts(current_account_id, include_completed=True, workspace_id=workspace_id)
+    body_lower = body.lower() if body else b""
+    has_filter = b"comp-filter" in body_lower or b"comp" in body_lower
+    
+    include_events = True
+    include_tasks = True
+    
+    if has_filter:
+        has_vevent = b"vevent" in body_lower
+        has_vtodo = b"vtodo" in body_lower
+        if has_vevent and not has_vtodo:
+            include_tasks = False
+        elif has_vtodo and not has_vevent:
+            include_events = False
+
+    events = []
+    if include_events:
+        events = await get_events_as_dicts(current_account_id, workspace_id=calendar_id, include_past=True)
+        
+    tasks = []
+    if include_tasks:
+        tasks = await get_tasks_as_dicts(current_account_id, include_completed=True, workspace_id=calendar_id)
+        
     account = await db.get(Account, uuid.UUID(current_account_id))
     tz = account.timezone if account and account.timezone else "UTC"
 
     for items, to_ical_func, model in [(events, _event_to_ical, AgendaEvent), (tasks, _task_to_ical, Task)]:
         for item in items:
+            uid = item.get("caldav_uid") or str(item["id"])
+            item_href = f"{request.url.path.rstrip('/')}/{uid}.ics"
+            
+            if multiget_hrefs is not None:
+                matched = False
+                for h in multiget_hrefs:
+                    if h.endswith(f"/{uid}.ics") or h.endswith(f"/{uid}"):
+                        matched = True
+                        break
+                if not matched:
+                    continue
+                    
             logger.debug(f"Processing item {item.get('id')} for CalDAV response")
             ir = ET.SubElement(multistatus, "{DAV:}response")
-            uid = item.get("caldav_uid") or str(item["id"])
-            ET.SubElement(ir, "{DAV:}href").text = f"{request.url.path.rstrip('/')}/{uid}.ics"
+            ET.SubElement(ir, "{DAV:}href").text = item_href
             ps = ET.SubElement(ir, "{DAV:}propstat")
             prop = ET.SubElement(ps, "{DAV:}prop")
-            ET.SubElement(prop, "{DAV:}getetag").text = str(item.get("etag", "static-etag"))
+            
+            etag_val = item.get("etag")
+            if not etag_val:
+                etag_val = f'"{item["id"]}-static"'
+            ET.SubElement(prop, "{DAV:}getetag").text = str(etag_val)
+            
             if wants_data:
                 # Convert ID to UUID if it's a string (for Tasks)
                 search_id = item["id"]
@@ -285,7 +349,7 @@ async def propfind_caldav_calendar_collection(
                     ET.SubElement(prop, "{urn:ietf:params:xml:ns:caldav}calendar-data").text = to_ical_func(obj, tz) # type: ignore
             ET.SubElement(ps, "{DAV:}status").text = "HTTP/1.1 200 OK"
 
-    return Response(content=_pretty_print_xml(multistatus), media_type="application/xml")
+    return Response(content=_pretty_print_xml(multistatus), status_code=207, media_type="application/xml")
 
 @router.report("/caldav/calendars/{account_id}/{calendar_id}", status_code=207)
 @router.report("/caldav/calendars/{account_id}/{calendar_id}/", status_code=207)
@@ -309,9 +373,31 @@ async def get_caldav_resource(
     
     res = await get_event_by_caldav_uid(current_account_id, uid)
     tp = "event"
+    if not res and uid.isdigit():
+        stmt = select(AgendaEvent).options(
+            selectinload(AgendaEvent.contact_profiles),
+            selectinload(AgendaEvent.workspace),
+            selectinload(AgendaEvent.attendees)
+        ).where(
+            AgendaEvent.id == int(uid),
+            AgendaEvent.account_id == uuid.UUID(current_account_id)
+        )
+        res = (await db.execute(stmt)).scalars().first()
+        
     if not res:
         res = await get_task_by_caldav_uid(current_account_id, uid)
         tp = "task"
+        if not res:
+            try:
+                task_uuid = uuid.UUID(uid)
+                stmt = select(Task).options(selectinload(Task.contact_profiles)).where(
+                    Task.id == task_uuid,
+                    Task.account_id == uuid.UUID(current_account_id)
+                )
+                res = (await db.execute(stmt)).scalars().first()
+                tp = "task"
+            except ValueError:
+                pass
     
     if not res or res.workspace_id != ws_id: raise HTTPException(status_code=404)
     
@@ -334,6 +420,16 @@ async def put_caldav_resource(
     if is_todo:
         data = await _ical_to_task_data(body, current_account_id, db)
         existing = await get_task_by_caldav_uid(current_account_id, uid)
+        if not existing:
+            try:
+                task_uuid = uuid.UUID(uid)
+                stmt = select(Task).options(selectinload(Task.contact_profiles)).where(
+                    Task.id == task_uuid,
+                    Task.account_id == uuid.UUID(current_account_id)
+                )
+                existing = (await db.execute(stmt)).scalars().first()
+            except ValueError:
+                pass
         if existing:
             if existing.workspace_id != ws_id: raise HTTPException(status_code=403)
             obj = await update_task_core(db, current_account_id, str(existing.id), **data)
@@ -342,10 +438,49 @@ async def put_caldav_resource(
     else:
         data = await _ical_to_event_data(body, current_account_id, db)
         existing = await get_event_by_caldav_uid(current_account_id, uid)
+        if not existing and uid.isdigit():
+            stmt = select(AgendaEvent).options(
+                selectinload(AgendaEvent.contact_profiles),
+                selectinload(AgendaEvent.workspace),
+                selectinload(AgendaEvent.attendees)
+            ).where(
+                AgendaEvent.id == int(uid),
+                AgendaEvent.account_id == uuid.UUID(current_account_id)
+            )
+            existing = (await db.execute(stmt)).scalars().first()
         if existing:
             if existing.workspace_id != ws_id: raise HTTPException(status_code=403)
             # update_event_db expects different dict than schedule_event
-            obj = await update_event_db(db, current_account_id, existing.id, **data)
+            account = await db.get(Account, uuid.UUID(current_account_id))
+            user_tz = pytz.timezone(account.timezone) if account and account.timezone else pytz.utc
+            
+            event_datetime_utc = None
+            if "event_date" in data and "event_time" in data:
+                try:
+                    local_datetime_str = f"{data['event_date']} {data['event_time']}"
+                    naive_datetime = datetime.strptime(local_datetime_str, "%Y-%m-%d %H:%M")
+                    localized_dt = user_tz.localize(naive_datetime)
+                    event_datetime_utc = localized_dt.astimezone(pytz.utc)
+                except ValueError:
+                    pass
+
+            duration_minutes = data.get("duration_minutes")
+            end_date = None
+            if event_datetime_utc and duration_minutes is not None:
+                end_date = event_datetime_utc + timedelta(minutes=duration_minutes)
+
+            update_fields = {
+                "summary": data.get("summary"),
+                "description": data.get("description"),
+                "location": data.get("location"),
+                "event_datetime_utc": event_datetime_utc,
+                "end_date": end_date,
+                "duration_minutes": duration_minutes,
+            }
+            # Remove None values so we don't overwrite if they are not specified
+            update_fields = {k: v for k, v in update_fields.items() if v is not None}
+            
+            obj = await update_event_db(db, current_account_id, existing.id, **update_fields)
         else:
             _, _, obj = await schedule_event(current_account_id, workspace_id=str(ws_id) if ws_id else None, caldav_uid=uid, **data)
 
@@ -359,14 +494,31 @@ async def put_caldav_resource(
 @router.delete("/caldav/calendars/{account_id}/{calendar_id}/{uid}.ics")
 async def delete_caldav_resource(
     account_id: str, calendar_id: str, uid: str,
-    current_account_id: str = Depends(get_current_account_id_caldav)
+    current_account_id: str = Depends(get_current_account_id_caldav),
+    db: AsyncSession = Depends(get_db_session)
 ):
     if account_id != current_account_id: raise HTTPException(status_code=403)
     ws_id = _get_workspace_id_from_cal(calendar_id)
     res = await get_event_by_caldav_uid(current_account_id, uid)
+    if not res and uid.isdigit():
+        stmt = select(AgendaEvent).where(
+            AgendaEvent.id == int(uid),
+            AgendaEvent.account_id == uuid.UUID(current_account_id)
+        )
+        res = (await db.execute(stmt)).scalars().first()
     if res:
         if res.workspace_id == ws_id: await cancel_event(current_account_id, res.id); return Response(status_code=204)
     res = await get_task_by_caldav_uid(current_account_id, uid)
+    if not res:
+        try:
+            task_uuid = uuid.UUID(uid)
+            stmt = select(Task).where(
+                Task.id == task_uuid,
+                Task.account_id == uuid.UUID(current_account_id)
+            )
+            res = (await db.execute(stmt)).scalars().first()
+        except ValueError:
+            pass
     if res:
         if res.workspace_id == ws_id: await delete_task(current_account_id, res.id); return Response(status_code=204)
     raise HTTPException(status_code=404)
@@ -379,4 +531,4 @@ async def proppatch_caldav_calendar(calendar_id: str, request: Request):
     ET.SubElement(resp, "{DAV:}href").text = request.url.path
     ps = ET.SubElement(resp, "{DAV:}propstat")
     ET.SubElement(ps, "{DAV:}status").text = "HTTP/1.1 200 OK"
-    return Response(content=_pretty_print_xml(multistatus), media_type="application/xml")
+    return Response(content=_pretty_print_xml(multistatus), status_code=207, media_type="application/xml")

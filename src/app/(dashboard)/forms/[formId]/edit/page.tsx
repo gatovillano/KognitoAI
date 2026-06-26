@@ -17,7 +17,7 @@ import apiClient from '@/lib/api';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
 import { Form, FormFieldData, FormSectionData, FormElement } from '@/types/form';
-import { ContactProfile } from '@/app/(dashboard)/profiles/page';
+import { ContactProfile } from '@/app/(dashboard)/profiles/Profiles';
 import { Badge } from '@/components/ui/badge';
 import { Tag } from '@/components/ui/tag'; // Asumiendo que existe un componente Tag
 

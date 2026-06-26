@@ -40,9 +40,11 @@ interface TaskContextType {
   uploadTasks: UploadTask[];
   analysisTasks: AnalysisTask[];
   addUploadTask: (task: UploadTask) => void;
+  updateUploadTask: (taskId: string, updates: Partial<UploadTask>) => void;
+  removeUploadTask: (taskId: string) => void;
   addAnalysisTask: (task: AnalysisTask) => void;
-  removeAnalysisTask: (taskId: string) => void;
   updateAnalysisTask: (taskId: string, updates: Partial<AnalysisTask>) => void;
+  removeAnalysisTask: (taskId: string) => void;
 }
 
 const TaskContext = createContext<TaskContextType | undefined>(undefined);
@@ -53,7 +55,19 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
   const { registerMessageHandler } = useWebSocketContext();
 
   const addUploadTask = useCallback((task: UploadTask) => {
-    setUploadTasks(prev => [...prev, task]);
+    setUploadTasks(prev => {
+      const exists = prev.some(t => t.id === task.id);
+      if (exists) return prev;
+      return [...prev, task];
+    });
+  }, []);
+
+  const updateUploadTask = useCallback((taskId: string, updates: Partial<UploadTask>) => {
+    setUploadTasks(prev => prev.map(t => t.id === taskId ? { ...t, ...updates } : t));
+  }, []);
+
+  const removeUploadTask = useCallback((taskId: string) => {
+    setUploadTasks(prev => prev.filter(t => t.id !== taskId));
   }, []);
 
   const addAnalysisTask = useCallback((task: AnalysisTask) => {
@@ -79,8 +93,19 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       switch (message.type) {
         case 'upload_started':
           setUploadTasks(prev => {
-            const exists = prev.some(t => t.id === message.task_id);
-            if (exists) return prev;
+            const exists = prev.some(t => t.id === message.task_id || t.id === (message.file_names?.[0]));
+            if (exists) {
+              return prev.map(t => (t.id === message.task_id || t.id === (message.file_names?.[0]))
+                ? { 
+                    ...t, 
+                    id: message.task_id, 
+                    status: 'processing' as const, 
+                    file_names: message.file_names || [], 
+                    topic: message.topic || '' 
+                  }
+                : t
+              );
+            }
             return [...prev, { 
                 id: message.task_id, 
                 status: 'processing', 
@@ -158,9 +183,11 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         uploadTasks, 
         analysisTasks, 
         addUploadTask, 
+        updateUploadTask,
+        removeUploadTask,
         addAnalysisTask, 
-        removeAnalysisTask,
-        updateAnalysisTask
+        updateAnalysisTask,
+        removeAnalysisTask
     }}>
       {children}
     </TaskContext.Provider>
