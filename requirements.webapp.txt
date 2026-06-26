@@ -1,0 +1,6 @@
+# Dependencias para el servidor FastAPI de Telegram Panel
+fastapi
+uvicorn[standard]
+python-multipart
+httpx
+python-dotenv

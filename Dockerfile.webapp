@@ -1,0 +1,17 @@
+FROM python:3.11-slim
+
+# Instalar dependencias del sistema
+RUN apt-get update && apt-get install -y libpq-dev build-essential && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copiar el archivo de requerimientos específico para telegram_panel
+COPY requirements.webapp.txt .
+RUN pip install --no-cache-dir -r requirements.webapp.txt
+
+# Copiar todo el contexto del proyecto
+COPY . .
+
+EXPOSE 8000
+
+CMD ["uvicorn", "run_telegram_panel:app", "--host", "0.0.0.0", "--port", "8000"]
