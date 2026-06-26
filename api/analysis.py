@@ -42,6 +42,115 @@ from typing import AsyncGenerator
 
 # get_db eliminado en favor de core.dependencies.get_db_session
 
+def extract_topics_from_payload(payload: dict) -> List[dict]:
+    extracted = []
+    if not isinstance(payload, dict):
+        return extracted
+        
+    def add_theme(theme_name: str, quotes_raw, mentions: int = 1):
+        if not theme_name or not isinstance(theme_name, str):
+            return
+        theme_name = theme_name.strip()
+        if not theme_name:
+            return
+        
+        # Normalize quotes
+        quotes = []
+        if quotes_raw:
+            if isinstance(quotes_raw, list):
+                for q in quotes_raw:
+                    if isinstance(q, str):
+                        quotes.append({"document_title": "Documento", "quote": q})
+                    elif isinstance(q, dict):
+                        doc = q.get("document_title") or q.get("source_reference") or q.get("documento") or "Documento"
+                        text = q.get("quote") or q.get("text") or q.get("cita") or ""
+                        if text:
+                            quotes.append({"document_title": doc, "quote": text})
+            elif isinstance(quotes_raw, str):
+                quotes.append({"document_title": "Documento", "quote": quotes_raw})
+                
+        extracted.append({
+            "topic": theme_name,
+            "quotes": quotes,
+            "mentions": mentions
+        })
+
+    # 1. key_themes
+    if "key_themes" in payload and isinstance(payload["key_themes"], list):
+        for item in payload["key_themes"]:
+            if isinstance(item, str):
+                add_theme(item, None)
+            elif isinstance(item, dict):
+                name = item.get("theme") or item.get("tema") or item.get("name")
+                quotes_raw = item.get("related_quotes") or item.get("quotes") or item.get("citas")
+                add_theme(name, quotes_raw)
+
+    # 2. cross_cutting_themes
+    if "cross_cutting_themes" in payload and isinstance(payload["cross_cutting_themes"], list):
+        for item in payload["cross_cutting_themes"]:
+            if isinstance(item, str):
+                add_theme(item, None)
+            elif isinstance(item, dict):
+                name = item.get("theme") or item.get("tema") or item.get("name") or item.get("description")
+                quotes_raw = item.get("related_quotes") or item.get("quotes") or item.get("citas")
+                add_theme(name, quotes_raw)
+
+    # 3. temas_transversales
+    if "temas_transversales" in payload and isinstance(payload["temas_transversales"], list):
+        for item in payload["temas_transversales"]:
+            if isinstance(item, str):
+                add_theme(item, None)
+            elif isinstance(item, dict):
+                name = item.get("tema") or item.get("theme") or item.get("name")
+                quotes_raw = item.get("citas") or item.get("related_quotes") or item.get("quotes")
+                add_theme(name, quotes_raw)
+
+    # 4. grouped_topics
+    if "grouped_topics" in payload and isinstance(payload["grouped_topics"], list):
+        for item in payload["grouped_topics"]:
+            if isinstance(item, dict):
+                name = item.get("topic") or item.get("tema") or item.get("theme")
+                quotes_raw = item.get("quotes") or item.get("citas") or item.get("related_quotes")
+                mentions = item.get("mentions", 1)
+                add_theme(name, quotes_raw, mentions)
+
+    # 5. temas_clave_avanzados
+    if "temas_clave_avanzados" in payload and isinstance(payload["temas_clave_avanzados"], list):
+        for item in payload["temas_clave_avanzados"]:
+            if isinstance(item, str):
+                add_theme(item, None)
+            elif isinstance(item, dict):
+                name = item.get("tema") or item.get("theme") or item.get("name")
+                quotes_raw = item.get("citas") or item.get("related_quotes") or item.get("quotes")
+                add_theme(name, quotes_raw)
+
+    # 6. main_topic
+    main_t = payload.get("main_topic")
+    if main_t and isinstance(main_t, str):
+        add_theme(main_t, None)
+
+    # 7. concepts / conceptos / conceptos_centrales / central_concepts
+    for key in ["concepts", "conceptos", "conceptos_centrales", "central_concepts"]:
+        if key in payload and isinstance(payload[key], list):
+            for item in payload[key]:
+                if isinstance(item, str):
+                    if ":" in item:
+                        parts = item.split(":", 1)
+                        concept_name = parts[0].strip()
+                        if len(concept_name) < 50:
+                            add_theme(concept_name, None)
+                        else:
+                            add_theme(item, None)
+                    else:
+                        add_theme(item, None)
+                elif isinstance(item, dict):
+                    name = item.get("concept") or item.get("concepto") or item.get("name") or item.get("theme") or item.get("tema")
+                    quotes_raw = item.get("related_quotes") or item.get("quotes") or item.get("citas")
+                    add_theme(name, quotes_raw)
+
+    return extracted
+
+
 async def list_all_user_documents(account_id: str, topic: Optional[str] = None, workspace_id: Optional[str] = None):
     """
     Combina documentos regulares y documentos de GitHub para un usuario.
@@ -489,30 +598,19 @@ async def get_dashboard_insights(
     for task in analysis_tasks_for_topics:
         payload = task.result_payload
         if isinstance(payload, dict):
-            if task.analysis_type == "semantic_summary" and "temas_transversales" in payload:
-                for theme in payload["temas_transversales"]:
-                    tema = theme.get("tema")
-                    citas = theme.get("citas", [])
-                    if tema:
-                        if tema not in all_topics_with_quotes:
-                            all_topics_with_quotes[tema] = {"mentions": 0, "quotes": []}
-                        all_topics_with_quotes[tema]["quotes"].extend(citas)
-            # Si es un análisis semántico de temas agrupados, usar grouped_topics
-            elif task.analysis_type == "semantic" and "grouped_topics" in payload:
-                for grouped_topic in payload["grouped_topics"]:
-                    topic_name = grouped_topic.get("topic")
-                    quotes_from_grouped = grouped_topic.get("quotes", [])
-                    if topic_name:
-                        if topic_name not in all_topics_with_quotes:
-                            all_topics_with_quotes[topic_name] = {"mentions": 0, "quotes": []}
-                        all_topics_with_quotes[topic_name]["mentions"] += grouped_topic.get("mentions", 1)
-                        all_topics_with_quotes[topic_name]["quotes"].extend(quotes_from_grouped)
-            # Para otros tipos de análisis que puedan tener temas clave avanzados
-            elif "temas_clave_avanzados" in payload:
-                for tema in payload["temas_clave_avanzados"]:
-                    if tema not in all_topics_with_quotes:
-                        all_topics_with_quotes[tema] = {"mentions": 0, "quotes": []}
-                    all_topics_with_quotes[tema]["mentions"] += 1
+            extracted_topics = extract_topics_from_payload(payload)
+            for t in extracted_topics:
+                topic_name = t["topic"]
+                if topic_name not in all_topics_with_quotes:
+                    all_topics_with_quotes[topic_name] = {"mentions": 0, "quotes": []}
+                all_topics_with_quotes[topic_name]["mentions"] += t.get("mentions", 1)
+                
+                # Extend quotes while keeping them unique by their 'quote' text
+                existing_texts = {q["quote"] for q in all_topics_with_quotes[topic_name]["quotes"]}
+                for q in t["quotes"]:
+                    if q["quote"] not in existing_texts:
+                        all_topics_with_quotes[topic_name]["quotes"].append(q)
+                        existing_texts.add(q["quote"])
 
     # Convertir el diccionario a la lista de KeyTopic esperada por el frontend
     key_topics_for_dashboard = []
@@ -1402,10 +1500,22 @@ async def run_semantic_topic_analysis(task_id: str, account_id: str, max_terms: 
             analysis_payloads = analysis_results.scalars().all()
 
             all_topics_raw = []
+            topic_quotes_map = {} # Map topic name -> list of quotes
             for payload in analysis_payloads:
                 if isinstance(payload, dict):
-                    # Asumimos que 'temas_clave_avanzados' es la fuente de temas individuales
-                    all_topics_raw.extend(payload.get("temas_clave_avanzados", []))
+                    extracted_topics = extract_topics_from_payload(payload)
+                    for t in extracted_topics:
+                        topic_name = t["topic"]
+                        if topic_name not in topic_quotes_map:
+                            topic_quotes_map[topic_name] = []
+                        existing_texts = {q["quote"] for q in topic_quotes_map[topic_name]}
+                        for q in t.get("quotes", []):
+                            if q["quote"] not in existing_texts:
+                                topic_quotes_map[topic_name].append(q)
+                                existing_texts.add(q["quote"])
+
+                        for _ in range(t.get("mentions", 1)):
+                            all_topics_raw.append(topic_name)
             
             topic_counts = Counter(all_topics_raw)
             
@@ -1640,12 +1750,22 @@ async def run_semantic_topic_analysis(task_id: str, account_id: str, max_terms: 
                         "topic_count": len(data["topics"])
                     })
 
+                    # Recopilar citas de todos los temas en este clúster
+                    cluster_quotes = []
+                    existing_cluster_quote_texts = set()
+                    for topic in data["topics"]:
+                        for q in topic_quotes_map.get(topic, []):
+                            if q["quote"] not in existing_cluster_quote_texts:
+                                cluster_quotes.append(q)
+                                existing_cluster_quote_texts.add(q["quote"])
+
                     grouped_topics.append({
                         "topic": representative_term,
                         "mentions": int(data["mentions"]),
                         "cluster_id": int(cluster_id),
                         "description": description,
-                        "topics": data["topics"]
+                        "topics": data["topics"],
+                        "quotes": cluster_quotes
                     })
 
                 # Ordenar por menciones descendentes y limitar a los 10 principales

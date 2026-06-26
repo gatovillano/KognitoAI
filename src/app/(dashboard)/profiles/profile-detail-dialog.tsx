@@ -15,7 +15,7 @@ import { es } from 'date-fns/locale';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 
-import { ContactProfile } from './page';
+import { ContactProfile } from './Profiles';
 import { LinkedFormResponse } from '@/types/form';
 
 interface LinkedNoteResponse {

@@ -1,8 +1,10 @@
 import pytest
 import re
+import asyncio
 from unittest.mock import MagicMock
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 from api.chat import Message
+from core.pty_sessions import create_session, get_session, close_session
 
 def test_content_parts_reconstruction():
     # Simular final_messages de un agente
@@ -97,3 +99,41 @@ def test_content_parts_reconstruction():
     assert ai_content_parts[0]["status"] == "end"
     assert ai_content_parts[1]["type"] == "text"
     assert ai_content_parts[1]["content"] == "He listado el directorio."
+
+@pytest.mark.anyio
+async def test_pty_session_history_and_delay():
+    import uuid
+    account_id = str(uuid.uuid4())
+    # 1. Crear una sesión que imprima algo y termine
+    session_id = await create_session(
+        command="echo 'hello terminal persistence'",
+        account_id=account_id,
+    )
+    
+    # 2. Recuperar la sesión
+    session = get_session(session_id)
+    assert session is not None
+    assert session["account_id"] == account_id
+    assert not session["closed"]
+    
+    # 3. Esperar a que el proceso termine usando close_event
+    close_event = session.get("close_event")
+    assert close_event is not None
+    
+    await asyncio.wait_for(close_event.wait(), timeout=5.0)
+    
+    # 4. Verificar que esté cerrada, pero que la sesión SIGA en _sessions (delayed pop)
+    assert session["closed"]
+    
+    session_after_close = get_session(session_id)
+    assert session_after_close is not None
+    
+    # Verificar que haya acumulado la salida
+    accumulated = session_after_close.get("accumulated_output", [])
+    assert len(accumulated) > 0
+    full_output = "".join(accumulated)
+    assert "hello terminal persistence" in full_output
+    
+    # 5. Limpieza explícita
+    await close_session(session_id)
+    assert get_session(session_id) is None

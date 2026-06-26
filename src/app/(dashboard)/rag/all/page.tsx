@@ -20,10 +20,12 @@ import { EditDocumentDialog } from '../edit-document-dialog';
 import { DeleteConfirmationDialog } from '../delete-confirmation-dialog';
 import { AnalysisDetailDialog } from '@/app/(dashboard)/analysis/analysis-detail-dialog';
 import { CustomAnalysisDialog } from '../custom-analysis-dialog'; // Nueva importación
+import { useTaskContext } from '@/contexts/TaskContext';
 
 export default function AllDocumentsPage() {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const { addAnalysisTask } = useTaskContext();
   
   // Estados para los diálogos
   const [isUploadOpen, setIsUploadOpen] = useState(false);
@@ -132,12 +134,23 @@ export default function AllDocumentsPage() {
     setDocumentToAnalyze(doc);
     try {
       const response = await apiClient.post('/api/start-document-analysis', { file_name: doc.file_name });
-      setDocPollingId(response.data.task_id);
+      const taskId = response.data.task_id;
+      setDocPollingId(taskId);
+      addAnalysisTask({
+        task_id: taskId,
+        phase: 'initializing',
+        message: `Iniciando análisis de "${doc.file_name}"...`,
+        progress_percent: 0,
+        is_complete: false,
+        has_error: false,
+        file_name: doc.file_name,
+        type: 'document'
+      });
       toast.info(`Análisis para "${doc.file_name}" iniciado`);
     } catch (error) {
       toast.error('No se pudo iniciar el análisis del documento');
     }
-  }, [docPollingId, collectionPollingId]);
+  }, [docPollingId, collectionPollingId, addAnalysisTask]);
 
   const handleAnalyzeCollection = async () => {
     if (docPollingId || collectionPollingId) { toast.info("Ya hay un análisis en progreso."); return; }

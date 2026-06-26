@@ -47,6 +47,9 @@ class GlobalLLMSettingsResponse(BaseModel):
     vision_llm_model: Optional[str] = None
     vision_llm_provider: Optional[str] = None
     use_prompt_tooling: bool = False
+    reranker_provider: Optional[str] = None
+    reranker_model: Optional[str] = None
+    reranker_api_base: Optional[str] = None
 
 class GlobalLLMSettingsUpdateRequest(BaseModel):
     llm_provider: Optional[str] = None
@@ -58,6 +61,9 @@ class GlobalLLMSettingsUpdateRequest(BaseModel):
     vision_llm_model: Optional[str] = None
     vision_llm_provider: Optional[str] = None
     use_prompt_tooling: Optional[bool] = None
+    reranker_provider: Optional[str] = None
+    reranker_model: Optional[str] = None
+    reranker_api_base: Optional[str] = None
 
 class GlobalSecretRequest(BaseModel):
     key_name: str = Field(..., pattern=r"^[A-Z0-9_]+$")

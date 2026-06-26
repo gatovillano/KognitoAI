@@ -113,9 +113,10 @@ async def get_provider_models(
                 raw_models = data.get("data", [])
                 
                 for m in raw_models:
+                    raw_id = m.get("id", "")
                     models.append({
-                        "id": m.get("id"),
-                        "name": m.get("name") or m.get("id"),
+                        "id": f"openrouter/{raw_id}" if raw_id else raw_id,
+                        "name": m.get("name") or raw_id,
                         "description": m.get("description", ""),
                         "context_length": m.get("context_length"),
                         "pricing": m.get("pricing", {})

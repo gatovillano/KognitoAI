@@ -106,6 +106,8 @@ async def create_session(
         "cols": cols,
         "rows": rows,
         "closed": False,
+        "accumulated_output": [],
+        "close_event": asyncio.Event(),
     }
     _sessions[session_id] = session
 
@@ -150,6 +152,11 @@ async def _reader_loop(session_id: str) -> None:
                 break
             text = chunk.decode("utf-8", errors="replace")
             accumulated.append(text)
+
+            # Guardar en el historial de la sesión si aún existe
+            current_session = _sessions.get(session_id)
+            if current_session:
+                current_session.setdefault("accumulated_output", []).append(text)
 
             # 1) Enviar a la UI de chat como stream_chunk (para que CommonChat lo recoja)
             try:
@@ -204,7 +211,19 @@ async def _reader_loop(session_id: str) -> None:
             pass
 
         session["closed"] = True
-        _sessions.pop(session_id, None)
+        
+        # Activar el evento de cierre si existe
+        close_event = session.get("close_event")
+        if close_event:
+            close_event.set()
+
+        # Mantener la sesión en memoria durante 5 minutos para que el frontend
+        # pueda recuperar el historial de salida antes de ser limpiada
+        async def delayed_pop():
+            await asyncio.sleep(300)
+            _sessions.pop(session_id, None)
+        
+        asyncio.create_task(delayed_pop())
 
 
 async def write_to_session(session_id: str, data: str) -> None:
@@ -248,7 +267,9 @@ async def close_session(session_id: str) -> None:
         logger.exception("Error terminando proceso PTY")
     finally:
         try:
-            os.close(session.get("master_fd"))
+            mfd = session.get("master_fd")
+            if mfd is not None:
+                os.close(mfd)
         except Exception:
             pass
         _sessions.pop(session_id, None)

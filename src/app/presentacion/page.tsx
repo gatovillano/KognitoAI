@@ -342,7 +342,7 @@ export default function PresentacionPage() {
               <span className="text-emerald-500 text-[8px]">Co-editando</span>
             </div>
             <div className="p-2 bg-slate-900 border border-white/5 rounded-lg text-[8px] text-cyan-300 leading-normal">
-              <span className="text-white/40">// El Agente está insertando una tabla de RAG...</span><br />
+              <span className="text-white/40">{"// El Agente está insertando una tabla de RAG..."}</span><br />
               &gt; edit_onlyoffice_document_tool(action="insert_table", table_data=[["Módulo", "Soberanía"], ["Neo4j", "Local"]])
             </div>
           </div>

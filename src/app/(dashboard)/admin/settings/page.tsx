@@ -32,9 +32,11 @@ const MODELS_BY_PROVIDER: Record<string, string[]> = {
   openai: ['openai/gpt-4o', 'openai/gpt-4o-mini', 'openai/gpt-4-turbo'],
   anthropic: ['anthropic/claude-3-5-sonnet-20240620', 'anthropic/claude-3-opus-20240229', 'anthropic/claude-3-haiku-20240307'],
   openrouter: [
+    'openrouter/google/gemini-2.5-flash-preview',
+    'openrouter/anthropic/claude-sonnet-4',
+    'openrouter/openai/gpt-4.1-mini',
+    'openrouter/google/gemini-2.5-pro-preview',
     'openrouter/mistralai/mistral-small-3.1-24b-instruct:free',
-    'openrouter/google/gemini-2.0-flash-001',
-    'openrouter/anthropic/claude-3.5-sonnet'
   ],
   ollama: ['ollama/llama3.1', 'ollama/mistral', 'ollama/phi3', 'ollama/gemma2'],
   'ollama-cloud': ['ollama_chat/llama3.1', 'ollama_chat/mistral', 'ollama_chat/phi3', 'ollama_chat/gemma2', 'ollama_chat/qwen2.5'],

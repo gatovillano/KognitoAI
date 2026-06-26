@@ -364,15 +364,9 @@ Herramientas clave:
 - Otras: gestión de notas, agenda, documentos, imágenes, etc.
 """
         tools_documentation = ""
-        # If relevant_skills is provided, use it to document only those skills
+        # If relevant_skills is provided, they will be documented in procedural_instructions
         if relevant_skills is not None and len(relevant_skills) > 0:
-            tools_documentation = "\n\n<b>🛠️ MANUAL DE SKILLS RELEVANTES:</b>\n"
-            for skill in relevant_skills:
-                name = skill.get("id", "(sin-nombre)")
-                desc = skill.get("description", "Sin descripción.")
-                tools_documentation += f"--- SKILL: {name} ---\n"
-                tools_documentation += f"Descripción: {desc}\n"
-                tools_documentation += "\n"
+            pass
         elif tools:
             tools_documentation = "\n\n<b>🛠️ MANUAL DE HERRAMIENTAS DISPONIBLES:</b>\n"
             tools_documentation += "Si tienes problemas para realizar una llamada técnica, usa este formato exacto en tu respuesta para ejecutar una herramienta:\n"
@@ -416,6 +410,22 @@ Hoy es {current_date_str} y son las {current_time_str}.
 Usa esta información para responder preguntas sobre el tiempo, programar eventos en la `agenda` o recordatorios si el usuario lo solicita.
 """
 
+        procedural_instructions = ""
+        if relevant_skills is not None and len(relevant_skills) > 0:
+            procedural_parts = ["\n\n<b>📝 MANUAL DE SKILLS Y PROCEDIMIENTOS RELEVANTES:</b>"]
+            procedural_parts.append("Has recibido pautas de comportamiento y procedimientos adicionales que se adaptan a la consulta del usuario. DEBES seguirlos estrictamente cuando sea aplicable:")
+            for skill in relevant_skills:
+                name = skill.get("name") or skill.get("id", "(sin-nombre)")
+                desc = skill.get("description", "Sin descripción.")
+                instructions = skill.get("instructions", "")
+                
+                procedural_parts.append(f"\n--- SKILL: {name} ---")
+                procedural_parts.append(f"Descripción: {desc}")
+                if instructions:
+                    procedural_parts.append(f"Instrucciones/Procedimiento:\n{instructions}")
+                procedural_parts.append("-" * 45)
+            procedural_instructions = "\n".join(procedural_parts) + "\n"
+
         final_prompt_parts = []
         if compact_mode:
             # Modo compacto (ej: Ollama): omitir la sección de diseño HTML para ahorrar tokens
@@ -438,6 +448,7 @@ Usa esta información para responder preguntas sobre el tiempo, programar evento
             "<hr>",
             tools_capabilities,
             tools_documentation if mode == "prompt_tooling" else "",
+            procedural_instructions,
             "<hr>",
             installation_guidance,
             "<hr>" if installation_guidance else "",

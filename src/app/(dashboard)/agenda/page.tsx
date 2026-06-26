@@ -9,8 +9,8 @@ import apiClient from '@/lib/api';
 import { toast } from 'sonner';
 import { PlusCircle, Clock, Trash2, Users, MoreHorizontal, Info, CheckCircle2, Link as LinkIcon, CalendarIcon, Bot, Notebook } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import NotesPage from '../notes/page';
-import ProfilesPage from '../profiles/page';
+import { Notes } from '../notes/Notes';
+import { Profiles } from '../profiles/Profiles';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { EventDialog } from './event-dialog';
 import { Calendar } from '@/components/ui/calendar';
@@ -215,26 +215,30 @@ export default function AgendaPage() {
     if (!eventToMove) return;
 
     const originalEventDateTime = new Date(eventToMove.event_datetime_local);
-    const updatedDateTime = new Date(
-      newDate.getFullYear(),
-      newDate.getMonth(),
-      newDate.getDate(),
-      originalEventDateTime.getHours(),
-      originalEventDateTime.getMinutes(),
-      originalEventDateTime.getSeconds()
-    );
+    const durationMs = eventToMove.end_date
+      ? new Date(eventToMove.end_date).getTime() - originalEventDateTime.getTime()
+      : 60 * 60 * 1000; // default 1 hour duration
+
+    const updatedStartDateTime = newDate;
+    const updatedEndDateTime = new Date(updatedStartDateTime.getTime() + durationMs);
 
     const toastId = toast.loading('Moviendo evento...');
     try {
       // Actualizar el evento en el backend
       await apiClient.put(`/api/agenda/events/${eventId}`, {
-        event_date: format(updatedDateTime, 'yyyy-MM-dd'),
-        event_time: format(updatedDateTime, 'HH:mm'),
+        event_date: format(updatedStartDateTime, 'yyyy-MM-dd'),
+        event_time: format(updatedStartDateTime, 'HH:mm'),
+        end_date: format(updatedEndDateTime, 'yyyy-MM-dd'),
+        end_time: format(updatedEndDateTime, 'HH:mm'),
       });
 
       // Actualizar el estado local
       setAllEvents(prev => prev.map(event =>
-        event.id === eventId ? { ...event, event_datetime_local: updatedDateTime.toISOString() } : event
+        event.id === eventId ? { 
+          ...event, 
+          event_datetime_local: updatedStartDateTime.toISOString(),
+          end_date: updatedEndDateTime.toISOString()
+        } : event
       ));
       toast.success('Evento movido exitosamente.', { id: toastId });
     } catch (error) {
@@ -247,26 +251,42 @@ export default function AgendaPage() {
     const taskToMove = allTasks.find(task => task.id === taskId);
     if (!taskToMove) return;
 
-    const originalTaskDueDate = taskToMove.end_date ? new Date(taskToMove.end_date) : new Date();
-    const updatedDateTime = new Date(
-      newDate.getFullYear(),
-      newDate.getMonth(),
-      newDate.getDate(),
-      originalTaskDueDate.getHours(),
-      originalTaskDueDate.getMinutes(),
-      originalTaskDueDate.getSeconds()
-    );
+    const startObj = taskToMove.start_date ? new Date(taskToMove.start_date) : null;
+    const endObj = taskToMove.end_date ? new Date(taskToMove.end_date) : null;
+
+    let updatedStartDateTime: Date;
+    let updatedEndDateTime: Date;
+
+    if (startObj && endObj) {
+      const durationMs = endObj.getTime() - startObj.getTime();
+      updatedStartDateTime = newDate;
+      updatedEndDateTime = new Date(newDate.getTime() + durationMs);
+    } else if (startObj) {
+      updatedStartDateTime = newDate;
+      updatedEndDateTime = new Date(newDate.getTime() + 60 * 60 * 1000);
+    } else if (endObj) {
+      updatedStartDateTime = newDate;
+      updatedEndDateTime = new Date(newDate.getTime() + 60 * 60 * 1000);
+    } else {
+      updatedStartDateTime = newDate;
+      updatedEndDateTime = new Date(newDate.getTime() + 60 * 60 * 1000);
+    }
 
     const toastId = toast.loading('Moviendo tarea...');
     try {
       // Optimistic update
       setAllTasks(prev => prev.map(task =>
-        task.id === taskId ? { ...task, end_date: updatedDateTime.toISOString() } : task
+        task.id === taskId ? { 
+          ...task, 
+          start_date: updatedStartDateTime.toISOString(),
+          end_date: updatedEndDateTime.toISOString() 
+        } : task
       ));
 
       // API call
       await apiClient.put(`/api/tasks/${taskId}`, {
-        end_date: updatedDateTime.toISOString(),
+        start_date: updatedStartDateTime.toISOString(),
+        end_date: updatedEndDateTime.toISOString(),
       });
 
       toast.success('Tarea movida exitosamente.', { id: toastId });
@@ -275,7 +295,7 @@ export default function AgendaPage() {
       console.error('Error moving task:', error);
       // Revert on error
       setAllTasks(prev => prev.map(task =>
-        task.id === taskId ? { ...task, end_date: taskToMove.end_date } : task
+        task.id === taskId ? { ...task, start_date: taskToMove.start_date, end_date: taskToMove.end_date } : task
       ));
     }
   };
@@ -642,11 +662,11 @@ export default function AgendaPage() {
           </TabsContent>
 
           <TabsContent value="notes" className="space-y-6 animate-in fade-in duration-300 outline-none">
-            <NotesPage isEmbedded={true} />
+            <Notes isEmbedded={true} />
           </TabsContent>
 
           <TabsContent value="contacts" className="space-y-6 animate-in fade-in duration-300 outline-none">
-            <ProfilesPage isEmbedded={true} />
+            <Profiles isEmbedded={true} />
           </TabsContent>
         </Tabs>
       </div>

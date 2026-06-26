@@ -119,7 +119,7 @@ async def search_notes(
                 for res in all_results
             ]
             reranker = Reranker()
-            reranked_docs = await reranker.rerank(query, docs_to_rerank)
+            reranked_docs = await reranker.rerank(query, docs_to_rerank, account_id=account_id)
             
             # Mapear scores de rerank de vuelta
             rerank_map = {doc.metadata["note_id"]: doc.metadata["rerank_score"] for doc in reranked_docs}

@@ -1611,6 +1611,10 @@ async def create_and_run_agent_streaming(
                             match = re.search(r'data-session-id="([^"]+)"', content)
                             if match:
                                 pty_session = {"session_id": match.group(1)}
+                                match_cmd = re.search(r'data-cmd="([^"]+)"', content)
+                                if match_cmd:
+                                    import html
+                                    pty_session["command"] = html.unescape(match_cmd.group(1))
                     else:
                         status = "error"
                         

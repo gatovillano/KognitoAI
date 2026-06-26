@@ -9,7 +9,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { PlusCircle, XCircle } from 'lucide-react'; // Importar iconos
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
-import { ContactProfile } from './page';
+import { ContactProfile } from './Profiles';
 
 interface ProfileDialogProps {
   isOpen: boolean;

@@ -18,6 +18,7 @@ import { ShareDocumentDialog } from '../../share-document-dialog';
 import { UpdateRepositoryDialog } from '../../update-repository-dialog';
 import { StartCodeAnalysisDialog } from '@/app/(dashboard)/analysis/StartCodeAnalysisDialog';
 import type { Document } from '../../columns';
+import { useTaskContext } from '@/contexts/TaskContext';
 
 // Definir un tipo extendido para documentos de GitHub que incluye repo_url
 interface GitHubDocument extends Document {
@@ -31,6 +32,7 @@ export default function RepositoryDetailPage() {
   const repoName = (params?.repoName as string) || '';
   const [documents, setDocuments] = useState<GitHubDocument[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const { addAnalysisTask } = useTaskContext();
   const [repoUrl, setRepoUrl] = useState<string>('');
 
   // Estados para diálogos
@@ -176,7 +178,18 @@ export default function RepositoryDetailPage() {
           file_name: doc.file_name,
           analysis_type: analysisType 
         });
-        setDocPollingId(response.data.task_id);
+        const taskId = response.data.task_id;
+        setDocPollingId(taskId);
+        addAnalysisTask({
+          task_id: taskId,
+          phase: 'initializing',
+          message: `Iniciando análisis (${analysisType}) de "${doc.file_name}"...`,
+          progress_percent: 0,
+          is_complete: false,
+          has_error: false,
+          file_name: doc.file_name,
+          type: 'document'
+        });
         toast.info(`Análisis (${analysisType}) para "${doc.file_name}" iniciado`);
       } catch (error) { toast.error('No se pudo iniciar el análisis del documento'); }
     } else {
@@ -185,7 +198,18 @@ export default function RepositoryDetailPage() {
           repo_name: repoName,
           analysis_type: analysisType
         });
-        setCollectionPollingId(response.data.task_id);
+        const taskId = response.data.task_id;
+        setCollectionPollingId(taskId);
+        addAnalysisTask({
+          task_id: taskId,
+          phase: 'initializing',
+          message: `Iniciando análisis (${analysisType}) del repositorio "${repoName}"...`,
+          progress_percent: 0,
+          is_complete: false,
+          has_error: false,
+          topic: repoName,
+          type: 'collection'
+        });
         toast.info(`Análisis (${analysisType}) del repositorio "${repoName}" iniciado`);
       } catch (error) { toast.error('No se pudo iniciar el análisis del repositorio'); }
     }

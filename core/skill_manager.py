@@ -1,17 +1,44 @@
 import os
 import importlib
+import importlib.util
 import inspect
 import logging
 from typing import List, Optional, Any, Dict
 from pydantic import BaseModel
+import yaml
 
 # Embedding and async
 import asyncio
-from core.embedding_manager import aembed_query, aembed_documents
-import numpy as np
+
+try:
+    import numpy as np
+except ImportError:
+    np = None  # type: ignore
 
 from langchain_core.tools import BaseTool
-from core.config import settings
+
+# Lazy imports – resolved at runtime to avoid heavy deps at import time
+# (needed for test environments without sentence_transformers / DB)
+_aembed_query = None
+_aembed_documents = None
+_settings = None
+
+
+def _get_embed_fns():
+    global _aembed_query, _aembed_documents
+    if _aembed_query is None:
+        from core.embedding_manager import aembed_query, aembed_documents
+        _aembed_query = aembed_query
+        _aembed_documents = aembed_documents
+    return _aembed_query, _aembed_documents
+
+
+def _get_settings():
+    global _settings
+    if _settings is None:
+        from core.config import settings
+        _settings = settings
+    return _settings
 
 logger = logging.getLogger(__name__)
 
@@ -50,105 +77,76 @@ class SkillManager:
         self._enhanced_memory_manager = None
         self._knowledge_graph_service = None
 
-        # Cache for skill markdowns and embeddings
-        self._skill_md_cache: Optional[List[Dict[str, Any]]] = None
-        self._skill_md_embeddings: Optional[np.ndarray] = None
-    async def _load_skill_markdowns(self) -> List[Dict[str, Any]]:
-        """
-        Load all SKILL.md (or .md) files for all skills and return a list of dicts:
-        [{ 'id': skill_id, 'description': ..., 'markdown': ... }]
-        Robust to missing/deleted skill directories.
-        """
-        if self._skill_md_cache is not None:
-            return self._skill_md_cache
-        metadata = await self.get_skills_metadata()
-        skill_mds = []
-        for entry in metadata:
-            skill_id = entry["id"]
-            try:
-                # Try to find the markdown file for this skill
-                # Native
-                native_path = os.path.join(self.skills_dir, skill_id)
-                if os.path.exists(native_path):
-                    md = self._read_markdown_description(native_path, skill_id)
-                    if md:
-                        skill_mds.append({"id": skill_id, "description": entry.get("description", ""), "markdown": md})
-                        continue
-                # User/global
-                user_global_path = os.path.join(self.skills_dir, "user_global", skill_id)
-                if os.path.exists(user_global_path):
-                    md = self._read_markdown_description(user_global_path, skill_id)
-                    if md:
-                        skill_mds.append({"id": skill_id, "description": entry.get("description", ""), "markdown": md})
-            except Exception as e:
-                logger.warning(f"[SKILL.md loader] Ignoring missing or broken skill '{skill_id}': {e}")
-                continue
-        self._skill_md_cache = skill_mds
-        return skill_mds
+        # Cache dictionaries by (account_id, workspace_name)
+        self._skill_md_cache_dict: Dict[tuple, List[Dict[str, Any]]] = {}
+        self._skill_md_embeddings_dict: Dict[tuple, Any] = {}  # np.ndarray when np available
 
-    async def _ensure_skill_md_embeddings(self):
+    def parse_skill_markdown(self, content: str) -> Dict[str, Any]:
         """
-        Ensure that embeddings for all SKILL.md files are computed and cached.
+        Parsea el contenido de un SKILL.md/markdown separando frontmatter y cuerpo.
+        Soporta frontmatter YAML delimitado por '---'.
         """
-        if self._skill_md_embeddings is not None:
-            return
-        skill_mds = await self._load_skill_markdowns()
-        texts = [s["markdown"] for s in skill_mds]
-        if not texts:
-            self._skill_md_embeddings = np.zeros((0, 384), dtype=np.float32)
-            return
-        # Compute embeddings
-        embeddings = await aembed_documents(texts)
-        self._skill_md_embeddings = np.array(embeddings)
-
-    async def search_skills_semantic(self, query: str, top_k: int = 3) -> List[Dict[str, Any]]:
-        """
-        Perform semantic search over all SKILL.md files and return the top-k most relevant skills.
-        Returns a list of dicts: [{ 'id': ..., 'description': ..., 'markdown': ... }]
-        """
-        await self._ensure_skill_md_embeddings()
-        skill_mds = await self._load_skill_markdowns()
-        if not skill_mds or self._skill_md_embeddings.shape[0] == 0:
-            return []
-        # Embed the query
-        query_emb = await aembed_query(query)
-        query_emb = np.array(query_emb)
-        # Compute cosine similarity
-        skill_embs = self._skill_md_embeddings
-        # Normalize
-        skill_embs_norm = skill_embs / (np.linalg.norm(skill_embs, axis=1, keepdims=True) + 1e-8)
-        query_emb_norm = query_emb / (np.linalg.norm(query_emb) + 1e-8)
-        sims = np.dot(skill_embs_norm, query_emb_norm)
-        # Get top-k
-        top_idx = np.argsort(sims)[::-1][:top_k]
-        return [skill_mds[i] for i in top_idx]
-
-    def clear_skill_md_cache(self):
-        self._skill_md_cache = None
-        self._skill_md_embeddings = None
-
-    async def initialize_dependencies(self):
-        """Inicializa despendenicss globales necesarias para las tools (ej: base de datos Neo4j)"""
+        content = content.strip()
+        if not content.startswith("---"):
+            return {
+                "name": "",
+                "description": content,
+                "instructions": content,
+                "metadata": {}
+            }
+        
+        parts = content.split("---", 2)
+        if len(parts) < 3:
+            return {
+                "name": "",
+                "description": content,
+                "instructions": content,
+                "metadata": {}
+            }
+        
         try:
-            from core.agent import get_shared_graph_dependencies
-            self._graph_db, self._enhanced_memory_manager = await get_shared_graph_dependencies()
+            frontmatter = yaml.safe_load(parts[1]) or {}
         except Exception as e:
-            logger.warning(f"No se pudieron cargar as dependencias globales compartidas para las skills: {e}")
+            logger.warning(f"Error parsing YAML frontmatter: {e}")
+            frontmatter = {}
+            
+        if not isinstance(frontmatter, dict):
+            frontmatter = {}
+            
+        description = frontmatter.get("description", "").strip()
+        instructions = frontmatter.get("instructions", "").strip()
+        body_content = parts[2].strip()
+        if not instructions:
+            instructions = body_content
+        
+        if not description:
+            description = instructions[:200]
+            if len(instructions) > 200:
+                description += "..."
+                
+        return {
+            "name": frontmatter.get("name", ""),
+            "description": description,
+            "instructions": instructions,
+            "content": body_content,
+            "metadata": frontmatter
+        }
 
-    def _read_markdown_description(self, skill_folder_path: str, skill_name: str) -> Optional[str]:
+    def _read_markdown_content(self, skill_folder_path: str, skill_name: str) -> Optional[str]:
         """
-        Lee el archivo .md asociado a la skill.
-        Busca primero uno con el nombre de la carpeta (ej: notes_skill/notes_skill.md),
-        y si no, toma el primer .md que encuentre en la raíz de dicha carpeta.
+        Lee el archivo markdown (.md) asociado a la skill de forma robusta.
         """
         md_path = os.path.join(skill_folder_path, f"{skill_name}.md")
-            
         if not os.path.exists(md_path):
-            # Buscar cualquier archivo .md si no existe el específico
-            md_files = [f for f in os.listdir(skill_folder_path) if f.endswith(".md")]
-            if md_files:
-                md_path = os.path.join(skill_folder_path, md_files[0])
-            else:
+            md_path = os.path.join(skill_folder_path, "SKILL.md")
+        if not os.path.exists(md_path):
+            try:
+                md_files = [f for f in os.listdir(skill_folder_path) if f.endswith(".md") and f != "README.md"]
+                if md_files:
+                    md_path = os.path.join(skill_folder_path, md_files[0])
+                else:
+                    return None
+            except Exception:
                 return None
 
         try:
@@ -157,6 +155,135 @@ class SkillManager:
         except Exception as e:
             logger.error(f"Error reading markdown file {md_path}: {e}")
         return None
+
+    def _read_markdown_description(self, skill_folder_path: str, skill_name: str) -> Optional[str]:
+        """
+        Lee el archivo markdown y retorna su descripción básica.
+        """
+        content = self._read_markdown_content(skill_folder_path, skill_name)
+        if content:
+            parsed = self.parse_skill_markdown(content)
+            return parsed["description"]
+        return None
+
+    async def _load_skill_markdowns(self, account_id: Optional[str] = None, workspace_name: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Carga todos los archivos markdown de las skills buscando en categorías nativas
+        y en los scopes correspondientes al usuario y workspace.
+        """
+        cache_key = (account_id, workspace_name)
+        if cache_key in self._skill_md_cache_dict:
+            return self._skill_md_cache_dict[cache_key]
+            
+        metadata = await self.get_skills_metadata(account_id, workspace_name)
+        skill_mds = []
+        
+        scopes = ["user_global"]
+        if account_id:
+            scopes.append(f"user_account_{account_id}")
+        if workspace_name:
+            scopes.append(f"user_workspace_{workspace_name}")
+            
+        for entry in metadata:
+            skill_id = entry["id"]
+            try:
+                # 1. Native
+                native_path = os.path.join(self.skills_dir, skill_id)
+                if os.path.exists(native_path):
+                    md_content = self._read_markdown_content(native_path, skill_id)
+                    if md_content:
+                        parsed = self.parse_skill_markdown(md_content)
+                        skill_mds.append({
+                            "id": skill_id,
+                            "name": parsed["name"] or skill_id,
+                            "description": parsed["description"],
+                            "instructions": parsed["instructions"],
+                            "markdown": parsed["instructions"]
+                        })
+                        continue
+                
+                # 2. Scopes
+                found = False
+                for scope in scopes:
+                    scope_path = os.path.join(self.skills_dir, scope, skill_id)
+                    if os.path.exists(scope_path):
+                        md_content = self._read_markdown_content(scope_path, skill_id)
+                        if md_content:
+                            parsed = self.parse_skill_markdown(md_content)
+                            skill_mds.append({
+                                "id": skill_id,
+                                "name": parsed["name"] or skill_id,
+                                "description": parsed["description"],
+                                "instructions": parsed["instructions"],
+                                "markdown": parsed["instructions"]
+                            })
+                            found = True
+                            break
+                if found:
+                    continue
+            except Exception as e:
+                logger.warning(f"[SKILL.md loader] Ignoring missing or broken skill '{skill_id}': {e}")
+                continue
+                
+        self._skill_md_cache_dict[cache_key] = skill_mds
+        return skill_mds
+
+    async def _ensure_skill_md_embeddings(self, account_id: Optional[str] = None, workspace_name: Optional[str] = None):
+        """
+        Asegura que los embeddings para los markdowns estén calculados y cacheados.
+        """
+        cache_key = (account_id, workspace_name)
+        if cache_key in self._skill_md_embeddings_dict:
+            return
+            
+        skill_mds = await self._load_skill_markdowns(account_id, workspace_name)
+        texts = [s["markdown"] for s in skill_mds]
+        if not texts:
+            import numpy as _np
+            self._skill_md_embeddings_dict[cache_key] = _np.zeros((0, 384), dtype=_np.float32)
+            return
+
+        _, _aembed_docs = _get_embed_fns()
+        embeddings = await _aembed_docs(texts)
+        import numpy as _np2
+        self._skill_md_embeddings_dict[cache_key] = _np2.array(embeddings)
+
+    async def search_skills_semantic(self, query: str, top_k: int = 3, account_id: Optional[str] = None, workspace_name: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Realiza búsqueda semántica sobre todas las skills relevantes.
+        """
+        await self._ensure_skill_md_embeddings(account_id, workspace_name)
+        skill_mds = await self._load_skill_markdowns(account_id, workspace_name)
+        cache_key = (account_id, workspace_name)
+        embeddings = self._skill_md_embeddings_dict.get(cache_key)
+        
+        if not skill_mds or embeddings is None or embeddings.shape[0] == 0:
+            return []
+            
+        _aembed_q, _ = _get_embed_fns()
+        query_emb = await _aembed_q(query)
+        import numpy as _np
+        query_emb = _np.array(query_emb)
+
+        # Normalizar y calcular similitud coseno
+        skill_embs_norm = embeddings / (_np.linalg.norm(embeddings, axis=1, keepdims=True) + 1e-8)
+        query_emb_norm = query_emb / (_np.linalg.norm(query_emb) + 1e-8)
+        sims = _np.dot(skill_embs_norm, query_emb_norm)
+
+        top_idx = _np.argsort(sims)[::-1][:top_k]
+        return [skill_mds[i] for i in top_idx]
+
+    def clear_skill_md_cache(self):
+        self._skill_md_cache_dict.clear()
+        self._skill_md_embeddings_dict.clear()
+
+    async def initialize_dependencies(self):
+        """Inicializa despendenicss globales necesarias para las tools (ej: base de datos Neo4j)"""
+        try:
+            from core.agent import get_shared_graph_dependencies
+            self._graph_db, self._enhanced_memory_manager = await get_shared_graph_dependencies()
+        except Exception as e:
+            logger.warning(f"No se pudieron cargar as dependencias globales compartidas para las skills: {e}")
 
     def _get_tool_classes_from_module(self, module) -> List[Any]:
         """
@@ -381,12 +508,11 @@ class SkillManager:
                 
         return tool_instance
 
-    async def get_skills_metadata(self) -> List[Dict[str, str]]:
+    async def get_skills_metadata(self, account_id: Optional[str] = None, workspace_name: Optional[str] = None) -> List[Dict[str, str]]:
         """
         Escanea el directorio de skills y devuelve una lista de diccionarios con
         el nombre base de la skill y su descripción (si existe).
         """
-        # Nota: Este método podría necesitar refinarse para devolver metadatos de las carpetas de skills
         metadata = []
         if not os.path.exists(self.skills_dir):
             return metadata
@@ -407,8 +533,14 @@ class SkillManager:
                 "description": description or "Sin descripción disponible."
             })
 
-        # 3. Ahora buscamos en user_global y user_workspace_*
-        for scope in ["user_global"]: # Por ahora solo global para metadatos generales
+        # 3. Ahora buscamos en user_global, user_account_*, y user_workspace_*
+        scopes = ["user_global"]
+        if account_id:
+            scopes.append(f"user_account_{account_id}")
+        if workspace_name:
+            scopes.append(f"user_workspace_{workspace_name}")
+
+        for scope in scopes:
             scope_dir = os.path.join(self.skills_dir, scope)
             if not os.path.exists(scope_dir): continue
             
@@ -482,8 +614,9 @@ class SkillManager:
                 if file.endswith(".py") and not file.startswith("__"):
                     module_name = file[:-3]
                     module_path = f"skills.{category}.scripts.{module_name}"
+                    file_path = os.path.join(scripts_path, file)
                     await self._load_module_and_instantiate(
-                        module_path, account_id, telegram_id, thread_id, 
+                        module_path, file_path, account_id, telegram_id, thread_id, 
                         workspace_id, workspace_name, progress_callback, 
                         skill_description, loaded_tools
                     )
@@ -511,9 +644,10 @@ class SkillManager:
                         module_name = file[:-3]
                         # Path: skills.[scope].[skill_folder].scripts.[module_name]
                         module_path = f"skills.{scope}.{skill_folder}.scripts.{module_name}"
+                        file_path = os.path.join(scripts_path, file)
                         logger.info(f"🧪 Found user skill script: {file} in {scope}/{skill_folder}")
                         await self._load_module_and_instantiate(
-                            module_path, account_id, telegram_id, thread_id, 
+                            module_path, file_path, account_id, telegram_id, thread_id, 
                             workspace_id, workspace_name, progress_callback, 
                             skill_description, loaded_tools
                         )
@@ -526,12 +660,13 @@ class SkillManager:
         Limpia caches y asegura que las habilidades del usuario sean re-escaneadas.
         """
         importlib.invalidate_caches()
+        self.clear_skill_md_cache()
         # Limpiar el registro interno de herramientas para forzar re-instanciación
         self._loaded_tools = {}
         logger.info(f"🔄 Caches de importación y registro de herramientas invalidados para recarga de skills (account: {account_id})")
 
     async def _load_module_and_instantiate(
-        self, module_path, account_id, telegram_id, thread_id, 
+        self, module_path, file_path, account_id, telegram_id, thread_id, 
         workspace_id, workspace_name, progress_callback, 
         skill_description, loaded_tools
     ):
@@ -546,7 +681,13 @@ class SkillManager:
                 parent_path = '.'.join(parts[:i])
                 if parent_path not in sys.modules:
                     try:
-                        importlib.import_module(parent_path)
+                        if "-" in parent_path:
+                            import types
+                            dummy = types.ModuleType(parent_path)
+                            dummy.__path__ = []
+                            sys.modules[parent_path] = dummy
+                        else:
+                            importlib.import_module(parent_path)
                     except Exception as e:
                         logger.debug(f"Could not preemptively import parent package {parent_path}: {e}")
 
@@ -557,11 +698,28 @@ class SkillManager:
             
             if is_reload:
                 module = sys.modules[module_path]
-                importlib.reload(module)
+                if "-" in module_path:
+                    spec = importlib.util.spec_from_file_location(module_path, file_path)
+                    if spec is not None and spec.loader is not None:
+                        spec.loader.exec_module(module)
+                        logger.debug(f"🔄 Module reloaded from file path: {module_path}")
+                    else:
+                        importlib.reload(module)
+                else:
+                    importlib.reload(module)
                 logger.debug(f"🔄 Module reloaded: {module_path}")
             else:
-                module = importlib.import_module(module_path)
-                logger.debug(f"🆕 Module imported for the first time: {module_path}")
+                if "-" in module_path:
+                    spec = importlib.util.spec_from_file_location(module_path, file_path)
+                    if spec is None or spec.loader is None:
+                        raise ImportError(f"Could not load spec for {file_path}")
+                    module = importlib.util.module_from_spec(spec)
+                    sys.modules[module_path] = module
+                    spec.loader.exec_module(module)
+                    logger.debug(f"🆕 Module imported from file path (kebab-case support): {module_path}")
+                else:
+                    module = importlib.import_module(module_path)
+                    logger.debug(f"🆕 Module imported for the first time: {module_path}")
                 
             tool_classes = self._get_tool_classes_from_module(module)
             

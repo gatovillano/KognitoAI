@@ -7,7 +7,7 @@ This document defines the Kognito AI Autonomous Heartbeat System and structures 
 ## 1. System Overview
 
 The Kognito AI Autonomous Heartbeat runs periodically in the background via `core/autonomous_heartbeat.py`. Its primary objectives are:
-1. **Context Collection:** Read recent notes, agenda events, analysis tasks, and chat threads.
+1. **Context Collection:** Read recent notes, agenda events, analysis tasks, chat threads, and recently uploaded/created documents (in the last 3 days) along with the list of existing documents.
 2. **Qualitative Synthesis:** Use Kognito's LLM to identify opportunities, trends, strategic patterns, and urgent action items.
 3. **Proactive Intervention:** Trigger specific tools autonomously to keep the agent active, collaborative, and helpful.
 

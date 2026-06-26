@@ -19,6 +19,7 @@ interface GitHubDocument extends Document {
   repo_url?: string;
 }
 import apiClient from '@/lib/api';
+import { useTaskContext } from '@/contexts/TaskContext';
 import { UploadDocumentDialog } from '../upload-document-dialog';
 import { PreviewDocumentDialog } from '../preview-document-dialog';
 import { EditDocumentDialog } from '../edit-document-dialog';
@@ -34,6 +35,7 @@ import { Trash2 } from 'lucide-react';
 export default function RepositoriesPage() {
   const [documents, setDocuments] = useState<GitHubDocument[]>([]);
   const [repositoriesData, setRepositoriesData] = useState<{ repo_url: string, repo_name: string }[]>([]);
+  const { addAnalysisTask } = useTaskContext();
   const [isLoading, setIsLoading] = useState(true);
   
   // Estados para diálogos
@@ -121,10 +123,21 @@ export default function RepositoriesPage() {
     setDocumentToAnalyze(doc);
     try {
       const response = await apiClient.post('/api/start-document-analysis', { file_name: doc.file_name });
-      setDocPollingId(response.data.task_id);
+      const taskId = response.data.task_id;
+      setDocPollingId(taskId);
+      addAnalysisTask({
+        task_id: taskId,
+        phase: 'initializing',
+        message: `Iniciando análisis de "${doc.file_name}"...`,
+        progress_percent: 0,
+        is_complete: false,
+        has_error: false,
+        file_name: doc.file_name,
+        type: 'document'
+      });
       toast.info(`Análisis para "${doc.file_name}" iniciado.`);
     } catch (error) { toast.error("No se pudo iniciar el análisis del documento."); }
-  }, [docPollingId, collectionPollingId]);
+  }, [docPollingId, collectionPollingId, addAnalysisTask]);
   
   const handleAnalyzeCollection = async () => {
     if (docPollingId || collectionPollingId) { toast.info("Ya hay un análisis en progreso."); return; }

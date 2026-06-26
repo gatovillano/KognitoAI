@@ -31,7 +31,7 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import apiClient from '@/lib/api';
-import type { Note } from './page';
+import type { Note } from './Notes';
 import { BookUp } from 'lucide-react';
 
 

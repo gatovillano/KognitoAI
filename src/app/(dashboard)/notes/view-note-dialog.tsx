@@ -13,7 +13,7 @@ import { useState, useEffect } from 'react'; // Importar useState y useEffect
 import apiClient from '@/lib/api'; // Importar apiClient
 import { NoteDialog } from './note-dialog'; // Importar NoteDialog para la edición
 import { useRouter } from 'next/navigation'; // Importar useRouter
-import type { Note } from './page'; // Importamos el tipo de dato 'Note' desde la página principal
+import type { Note } from './Notes';
 import { DialogFooter } from '@/components/ui/dialog'; // Importar DialogFooter
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'; // Importar Select components
 import { ContextualChat } from '@/components/ContextualChat';

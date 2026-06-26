@@ -147,16 +147,14 @@ export default function GraphProgressIndicator({ tasks, onDismiss }: { tasks: Gr
                                                 </p>
                                             </div>
                                         </div>
-                                        {(task.is_complete || task.has_error) && (
-                                            <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                className="h-6 w-6 -mr-1 -mt-1"
-                                                onClick={() => onDismiss(task.task_id)}
-                                            >
-                                                <X className="h-3 w-3" />
-                                            </Button>
-                                        )}
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-6 w-6 -mr-1 -mt-1"
+                                            onClick={() => onDismiss(task.task_id)}
+                                        >
+                                            <X className="h-3 w-3" />
+                                        </Button>
                                     </div>
 
                                     {!task.is_complete && !task.has_error && (
