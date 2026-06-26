@@ -48,10 +48,9 @@ interface DocumentCollectionDisplayProps {
 export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, backButtonText = "Volver a Colecciones", backButtonHref = "/rag/all" }: DocumentCollectionDisplayProps) {
 
   const { user } = useAuth(); // Obtener el usuario del contexto de autenticación
-  const { addAnalysisTask, updateAnalysisTask } = useTaskContext();
+  const { uploadTasks, addUploadTask, removeUploadTask, addAnalysisTask, updateAnalysisTask } = useTaskContext();
   const [documents, setDocuments] = useState<Document[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [uploadTasks, setUploadTasks] = useState<UploadTask[]>([]);
   const [collectionDescription, setCollectionDescription] = useState<string | null>(null);
   const [collectionDataState, setCollectionDataState] = useState<any | null>(null);
   const [subcollections, setSubcollections] = useState<Collection[]>([]);
@@ -77,6 +76,18 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
       document_type: 'placeholder' as const,
     }));
     setDocuments(prevDocs => [...newPlaceholders, ...prevDocs]);
+
+    // Agregar al TaskContext global para que se muestre en el indicador persistente
+    fileNames.forEach(fileName => {
+      addUploadTask({
+        id: fileName,
+        file_names: [fileName],
+        topic: topic,
+        status: 'pending' as const,
+        progress: 0,
+        created_at: new Date().toISOString(),
+      });
+    });
   };
 
   // Estados para diálogos
@@ -204,20 +215,11 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
   }, []);
 
   const onUploadStarted = useCallback((message: WebSocketMessage) => {
-    console.log("onUploadStarted received message:", message); // Log para depuración
-    if (!message || !message.task_id) {
-      console.error("Received undefined message or task_id in onUploadStarted", message);
-      return;
-    }
-    setUploadTasks(prev => [...prev, { id: message.task_id, status: 'processing', file_names: message.file_names, topic: message.topic, created_at: message.created_at }]);
+    // Manejado de forma global por TaskContext
   }, []);
 
-  const onUploadProgress = useCallback((data: { task_id: string; progress: number; message: string; }) => {
-    if (!data || !data.task_id) {
-      console.error("Received undefined data or task_id in onUploadProgress", data);
-      return;
-    }
-    setUploadTasks(prev => prev.map(task => task.id === data.task_id ? { ...task, progress: data.progress } : task));
+  const onUploadProgress = useCallback((data: any) => {
+    // Manejado de forma global por TaskContext
   }, []);
 
   const onUploadCompleted = useCallback((data: { task_id: string; message: string; }) => {
@@ -226,7 +228,6 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
       return;
     }
     toast.success(data.message || 'Subida completada.');
-    setUploadTasks(prev => prev.filter(task => task.id !== data.task_id));
     fetchPageData();
   }, [fetchPageData]);
 
@@ -236,7 +237,6 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
       return;
     }
     toast.error(data.error_message || 'Falló la subida de archivos.');
-    setUploadTasks(prev => prev.filter(task => task.id !== data.task_id));
     fetchPageData(); // Recargar para limpiar
   }, [fetchPageData]);
 
@@ -810,9 +810,7 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
 
 
 
-      {uploadTasks.length > 0 && (
-        <div className="fixed bottom-6 right-6 z-50 w-80"><UploadProgressIndicator tasks={uploadTasks} /></div>
-      )}
+
 
       <div className="space-y-6">
         {/* Componente de búsqueda */}

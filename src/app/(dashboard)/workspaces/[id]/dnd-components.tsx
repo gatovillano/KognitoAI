@@ -6,7 +6,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { MoreVertical, Notebook, Trash2, Edit } from 'lucide-react';
-import { Note } from '../../notes/page';
+import { Note } from '../../notes/Notes';
 
 export const ItemTypes = {
   NOTE: 'note',

@@ -92,7 +92,7 @@ function PanelContent() {
 
   // --- Inicialización y Autenticación ---
   useEffect(() => {
-    const queryToken = searchParams.get("token");
+    const queryToken = searchParams?.get("token");
     let tokenToUse = queryToken;
 
     if (queryToken) {

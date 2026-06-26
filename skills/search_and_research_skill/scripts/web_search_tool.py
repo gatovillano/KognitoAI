@@ -153,7 +153,7 @@ class WebSearchTool(BaseTool):
 
             # Rerankear todos los fragmentos encontrados
             logger.info(f"🔍 Rerankeando {len(all_chunks_as_docs)} fragmentos de {len(valid_results)} sitios web...")
-            reranked_docs = await reranker.rerank(query, all_chunks_as_docs)
+            reranked_docs = await reranker.rerank(query, all_chunks_as_docs, account_id=self.account_id)
             
             # Re-ensamblar resultados basados en los mejores fragmentos
             # Presupuesto total de caracteres para el LLM: 25,000

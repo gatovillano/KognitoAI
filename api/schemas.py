@@ -42,6 +42,10 @@ class UserSettingsResponse(BaseModel):
     embedding_model: Optional[str]
     embedding_api_key_name: Optional[str]
     embedding_api_base: Optional[str]
+    # Campos de Reranker
+    reranker_provider: Optional[str] = None
+    reranker_model: Optional[str] = None
+    reranker_api_base: Optional[str] = None
     disabled_skills: Optional[list] = []
     # Campos de SSH
     ssh_host: Optional[str] = None
@@ -93,6 +97,10 @@ class UserSettingsUpdateRequest(BaseModel):
     embedding_model: Optional[str] = None
     embedding_api_key_name: Optional[str] = None
     embedding_api_base: Optional[str] = None
+    # Campos de Reranker
+    reranker_provider: Optional[str] = None
+    reranker_model: Optional[str] = None
+    reranker_api_base: Optional[str] = None
     disabled_skills: Optional[list] = None
     # Campos de SSH
     ssh_host: Optional[str] = None

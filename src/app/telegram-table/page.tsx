@@ -16,7 +16,7 @@ function TableViewer() {
   const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
-    const rawData = searchParams.get("data");
+    const rawData = searchParams?.get("data");
     if (!rawData) {
       setError("No se proporcionaron datos para la tabla.");
       return;

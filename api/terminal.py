@@ -99,6 +99,30 @@ async def terminal_websocket(websocket: WebSocket, account_id: str):
             websocket_manager.disconnect(websocket, account_id, "terminal")
             await websocket.close()
             return
+
+        # Enviar historial acumulado si existe
+        accumulated = session.get("accumulated_output", [])
+        for chunk in accumulated:
+            await websocket.send_json({"type": "output", "data": chunk})
+
+        # Si la sesión ya está cerrada, desconectar y salir
+        if session.get("closed", False):
+            websocket_manager.disconnect(websocket, account_id, "terminal")
+            await websocket.close()
+            return
+
+        close_event = session.get("close_event")
+        close_task = None
+        if close_event:
+            async def wait_for_close():
+                try:
+                    await close_event.wait()
+                    await asyncio.sleep(0.5)
+                    await websocket.close()
+                except Exception:
+                    pass
+            close_task = asyncio.create_task(wait_for_close())
+
         try:
             while True:
                 msg_text = await websocket.receive_text()
@@ -127,6 +151,8 @@ async def terminal_websocket(websocket: WebSocket, account_id: str):
         except Exception as e:
             logger.exception(f"Error en terminal WS cliente: {e}")
         finally:
+            if close_task:
+                close_task.cancel()
             websocket_manager.disconnect(websocket, account_id, "terminal")
             return
 
