@@ -67,3 +67,8 @@ core/agents/*_backup.py
 /check_*.py
 /add_*.py
 /create_mcp_table.py
+
+# Large assets and models
+*.cast
+*.gif
+kokoro_service/models/
