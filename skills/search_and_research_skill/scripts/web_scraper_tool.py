@@ -85,33 +85,42 @@ class WebScraperTool(BaseTool):
             is_pdf = url.lower().endswith('.pdf') or '/pdf/' in url.lower()
             
             if is_pdf:
-                logger.info(f"Detectado PDF (posible). Usando PyPDFLoader para: {url}")
-                from langchain_community.document_loaders import PyPDFLoader
-                loader = PyPDFLoader(url)
+                logger.info(f"Detectado PDF (posible). Preparando PyPDFLoader para: {url}")
             else:
-                # Usar cabeceras para simular un navegador real y evitar bloqueos
-                headers = {
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-                }
-                loader = WebBaseLoader(url, header_template=headers)
+                logger.info(f"Detectando HTML. Preparando WebBaseLoader para: {url}")
 
             loop = asyncio.get_event_loop()
             
-            # Ejecuta la función bloqueante en el pool de hilos por defecto con un timeout.
+            # Ejecuta la función bloqueante (incluyendo la instanciación del loader que puede hacer red síncrona en init)
+            # en el pool de hilos por defecto con un timeout.
+            def _load_sync():
+                if is_pdf:
+                    from langchain_community.document_loaders import PyPDFLoader
+                    loader = PyPDFLoader(url)
+                else:
+                    headers = {
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+                    }
+                    loader = WebBaseLoader(url, header_template=headers)
+                return loader.load()
+
             try:
                 docs: List[Document] = await asyncio.wait_for(
                     loop.run_in_executor(
                         None, 
-                        loader.load
+                        _load_sync
                     ),
                     timeout=25.0
                 )
             except Exception as e:
                 logger.warning(f"Primer intento de carga fallido para {url}: {e}. Intentando carga simple sin headers...")
                 # Intento de respaldo sin headers
-                loader_fallback = WebBaseLoader(url)
+                def _load_fallback_sync():
+                    loader_fallback = WebBaseLoader(url)
+                    return loader_fallback.load()
+
                 docs = await asyncio.wait_for(
-                    loop.run_in_executor(None, loader_fallback.load),
+                    loop.run_in_executor(None, _load_fallback_sync),
                     timeout=25.0
                 )
 

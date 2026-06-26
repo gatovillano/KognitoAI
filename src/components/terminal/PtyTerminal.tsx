@@ -44,12 +44,21 @@ export default function PtyTerminal({
 
   // ── Construir URL WebSocket ──────────────────────────────────────────────
   const buildWsUrl = useCallback(() => {
-    const base =
-      apiBaseUrl ||
-      process.env.NEXT_PUBLIC_API_URL ||
-      "http://localhost:8000";
-    const wsBase = base.replace(/^http/, "ws").replace(/\/$/, "");
-    let url = `${wsBase}/ws/terminal/${accountId}?token=${encodeURIComponent(token)}`;
+    const base = apiBaseUrl || process.env.NEXT_PUBLIC_API_URL || (typeof window !== "undefined" ? window.location.origin : "http://localhost:8000");
+    let wsProtocol = "ws";
+    let wsHost = "localhost:8000";
+    if (typeof window !== "undefined") {
+      wsProtocol = window.location.protocol === "https:" ? "wss" : "ws";
+      wsHost = window.location.host;
+    }
+    try {
+      const url = new URL(base);
+      wsProtocol = url.protocol === "https:" ? "wss" : "ws";
+      wsHost = url.host;
+    } catch (e) {
+      console.error("PTY: Error parsing apiBaseUrl", e);
+    }
+    let url = `${wsProtocol}://${wsHost}/ws/terminal/${accountId}?token=${encodeURIComponent(token)}`;
     if (cmd) {
       url += `&cmd=${encodeURIComponent(cmd)}`;
     }
@@ -226,7 +235,9 @@ export default function PtyTerminal({
         {/* Título central */}
         <div className="flex-1 flex justify-center items-center gap-1.5">
           <TerminalSquare className="w-3.5 h-3.5 text-white/40" />
-          <span className="text-xs text-white/40 font-mono">bash</span>
+          <span className="text-xs text-white/40 font-mono truncate max-w-[400px]" title={cmd || "bash"}>
+            {cmd ? `PTY: ${cmd}` : "bash"}
+          </span>
           {/* Indicador de estado */}
           <span
             className={`ml-1 w-1.5 h-1.5 rounded-full ${

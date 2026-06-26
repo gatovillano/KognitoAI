@@ -14,6 +14,7 @@ from core.database import (
     AgendaEvent,
     AnalysisTask,
     ChatThread,
+    Document,
     Nota,
     ProactiveInsight,
     SessionLocal,
@@ -300,20 +301,27 @@ async def _collect_autonomous_heartbeat_context(
             AgendaEvent.event_datetime_utc >= now,
         )
         threads_stmt = select(ChatThread).where(ChatThread.account_id == account_uuid)
+        tasks_stmt = select(Task).where(
+            Task.account_id == account_uuid,
+            Task.is_completed == False,
+        )
         
         if workspace_id:
             ws_uuid = uuid.UUID(workspace_id)
             notes_stmt = notes_stmt.where(Nota.workspace_id == ws_uuid)
             events_stmt = events_stmt.where(AgendaEvent.workspace_id == ws_uuid)
             threads_stmt = threads_stmt.where(ChatThread.workspace_id == ws_uuid)
+            tasks_stmt = tasks_stmt.where(Task.workspace_id == ws_uuid)
             # AnalysisTask puede o no tener workspace_id, así que no lo filtramos o lo hacemos seguro:
             if hasattr(AnalysisTask, "workspace_id"):
                 analyses_stmt = analyses_stmt.where(AnalysisTask.workspace_id == ws_uuid)
 
         notes_stmt = notes_stmt.order_by(Nota.updated_at.desc()).limit(6)
         analyses_stmt = analyses_stmt.order_by(AnalysisTask.created_at.desc()).limit(6)
-        events_stmt = events_stmt.order_by(AgendaEvent.event_datetime_utc.asc()).limit(6)
+        events_stmt = events_stmt.order_by(AgendaEvent.event_datetime_utc.asc()).limit(20)
         threads_stmt = threads_stmt.order_by(ChatThread.created_at.desc()).limit(6)
+        tasks_stmt = tasks_stmt.order_by(Task.due_date.asc().nulls_last(), Task.created_at.desc()).limit(15)
+        
         prior_insights_stmt = select(ProactiveInsight).where(
             ProactiveInsight.account_id == account_uuid,
             ProactiveInsight.created_at >= lookback_start,
@@ -327,6 +335,7 @@ async def _collect_autonomous_heartbeat_context(
         analyses = (await db.execute(analyses_stmt)).scalars().all()
         events = (await db.execute(events_stmt)).scalars().all()
         threads = (await db.execute(threads_stmt)).scalars().all()
+        tasks = (await db.execute(tasks_stmt)).scalars().all()
         
         # Manejar gracefully si las columnas nuevas no existen aún en la BD
         try:
@@ -334,6 +343,36 @@ async def _collect_autonomous_heartbeat_context(
         except Exception as e:
             logger.warning(f"No se pudieron recuperar insights previos (columnas pueden no existir): {e}")
             prior_insights = []
+
+        # Documentos existentes y creados/subidos en los últimos 3 días
+        existing_docs = []
+        recent_docs = []
+        try:
+            docs_stmt = select(Document).where(Document.account_id == account_uuid)
+            if workspace_id:
+                docs_stmt = docs_stmt.where(Document.workspace_id == uuid.UUID(workspace_id))
+            docs_stmt = docs_stmt.order_by(Document.created_at.desc())
+            all_docs = (await db.execute(docs_stmt)).scalars().all()
+            
+            three_days_ago = now - timedelta(days=3)
+            for doc in all_docs:
+                doc_data = {
+                    "id": str(doc.id),
+                    "filename": doc.filename,
+                    "extension": doc.extension,
+                    "workspace_name": workspace_map.get(str(doc.workspace_id), "Global") if getattr(doc, "workspace_id", None) else "Global",
+                    "created_at": doc.created_at.isoformat() if doc.created_at else None,
+                    "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
+                }
+                existing_docs.append(doc_data)
+                doc_created = doc.created_at
+                if doc_created:
+                    if doc_created.tzinfo is None:
+                        doc_created = doc_created.replace(tzinfo=timezone.utc)
+                    if doc_created >= three_days_ago:
+                        recent_docs.append(doc_data)
+        except Exception as doc_err:
+            logger.warning(f"No se pudieron recuperar los documentos en el heartbeat: {doc_err}")
 
     memory_snippets: List[Dict[str, Any]] = []
     try:
@@ -422,6 +461,18 @@ async def _collect_autonomous_heartbeat_context(
             }
             for event in events
         ],
+        "pending_tasks": [
+            {
+                "id": str(task.id),
+                "description": task.description,
+                "status": task.status,
+                "workspace_name": workspace_map.get(str(task.workspace_id), "Global") if getattr(task, "workspace_id", None) else "Global",
+                "start_date": task.start_date.isoformat() if task.start_date else None,
+                "end_date": task.end_date.isoformat() if task.end_date else None,
+                "due_date": task.due_date.isoformat() if task.due_date else None,
+            }
+            for task in tasks
+        ],
         "recent_threads": [
             {
                 "id": str(thread.id),
@@ -442,6 +493,8 @@ async def _collect_autonomous_heartbeat_context(
             }
             for insight in prior_insights
         ],
+        "recent_documents": recent_docs,
+        "existing_documents": existing_docs,
         "memory_snippets": memory_snippets,
         "conversation_review": conversation_review,
         "window": {
@@ -653,6 +706,12 @@ async def _run_heartbeat_tool_phase(
         else "Tienes acceso a un conjunto preseleccionado de herramientas. Elige las que mejor sirvan a las instrucciones."
     )
 
+    recent_docs_list = context_payload.get('recent_documents', [])
+    existing_docs_list = context_payload.get('existing_documents', [])
+    
+    recent_docs_str = "\n".join([f"  - {d['filename']} (Creado/Subido: {d['created_at']})" for d in recent_docs_list]) if recent_docs_list else "  - Ningún documento creado/subido recientemente."
+    existing_docs_str = "\n".join([f"  - {d['filename']} (workspace: {d['workspace_name']})" for d in existing_docs_list]) if existing_docs_list else "  - Ningún documento existente."
+
     planning_prompt = f"""Eres KAI ejecutando tu heartbeat autónomo. {tool_selection_note}
 
 **HERRAMIENTAS DISPONIBLES ({len(selected_tools)}):**
@@ -660,9 +719,14 @@ async def _run_heartbeat_tool_phase(
 
 **CONTEXTO ACTUAL DEL USUARIO:**
 - Notas recientes: {len(context_payload.get('notes', []))} notas
+- Tareas pendientes: {len(context_payload.get('pending_tasks', []))} tareas
 - Análisis completados: {len(context_payload.get('analysis_tasks', []))} análisis
 - Eventos próximos: {len(context_payload.get('upcoming_events', []))} eventos
 - Conversaciones recientes: {len(context_payload.get('recent_threads', []))} hilos
+- Documentos creados/subidos en los últimos 3 días:
+{recent_docs_str}
+- Lista de documentos existentes:
+{existing_docs_str}
 
 **INSTRUCCIONES DEL HEARTBEAT:**
 {heartbeat_instructions}
@@ -671,6 +735,9 @@ async def _run_heartbeat_tool_phase(
 Analiza las instrucciones y decide qué herramientas ejecutar. Puedes hacer DOS tipos de llamadas:
 1. **Consulta/búsqueda**: para obtener información y enriquecer el análisis
 2. **Acción**: para publicar, crear o enviar algo (ej: postear una reflexión, crear una nota)
+
+### REGLA CRÍTICA OBLIGATORIA PARA LEER DOCUMENTOS (`get_document_content_tool`):
+Si consideras que alguno de los documentos creados o existentes recientemente es relevante para tu análisis, para relacionar conceptos o para las instrucciones del heartbeat, DEBES leer su contenido completo llamando a `get_document_content_tool` pasándole el `file_name` correspondiente.
 
 ### REGLA CRÍTICA OBLIGATORIA PARA GUARDAR NOTAS (`add_note`):
 Si decides crear o guardar una nota utilizando la herramienta `add_note`, debes establecer OBLIGATORIAMENTE el parámetro `send_as_agent_message` en `true`. Esto garantiza que el contenido se guarde como un mensaje enviado al usuario en su Bandeja de entrada. Nunca dejes este parámetro en `false` o ausente.
@@ -954,8 +1021,11 @@ Analiza minuciosamente los siguientes bloques en el payload de contexto:
 1. **Notas Recientes (`notes`):** Representan el conocimiento estructurado y reflexiones del usuario.
 2. **Tareas de Análisis (`analysis_tasks`):** Muestran datos procesados y reportes detallados que el usuario ha solicitado (fíjate en los resúmenes y resultados).
 3. **Eventos de Agenda (`upcoming_events`):** Representan el tiempo del usuario, hitos clave y compromisos.
-4. **Conversaciones Recientes (`recent_threads` y `conversation_review`):** La voz viva del usuario. Aquí radican sus preocupaciones, intenciones inmediatas, frustraciones y focos actuales.
-5. **Resultados de Herramientas (`tool_results`):** Resultados de búsquedas o acciones que ejecutaste en la fase previa de este heartbeat. Úsalos como datos duros para enriquecer tus insights.
+4. **Tareas Pendientes (`pending_tasks`):** Tareas activas/pendientes actuales del usuario, con sus respectivas fechas de inicio, finalización o vencimiento si están definidas.
+5. **Conversaciones Recientes (`recent_threads` y `conversation_review`):** La voz viva del usuario. Aquí radican sus preocupaciones, intenciones inmediatas, frustraciones y focos actuales.
+6. **Documentos Recientes (`recent_documents`):** Documentos subidos o creados en los últimos 3 días.
+7. **Documentos Existentes (`existing_documents`):** Lista completa de documentos guardados por el usuario.
+8. **Resultados de Herramientas (`tool_results`):** Resultados de búsquedas o acciones que ejecutaste en la fase previa de este heartbeat (como la lectura del contenido de algún documento relevante). Úsalos como datos duros para enriquecer tus insights.
 
 ### 4. INSTRUCCIONES PERSONALIZADAS DE ESTA CUENTA
 Aplica con máxima prioridad estas directrices definidas por el usuario:
@@ -973,7 +1043,13 @@ Al redactar tus insights, prioriza en este orden:
 - **Evita duplicados:** Compara tus hallazgos con los `recent_insights` provistos. Si un insight ya fue reportado recientemente con el mismo enfoque, no lo repitas a menos que haya evolucionado significativamente o se haya convertido en un problema crítico.
 - **Cantidad máxima:** Genera un máximo de {max_insights} insights (solo los de mayor calidad y relevancia).
 - **Cita y Vínculo Preciso (`related_items`):** Cada elemento relacionado debe mapear a objetos reales en el contexto. Especifica su tipo (`kind`) y su identificador o título exacto (`reference`), explicando brevemente la razón de su vínculo.
-- **Creación Autónoma de Tareas y Eventos:** Si a partir de tu revisión detectas compromisos, reuniones a programar o pendientes claros (que el usuario no haya registrado aún), DEBES crear tareas o eventos en las listas `auto_created_tasks` y `auto_created_events`. Estima las fechas de manera lógica usando la fecha actual. Usa tu criterio estratégico para decidir cuándo conviene agendarlos.
+- **Creación Autónoma de Tareas y Eventos sin Superposiciones (OBLIGATORIO):** Si a partir de tu revisión detectas compromisos, reuniones a programar o tareas pendientes claras (que el usuario no haya registrado aún), DEBES proponer su creación agregándolos a `auto_created_tasks` y `auto_created_events`. Para asignar las fechas y horas, y determinar el espacio de trabajo correspondiente, DEBES seguir estas reglas estrictas de disponibilidad, urgencia y pertenencia:
+  1. **Evitar Superposiciones (No Overlaps):** Revisa con precisión las fechas y horas en `upcoming_events` y `pending_tasks`. No programes ningún evento nuevo que se cruce, coincida o se superponga en el mismo bloque de tiempo que un evento ya existente. Tampoco programes múltiples tareas con el mismo rango de inicio/fin en horas idénticas.
+  2. **Distribución en el Tiempo por Disponibilidad:** No agendes todas las tareas y eventos para el mismo día (e.g., hoy). Distribúyelos a lo largo de los próximos días (de 1 a 7 días en adelante) basándote en la disponibilidad que observes en la agenda del usuario.
+  3. **Priorización por Urgencia Percibida:** Evalúa la urgencia de cada pendiente según la información de las conversaciones recientes (`conversation_review`, `recent_threads`), notas o insights. Las tareas/eventos de alta prioridad o urgentes deben agendarse más temprano (por ejemplo, mañana en una hora disponible), mientras que los de menor urgencia deben programarse para días posteriores.
+  4. **Fecha y Hora de Referencia:** Usa la fecha y hora UTC actual (`generated_at` en el objeto `window` del contexto) como punto de partida. Convierte mentalmente o utiliza la zona horaria del usuario (`timezone` en el objeto `account`) para que los horarios sugeridos sean razonables dentro de las horas laborables o normales del usuario (evita programar eventos o tareas de madrugada, por ejemplo a las 3:00 AM hora local).
+  5. **Duración Realista:** Asegúrate de estimar una duración (`duration_minutes`) realista para cada evento autónomo creado.
+  6. **Asociación de Workspace Correcto (OBLIGATORIO):** Si determinas que una tarea o evento pertenece a un contexto o espacio de trabajo particular (que puedes deducir de los elementos relacionados en el payload de contexto, como notas, análisis, hilos, etc., que indican su respectivo `workspace_name`), DEBES establecer el campo `workspace_name` con el nombre exacto de dicho workspace. Si es de carácter general o no está claro, asígnalo como "Global".
 - **Salida:** Si no hay hallazgos con suficiente solidez, devuelve una lista vacía `{{"insights": []}}`. No inventes datos ni asumas hechos.
 - **Idioma y Tono:** Redacta exclusivamente en **español**, con un tono profesional, ejecutivo, claro y accionable.
 
@@ -991,7 +1067,7 @@ Tu respuesta debe ser un objeto JSON válido y estructurado exactamente así. No
       "innovation_potential": "Descripción de cómo este insight abre una puerta a la innovación, un nuevo experimento o una mejora del flujo de trabajo.",
       "related_items": [
         {{
-          "kind": "note|analysis|event|memory|thread",
+          "kind": "note|analysis|event|memory|thread|document",
           "reference": "ID_DE_REFERENCIA_O_TITULO_EXACTO",
           "reason": "Vínculo explicativo muy breve de por qué se asocia este elemento."
         }}
@@ -1002,7 +1078,8 @@ Tu respuesta debe ser un objeto JSON válido y estructurado exactamente así. No
     {{
       "description": "Texto descriptivo de la tarea identificada a partir de los insights",
       "start_date": "YYYY-MM-DDTHH:MM:SSZ",
-      "end_date": "YYYY-MM-DDTHH:MM:SSZ"
+      "end_date": "YYYY-MM-DDTHH:MM:SSZ",
+      "workspace_name": "Nombre exacto del workspace correspondiente al que pertenece la tarea o 'Global'"
     }}
   ],
   "auto_created_events": [
@@ -1010,7 +1087,8 @@ Tu respuesta debe ser un objeto JSON válido y estructurado exactamente así. No
       "summary": "Resumen de la reunión o compromiso",
       "description": "Descripción más detallada del evento",
       "event_datetime_utc": "YYYY-MM-DDTHH:MM:SSZ",
-      "duration_minutes": 60
+      "duration_minutes": 60,
+      "workspace_name": "Nombre exacto del workspace correspondiente al que pertenece el evento o 'Global'"
     }}
   ]
 }}
@@ -1039,63 +1117,91 @@ Tu respuesta debe ser un objeto JSON válido y estructurado exactamente así. No
     
     # --- PROCESAMIENTO DE TAREAS Y EVENTOS AUTOMÁTICOS ---
     auto_tasks = parsed.get("auto_created_tasks", [])
-    if isinstance(auto_tasks, list) and auto_tasks:
-        tasks_created_count = 0
-        async with DBSession(SessionLocal) as db:
-            for t_data in auto_tasks:
-                if not isinstance(t_data, dict): continue
-                desc = t_data.get("description")
-                if not desc: continue
-                try:
-                    start_d = datetime.fromisoformat(t_data.get("start_date").replace("Z", "+00:00")) if t_data.get("start_date") else datetime.now(timezone.utc)
-                    end_d = datetime.fromisoformat(t_data.get("end_date").replace("Z", "+00:00")) if t_data.get("end_date") else None
-                except Exception:
-                    start_d = datetime.now(timezone.utc)
-                    end_d = None
-                new_task = Task(
-                    account_id=uuid.UUID(account_id),
-                    workspace_id=uuid.UUID(workspace_id) if workspace_id else None,
-                    description=desc,
-                    start_date=start_d,
-                    end_date=end_d,
-                    status="Pendiente",
-                    is_completed=False
-                )
-                db.add(new_task)
-                tasks_created_count += 1
-            if tasks_created_count > 0:
-                await db.commit()
-                if thread_created:
-                    await _log_to_heartbeat_thread(thread_id, f"✅ **Tareas Automáticas**: Se crearon {tasks_created_count} tareas nuevas detectadas en el análisis.")
-
     auto_events = parsed.get("auto_created_events", [])
-    if isinstance(auto_events, list) and auto_events:
-        events_created_count = 0
+
+    if (isinstance(auto_tasks, list) and auto_tasks) or (isinstance(auto_events, list) and auto_events):
         async with DBSession(SessionLocal) as db:
-            for e_data in auto_events:
-                if not isinstance(e_data, dict): continue
-                summary = e_data.get("summary")
-                if not summary: continue
-                try:
-                    evt_date = datetime.fromisoformat(e_data.get("event_datetime_utc").replace("Z", "+00:00")) if e_data.get("event_datetime_utc") else datetime.now(timezone.utc)
-                except Exception:
-                    evt_date = datetime.now(timezone.utc)
-                new_evt = AgendaEvent(
-                    account_id=uuid.UUID(account_id),
-                    workspace_id=uuid.UUID(workspace_id) if workspace_id else None,
-                    summary=summary,
-                    description=e_data.get("description"),
-                    event_datetime_utc=evt_date,
-                    duration_minutes=e_data.get("duration_minutes") or 60,
-                    is_active=True,
-                    status="Pendiente"
-                )
-                db.add(new_evt)
-                events_created_count += 1
-            if events_created_count > 0:
-                await db.commit()
-                if thread_created:
-                    await _log_to_heartbeat_thread(thread_id, f"📅 **Eventos Automáticos**: Se crearon {events_created_count} eventos nuevos en la agenda.")
+            # Obtener mapa de nombres de workspace a UUID para asignar el workspace correspondiente
+            ws_stmt = select(Workspace).where(Workspace.account_id == uuid.UUID(account_id))
+            all_ws = (await db.execute(ws_stmt)).scalars().all()
+            ws_name_to_id = {w.name.strip().lower(): w.id for w in all_ws}
+
+            # Procesar tareas
+            if isinstance(auto_tasks, list) and auto_tasks:
+                tasks_created_count = 0
+                for t_data in auto_tasks:
+                    if not isinstance(t_data, dict): continue
+                    desc = t_data.get("description")
+                    if not desc: continue
+                    try:
+                        start_d = datetime.fromisoformat(t_data.get("start_date").replace("Z", "+00:00")) if t_data.get("start_date") else datetime.now(timezone.utc)
+                        end_d = datetime.fromisoformat(t_data.get("end_date").replace("Z", "+00:00")) if t_data.get("end_date") else None
+                    except Exception:
+                        start_d = datetime.now(timezone.utc)
+                        end_d = None
+                    
+                    ws_name = t_data.get("workspace_name")
+                    task_ws_uuid = None
+                    if ws_name:
+                        name_clean = ws_name.strip().lower()
+                        if name_clean != "global":
+                            task_ws_uuid = ws_name_to_id.get(name_clean)
+                    if not task_ws_uuid and workspace_id:
+                        task_ws_uuid = uuid.UUID(workspace_id)
+
+                    new_task = Task(
+                        account_id=uuid.UUID(account_id),
+                        workspace_id=task_ws_uuid,
+                        description=desc,
+                        start_date=start_d,
+                        end_date=end_d,
+                        status="Pendiente",
+                        is_completed=False
+                    )
+                    db.add(new_task)
+                    tasks_created_count += 1
+                if tasks_created_count > 0:
+                    await db.commit()
+                    if thread_created:
+                        await _log_to_heartbeat_thread(thread_id, f"✅ **Tareas Automáticas**: Se crearon {tasks_created_count} tareas nuevas detectadas en el análisis.")
+
+            # Procesar eventos
+            if isinstance(auto_events, list) and auto_events:
+                events_created_count = 0
+                for e_data in auto_events:
+                    if not isinstance(e_data, dict): continue
+                    summary = e_data.get("summary")
+                    if not summary: continue
+                    try:
+                        evt_date = datetime.fromisoformat(e_data.get("event_datetime_utc").replace("Z", "+00:00")) if e_data.get("event_datetime_utc") else datetime.now(timezone.utc)
+                    except Exception:
+                        evt_date = datetime.now(timezone.utc)
+                    
+                    ws_name = e_data.get("workspace_name")
+                    event_ws_uuid = None
+                    if ws_name:
+                        name_clean = ws_name.strip().lower()
+                        if name_clean != "global":
+                            event_ws_uuid = ws_name_to_id.get(name_clean)
+                    if not event_ws_uuid and workspace_id:
+                        event_ws_uuid = uuid.UUID(workspace_id)
+
+                    new_evt = AgendaEvent(
+                        account_id=uuid.UUID(account_id),
+                        workspace_id=event_ws_uuid,
+                        summary=summary,
+                        description=e_data.get("description"),
+                        event_datetime_utc=evt_date,
+                        duration_minutes=e_data.get("duration_minutes") or 60,
+                        is_active=True,
+                        status="Pendiente"
+                    )
+                    db.add(new_evt)
+                    events_created_count += 1
+                if events_created_count > 0:
+                    await db.commit()
+                    if thread_created:
+                        await _log_to_heartbeat_thread(thread_id, f"📅 **Eventos Automáticos**: Se crearon {events_created_count} eventos nuevos en la agenda.")
     
     # --- PROCESAMIENTO DE INSIGHTS ---
     raw_insights = parsed.get("insights") if isinstance(parsed, dict) else []

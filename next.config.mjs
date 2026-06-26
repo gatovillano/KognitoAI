@@ -15,6 +15,7 @@ try {
 }
 
 const nextConfig = {
+  allowedDevOrigins: ['kognito.cuerpolibre.cl', 'webapp3.cuerpolibre.cl', 'kognitoai.cloud'],
   images: {
     unoptimized: true,
     remotePatterns: [
@@ -26,9 +27,6 @@ const nextConfig = {
       },
     ],
     minimumCacheTTL: 600,
-  },
-  experimental: {
-    allowedDevOrigins: ['kognito.cuerpolibre.cl', 'webapp3.cuerpolibre.cl', 'kognitoai.cloud'],
   },
   transpilePackages: ['react-dnd', 'react-dnd-html5-backend'],
   async redirects() {

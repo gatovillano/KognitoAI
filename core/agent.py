@@ -971,6 +971,15 @@ async def call_model_node(state: AgentState):
     context = state.get("context")
     rag_context = state.get("rag_context")
 
+    workspace_name = None
+    workspace_prompt = None
+    if state.get('workspace_id'):
+        async with DBSession(SessionLocal) as db:
+            workspace = await db.get(Workspace, uuid.UUID(state.get('workspace_id')))
+            if workspace:
+                workspace_name = workspace.name
+                if workspace.system_prompt:
+                    workspace_prompt = str(workspace.system_prompt)
 
     # 1. Construir el prompt del sistema dinámicamente y cargar metadatos en paralelo
     user_message = extract_text_content(state["messages"][-1].content)
@@ -990,7 +999,12 @@ async def call_model_node(state: AgentState):
 
     # Semantic skill search (async)
     skill_manager = get_skill_manager()
-    semantic_skills_task = skill_manager.search_skills_semantic(user_message, top_k=4)
+    semantic_skills_task = skill_manager.search_skills_semantic(
+        user_message, 
+        top_k=4,
+        account_id=state['account_id'],
+        workspace_name=workspace_name
+    )
 
     # Ejecutar todas en paralelo
     metadata_results = await asyncio.gather(
@@ -1252,12 +1266,7 @@ async def call_model_node(state: AgentState):
     tools = full_toolbox
     logger.info(f"🧰 Selección dinámica: {len(tools)} herramientas de {len(full_toolbox)} cargadas (límite={'Ollama' if _is_ollama_model else 'estándar'}).")
     
-    workspace_prompt = None
-    if state.get('workspace_id'):
-        async with DBSession(SessionLocal) as db:
-            workspace = await db.get(Workspace, uuid.UUID(state.get('workspace_id')))
-            if workspace and workspace.system_prompt:
-                workspace_prompt = str(workspace.system_prompt)
+    # workspace_prompt was already loaded asynchronously at the start of call_model_node
 
     # --- CONFIGURACIÓN DE HERRAMIENTAS Y LLM ---
     # Reutilizamos el LLM ya obtenido arriba para la detección de Ollama
@@ -3304,6 +3313,10 @@ async def run_custom_user_heartbeat(account_id: str, workspace_id: Optional[str]
                                 match = re.search(r'data-session-id="([^"]+)"', content)
                                 if match:
                                     pty_session = {"session_id": match.group(1)}
+                                    match_cmd = re.search(r'data-cmd="([^"]+)"', content)
+                                    if match_cmd:
+                                        import html
+                                        pty_session["command"] = html.unescape(match_cmd.group(1))
                         else:
                             status = "error"
                             

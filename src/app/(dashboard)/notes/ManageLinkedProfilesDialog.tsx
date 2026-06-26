@@ -8,7 +8,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { useEffect, useState, useCallback } from 'react';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
-import { ContactProfile } from '../profiles/page';
+import { ContactProfile } from '../profiles/Profiles';
 
 interface LinkedProfileDisplay extends ContactProfile {
   linked: boolean;

@@ -1861,3 +1861,34 @@ ps aux | grep -E "(start_local|run_api\.py|npm run dev)" | grep -v grep
 
 ### Fundamentación
 El script `start_local.sh` actúa como proceso padre de los servicios. Al matar primero el script, se evita el comportamiento de reinicio automático de los procesos hijos, permitiendo un cierre completo y limpio del stack de desarrollo.
+
+## [2025-01-17] - Corrección Error JSON en kai.py
+
+### Corregido
+- **Error crítico**: `Error: string indices must be integers, not 'str'` en múltiples funciones
+- **Archivo**: `kognito-ai/kai.py`
+
+### Cambios específicos:
+1. **Línea 1357**: `resp.json()["id"]` → `resp.json().get("id", "")`
+2. **Líneas 1442-1447**: Login threads - uso de `.get()` con validación de tipo
+3. **Línea 1622**: WebSocket taskId - uso de `.get()` con valor por defecto
+4. **Líneas 184, 199**: Manejo de errores en login
+
+### Patrón aplicado:
+- `resp.json()["clave"]` → `resp.json().get("clave", valor_por_defecto)`
+- Validación de tipo antes de acceder a estructuras JSON
+- Uso de `isinstance()` para verificar tipo de respuesta
+
+### Funciones afectadas:
+- `list_workspaces()`
+- `list_threads()`
+- `list_notes()`
+- `show_note_content()`
+- `show_dashboard_chat()`
+- `login()`
+- Creación de hilos en sync
+
+### Testing
+- ✅ Sintaxis verificada con `python -m py_compile kai.py`
+- ✅ Todas las funciones compilan correctamente
+
