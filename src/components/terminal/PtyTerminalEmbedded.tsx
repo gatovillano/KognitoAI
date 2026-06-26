@@ -45,7 +45,7 @@ export default function PtyTerminalEmbedded({
         background: "#0d1117",
         foreground: "#e6edf3",
         cursor: "#58a6ff",
-        selection: "#264f78",
+        selectionBackground: "#264f78",
         black: "#0d1117",
         red: "#f85142",
         green: "#3fb950",
@@ -79,8 +79,21 @@ export default function PtyTerminalEmbedded({
     fitAddonRef.current = fitAddon;
 
     // Conectar WebSocket
-    const baseUrl = apiBaseUrl || window.location.origin;
-    const wsUrl = `${baseUrl.replace("http", "ws")}/ws/terminal/${accountId}?token=${encodeURIComponent(token)}&session_id=${sessionId}`;
+    const base = apiBaseUrl || process.env.NEXT_PUBLIC_API_URL || (typeof window !== "undefined" ? window.location.origin : "http://localhost:8000");
+    let wsProtocol = "ws";
+    let wsHost = "localhost:8000";
+    if (typeof window !== "undefined") {
+      wsProtocol = window.location.protocol === "https:" ? "wss" : "ws";
+      wsHost = window.location.host;
+    }
+    try {
+      const url = new URL(base);
+      wsProtocol = url.protocol === "https:" ? "wss" : "ws";
+      wsHost = url.host;
+    } catch (e) {
+      console.error("PTY: Error parsing apiBaseUrl, using window.location", e);
+    }
+    const wsUrl = `${wsProtocol}://${wsHost}/ws/terminal/${accountId}?token=${encodeURIComponent(token)}&session_id=${sessionId}`;
     
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
@@ -156,7 +169,9 @@ export default function PtyTerminalEmbedded({
       {/* Header minimal */}
       <div className="flex items-center gap-2 px-3 py-1.5 bg-[#161b22] border-b border-white/5 text-xs font-mono">
         <span className="text-green-400">●</span>
-        <span className="text-white/60 flex-1">Terminal PTY — bash</span>
+        <span className="text-white/60 flex-1 truncate" title={initialCommand || "Terminal PTY — bash"}>
+          {initialCommand ? `PTY: ${initialCommand}` : "Terminal PTY — bash"}
+        </span>
         {isConnected ? (
           <span className="text-green-400 text-[10px]">Conectado</span>
         ) : (

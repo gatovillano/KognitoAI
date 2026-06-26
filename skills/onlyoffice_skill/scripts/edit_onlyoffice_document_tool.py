@@ -10,8 +10,9 @@ import re
 import logging
 import uuid
 import shutil
+import json
 from typing import Any, Type, Optional, List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from langchain_core.tools import BaseTool
 from sqlalchemy import select
 from core.database import SessionLocal, Document
@@ -37,7 +38,7 @@ try:
     import openpyxl
     from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
     from openpyxl.utils import get_column_letter
-    import openpyxl.utils.numbers as numbers
+    import openpyxl.styles.numbers as numbers
     XLSX_AVAILABLE = True
 except ImportError:
     XLSX_AVAILABLE = False
@@ -447,6 +448,28 @@ class EditOnlyOfficeInput(BaseModel):
     column_index: Optional[int] = Field(None, description="Índice de columna (0-based). Usar con 'xlsx_insert_column', 'xlsx_delete_column'.")
     width: Optional[float] = Field(None, description="Ancho en cm. Usar con 'xlsx_set_column_width'.")
     height: Optional[float] = Field(None, description="Alto en filas. Usar con 'xlsx_set_row_height'.")
+
+    @field_validator(
+        "list_items",
+        "table_data",
+        "row_data",
+        "page_margins",
+        "cell_style",
+        "range_data",
+        "format_options",
+        mode="before"
+    )
+    @classmethod
+    def parse_json_fields(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            v_stripped = v.strip()
+            if (v_stripped.startswith('[') and v_stripped.endswith(']')) or \
+               (v_stripped.startswith('{') and v_stripped.endswith('}')):
+                try:
+                    return json.loads(v)
+                except Exception:
+                    pass
+        return v
 
 
 class EditOnlyOfficeDocumentTool(BaseTool):
@@ -1066,8 +1089,8 @@ class EditOnlyOfficeDocumentTool(BaseTool):
     def _xlsx_write_range(self, ws, range_address: str, range_data: List[List[str]], filename: str, sheet_name: str) -> str:
         """Escribe datos en un rango de celdas."""
         try:
-            from openpyxl.utils import coordinate_to_rowcol
-            start_row, start_col = coordinate_to_rowcol(range_address.split(':')[0])
+            from openpyxl.utils import coordinate_to_tuple
+            start_row, start_col = coordinate_to_tuple(range_address.split(':')[0])
             
             for i, row in enumerate(range_data):
                 for j, value in enumerate(row):
@@ -1081,16 +1104,21 @@ class EditOnlyOfficeDocumentTool(BaseTool):
     def _xlsx_format_cells(self, ws, range_address: str, format_options: dict, filename: str, sheet_name: str) -> str:
         """Formatea celdas con estilos."""
         try:
-            from openpyxl.utils import coordinate_to_rowcol
-            range_ref = ws.range(range_address)
+            if ':' in range_address:
+                range_ref = [cell for row in ws[range_address] for cell in row]
+            else:
+                range_ref = [ws[range_address]]
             
             for cell in range_ref:
+                font_kwargs = {}
                 if format_options.get('bold'):
-                    cell.font = Font(bold=True)
+                    font_kwargs['bold'] = True
                 if format_options.get('italic'):
-                    cell.font = Font(italic=True)
+                    font_kwargs['italic'] = True
                 if format_options.get('font_size'):
-                    cell.font = Font(size=format_options['font_size'])
+                    font_kwargs['size'] = format_options['font_size']
+                if font_kwargs:
+                    cell.font = Font(**font_kwargs)
                 if format_options.get('fill_color'):
                     fill = PatternFill(start_color=format_options['fill_color'], end_color=format_options['fill_color'], fill_type='solid')
                     cell.fill = fill

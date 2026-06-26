@@ -43,7 +43,8 @@ type InboxItem =
   | { kind: 'agent_message'; id: string; created_at: string; title: string; preview: string; payload: AgentMessage }
   | { kind: 'insight'; id: string; created_at: string; title: string; preview: string; payload: InsightItem };
 
-export default function InboxPage({ isEmbedded = false }: { params?: any; searchParams?: any; isEmbedded?: boolean }) {
+export default function InboxPage() {
+  const isEmbedded = false;
   const [isLoading, setIsLoading] = useState(true);
   const [items, setItems] = useState<InboxItem[]>([]);
   const [isInfoSheetOpen, setIsInfoSheetOpen] = useState(false);

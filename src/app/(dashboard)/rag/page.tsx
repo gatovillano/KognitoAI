@@ -20,7 +20,8 @@ import { Table as TableIcon, FileSpreadsheet, BarChart, Share, Download, Filter,
 import { UploadDocumentDialog } from './upload-document-dialog';
 import { CreateCollectionDialog } from './create-collection-dialog';
 import { AnalysisDetailDialog } from '@/app/(dashboard)/analysis/analysis-detail-dialog';
-import UploadProgressIndicator, { UploadTask } from '@/components/UploadProgressIndicator';
+import { useTaskContext } from '@/contexts/TaskContext';
+import { UploadTask } from '@/contexts/TaskContext';
 import { Analysis } from '@/lib/models';
 import { GitHubRepoDialog } from './github-repo-dialog';
 import { EditCollectionDialog } from './edit-collection-dialog';
@@ -33,7 +34,7 @@ import { TablesView } from './tables-view';
 import { AnalysisResults } from '@/components/AnalysisResults';
 import { GraphView } from '@/components/GraphView';
 import { ContextualChat } from '@/components/ContextualChat';
-import GraphProgressIndicator, { GraphTask } from '@/components/GraphProgressIndicator';
+import { AnalysisTask as GraphTask } from '@/contexts/TaskContext';
 
 // Using unified Collection interface imported above
 
@@ -47,8 +48,18 @@ export default function RagCollectionsPage() {
   const [deletingTopic, setDeletingTopic] = useState<string | null>(null);
   const [isInfoSheetOpen, setIsInfoSheetOpen] = useState(false); // Estado para controlar la visibilidad del Sheet
 
-  // Estados para el seguimiento de tareas de subida
-  const [uploadTasks, setUploadTasks] = useState<UploadTask[]>([]);
+  // Obtener tareas y modificadores del TaskContext global
+  const { 
+    uploadTasks, 
+    addUploadTask, 
+    updateUploadTask, 
+    removeUploadTask, 
+    analysisTasks, 
+    addAnalysisTask,
+    updateAnalysisTask,
+    removeAnalysisTask
+  } = useTaskContext();
+  const activeTasks = analysisTasks;
 
   // Estados para procesamiento de grafos de conocimiento
   const [isProcessingKnowledgeGraph, setIsProcessingKnowledgeGraph] = useState(false);
@@ -72,7 +83,6 @@ export default function RagCollectionsPage() {
   const [isDatasetDialogOpen, setIsDatasetDialogOpen] = useState(false);
   const [processingTopic, setProcessingTopic] = useState<string | null>(null);
   const [processingWorkspaceId, setProcessingWorkspaceId] = useState<string | null>(null);
-  const [activeTasks, setActiveTasks] = useState<GraphTask[]>([]);
 
   const { registerMessageHandler } = useWebSocketContext();
 
@@ -93,35 +103,22 @@ export default function RagCollectionsPage() {
   }, []);
 
   const onUploadStarted = useCallback((message: WebSocketMessage) => {
-    if (!message || !message.task_id) return;
-    setUploadTasks(prev => {
-      // Evitar duplicados si ya se añadió por onUploadStart del diálogo
-      const exists = prev.some(t => t.id === message.task_id || t.id === (message.file_names?.[0]));
-      if (exists) {
-        return prev.map(t => (t.id === message.task_id || t.id === (message.file_names?.[0]))
-          ? { ...t, id: message.task_id, status: 'processing', file_names: message.file_names, topic: message.topic }
-          : t);
-      }
-      return [...prev, { id: message.task_id, status: 'processing', file_names: message.file_names, topic: message.topic, created_at: message.created_at || new Date().toISOString() }];
-    });
+    // Manejado de forma global por TaskContext
   }, []);
 
   const onUploadProgress = useCallback((data: any) => {
-    if (!data || !data.task_id) return;
-    setUploadTasks(prev => prev.map(task => task.id === data.task_id ? { ...task, progress: data.progress } : task));
+    // Manejado de forma global por TaskContext
   }, []);
 
   const onUploadCompleted = useCallback((data: any) => {
     if (!data || !data.task_id) return;
     toast.success(data.message || 'Subida completada.');
-    setUploadTasks(prev => prev.filter(task => task.id !== data.task_id));
     fetchCollections();
   }, [fetchCollections]);
 
   const onUploadFailed = useCallback((data: any) => {
     if (!data || !data.task_id) return;
     toast.error(data.error_message || 'Falló la subida de archivos.');
-    setUploadTasks(prev => prev.filter(task => task.id !== data.task_id));
   }, []);
 
   useEffect(() => {
@@ -141,32 +138,8 @@ export default function RagCollectionsPage() {
           break;
         case 'knowledge_graph_progress':
         case 'analysis_progress':
-          const taskData = message.data as GraphTask;
+          const taskData = (message.data || message) as GraphTask;
           if (taskData && taskData.task_id) {
-            setActiveTasks(prev => {
-              // 1. Verificar si ya existe por ID exacto
-              const exists = prev.some(t => t.task_id === taskData.task_id);
-              if (exists) {
-                return prev.map(t => t.task_id === taskData.task_id ? { ...t, ...taskData } : t);
-              }
-
-              // 2. Si no existe, intentar vincular con una tarea temporal del mismo topic y tipo si existe
-              // Esto evita que aparezcan dos recuadros cuando se inicia la tarea
-              const tempTaskIndex = prev.findIndex(t => 
-                (t.task_id.startsWith('temp-')) && 
-                (t.topic === taskData.topic)
-              );
-
-              if (tempTaskIndex !== -1) {
-                const newTasks = [...prev];
-                newTasks[tempTaskIndex] = { ...newTasks[tempTaskIndex], ...taskData };
-                return newTasks;
-              }
-
-              // 3. Si no hay nada con qué vincular, añadir como nueva
-              return [...prev, taskData];
-            });
-
             if (taskData.is_complete && message.type === 'knowledge_graph_progress') {
               fetchCollections();
             }
@@ -199,12 +172,12 @@ export default function RagCollectionsPage() {
       toast.info("Ya hay un análisis en progreso. Por favor, espera.");
       return;
     }
+    const tempTaskId = `temp-${Date.now()}`;
     try {
       setSelectedAnalysis(null);
       setAnalyzingTopic(topic);
       
-      const tempTaskId = `temp-${Date.now()}`;
-      setActiveTasks(prev => [...prev, {
+      addAnalysisTask({
         task_id: tempTaskId,
         phase: 'initializing',
         message: 'Iniciando análisis de colección...',
@@ -213,19 +186,19 @@ export default function RagCollectionsPage() {
         has_error: false,
         processing_mode: 'conceptual',
         topic: topic
-      }]);
+      });
 
       const response = await apiClient.post('/api/start-collection-analysis', { topic });
       setCollectionPollingId(response.data.task_id);
       
       // Vincular ID real con la tarea temporal
-      setActiveTasks(prev => prev.map(t => t.task_id === tempTaskId ? { ...t, task_id: response.data.task_id } : t));
+      updateAnalysisTask(tempTaskId, { task_id: response.data.task_id });
       
       toast.info(`Análisis de la colección "${topic}" iniciado.`);
     } catch (error) {
       toast.error("No se pudo iniciar el análisis de la colección.");
       setAnalyzingTopic(null);
-      setActiveTasks(prev => prev.filter(t => !t.task_id.startsWith('temp-')));
+      removeAnalysisTask(tempTaskId);
     }
   };
 
@@ -347,10 +320,10 @@ export default function RagCollectionsPage() {
         : `Procesando grafo global (Modo: ${mode === 'hybrid' ? 'Estándar' : 'Conceptual'})...`
     );
 
+    const tempTaskId = `temp-${Date.now()}`;
     try {
       // Inicializar tarea localmente para feedback inmediato
-      const tempTaskId = `temp-${Date.now()}`;
-      setActiveTasks(prev => [...prev, {
+      addAnalysisTask({
         task_id: tempTaskId,
         phase: 'initializing',
         message: 'Iniciando procesamiento...',
@@ -359,7 +332,7 @@ export default function RagCollectionsPage() {
         has_error: false,
         processing_mode: mode,
         topic: processingTopic || undefined
-      }]);
+      });
 
       // Determinar qué endpoint usar basado en el modo
       if (mode === 'conceptual') {
@@ -376,7 +349,7 @@ export default function RagCollectionsPage() {
 
         // Actualizar el ID de la tarea temporal con el real si viene en la respuesta
         if (response.data?.task_id) {
-          setActiveTasks(prev => prev.map(t => t.task_id === tempTaskId ? { ...t, task_id: response.data.task_id } : t));
+          updateAnalysisTask(tempTaskId, { task_id: response.data.task_id });
         }
       } else {
         // Modo Híbrido (Estándar): Llamar al endpoint optimizado
@@ -389,7 +362,7 @@ export default function RagCollectionsPage() {
 
         // Actualizar el ID de la tarea temporal con el real
         if (response.data?.task_id) {
-          setActiveTasks(prev => prev.map(t => t.task_id === tempTaskId ? { ...t, task_id: response.data.task_id } : t));
+          updateAnalysisTask(tempTaskId, { task_id: response.data.task_id });
         }
       }
 
@@ -401,7 +374,7 @@ export default function RagCollectionsPage() {
       console.error(error);
       toast.error("Error al iniciar el procesamiento del grafo.", { id: toastId });
       // Limpiar tareas temporales en caso de error
-      setActiveTasks(prev => prev.filter(t => !t.task_id.startsWith('temp-')));
+      removeAnalysisTask(tempTaskId);
     } finally {
       setIsProcessingKnowledgeGraph(false);
       setProcessingTopic(null);
@@ -602,17 +575,7 @@ export default function RagCollectionsPage() {
         </div>
       </div>
 
-      {(uploadTasks.length > 0 || activeTasks.length > 0) && (
-        <div className="fixed bottom-6 right-6 z-50 w-80 space-y-4">
-          {uploadTasks.length > 0 && <UploadProgressIndicator tasks={uploadTasks} />}
-          {activeTasks.length > 0 && (
-            <GraphProgressIndicator
-              tasks={activeTasks}
-              onDismiss={(taskId) => setActiveTasks(prev => prev.filter(t => t.task_id !== taskId))}
-            />
-          )}
-        </div>
-      )}
+
 
       <Tabs defaultValue="collections" className="w-full">
         <TabsList className="grid h-auto w-full grid-cols-2 gap-1 bg-muted/50 p-1 rounded-xl mb-8 sm:grid-cols-4">
@@ -672,15 +635,16 @@ export default function RagCollectionsPage() {
         onOpenChange={setIsUploadOpen}
         onUploadSuccess={() => { /* WebSocket handles updates */ }}
         onUploadStart={(fileNames, topic) => {
-          const newTasks = fileNames.map(name => ({
-            id: name, // Usar el nombre del archivo como ID temporal
-            file_names: [name], // Añadir file_names como un array con el nombre del archivo
-            topic,
-            status: 'pending' as const,
-            progress: 0,
-            created_at: new Date().toISOString(), // Añadir created_at con la fecha actual
-          }));
-          setUploadTasks(prev => [...prev, ...newTasks]);
+          fileNames.forEach(name => {
+            addUploadTask({
+              id: name, // Usar el nombre del archivo como ID temporal
+              file_names: [name],
+              topic,
+              status: 'pending' as const,
+              progress: 0,
+              created_at: new Date().toISOString(),
+            });
+          });
         }}
       />
       <CreateCollectionDialog isOpen={isCreateOpen} onOpenChange={setIsCreateOpen} onCreateSuccess={handleCollectionCreated} />

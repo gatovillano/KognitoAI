@@ -36,7 +36,7 @@ import { AnalysisDetailDialog } from '../../analysis/analysis-detail-dialog';
 import apiClient from '@/lib/api';
 import { CreateWorkspaceCollectionDialog } from './CreateWorkspaceCollectionDialog';
 import { AgendaEvent, TaskResponse } from '../../agenda/types'; // Import types from agenda page
-import { Note } from '../../notes/page'; // Import type from notes page
+import { Note } from '../../notes/Notes'; // Import type from notes component
 import { EventDialog } from '../../agenda/event-dialog'; // Import EventDialog
 import { TaskDialog } from '../../agenda/task-dialog'; // Import TaskDialog
 import { NoteDialog } from '../../notes/note-dialog'; // Import NoteDialog
@@ -46,6 +46,8 @@ import { WeeklyScheduleView } from '../../agenda/WeeklyScheduleView'; // Import 
 import { ShareWorkspaceDialog } from '../ShareWorkspaceDialog'; // Import ShareWorkspaceDialog
 import { KanbanBoardWrapper } from './projects/KanbanBoardWrapper';
 import { GanttChart } from './projects/GanttChart'; // Import GanttChart
+import { format } from 'date-fns';
+import { toast } from 'sonner';
 
 interface ChatThread {
   id: string;
@@ -227,6 +229,90 @@ export default function WorkspaceDashboard({ params }: PageProps) {
     } catch (error) {
       console.error('Error toggling task completed status:', error);
       alert('Error al actualizar el estado de la tarea.');
+    }
+  };
+
+  const handleMoveEvent = async (eventId: string, newDate: Date) => {
+    const eventToMove = agendaEvents.find(event => event.id === eventId);
+    if (!eventToMove) return;
+
+    const originalEventDateTime = new Date(eventToMove.event_datetime_local);
+    const durationMs = eventToMove.end_date
+      ? new Date(eventToMove.end_date).getTime() - originalEventDateTime.getTime()
+      : 60 * 60 * 1000; // default 1 hour duration
+
+    const updatedStartDateTime = newDate;
+    const updatedEndDateTime = new Date(updatedStartDateTime.getTime() + durationMs);
+
+    const toastId = toast.loading('Moviendo evento...');
+    try {
+      await apiClient.put(`/api/agenda/events/${eventId}`, {
+        event_date: format(updatedStartDateTime, 'yyyy-MM-dd'),
+        event_time: format(updatedStartDateTime, 'HH:mm'),
+        end_date: format(updatedEndDateTime, 'yyyy-MM-dd'),
+        end_time: format(updatedEndDateTime, 'HH:mm'),
+        workspace_id: workspaceId,
+      });
+
+      setAgendaEvents(prev => prev.map(event =>
+        event.id === eventId ? { 
+          ...event, 
+          event_datetime_local: updatedStartDateTime.toISOString(),
+          end_date: updatedEndDateTime.toISOString()
+        } : event
+      ));
+      toast.success('Evento movido exitosamente.', { id: toastId });
+    } catch (error) {
+      toast.error('Error al mover el evento.', { id: toastId });
+      console.error('Error moving event:', error);
+    }
+  };
+
+  const handleMoveTask = async (taskId: string, newDate: Date) => {
+    const taskToMove = tasks.find(task => task.id === taskId);
+    if (!taskToMove) return;
+
+    const startObj = taskToMove.start_date ? new Date(taskToMove.start_date) : null;
+    const endObj = taskToMove.end_date ? new Date(taskToMove.end_date) : null;
+
+    let updatedStartDateTime: Date;
+    let updatedEndDateTime: Date;
+
+    if (startObj && endObj) {
+      const durationMs = endObj.getTime() - startObj.getTime();
+      updatedStartDateTime = newDate;
+      updatedEndDateTime = new Date(newDate.getTime() + durationMs);
+    } else if (startObj) {
+      updatedStartDateTime = newDate;
+      updatedEndDateTime = new Date(newDate.getTime() + 60 * 60 * 1000);
+    } else {
+      updatedStartDateTime = newDate;
+      updatedEndDateTime = new Date(newDate.getTime() + 60 * 60 * 1000);
+    }
+
+    const toastId = toast.loading('Moviendo tarea...');
+    try {
+      setTasks(prev => prev.map(task =>
+        task.id === taskId ? { 
+          ...task, 
+          start_date: updatedStartDateTime.toISOString(),
+          end_date: updatedEndDateTime.toISOString() 
+        } : task
+      ));
+
+      await apiClient.put(`/api/tasks/${taskId}`, {
+        start_date: updatedStartDateTime.toISOString(),
+        end_date: updatedEndDateTime.toISOString(),
+        workspace_id: workspaceId,
+      });
+
+      toast.success('Tarea movida exitosamente.', { id: toastId });
+    } catch (error) {
+      toast.error('Error al mover la tarea.', { id: toastId });
+      console.error('Error moving task:', error);
+      setTasks(prev => prev.map(task =>
+        task.id === taskId ? { ...task, start_date: taskToMove.start_date, end_date: taskToMove.end_date } : task
+      ));
     }
   };
 
@@ -1118,6 +1204,8 @@ export default function WorkspaceDashboard({ params }: PageProps) {
                 onEditTask={handleEditTask}
                 onDeleteTask={handleDeleteTask}
                 onToggleTaskCompleted={handleToggleTaskCompleted}
+                onMoveEvent={handleMoveEvent}
+                onMoveTask={handleMoveTask}
               />
             )}
             {viewMode === 'kanban' && <KanbanBoardWrapper workspaceId={workspaceId} />}
