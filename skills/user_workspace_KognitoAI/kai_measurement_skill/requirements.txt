@@ -1,0 +1,4 @@
+aiohttp>=3.9.0
+prometheus-client>=0.19.0
+asyncio>=3.4.0
+statistics>=1.0.3.7
