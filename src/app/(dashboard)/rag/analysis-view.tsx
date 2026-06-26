@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
     Loader2, Info, Filter, ChevronDown, Search, BarChart3, FileText, FolderKanban,
-    Lightbulb, Code, Calendar, Eye, Plus, TrendingUp, AlertTriangle, HelpCircle,
+    Lightbulb, Code, Calendar, Eye, Plus,
     CheckCircle, Clock, XCircle, ArrowLeft, StickyNote, TrendingDown, Users,
     Activity, Target, PieChart, RefreshCcw, Zap, Network
 } from 'lucide-react';
@@ -16,7 +16,7 @@ import { toast } from 'sonner';
 import apiClient from '@/lib/api';
 import {
     Analysis, AnalysisType, Question, AnalysisResponse,
-    DashboardInsightsResponse, AnalysisStats, KeyTopic
+    DashboardInsightsResponse, AnalysisStats
 } from '@/lib/models';
 import { Badge } from '@/components/ui/badge';
 import { Bar, BarChart, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts';
@@ -33,9 +33,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
     Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription
 } from '@/components/ui/dialog';
-import { QuestionSlider } from '@/components/QuestionSlider';
-import { KeyTopicSlider } from '@/components/KeyTopicSlider';
-import { KeyTopicDetailDialog } from '@/components/KeyTopicDetailDialog';
+
 import { AnalysisDetailDialog } from '@/app/(dashboard)/analysis/analysis-detail-dialog';
 import { DeepResearchDetailDialog } from '@/app/(dashboard)/analysis/deep-research-detail-dialog';
 import { DraftDetailDialog } from '@/app/(dashboard)/analysis/draft-detail-dialog'; // NUEVO
@@ -125,8 +123,7 @@ export function AnalysisView() {
     const [selectedAnalysis, setSelectedAnalysis] = useState<Analysis | null>(null);
     const [dashboardData, setDashboardData] = useState<DashboardInsightsResponse | null>(null);
     const [isLoadingDashboard, setIsLoadingDashboard] = useState(true);
-    const [isKeyTopicDetailDialogOpen, setIsKeyTopicDetailDialogOpen] = useState(false);
-    const [selectedKeyTopic, setSelectedKeyTopic] = useState<KeyTopic | null>(null);
+
     const [isInfoSheetOpen, setIsInfoSheetOpen] = useState(false);
     const offsetRef = useRef(0);
     const [hasMore, setHasMore] = useState(false);
@@ -441,41 +438,7 @@ export function AnalysisView() {
                         </Card>
                     </div>
 
-                    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                        <QuestionSlider
-                            title="Brechas de Conocimiento"
-                            questions={dashboardData.emergent_knowledge_gaps || []}
-                            icon={<AlertTriangle className="h-5 w-5 text-amber-500" />}
-                            emptyMessage="No se detectaron brechas recientes."
-                            autoSlide={true}
-                            slideInterval={5000}
-                            showCounter={false}
-                            onDevelopClick={() => { }}
-                        />
 
-                        <KeyTopicSlider
-                            title="Temas Clave"
-                            keyTopics={dashboardData.key_topics || []}
-                            icon={<TrendingUp className="h-5 w-5 text-blue-500" />}
-                            emptyMessage="No hay temas clave recientes."
-                            autoSlide={true}
-                            slideInterval={7000}
-                            onKeyTopicClick={(topic) => {
-                                setSelectedKeyTopic(topic);
-                                setIsKeyTopicDetailDialogOpen(true);
-                            }}
-                        />
-
-                        <QuestionSlider
-                            title="Preguntas para Explorar"
-                            questions={dashboardData.exploration_questions || []}
-                            icon={<HelpCircle className="h-5 w-5 text-indigo-500" />}
-                            emptyMessage="No hay preguntas para explorar recientes."
-                            autoSlide={true}
-                            slideInterval={6000}
-                            onDevelopClick={() => { }}
-                        />
-                    </div>
 
                     <Card className="border-none shadow-md">
                         <CardHeader>
@@ -681,11 +644,7 @@ export function AnalysisView() {
                 }
             })()}
 
-            <KeyTopicDetailDialog
-                isOpen={isKeyTopicDetailDialogOpen}
-                onOpenChange={setIsKeyTopicDetailDialogOpen}
-                keyTopic={selectedKeyTopic}
-            />
+
 
             <Sheet open={isInfoSheetOpen} onOpenChange={setIsInfoSheetOpen}>
                 <SheetContent side="right" className="w-full sm:max-w-md">
