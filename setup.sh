@@ -104,10 +104,10 @@ fi
 
 # 4. Check and Start Docker Containers (Postgres, Neo4j, Redis, Kokoro TTS)
 echo -e "${BLUE}🐳 4. Starting database & AI backend containers (Docker)...${NC}"
-if command -v docker-compose &> /dev/null; then
-    docker-compose up -d db neo4j redis kokoro-tts
-elif command -v docker &> /dev/null && docker compose version &> /dev/null; then
-    docker compose up -d db neo4j redis kokoro-tts
+if command -v docker &> /dev/null && docker compose version &> /dev/null; then
+    docker compose up -d --build || docker compose up -d
+elif command -v docker-compose &> /dev/null; then
+    docker-compose up -d --build || docker-compose up -d
 else
     echo -e "${RED}⚠️  Docker or Docker Compose not found. Please ensure Docker is running.${NC}"
 fi
