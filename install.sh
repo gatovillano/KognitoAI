@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
-# Kognito AI - Full Commercial Installation & Launcher Script
-# Auto-clones repo if executed remotely, initializes ~/.kognito, starts database containers, and launches full stack.
+# Kognito AI - Full Commercial Installation Script (For New Users)
+# Auto-clones repo, generates secure secrets, builds frontend, starts containers, and launches stack.
 
 set -e
 
@@ -12,13 +12,10 @@ GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
+BOLD='\033[1m'
 NC='\033[0m'
 
-echo -e "${BLUE}=====================================================${NC}"
-echo -e "${GREEN}       🚀 Kognito AI - Auto-Clone & Fresh Install    ${NC}"
-echo -e "${BLUE}=====================================================${NC}"
-
-# 0. Check if running inside cloned repo, otherwise clone automatically
+# 0. Resolve PROJECT_DIR (local or clone from GitHub)
 REPO_URL="https://github.com/gatovillano/KognitoAI.git"
 TARGET_REPO_DIR="${HOME}/KognitoAI"
 
@@ -27,11 +24,11 @@ if [ -n "${SCRIPT_DIR}" ] && [ -f "${SCRIPT_DIR}/run_api.py" ]; then
 elif [ -f "./run_api.py" ]; then
     PROJECT_DIR="$(pwd)"
 else
-    echo -e "${YELLOW}🌐 Repository not detected locally. Cloning from GitHub...${NC}"
+    echo -e "${YELLOW}🌐 Clonando Kognito AI desde GitHub...${NC}"
     if [ ! -d "${TARGET_REPO_DIR}" ]; then
         git clone "${REPO_URL}" "${TARGET_REPO_DIR}"
     else
-        echo -e "${YELLOW}ℹ️ Directory ${TARGET_REPO_DIR} already exists. Updating via git pull...${NC}"
+        echo -e "${YELLOW}ℹ️ Directorio ${TARGET_REPO_DIR} ya existe. Actualizando...${NC}"
         (cd "${TARGET_REPO_DIR}" && git pull origin main || true)
     fi
     PROJECT_DIR="${TARGET_REPO_DIR}"
@@ -39,25 +36,48 @@ fi
 
 cd "${PROJECT_DIR}"
 
-echo -e "Target User Home: ${INSTALL_DIR}"
-echo -e "Project Base Dir: ${PROJECT_DIR}"
-echo -e "${BLUE}-----------------------------------------------------${NC}"
+echo ""
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${BOLD}  🚀 Kognito AI — Instalación Completa (Nuevo Usuario)${NC}"
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "  Directorio de datos: ${INSTALL_DIR}"
+echo -e "  Repositorio:         ${PROJECT_DIR}"
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
-# 1. Create directory structure for isolated execution
-echo -e "${BLUE}📁 1. Initializing isolated user workspace at ${INSTALL_DIR}...${NC}"
-mkdir -p "${INSTALL_DIR}/config"
-mkdir -p "${INSTALL_DIR}/skills"
-mkdir -p "${INSTALL_DIR}/media/documents"
-mkdir -p "${INSTALL_DIR}/media/thumbnails"
-mkdir -p "${INSTALL_DIR}/storage/onlyoffice/documents"
-mkdir -p "${INSTALL_DIR}/secrets"
+# 1. Create directory structure
+echo -e "${BLUE}📁 1. Creando estructura de directorios en ${INSTALL_DIR}...${NC}"
+mkdir -p "${INSTALL_DIR}/config" "${INSTALL_DIR}/skills" \
+         "${INSTALL_DIR}/media/documents" "${INSTALL_DIR}/media/thumbnails" \
+         "${INSTALL_DIR}/storage/onlyoffice/documents" "${INSTALL_DIR}/secrets"
+chmod 700 "${INSTALL_DIR}/secrets"
 
-# 2. Generate clean configuration file
+# 2. Generate .env with secure auto-generated secrets (only if not already exists)
 ENV_FILE="${INSTALL_DIR}/config/.env"
-if [ ! -f "${ENV_FILE}" ]; then
-    echo -e "${BLUE}⚙️  2. Generating user configuration at ${ENV_FILE}...${NC}"
+if [ -f "${ENV_FILE}" ]; then
+    echo -e "${YELLOW}ℹ️  Configuración existente encontrada. Preservando.${NC}"
+else
+    echo ""
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${BOLD}🔑 2. Configuración inicial${NC}"
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${YELLOW}💡 Los secrets de seguridad se generan automáticamente.${NC}"
+    echo -e "${YELLOW}   Solo necesitas ingresar tu token de Telegram (opcional).${NC}"
+    echo ""
+    printf "  🤖 Token del Bot de Telegram [dejar vacío para configurar luego]: "
+    read -r TG_TOKEN
+
+    # Auto-generate all secure secrets
+    echo -e "\n${BLUE}🔐 Generando secrets seguros automáticamente...${NC}"
+    JWT_SECRET=$(openssl rand -hex 32)
+    DB_ENC_KEY=$(openssl rand -hex 32)
+    INTERNAL_API_KEY=$(openssl rand -hex 24)
+    ADMIN_SECRET=$(openssl rand -hex 16)
+
     cat <<EOF > "${ENV_FILE}"
 # Kognito AI Environment Configuration
+# Generated automatically on $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+# ── Paths ─────────────────────────────────────────────
 KOGNITO_HOME=${INSTALL_DIR}
 KOGNITO_USER_SKILLS_DIR=${INSTALL_DIR}/skills
 MEDIA_ROOT=${INSTALL_DIR}/media/documents
@@ -65,49 +85,75 @@ THUMBNAILS_ROOT=${INSTALL_DIR}/media/thumbnails
 ONLYOFFICE_DOCS_ROOT=${INSTALL_DIR}/storage/onlyoffice/documents
 KOGNITO_SECRETS_DIR=${INSTALL_DIR}/secrets
 
-# Database configuration
+# ── Database ──────────────────────────────────────────
 DATABASE_URL=sqlite+aiosqlite:///${INSTALL_DIR}/kognito_db.sqlite
+
+# ── Security (auto-generated) ─────────────────────────
+JWT_SECRET_KEY=${JWT_SECRET}
+DB_ENCRYPTION_KEY=${DB_ENC_KEY}
+INTERNAL_API_KEY_FOR_BOT=${INTERNAL_API_KEY}
+ADMIN_SECRET=${ADMIN_SECRET}
+
+# ── Telegram ──────────────────────────────────────────
+TELEGRAM_BOT_TOKEN=${TG_TOKEN}
 EOF
-    echo -e "${GREEN}✅ Configuration created.${NC}"
-else
-    echo -e "${YELLOW}ℹ️  Configuration already exists at ${ENV_FILE}. Preserving.${NC}"
+    chmod 600 "${ENV_FILE}"
+    echo -e "${GREEN}✅ Configuración generada de forma segura en ${ENV_FILE}${NC}"
+    echo -e "   ${YELLOW}JWT, DB encryption key, internal API keys → generados automáticamente.${NC}"
 fi
 
-# 3. Check and Start Docker Containers (Postgres, Neo4j, Redis, Kokoro TTS)
-echo -e "${BLUE}🐳 3. Checking database & AI backend containers (Docker)...${NC}"
+# 3. Docker containers
+echo -e "\n${BLUE}🐳 3. Verificando contenedores Docker...${NC}"
 if docker ps --format "{{.Names}}" 2>/dev/null | grep -q "^kognito_db$"; then
-    echo -e "${GREEN}✅ Database containers are already running. Skipping Docker launch.${NC}"
-elif command -v docker &> /dev/null && docker compose version &> /dev/null; then
+    echo -e "${GREEN}✅ Contenedores ya en ejecución.${NC}"
+elif command -v docker &>/dev/null && docker compose version &>/dev/null; then
     docker compose up -d
-elif command -v docker-compose &> /dev/null; then
+elif command -v docker-compose &>/dev/null; then
     docker-compose up -d
 else
-    echo -e "${RED}⚠️  Docker or Docker Compose not found. Please ensure Docker is running.${NC}"
+    echo -e "${RED}⚠️  Docker no encontrado.${NC}"
 fi
 
-# 4. Check/Install Python Dependencies in Virtual environment
-echo -e "${BLUE}🐍 4. Checking Python virtual environment...${NC}"
+# 4. Python virtual environment
+echo -e "\n${BLUE}🐍 4. Entorno virtual Python...${NC}"
 if [ ! -d "${PROJECT_DIR}/venv_host" ]; then
-    echo -e "${YELLOW}Creating Python virtual environment in venv_host...${NC}"
     python3 -m venv "${PROJECT_DIR}/venv_host"
-    "${PROJECT_DIR}/venv_host/bin/pip" install --upgrade pip
-    if [ -f "${PROJECT_DIR}/requirements.txt" ]; then
-        echo -e "${YELLOW}Installing Python dependencies...${NC}"
-        "${PROJECT_DIR}/venv_host/bin/pip" install -r "${PROJECT_DIR}/requirements.txt"
-    fi
+    "${PROJECT_DIR}/venv_host/bin/pip" install --upgrade pip --quiet
+    [ -f "${PROJECT_DIR}/requirements.txt" ] && \
+        "${PROJECT_DIR}/venv_host/bin/pip" install -r "${PROJECT_DIR}/requirements.txt" --quiet
+    echo -e "${GREEN}✅ Dependencias Python instaladas.${NC}"
+else
+    echo -e "${GREEN}✅ Entorno virtual Python ya existe.${NC}"
 fi
 
-# 5. Check/Install Frontend Node Modules
-echo -e "${BLUE}📦 5. Checking Frontend dependencies...${NC}"
-if [ ! -d "${PROJECT_DIR}/node_modules" ]; then
-    echo -e "${YELLOW}Installing Node packages (npm install)...${NC}"
-    (cd "${PROJECT_DIR}" && npm install)
+# 5. Node modules + Production Frontend Build
+echo -e "\n${BLUE}📦 5. Instalando dependencias Node...${NC}"
+(cd "${PROJECT_DIR}" && npm install --silent)
+echo -e "${YELLOW}🏗️  Construyendo Frontend para producción (npm run build)...${NC}"
+(cd "${PROJECT_DIR}" && npm run build)
+echo -e "${GREEN}✅ Frontend construido exitosamente.${NC}"
+
+# 6. Install global kognitoai CLI
+CLI_TARGET="${HOME}/.local/bin/kognitoai"
+mkdir -p "${HOME}/.local/bin"
+cp "${PROJECT_DIR}/kognitoai" "${CLI_TARGET}"
+chmod +x "${CLI_TARGET}"
+echo -e "${GREEN}✅ Comando 'kognitoai' disponible en ${CLI_TARGET}${NC}"
+if ! echo "$PATH" | grep -q "${HOME}/.local/bin"; then
+    echo -e "${YELLOW}💡 Añade ~/.local/bin a tu PATH para usar 'kognitoai' globalmente:${NC}"
+    echo -e "   ${BOLD}echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc && source ~/.bashrc${NC}"
 fi
 
-echo -e "${BLUE}-----------------------------------------------------${NC}"
-echo -e "${GREEN}✅ Full Installation & Environment Setup Complete!${NC}"
-echo -e "${YELLOW}🚀 Starting Kognito AI Services (Backend, Frontend & Telegram Gateway)...${NC}"
-echo -e "${BLUE}-----------------------------------------------------${NC}"
+echo ""
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${GREEN}${BOLD}✅ Instalación completa!${NC}"
+echo -e "${YELLOW}🚀 Iniciando Kognito AI...${NC}"
+echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+echo -e " Al iniciar, abre en tu navegador:"
+echo -e "   ${GREEN}${BOLD}http://localhost:3002${NC}  → Interfaz Web"
+echo -e " El asistente de configuración inicial se abrirá automáticamente."
+echo ""
 
-# 6. Launch full stack services using start_local.sh
+# 7. Launch full stack
 exec ./start_local.sh
