@@ -1,22 +1,28 @@
 #!/usr/bin/env bash
 
-# Kognito AI - External Setup & Migration Script
-# Sets up user directory structure in ~/.kognito isolating user data from source repository.
+# Kognito AI - External Setup & Migration Script (For Existing Users)
+# Sets up user directory structure in ~/.kognito, migrates legacy user content, starts databases, and launches full stack.
 
 set -e
 
 INSTALL_DIR="${HOME}/.kognito"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-echo "====================================================="
-echo "       🚀 Kognito AI - Commercial Setup             "
-echo "====================================================="
-echo "Target Installation Directory: ${INSTALL_DIR}"
-echo "Repository Directory:           ${PROJECT_DIR}"
-echo "-----------------------------------------------------"
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+echo -e "${BLUE}=====================================================${NC}"
+echo -e "${GREEN}       🚀 Kognito AI - Migration & Setup             ${NC}"
+echo -e "${BLUE}=====================================================${NC}"
+echo -e "Target User Home: ${INSTALL_DIR}"
+echo -e "Repository Dir:   ${PROJECT_DIR}"
+echo -e "${BLUE}-----------------------------------------------------${NC}"
 
 # 1. Create directory structure
-echo "📁 Creating directory structure in ${INSTALL_DIR}..."
+echo -e "${BLUE}📁 1. Creating isolated directory structure in ${INSTALL_DIR}...${NC}"
 mkdir -p "${INSTALL_DIR}/config"
 mkdir -p "${INSTALL_DIR}/skills"
 mkdir -p "${INSTALL_DIR}/media/documents"
@@ -27,7 +33,7 @@ mkdir -p "${INSTALL_DIR}/secrets"
 # 2. Create default .env in ~/.kognito/config/.env if not present
 ENV_FILE="${INSTALL_DIR}/config/.env"
 if [ ! -f "${ENV_FILE}" ]; then
-    echo "⚙️  Generating default environment configuration at ${ENV_FILE}..."
+    echo -e "${BLUE}⚙️  2. Generating environment configuration at ${ENV_FILE}...${NC}"
     cat <<EOF > "${ENV_FILE}"
 # Kognito AI Environment Configuration
 KOGNITO_HOME=${INSTALL_DIR}
@@ -37,45 +43,77 @@ THUMBNAILS_ROOT=${INSTALL_DIR}/media/thumbnails
 ONLYOFFICE_DOCS_ROOT=${INSTALL_DIR}/storage/onlyoffice/documents
 KOGNITO_SECRETS_DIR=${INSTALL_DIR}/secrets
 
-# Database configuration (Defaults to local PostgreSQL or SQLite)
+# Database configuration
 DATABASE_URL=sqlite+aiosqlite:///${INSTALL_DIR}/kognito_db.sqlite
 EOF
-    echo "✅ Configuration file created."
+    echo -e "${GREEN}✅ Configuration file created.${NC}"
 else
-    echo "ℹ️  Existing configuration file found at ${ENV_FILE}. Preserving."
+    echo -e "${YELLOW}ℹ️  Existing configuration file found at ${ENV_FILE}. Preserving.${NC}"
 fi
 
 # 3. Migrate existing user content from repo if present
-echo "🚚 Checking for existing user data in repository to migrate..."
+echo -e "${BLUE}🚚 3. Checking for existing user data in repository to migrate...${NC}"
 
 # Migrate user skills
 if [ -d "${PROJECT_DIR}/skills" ]; then
     find "${PROJECT_DIR}/skills" -maxdepth 1 -type d -name "user_*" | while read -r user_skill_dir; do
         folder_name=$(basename "${user_skill_dir}")
-        echo "   -> Migrating user skill: ${folder_name}"
+        echo -e "   -> Migrating user skill: ${folder_name}"
         cp -rn "${user_skill_dir}" "${INSTALL_DIR}/skills/"
     done
 fi
 
 # Migrate media files
 if [ -d "${PROJECT_DIR}/media/documents" ] && [ "$(ls -A "${PROJECT_DIR}/media/documents" 2>/dev/null)" ]; then
-    echo "   -> Migrating documents from media/documents..."
+    echo -e "   -> Migrating documents from media/documents..."
     cp -rn "${PROJECT_DIR}/media/documents/"* "${INSTALL_DIR}/media/documents/" 2>/dev/null || true
 fi
 
 if [ -d "${PROJECT_DIR}/media/thumbnails" ] && [ "$(ls -A "${PROJECT_DIR}/media/thumbnails" 2>/dev/null)" ]; then
-    echo "   -> Migrating thumbnails from media/thumbnails..."
+    echo -e "   -> Migrating thumbnails from media/thumbnails..."
     cp -rn "${PROJECT_DIR}/media/thumbnails/"* "${INSTALL_DIR}/media/thumbnails/" 2>/dev/null || true
 fi
 
 # Migrate onlyoffice docs
 if [ -d "${PROJECT_DIR}/storage/onlyoffice/documents" ] && [ "$(ls -A "${PROJECT_DIR}/storage/onlyoffice/documents" 2>/dev/null)" ]; then
-    echo "   -> Migrating OnlyOffice documents..."
+    echo -e "   -> Migrating OnlyOffice documents..."
     cp -rn "${PROJECT_DIR}/storage/onlyoffice/documents/"* "${INSTALL_DIR}/storage/onlyoffice/documents/" 2>/dev/null || true
 fi
 
-echo "-----------------------------------------------------"
-echo "✅ Setup and migration completed successfully!"
-echo "User data and customized skills are now safely isolated in:"
-echo "   ${INSTALL_DIR}"
-echo "====================================================="
+# 4. Check and Start Docker Containers (Postgres, Neo4j, Redis, Kokoro TTS)
+echo -e "${BLUE}🐳 4. Starting database & AI backend containers (Docker)...${NC}"
+if command -v docker-compose &> /dev/null; then
+    docker-compose up -d db neo4j redis kokoro-tts
+elif command -v docker &> /dev/null && docker compose version &> /dev/null; then
+    docker compose up -d db neo4j redis kokoro-tts
+else
+    echo -e "${RED}⚠️  Docker or Docker Compose not found. Please ensure Docker is running.${NC}"
+fi
+
+# 5. Check/Install Python Dependencies in Virtual environment
+echo -e "${BLUE}🐍 5. Checking Python virtual environment...${NC}"
+if [ ! -d "${PROJECT_DIR}/venv_host" ]; then
+    echo -e "${YELLOW}Creating Python virtual environment in venv_host...${NC}"
+    python3 -m venv "${PROJECT_DIR}/venv_host"
+    "${PROJECT_DIR}/venv_host/bin/pip" install --upgrade pip
+    if [ -f "${PROJECT_DIR}/requirements.txt" ]; then
+        echo -e "${YELLOW}Installing Python dependencies...${NC}"
+        "${PROJECT_DIR}/venv_host/bin/pip" install -r "${PROJECT_DIR}/requirements.txt"
+    fi
+fi
+
+# 6. Check/Install Frontend Node Modules
+echo -e "${BLUE}📦 6. Checking Frontend dependencies...${NC}"
+if [ ! -d "${PROJECT_DIR}/node_modules" ]; then
+    echo -e "${YELLOW}Installing Node packages (npm install)...${NC}"
+    (cd "${PROJECT_DIR}" && npm install)
+fi
+
+echo -e "${BLUE}-----------------------------------------------------${NC}"
+echo -e "${GREEN}✅ Migration & Environment Setup Complete!${NC}"
+echo -e "${YELLOW}🚀 Starting Kognito AI Services (Backend, Frontend & Telegram Gateway)...${NC}"
+echo -e "${BLUE}-----------------------------------------------------${NC}"
+
+# 7. Launch full stack services using start_local.sh
+cd "${PROJECT_DIR}"
+exec ./start_local.sh
