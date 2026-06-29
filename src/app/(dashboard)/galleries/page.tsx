@@ -36,18 +36,15 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'; // Importar Sheet
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { PhotoResponse, AlbumResponse } from '@/types/gallery';
 import { EditAlbumModal } from '@/components/EditAlbumModal';
-import { ManageLinkedProfilesDialog } from '@/app/(dashboard)/notes/ManageLinkedProfilesDialog'; // Import the generic dialog
+import { ManageLinkedProfilesDialog } from '@/app/(dashboard)/notes/ManageLinkedProfilesDialog';
 
 import Image from 'next/image';
 
-// AlbumCard Component
 const AlbumCard = ({ album, onEditClick, onDeleteClick, onLinkProfileClick }: { album: AlbumResponse; onEditClick: (album: AlbumResponse) => void; onDeleteClick: (albumId: string) => void; onLinkProfileClick: (album: { id: string; name: string; }) => void }) => {
   const coverPhoto = album.cover_photo || album.photos.find(p => p.id === album.cover_photo_id);
-
-
 
   return (
     <motion.div
@@ -136,7 +133,6 @@ const AlbumCard = ({ album, onEditClick, onDeleteClick, onLinkProfileClick }: { 
   );
 };
 
-// Main Page Component
 const GalleriesPage = () => {
   const [albums, setAlbums] = useState<AlbumResponse[]>([]);
   const [loading, setLoading] = useState(true);
@@ -144,9 +140,10 @@ const GalleriesPage = () => {
   const [showCreateAlbumModal, setShowCreateAlbumModal] = useState(false);
   const [isEditAlbumDialogOpen, setIsEditAlbumDialogOpen] = useState(false);
   const [editingAlbum, setEditingAlbum] = useState<AlbumResponse | null>(null);
-  const [showManageProfilesDialog, setShowManageProfilesDialog] = useState(false); // New state for generic dialog
-  const [itemToManageProfiles, setItemToManageProfiles] = useState<{ id: string; name?: string; title?: string; } | null>(null); // New state for item to link/unlink profiles
-  const [isInfoSheetOpen, setIsInfoSheetOpen] = useState(false); // Nuevo estado para controlar la visibilidad del Sheet
+  const [showManageProfilesDialog, setShowManageProfilesDialog] = useState(false);
+  const [itemToManageProfiles, setItemToManageProfiles] = useState<{ id: string; name?: string; title?: string; } | null>(null);
+  const [isInfoSheetOpen, setIsInfoSheetOpen] = useState(false);
+
   const fetchAlbums = async () => {
     setLoading(true);
     setError(null);
@@ -169,7 +166,7 @@ const GalleriesPage = () => {
     try {
       await apiClient.delete(`${process.env.NEXT_PUBLIC_API_URL}/api/galleries/albums/${albumId}`);
       toast.success('Álbum eliminado exitosamente.');
-      fetchAlbums(); // Refetch albums to update the list
+      fetchAlbums();
     } catch (e: any) {
       toast.error('Error al eliminar el álbum.');
       console.error('Error deleting album:', e);
@@ -215,21 +212,22 @@ const GalleriesPage = () => {
         className="grid gap-6 md:grid-cols-3 lg:grid-cols-3"
       >
         <AnimatePresence>
-                      {albums.map((album) => (
-                        <AlbumCard
-                          key={album.id}
-                          album={album}
-                          onEditClick={(albumToEdit) => {
-                            setEditingAlbum(albumToEdit);
-                            setIsEditAlbumDialogOpen(true);
-                          }}
-                          onDeleteClick={handleDeleteAlbum}
-                          onLinkProfileClick={(albumToLink) => {
-                            setItemToManageProfiles({ id: albumToLink.id, name: albumToLink.name });
-                            setShowManageProfilesDialog(true);
-                          }}
-                        />
-                      ))}        </AnimatePresence>
+          {albums.map((album) => (
+            <AlbumCard
+              key={album.id}
+              album={album}
+              onEditClick={(albumToEdit) => {
+                setEditingAlbum(albumToEdit);
+                setIsEditAlbumDialogOpen(true);
+              }}
+              onDeleteClick={handleDeleteAlbum}
+              onLinkProfileClick={(albumToLink) => {
+                setItemToManageProfiles({ id: albumToLink.id, name: albumToLink.name });
+                setShowManageProfilesDialog(true);
+              }}
+            />
+          ))}
+        </AnimatePresence>
       </motion.div>
     );
   };
@@ -279,13 +277,12 @@ const GalleriesPage = () => {
         onSaveSuccess={fetchAlbums}
       />
 
-      {/* Replaced LinkAlbumModal with ManageLinkedProfilesDialog */}
       <ManageLinkedProfilesDialog
         isOpen={showManageProfilesDialog}
         onOpenChange={setShowManageProfilesDialog}
         item={itemToManageProfiles}
         itemType="album"
-                onLinkedProfilesUpdated={fetchAlbums}
+        onLinkedProfilesUpdated={fetchAlbums}
         onLink={async (profileId, albumId) => {
           try {
             await apiClient.post(`/api/galleries/albums/${albumId}/link-profile`, { profile_id: profileId });
@@ -306,7 +303,6 @@ const GalleriesPage = () => {
             console.error('Error unlinking profile:', error);
           }
         }}
-
       />
 
       <Sheet open={isInfoSheetOpen} onOpenChange={setIsInfoSheetOpen}>
@@ -325,29 +321,6 @@ const GalleriesPage = () => {
               <li><strong>Vincular a Perfiles:</strong> Conecta tus álbumes o fotos a perfiles de contacto para contextualizar tus recuerdos visuales.</li>
               <li><strong>Previsualización de Imágenes:</strong> Disfruta de una experiencia visual fluida con la previsualización de tus fotos.</li>
             </ul>
-
-            <p><strong>Interacción con IA:</strong></p>
-            <p>Además de la gestión manual, puedes interactuar con tu galería a través del chat de IA. La IA dispone de herramientas especializadas para:</p>
-            <ul className="list-disc pl-5 space-y-2">
-              <li>Buscar imágenes y álbumes por descripción, etiquetas o contenido.</li>
-              <li>Generar descripciones automáticas o etiquetas para tus fotos.</li>
-              <li>Crear álbumes basados en temas o eventos a partir de tus fotos existentes.</li>
-              <li>Realizar análisis de imágenes para extraer información relevante.</li>
-            </ul>
-
-            <p>
-              Esta interacción se potencia con la <strong>memoria de Kognito</strong>, que utiliza tus imágenes y álbumes para enriquecer el contexto de tus conversaciones y análisis, permitiendo a la IA comprender y recordar mejor tus experiencias visuales.
-            </p>
-
-            <p><strong>Beneficios Clave:</strong></p>
-            <ul className="list-disc pl-5 space-y-2">
-              <li><strong>Organización Visual:</strong> Mantén tus recuerdos organizados y accesibles.</li>
-              <li><strong>Búsqueda Inteligente:</strong> Encuentra rápidamente las imágenes que necesitas con la ayuda de la IA.</li>
-              <li><strong>Contexto Enriquecido:</strong> Conecta tus imágenes con personas y eventos relevantes.</li>
-              <li><strong>Potenciado por IA:</strong> Aprovecha la inteligencia artificial para gestionar y analizar tu contenido visual.</li>
-            </ul>
-
-            <p>¡Revive tus recuerdos y organiza tu contenido visual con el Módulo de Galería!</p>
           </div>
         </SheetContent>
       </Sheet>

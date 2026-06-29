@@ -13,8 +13,13 @@ def get_onlyoffice_docs_root() -> Path:
     return ONLYOFFICE_DOCS_ROOT
 
 
-def ensure_onlyoffice_account_dir(account_id: str) -> Path:
-    account_dir = ONLYOFFICE_DOCS_ROOT / str(account_id)
+from typing import Union, Optional
+
+def ensure_onlyoffice_account_dir(account_id: str, cloud_storage_path: Optional[str] = None) -> Path:
+    if cloud_storage_path:
+        account_dir = Path(cloud_storage_path) / "documents" / str(account_id)
+    else:
+        account_dir = ONLYOFFICE_DOCS_ROOT / str(account_id)
     account_dir.mkdir(parents=True, exist_ok=True)
     return account_dir
 

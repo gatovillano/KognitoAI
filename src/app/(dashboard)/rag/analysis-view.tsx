@@ -222,6 +222,7 @@ export function AnalysisView() {
             fetchAnalyses(true, debouncedSearchQuery, debouncedTopicKeywords);
             fetchDashboardData();
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [user, token, selectedType]);
 
     useEffect(() => {

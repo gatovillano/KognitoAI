@@ -13,6 +13,7 @@ export interface AlbumResponse {
   name: string;
   description: string | null;
   account_id: string;
+  workspace_id?: string | null;
   created_at: string;
   updated_at: string;
   cover_photo_id: string | null;

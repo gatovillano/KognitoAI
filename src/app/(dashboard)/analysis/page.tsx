@@ -376,6 +376,7 @@ export default function AnalysisPage() {
       fetchAnalyses(true, debouncedSearchQuery, debouncedTopicKeywords);
       fetchDashboardData();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, token, selectedType]);
 
   // useEffect separado para cambios en valores debounced (solo dashboard)

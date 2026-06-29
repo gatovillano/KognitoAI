@@ -8,18 +8,9 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useWorkspace } from '@/contexts/WorkspaceContext';
 import { EmptyChat } from '@/components/EmptyChat';
 import dynamic from 'next/dynamic'; // Importar dynamic
+import { SelectedContextItem } from '@/types/context';
 
 const WelcomeDialog = dynamic(() => import('@/components/WelcomeDialog').then(mod => mod.WelcomeDialog), { ssr: false });
-
-interface SelectedContextItem {
-  id: string;
-  type: 'document' | 'collection' | 'repository';
-  name: string;
-  title?: string;
-  topic?: string;
-  content?: string;
-  file_name?: string;
-}
 
 export default function NewChatPage() {
   const router = useRouter();

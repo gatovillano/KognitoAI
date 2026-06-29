@@ -17,15 +17,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
-
-interface SelectedContextItem {
-  id: string;
-  type: 'document' | 'collection';
-  name: string;
-  title?: string;
-  topic?: string;
-  file_name?: string;
-}
+import { SelectedContextItem } from '@/types/context';
 
 interface ContextSelectorButtonProps {
   onContextSelected: (selectedItems: SelectedContextItem[]) => void;

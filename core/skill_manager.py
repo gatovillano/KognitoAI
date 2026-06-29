@@ -69,6 +69,7 @@ class SkillManager:
         current_dir = os.path.dirname(os.path.abspath(__file__))
         project_root = os.path.dirname(current_dir)
         self.skills_dir = os.path.join(project_root, skills_dir)
+        self.user_skills_dir = os.getenv("KOGNITO_USER_SKILLS_DIR", os.path.expanduser("~/.kognito/skills"))
         self.skills_module_prefix = skills_dir.replace("/", ".")
         self._loaded_tools: Dict[str, BaseTool] = {}
         
@@ -205,22 +206,24 @@ class SkillManager:
                 # 2. Scopes
                 found = False
                 for scope in scopes:
-                    scope_path = os.path.join(self.skills_dir, scope, skill_id)
-                    if os.path.exists(scope_path):
-                        md_content = self._read_markdown_content(scope_path, skill_id)
-                        if md_content:
-                            parsed = self.parse_skill_markdown(md_content)
-                            skill_mds.append({
-                                "id": skill_id,
-                                "name": parsed["name"] or skill_id,
-                                "description": parsed["description"],
-                                "instructions": parsed["instructions"],
-                                "markdown": parsed["instructions"]
-                            })
-                            found = True
-                            break
-                if found:
-                    continue
+                    for base_dir in [self.user_skills_dir, self.skills_dir]:
+                        if not base_dir: continue
+                        scope_path = os.path.join(base_dir, scope, skill_id)
+                        if os.path.exists(scope_path):
+                            md_content = self._read_markdown_content(scope_path, skill_id)
+                            if md_content:
+                                parsed = self.parse_skill_markdown(md_content)
+                                skill_mds.append({
+                                    "id": skill_id,
+                                    "name": parsed["name"] or skill_id,
+                                    "description": parsed["description"],
+                                    "instructions": parsed["instructions"],
+                                    "markdown": parsed["instructions"]
+                                })
+                                found = True
+                                break
+                    if found:
+                        break
             except Exception as e:
                 logger.warning(f"[SKILL.md loader] Ignoring missing or broken skill '{skill_id}': {e}")
                 continue
@@ -377,8 +380,8 @@ class SkillManager:
                     return None
             
             # Re-asignar explicitly a la instancia final si existía el field y no se inyectó bien
-            if 'account_id' in fields and not hasattr(instance, 'account_id'): instance.account_id = account_id
-            if 'workspace_id' in fields and not hasattr(instance, 'workspace_id'): instance.workspace_id = workspace_id
+            if 'account_id' in fields and (not hasattr(instance, 'account_id') or getattr(instance, 'account_id', None) is None): instance.account_id = account_id
+            if 'workspace_id' in fields and (not hasattr(instance, 'workspace_id') or getattr(instance, 'workspace_id', None) is None): instance.workspace_id = workspace_id
             
             # Envuelve la herramienta para logging automático de ejecuciones
             instance = self._wrap_tool_with_logging(instance)
@@ -541,17 +544,19 @@ class SkillManager:
             scopes.append(f"user_workspace_{workspace_name}")
 
         for scope in scopes:
-            scope_dir = os.path.join(self.skills_dir, scope)
-            if not os.path.exists(scope_dir): continue
-            
-            for skill_folder in os.listdir(scope_dir):
-                skill_path = os.path.join(scope_dir, skill_folder)
-                if os.path.isdir(skill_path) and not skill_folder.startswith("__"):
-                    description = self._read_markdown_description(skill_path, skill_folder)
-                    metadata.append({
-                        "id": skill_folder,
-                        "description": description or "Sin descripción disponible."
-                    })
+            for base_dir in [self.user_skills_dir, self.skills_dir]:
+                if not base_dir or not os.path.exists(base_dir): continue
+                scope_dir = os.path.join(base_dir, scope)
+                if not os.path.exists(scope_dir): continue
+                
+                for skill_folder in os.listdir(scope_dir):
+                    skill_path = os.path.join(scope_dir, skill_folder)
+                    if os.path.isdir(skill_path) and not skill_folder.startswith("__"):
+                        description = self._read_markdown_description(skill_path, skill_folder)
+                        metadata.append({
+                            "id": skill_folder,
+                            "description": description or "Sin descripción disponible."
+                        })
         return metadata
 
     async def load_skills(
@@ -623,34 +628,38 @@ class SkillManager:
 
         # --- CARGAR SKILLS DE USUARIO ---
         for scope in user_scopes:
-            scope_path = os.path.join(self.skills_dir, scope)
-            if not os.path.exists(scope_path): continue
+            for base_dir in [self.user_skills_dir, self.skills_dir]:
+                if not base_dir or not os.path.exists(base_dir): continue
+                scope_path = os.path.join(base_dir, scope)
+                if not os.path.exists(scope_path): continue
 
-            for skill_folder in os.listdir(scope_path):
-                if disabled_skills and skill_folder in disabled_skills:
-                    continue
-                    
-                skill_folder_path = os.path.join(scope_path, skill_folder)
-                if not os.path.isdir(skill_folder_path) or skill_folder.startswith("__"):
-                    continue
+                for skill_folder in os.listdir(scope_path):
+                    if disabled_skills and skill_folder in disabled_skills:
+                        continue
+                        
+                    skill_folder_path = os.path.join(scope_path, skill_folder)
+                    if not os.path.isdir(skill_folder_path) or skill_folder.startswith("__"):
+                        continue
 
-                skill_description = self._read_markdown_description(skill_folder_path, skill_folder)
-                scripts_path = os.path.join(skill_folder_path, "scripts")
-                if not os.path.exists(scripts_path):
-                    continue
+                    skill_description = self._read_markdown_description(skill_folder_path, skill_folder)
+                    scripts_path = os.path.join(skill_folder_path, "scripts")
+                    if not os.path.exists(scripts_path):
+                        continue
 
-                for file in os.listdir(scripts_path):
-                    if file.endswith(".py") and not file.startswith("__"):
-                        module_name = file[:-3]
-                        # Path: skills.[scope].[skill_folder].scripts.[module_name]
-                        module_path = f"skills.{scope}.{skill_folder}.scripts.{module_name}"
-                        file_path = os.path.join(scripts_path, file)
-                        logger.info(f"🧪 Found user skill script: {file} in {scope}/{skill_folder}")
-                        await self._load_module_and_instantiate(
-                            module_path, file_path, account_id, telegram_id, thread_id, 
-                            workspace_id, workspace_name, progress_callback, 
-                            skill_description, loaded_tools
-                        )
+                    for file in os.listdir(scripts_path):
+                        if file.endswith(".py") and not file.startswith("__"):
+                            module_name = file[:-3]
+                            # Path: skills.[scope].[skill_folder].scripts.[module_name]
+                            clean_scope = scope.replace("-", "_")
+                            clean_folder = skill_folder.replace("-", "_")
+                            module_path = f"skills.{clean_scope}.{clean_folder}.scripts.{module_name}"
+                            file_path = os.path.join(scripts_path, file)
+                            logger.info(f"🧪 Found user skill script: {file} in {scope}/{skill_folder}")
+                            await self._load_module_and_instantiate(
+                                module_path, file_path, account_id, telegram_id, thread_id, 
+                                workspace_id, workspace_name, progress_callback, 
+                                skill_description, loaded_tools
+                            )
 
         logger.info(f"✅ Total skills loaded in this session: {len(loaded_tools)}")
         return loaded_tools

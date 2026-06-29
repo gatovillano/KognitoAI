@@ -282,6 +282,7 @@ async def _create_memory_to_memory_relationships(
         source_workspace_id = source_doc.get("workspace_id") or source_metadata.get("workspace_id")
         source_id = source_doc.get("document_id") or source_doc.get("id")
         source_title = source_doc.get("title") or source_doc.get("name") or str(source_id)
+        source_workspace = source_doc.get("workspace") or source_metadata.get("workspace")
 
         for j in range(i + 1, len(candidate_docs)):
             target_doc = candidate_docs[j]
@@ -322,6 +323,8 @@ async def _create_memory_to_memory_relationships(
                 "semantic_similarity": semantic_similarity,
                 "shared_signals": shared_signals,
                 "metadata_bonus": metadata_bonus,
+                "workspace_id": source_workspace_id,
+                "workspace": source_workspace,
             })
 
     if not llm_candidates:
@@ -364,6 +367,8 @@ async def _create_memory_to_memory_relationships(
             "similarity_score": round(meta["semantic_similarity"], 3),
             "metadata_score": round(meta["metadata_bonus"], 3),
             "llm_classified": bool(llm_classifications.get(idx)),
+            "workspace_id": meta.get("workspace_id"),
+            "workspace": meta.get("workspace"),
         })
 
     await graph_integration.hybrid_adapter.create_conceptual_relationships(
@@ -469,6 +474,7 @@ async def schedule_memory_graph_processing(account_id: str):
 async def _build_memory_graph_nodes(
     memories: List[Dict[str, Any]],
     account_id: str,
+    workspace_names: Optional[Dict[str, str]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Transforma las filas de BD al formato de nodo de grafo para memorias.
@@ -489,6 +495,11 @@ async def _build_memory_graph_nodes(
         sim_text = "\n".join(filter(None, [name, meta.get("topic"), meta.get("category"), raw_content]))
         contents.append(sim_text[:2000])
 
+        ws_id = meta.get("workspace_id") or ""
+        ws_name = ""
+        if workspace_names and ws_id:
+            ws_name = workspace_names.get(str(ws_id)) or ""
+
         nodes.append({
             "id": f"memory_{mem['id']}",
             "name": name,
@@ -497,7 +508,8 @@ async def _build_memory_graph_nodes(
             "category": meta.get("category") or "",
             "memory_type": meta.get("type") or "user_memory",
             "node_type": node_type,
-            "workspace_id": meta.get("workspace_id") or "",
+            "workspace_id": ws_id,
+            "workspace": ws_name,
             "thread_id": meta.get("thread_id") or "",
             "account_id": account_id,
             "original_uuid": str(mem["id"]),
@@ -609,8 +621,43 @@ async def process_memory_batches(account_id: str, task_id: Optional[str] = None,
             {"documents_processed": len(memories_raw)},
         )
 
+        # Mapear workspace_ids del lote a nombres de workspace
+        workspace_ids = set()
+        for mem in memories_raw:
+            meta = mem.get("cmetadata") or {}
+            if isinstance(meta, str):
+                try:
+                    meta = json.loads(meta)
+                except Exception:
+                    meta = {}
+            ws_id = meta.get("workspace_id")
+            if ws_id:
+                workspace_ids.add(ws_id)
+        
+        workspace_names = {}
+        if workspace_ids:
+            try:
+                from core.database import Workspace
+                from sqlalchemy import select
+                import uuid
+                uuid_ids = []
+                for wid in workspace_ids:
+                    try:
+                        uuid_ids.append(uuid.UUID(wid) if isinstance(wid, str) else wid)
+                    except ValueError:
+                        continue
+                if uuid_ids:
+                    async with SessionLocal() as db_session:
+                        stmt = select(Workspace).where(Workspace.id.in_(uuid_ids))
+                        res = await db_session.execute(stmt)
+                        for ws in res.scalars().all():
+                            workspace_names[str(ws.id)] = ws.name
+                    logger.info(f"💼 Resolved workspace names for memory batch: {workspace_names}")
+            except Exception as e:
+                logger.error(f"Error resolviendo nombres de workspace en process_memory_batches: {e}")
+
         # ── Paso 1: Construir nodos con embeddings ──────────────────────────
-        memory_nodes = await _build_memory_graph_nodes(memories_raw, account_id)
+        memory_nodes = await _build_memory_graph_nodes(memories_raw, account_id, workspace_names)
         if not memory_nodes:
             logger.warning("⚠️ No se pudieron construir nodos de memoria.")
             tracker.set_error("No se pudieron construir nodos de memoria.")
@@ -646,6 +693,7 @@ async def process_memory_batches(account_id: str, task_id: Optional[str] = None,
                 "title": n["name"],
                 "content": n["content"],
                 "workspace_id": n.get("workspace_id"),
+                "workspace": n.get("workspace"),
                 "metadata": n.get("_metadata", {}),
             }
             for n in memory_nodes

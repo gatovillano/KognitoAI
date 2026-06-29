@@ -45,6 +45,8 @@ tsconfig.tsbuildinfo
 # Local uploads and data storage
 storage/
 media/
+skills/user_*
+.kognito
 
 # Temporary scratch/debug files
 scratch/

@@ -150,7 +150,7 @@ export default function RagCollectionsPage() {
 
     const unregister = registerMessageHandler(handleWebSocketMessage);
     return unregister;
-  }, [registerMessageHandler, onUploadStarted, onUploadProgress, onUploadCompleted, onUploadFailed]);
+  }, [registerMessageHandler, onUploadStarted, onUploadProgress, onUploadCompleted, onUploadFailed, fetchCollections]);
 
   const router = useRouter();
 

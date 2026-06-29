@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
@@ -10,6 +10,7 @@ import apiClient from '@/lib/api';
 import { toast } from 'sonner';
 import { 
   Plus, 
+  Upload,
   FileText, 
   Trash2, 
   Edit3, 
@@ -165,11 +166,14 @@ export default function DocumentsPage() {
   const [privateSearch, setPrivateSearch] = useState('');
   const [privateSuggestions, setPrivateSuggestions] = useState<ShareUserSuggestion[]>([]);
   const [selectedPrivateUser, setSelectedPrivateUser] = useState<ShareUserSuggestion | null>(null);
+  const [shareCanEdit, setShareCanEdit] = useState(true);
   const [isChatSidebarOpen, setIsChatSidebarOpen] = useState(false);
   const [currentChatThreadId, setCurrentChatThreadId] = useState<string | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(450);
   const [isDraggingSidebar, setIsDraggingSidebar] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [sortBy, setSortBy] = useState<'name' | 'date'>('name');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [selectedDocs, setSelectedDocs] = useState<string[]>([]);
   const [selectedFolders, setSelectedFolders] = useState<string[]>([]);
   const [lastSelected, setLastSelected] = useState<{id: string, type: 'doc' | 'folder'} | null>(null);
@@ -238,7 +242,7 @@ export default function DocumentsPage() {
     }
   };
 
-  const fetchFolders = async () => {
+  const fetchFolders = useCallback(async () => {
     try {
       const params: any = {};
       params.parent_id = currentFolderId || "null";
@@ -249,7 +253,7 @@ export default function DocumentsPage() {
     } catch (error) {
       console.error('Error fetching folders:', error);
     }
-  };
+  }, [currentFolderId, currentWorkspaceId]);
 
   const fetchAllFolders = async () => {
     try {
@@ -260,7 +264,7 @@ export default function DocumentsPage() {
     }
   };
 
-  const fetchDocuments = async () => {
+  const fetchDocuments = useCallback(async () => {
     setIsLoading(true);
     try {
       const params: any = {};
@@ -275,7 +279,7 @@ export default function DocumentsPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [currentFolderId, currentWorkspaceId]);
 
   useEffect(() => {
     if (hasMounted) {
@@ -290,7 +294,7 @@ export default function DocumentsPage() {
       fetchFolders();
       fetchDocuments();
     }
-  }, [currentFolderId, currentWorkspaceId, hasMounted]);
+  }, [currentFolderId, currentWorkspaceId, hasMounted, fetchFolders, fetchDocuments]);
 
   const handleSelection = (id: string, type: 'doc' | 'folder', e?: React.MouseEvent | React.ChangeEvent) => {
     if (e && 'stopPropagation' in e) e.stopPropagation();
@@ -380,18 +384,7 @@ export default function DocumentsPage() {
     }
   };
 
-  useEffect(() => {
-    if (!hasMounted) return;
-    const openId = searchParams?.get('open');
-    if (openId && documents.length > 0) {
-      const doc = documents.find(d => d.id === openId);
-      if (doc) {
-        openEditor(doc);
-        const newUrl = window.location.pathname;
-        router.replace(newUrl);
-      }
-    }
-  }, [searchParams, documents, hasMounted]);
+
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files?.[0]) return;
@@ -663,6 +656,7 @@ export default function DocumentsPage() {
     setPrivateSearch('');
     setPrivateSuggestions([]);
     setSelectedPrivateUser(null);
+    setShareCanEdit(true);
     setIsShareDialogOpen(true);
     await fetchDocumentShareLinks(doc.id);
   };
@@ -673,7 +667,7 @@ export default function DocumentsPage() {
     try {
       const response = await apiClient.post(`/api/onlyoffice/${shareTargetDoc.id}/share-links`, {
         scope: 'public',
-        can_edit: true,
+        can_edit: shareCanEdit,
       });
       const shareUrl = response.data?.share_url
         ? `${window.location.origin}${response.data.share_url}`
@@ -701,7 +695,7 @@ export default function DocumentsPage() {
       await apiClient.post(`/api/onlyoffice/${shareTargetDoc.id}/share-links`, {
         scope: 'private',
         target_account_id: selectedPrivateUser.account_id,
-        can_edit: true,
+        can_edit: shareCanEdit,
       });
       toast.success('Documento compartido con la cuenta seleccionada');
       setPrivateSearch('');
@@ -820,7 +814,19 @@ export default function DocumentsPage() {
     }
   };
 
-  const openEditor = async (doc: OnlyOfficeDoc) => {
+  const initEditor = useCallback((config: any) => {
+    try {
+      // @ts-ignore
+      editorRef.current = new window.DocsAPI.DocEditor("onlyoffice-placeholder", config);
+      setIsOpeningEditor(false);
+    } catch (err) {
+      console.error("Editor init failed", err);
+      toast.error("Error al inicializar el editor de OnlyOffice");
+      setIsOpeningEditor(false);
+    }
+  }, []);
+
+  const openEditor = useCallback(async (doc: OnlyOfficeDoc) => {
     setIsOpeningEditor(true);
     try {
       const response = await apiClient.get(`/api/onlyoffice/config/${doc.id}`);
@@ -844,19 +850,20 @@ export default function DocumentsPage() {
       toast.error('Error al iniciar el editor');
       setIsOpeningEditor(false);
     }
-  };
+  }, [initEditor]);
 
-  const initEditor = (config: any) => {
-    try {
-      // @ts-ignore
-      editorRef.current = new window.DocsAPI.DocEditor("onlyoffice-placeholder", config);
-      setIsOpeningEditor(false);
-    } catch (err) {
-      console.error("Editor init failed", err);
-      toast.error("Error al inicializar el editor de OnlyOffice");
-      setIsOpeningEditor(false);
+  useEffect(() => {
+    if (!hasMounted) return;
+    const openId = searchParams?.get('open');
+    if (openId && documents.length > 0) {
+      const doc = documents.find(d => d.id === openId);
+      if (doc) {
+        openEditor(doc);
+        const newUrl = window.location.pathname;
+        router.replace(newUrl);
+      }
     }
-  };
+  }, [searchParams, documents, hasMounted, openEditor, router]);
 
   const closeEditor = () => {
     if (editorRef.current) {
@@ -890,11 +897,25 @@ export default function DocumentsPage() {
 
   const filteredDocs = documents.filter(doc => 
     doc.filename.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  ).sort((a, b) => {
+    if (sortBy === 'name') {
+      return sortOrder === 'asc' ? a.filename.localeCompare(b.filename) : b.filename.localeCompare(a.filename);
+    } else {
+      return sortOrder === 'asc' ? new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime() : new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+    }
+  });
   
   const filteredFolders = folders.filter(f => 
     f.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  ).sort((a, b) => {
+    if (sortBy === 'name') {
+      return sortOrder === 'asc' ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name);
+    } else {
+      const aDate = a.created_at || 0;
+      const bDate = b.created_at || 0;
+      return sortOrder === 'asc' ? new Date(aDate).getTime() - new Date(bDate).getTime() : new Date(bDate).getTime() - new Date(aDate).getTime();
+    }
+  });
 
   const getIconColor = (ext: string) => {
     switch (ext.toLowerCase()) {
@@ -1016,7 +1037,7 @@ export default function DocumentsPage() {
         <div>
           <h1 className="text-3xl font-bold flex items-center">
             <FileBox className="mr-3 h-8 w-8 text-primary" />
-            OnlyOffice
+            Documentos
             <Sheet>
               <SheetTrigger asChild>
                 <Button variant="ghost" size="icon" className="ml-2 h-6 w-6 text-muted-foreground">
@@ -1027,7 +1048,7 @@ export default function DocumentsPage() {
                 <SheetHeader className="pb-6 border-b">
                   <SheetTitle className="text-2xl font-bold flex items-center gap-2">
                     <FileBox className="h-6 w-6 text-primary" />
-                    Sobre OnlyOffice
+                    Sobre Documentos
                   </SheetTitle>
                   <SheetDescription>
                     Gestión avanzada de documentos y colaboración inteligente.
@@ -1036,7 +1057,7 @@ export default function DocumentsPage() {
                 
                 <div className="py-6 space-y-8">
                   <section className="space-y-3">
-                    <h3 className="text-sm font-bold uppercase tracking-wider text-primary">¿Qué es OnlyOffice en Kognito?</h3>
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-primary">¿Qué es Documentos?</h3>
                     <p className="text-sm text-muted-foreground leading-relaxed">
                       Es tu suite de ofimática privada. Aquí puedes subir, organizar y editar documentos de Word, Excel y PowerPoint sin que tus datos salgan de tu servidor.
                     </p>
@@ -1241,346 +1262,387 @@ export default function DocumentsPage() {
           </div>
         ) : (filteredDocs.length > 0 || filteredFolders.length > 0) ? (
           viewMode === 'grid' ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            <AnimatePresence>
-            {filteredFolders.map((folder) => (
-              <motion.div 
-                key={`folder-${folder.id}`}
-                layout
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                transition={{ duration: 0.3 }}
-                draggable={true}
-                onDragStart={(e: any) => {
-                  e.stopPropagation();
-                  const data = JSON.stringify({id: folder.id, type: 'folder'});
-                  e.dataTransfer.effectAllowed = "move";
-                  e.dataTransfer.setData('itemId', folder.id);
-                  e.dataTransfer.setData('itemType', 'folder');
-                  e.dataTransfer.setData('text/plain', folder.id);
-                  setDraggingItem({id: folder.id, type: 'folder'});
-                  e.currentTarget.classList.add('opacity-50', 'scale-95');
-                }}
-                onDragEnd={(e: any) => {
-                  e.currentTarget.classList.remove('opacity-50', 'scale-95');
-                  setDraggingItem(null);
-                }}
-                className="h-full"
-              >
-                <Card 
-                  className={`group relative h-full overflow-hidden backdrop-blur-sm transition-all duration-300 hover:shadow-xl cursor-grab active:cursor-grabbing rounded-3xl p-5 border ${
-                    selectedFolders.includes(folder.id) 
-                      ? 'bg-orange-500/10 border-orange-500 ring-2 ring-orange-500/50 shadow-md' 
-                      : 'bg-orange-500/5 border-orange-500/20 hover:border-orange-500/40'
-                  }`}
-                  onClick={(e) => {
-                     const isMod = (e as any).shiftKey || (e as any).ctrlKey || (e as any).metaKey;
-                     if (selectedDocs.length > 0 || selectedFolders.length > 0 || isMod) {
-                       toggleFolderSelection(folder.id, e as any);
-                     } else {
-                       navigateToFolder(folder);
-                     }
-                  }}
-                  onDragOver={(e: any) => {
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = "move";
-                    e.currentTarget.classList.add('bg-orange-500/10', 'border-orange-500/60', 'scale-105');
-                  }}
-                  onDragEnter={(e: any) => {
-                    e.preventDefault();
-                    e.currentTarget.classList.add('bg-orange-500/10', 'border-orange-500/60', 'scale-105');
-                  }}
-                  onDragLeave={(e: any) => {
-                    e.currentTarget.classList.remove('bg-orange-500/10', 'border-orange-500/60', 'scale-105');
-                  }}
-                  onDrop={(e: any) => {
-                    e.preventDefault();
-                    e.currentTarget.classList.remove('bg-orange-500/10', 'border-orange-500/60', 'scale-105');
-                    const itemId = e.dataTransfer.getData('itemId') || e.dataTransfer.getData('text/plain') || draggingItem?.id;
-                    const itemType = (e.dataTransfer.getData('itemType') as 'doc' | 'folder') || draggingItem?.type;
-                    if (itemId && itemType) handleDropToFolder(itemId, folder.id, itemType);
-                  }}
-                >
-                  <div className={`absolute top-4 left-4 z-10 transition-opacity ${selectedFolders.includes(folder.id) ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-                    <Checkbox 
-                      checked={selectedFolders.includes(folder.id)}
-                      onCheckedChange={() => toggleFolderSelection(folder.id)}
-                      onClick={(e) => e.stopPropagation()}
-                      className="data-[state=checked]:bg-orange-600 data-[state=checked]:border-orange-600"
-                    />
-                  </div>
-                  <div className="flex items-start justify-between pl-8">
-                    <div className="p-4 rounded-2xl bg-orange-500/10 text-orange-600 shadow-sm transition-transform group-hover:scale-110 duration-500">
-                      <Folder className="h-8 w-8 fill-current" />
-                    </div>
-                    
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full hover:bg-muted" onClick={(e) => e.stopPropagation()}>
-                          <MoreVertical className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-48 rounded-xl shadow-xl">
-                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); navigateToFolder(folder); }} className="gap-2 cursor-pointer">
-                          <ExternalLink className="h-4 w-4" />
-                          <span>Abrir</span>
-                        </DropdownMenuItem>
-                        <DropdownMenuItem 
-                          onClick={(e) => { 
-                            e.stopPropagation(); 
-                            setItemToRename({id: folder.id, name: folder.name, type: 'folder'});
-                            setNewName(folder.name);
-                            setIsRenameDialogOpen(true);
-                          }} 
-                          className="gap-2 cursor-pointer"
-                        >
-                          <Edit3 className="h-4 w-4" />
-                          <span>Renombrar</span>
-                        </DropdownMenuItem>
-                        <DropdownMenuItem 
-                          onClick={(e) => { 
-                            e.stopPropagation(); 
-                            setItemToMove({id: folder.id, name: folder.name, type: 'folder'});
-                            setSelectedTargetFolderForMove("null");
-                            setIsMoveItemDialogOpen(true);
-                            fetchAllFolders();
-                          }} 
-                          className="gap-2 cursor-pointer"
-                        >
-                          <FolderOutput className="h-4 w-4" />
-                          <span>Mover a...</span>
-                        </DropdownMenuItem>
-                        <DropdownMenuItem 
-                          onClick={(e) => { 
-                            e.stopPropagation(); 
-                            setItemToMove({id: folder.id, name: folder.name, type: 'folder'});
-                            setSelectedWorkspaceForMove(folder.workspace_id || "none");
-                            setIsMoveDialogOpen(true);
-                          }} 
-                          className="gap-2 cursor-pointer"
-                        >
-                          <Briefcase className="h-4 w-4" />
-                          <span>Asociar Workspace</span>
-                        </DropdownMenuItem>
-                        <div className="h-px bg-border/40 my-1" />
-                        <DropdownMenuItem 
-                          onClick={(e) => { e.stopPropagation(); handleDeleteFolder(folder.id, folder.name); }} 
-                          className="gap-2 cursor-pointer text-destructive focus:text-destructive focus:bg-destructive/10"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                          <span>Eliminar</span>
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                  <div className="mt-4 space-y-1">
-                    <h3 className="font-bold text-lg leading-tight truncate group-hover:text-orange-600 transition-colors">
-                      {folder.name}
-                    </h3>
-                    <p className="text-[10px] text-muted-foreground">Carpeta</p>
-                    {folder.workspace_name && (
-                      <div className="pt-2">
-                        <div
-                          className="inline-flex items-center gap-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-wider w-fit"
-                          style={{
-                            backgroundColor: folder.workspace_color ? `${folder.workspace_color}15` : '#f3f4f620',
-                            borderColor: folder.workspace_color ? `${folder.workspace_color}40` : '#88888840',
-                          }}
-                        >
-                          <span
-                            className="h-1.5 w-1.5 rounded-full"
-                            style={{ backgroundColor: folder.workspace_color || '#888888' }}
-                          ></span>
-                          <span style={{ color: folder.workspace_color || '#374151' }}>
-                            {folder.workspace_name}
-                          </span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </Card>
-              </motion.div>
-            ))}
-
-            {filteredDocs.map((doc) => (
-              <motion.div 
-                key={`doc-${doc.id}`}
-                layout
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                transition={{ duration: 0.3 }}
-                draggable={true}
-                onDragStart={(e: any) => {
-                  e.stopPropagation();
-                  e.dataTransfer.effectAllowed = "move";
-                  e.dataTransfer.setData('itemId', doc.id);
-                  e.dataTransfer.setData('itemType', 'doc');
-                  e.dataTransfer.setData('text/plain', doc.id);
-                  setDraggingItem({id: doc.id, type: 'doc'});
-                  e.currentTarget.classList.add('opacity-50', 'scale-95');
-                }}
-                onDragEnd={(e: any) => {
-                  e.currentTarget.classList.remove('opacity-50', 'scale-95');
-                  setDraggingItem(null);
-                }}
-                className="h-full"
-              >
-                <Card 
-                  className={`group relative h-full overflow-hidden backdrop-blur-sm transition-all duration-300 hover:shadow-2xl rounded-3xl p-5 border cursor-grab active:cursor-grabbing ${
-                    selectedDocs.includes(doc.id)
-                      ? 'bg-primary/5 border-primary ring-2 ring-primary/50 shadow-md'
-                      : 'bg-card/40 border-border/40 hover:border-primary/30 hover:shadow-primary/5'
-                  }`}
-                  onClick={(e) => {
-                     const isMod = (e as any).shiftKey || (e as any).ctrlKey || (e as any).metaKey;
-                     if (selectedDocs.length > 0 || selectedFolders.length > 0 || isMod) {
-                       toggleDocSelection(doc.id, e as any);
-                     }
-                  }}
-                >
-                  <div className={`absolute top-4 left-4 z-10 transition-opacity ${selectedDocs.includes(doc.id) ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-                    <Checkbox 
-                      checked={selectedDocs.includes(doc.id)}
-                      onCheckedChange={() => toggleDocSelection(doc.id)}
-                      onClick={(e) => e.stopPropagation()}
-                    />
-                  </div>
-                  <div className="flex flex-col gap-4 pl-8">
-                    <div className="flex items-start justify-between">
-                      <div className={`p-4 rounded-2xl shadow-sm ${getIconColor(doc.extension)} transition-transform group-hover:scale-110 duration-500`}>
-                        <FileText className="h-8 w-8" />
-                      </div>
-                      
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full hover:bg-muted">
-                            <MoreVertical className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-48 rounded-xl border-border/40 shadow-xl">
-                          <DropdownMenuItem onClick={() => openEditor(doc)} className="gap-2 cursor-pointer py-2 px-3">
-                            <Edit3 className="h-4 w-4 text-primary" />
-                            <span className="font-medium">Editar Ahora</span>
-                          </DropdownMenuItem>
-                          <DropdownMenuItem 
-                            onClick={() => {
-                              setItemToRename({id: doc.id, name: doc.filename, type: 'doc'});
-                              setNewName(doc.filename);
-                              setIsRenameDialogOpen(true);
-                            }} 
-                            className="gap-2 cursor-pointer py-2 px-3"
-                          >
-                            <Edit3 className="h-4 w-4" />
-                            <span className="font-medium">Renombrar</span>
-                          </DropdownMenuItem>
-                          <DropdownMenuItem className="gap-2 cursor-pointer py-2 px-3">
-                            <Download className="h-4 w-4" />
-                            <span className="font-medium">Descargar</span>
-                          </DropdownMenuItem>
-                           <DropdownMenuItem 
-                            onClick={(e) => { 
-                              e.stopPropagation(); 
-                              setItemToMove({id: doc.id, name: doc.filename, type: 'doc'});
-                              setSelectedTargetFolderForMove("null");
-                              setIsMoveItemDialogOpen(true);
-                              fetchAllFolders();
-                            }} 
-                            className="gap-2 cursor-pointer py-2 px-3"
-                          >
-                            <FolderOutput className="h-4 w-4" />
-                            <span className="font-medium">Mover a...</span>
-                          </DropdownMenuItem>
-                           <DropdownMenuItem 
-                            onClick={() => {
-                              setItemToMove({id: doc.id, name: doc.filename, type: 'doc'});
-                              setSelectedWorkspaceForMove(doc.workspace_id || "none");
-                              setIsMoveDialogOpen(true);
-                            }} 
-                            className="gap-2 cursor-pointer py-2 px-3"
-                          >
-                            <Briefcase className="h-4 w-4" />
-                            <span className="font-medium">Asociar Workspace</span>
-                          </DropdownMenuItem>
-                          <DropdownMenuItem 
-                            onClick={() => handleDuplicate(doc)}
-                            className="gap-2 cursor-pointer py-2 px-3"
-                          >
-                            <Copy className="h-4 w-4" />
-                            <span className="font-medium">Duplicar Documento</span>
-                          </DropdownMenuItem>
-                          <DropdownMenuItem 
-                            onClick={() => handleVectorize(doc)}
-                            className="gap-2 cursor-pointer py-2 px-3"
-                          >
-                            <Layers className="h-4 w-4 text-emerald-500" />
-                            <span className="font-medium text-emerald-500">Vectorizar (RAG)</span>
-                          </DropdownMenuItem>
-                          <div className="h-px bg-border/40 my-1" />
-                          <DropdownMenuItem 
-                            onClick={() => handleDelete(doc.id, doc.filename)} 
-                            className="gap-2 cursor-pointer py-2 px-3 text-destructive focus:text-destructive focus:bg-destructive/10"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                            <span className="font-medium">Eliminar</span>
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-
-                    <div className="space-y-1">
-                      <h3 className="font-bold text-lg leading-tight truncate group-hover:text-primary transition-colors" title={doc.filename}>
-                        {doc.filename}
-                      </h3>
-                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/50 w-fit px-2 py-0.5 rounded-full">
-                        <Calendar className="h-3 w-3" />
-                        <span>Actualizado {new Date(doc.updated_at).toLocaleDateString()}</span>
-                      </div>
-                      
-                       {doc.workspace_id && (
-                         <div className="pt-2">
-                           <div
-                             className="inline-flex items-center gap-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full border uppercase tracking-wider w-fit"
-                             style={{
-                               backgroundColor: doc.workspace_color ? `${doc.workspace_color}15` : '#f3f4f620',
-                               borderColor: doc.workspace_color ? `${doc.workspace_color}40` : '#88888840',
-                             }}
-                           >
-                             <span
-                               className="h-1.5 w-1.5 rounded-full"
-                               style={{ backgroundColor: doc.workspace_color || '#888888' }}
-                             ></span>
-                             <span style={{ color: doc.workspace_color || '#374151' }}>
-                               {doc.workspace_name || 'Workspace'}
-                             </span>
-                           </div>
-                         </div>
-                       )}
-                    </div>
-
-                    <div className="pt-2">
-                      <Button 
-                        onClick={() => openEditor(doc)}
-                        className="w-full bg-primary/5 text-primary hover:bg-primary hover:text-primary-foreground border border-primary/10 rounded-xl font-bold transition-all group-hover:shadow-md"
+          <div className="flex flex-col space-y-8 pb-12">
+            {filteredFolders.length > 0 && (
+              <div className="space-y-4">
+                <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider pl-1">Carpetas</h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
+                  <AnimatePresence>
+                  {filteredFolders.map((folder) => (
+                    <motion.div 
+                      key={`folder-${folder.id}`}
+                      layout
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.95 }}
+                      transition={{ duration: 0.2 }}
+                      draggable={true}
+                      onDragStart={(e: any) => {
+                        e.stopPropagation();
+                        const data = JSON.stringify({id: folder.id, type: 'folder'});
+                        e.dataTransfer.effectAllowed = "move";
+                        e.dataTransfer.setData('itemId', folder.id);
+                        e.dataTransfer.setData('itemType', 'folder');
+                        e.dataTransfer.setData('text/plain', folder.id);
+                        setDraggingItem({id: folder.id, type: 'folder'});
+                        e.currentTarget.classList.add('opacity-50', 'scale-95');
+                      }}
+                      onDragEnd={(e: any) => {
+                        e.currentTarget.classList.remove('opacity-50', 'scale-95');
+                        setDraggingItem(null);
+                      }}
+                    >
+                      <Card 
+                        className={`group relative flex flex-col h-64 overflow-hidden transition-all duration-200 hover:bg-muted/60 cursor-grab active:cursor-grabbing rounded-2xl border ${
+                          selectedFolders.includes(folder.id) 
+                            ? 'bg-primary/5 border-primary ring-1 ring-primary/50 shadow-md' 
+                            : 'bg-card border-border/60 hover:bg-muted/20 shadow-sm hover:shadow-md'
+                        }`}
+                        onClick={(e) => {
+                           const isMod = (e as any).shiftKey || (e as any).ctrlKey || (e as any).metaKey;
+                           if (selectedDocs.length > 0 || selectedFolders.length > 0 || isMod) {
+                             toggleFolderSelection(folder.id, e as any);
+                           } else {
+                             navigateToFolder(folder);
+                           }
+                        }}
+                        onDragOver={(e: any) => {
+                          e.preventDefault();
+                          e.dataTransfer.dropEffect = "move";
+                          e.currentTarget.classList.add('bg-primary/10', 'border-primary/60');
+                        }}
+                        onDragEnter={(e: any) => {
+                          e.preventDefault();
+                          e.currentTarget.classList.add('bg-primary/10', 'border-primary/60');
+                        }}
+                        onDragLeave={(e: any) => {
+                          e.currentTarget.classList.remove('bg-primary/10', 'border-primary/60');
+                        }}
+                        onDrop={(e: any) => {
+                          e.preventDefault();
+                          e.currentTarget.classList.remove('bg-primary/10', 'border-primary/60');
+                          const itemId = e.dataTransfer.getData('itemId') || e.dataTransfer.getData('text/plain') || draggingItem?.id;
+                          const itemType = (e.dataTransfer.getData('itemType') as 'doc' | 'folder') || draggingItem?.type;
+                          if (itemId && itemType) handleDropToFolder(itemId, folder.id, itemType);
+                        }}
                       >
-                        Abrir Editor
-                        <ChevronRight className="h-4 w-4 ml-1 transition-transform group-hover:translate-x-1" />
-                      </Button>
-                    </div>
-                  </div>
-                </Card>
-              </motion.div>
-          ))}
-            </AnimatePresence>
+                        <div className={`absolute top-3 left-3 z-10 transition-opacity ${selectedFolders.includes(folder.id) ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                          <Checkbox 
+                            checked={selectedFolders.includes(folder.id)}
+                            onCheckedChange={() => toggleFolderSelection(folder.id)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="w-4 h-4 rounded-sm"
+                          />
+                        </div>
+                        
+                        <div className="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="secondary" size="icon" className="h-8 w-8 rounded-full shadow-sm bg-background/80 backdrop-blur" onClick={(e) => e.stopPropagation()}>
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-48 rounded-xl shadow-xl border-border/50">
+                              <DropdownMenuItem onClick={(e) => { e.stopPropagation(); navigateToFolder(folder); }} className="gap-2 cursor-pointer focus:bg-muted">
+                                <ExternalLink className="h-4 w-4" />
+                                <span>Abrir</span>
+                              </DropdownMenuItem>
+                              <DropdownMenuItem 
+                                onClick={(e) => { 
+                                  e.stopPropagation(); 
+                                  setItemToRename({id: folder.id, name: folder.name, type: 'folder'});
+                                  setNewName(folder.name);
+                                  setIsRenameDialogOpen(true);
+                                }} 
+                                className="gap-2 cursor-pointer focus:bg-muted"
+                              >
+                                <Edit3 className="h-4 w-4" />
+                                <span>Renombrar</span>
+                              </DropdownMenuItem>
+                              <DropdownMenuItem 
+                                onClick={(e) => { 
+                                  e.stopPropagation(); 
+                                  setItemToMove({id: folder.id, name: folder.name, type: 'folder'});
+                                  setSelectedTargetFolderForMove("null");
+                                  setIsMoveItemDialogOpen(true);
+                                  fetchAllFolders();
+                                }} 
+                                className="gap-2 cursor-pointer focus:bg-muted"
+                              >
+                                <FolderOutput className="h-4 w-4" />
+                                <span>Mover a...</span>
+                              </DropdownMenuItem>
+                              <DropdownMenuItem 
+                                onClick={(e) => { 
+                                  e.stopPropagation(); 
+                                  setItemToMove({id: folder.id, name: folder.name, type: 'folder'});
+                                  setSelectedWorkspaceForMove(folder.workspace_id || "none");
+                                  setIsMoveDialogOpen(true);
+                                }} 
+                                className="gap-2 cursor-pointer focus:bg-muted"
+                              >
+                                <Briefcase className="h-4 w-4" />
+                                <span>Asociar Workspace</span>
+                              </DropdownMenuItem>
+                              <div className="h-px bg-border/40 my-1" />
+                              <DropdownMenuItem 
+                                onClick={(e) => { e.stopPropagation(); handleDeleteFolder(folder.id, folder.name); }} 
+                                className="gap-2 cursor-pointer text-destructive focus:text-destructive focus:bg-destructive/10"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                                <span>Eliminar</span>
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+
+                        {/* Folder Preview Area (Mock) */}
+                        <div className="flex-1 bg-muted/30 flex items-center justify-center p-6 border-b border-border/40">
+                          <div className="p-4 rounded-3xl bg-background shadow-sm text-foreground/70 transition-transform group-hover:scale-110 duration-500" style={{ color: folder.workspace_color || 'currentColor' }}>
+                            <Folder className="h-14 w-14 fill-current opacity-80" />
+                          </div>
+                        </div>
+
+                        {/* Folder Info Area */}
+                        <div className="p-4 bg-card h-24 flex flex-col justify-center">
+                          <div className="flex items-center gap-2 mb-1">
+                            <Folder className="h-4 w-4 shrink-0" style={{ color: folder.workspace_color || 'currentColor' }} />
+                            <h3 className="font-medium text-sm leading-tight truncate text-foreground" title={folder.name}>
+                              {folder.name}
+                            </h3>
+                          </div>
+                          
+                          <div className="flex items-center justify-between mt-1">
+                            <span className="text-[11px] text-muted-foreground flex items-center gap-1">
+                              <Folder className="h-3 w-3" />
+                              Carpeta
+                            </span>
+                            
+                            {folder.workspace_name && (
+                              <div
+                                className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full border uppercase tracking-wider"
+                                style={{
+                                  backgroundColor: folder.workspace_color ? `${folder.workspace_color}15` : '#f3f4f620',
+                                  borderColor: folder.workspace_color ? `${folder.workspace_color}40` : '#88888840',
+                                }}
+                                title={folder.workspace_name}
+                              >
+                                <span
+                                  className="h-1.5 w-1.5 rounded-full"
+                                  style={{ backgroundColor: folder.workspace_color || '#888888' }}
+                                ></span>
+                                <span style={{ color: folder.workspace_color || '#374151' }} className="truncate max-w-[60px]">
+                                  {folder.workspace_name}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </Card>
+                    </motion.div>
+                  ))}
+                  </AnimatePresence>
+                </div>
+              </div>
+            )}
+
+            {filteredDocs.length > 0 && (
+              <div className="space-y-4">
+                <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider pl-1">Archivos</h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-5">
+                  <AnimatePresence>
+                  {filteredDocs.map((doc) => (
+                    <motion.div 
+                      key={`doc-${doc.id}`}
+                      layout
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.95 }}
+                      transition={{ duration: 0.2 }}
+                      draggable={true}
+                      onDragStart={(e: any) => {
+                        e.stopPropagation();
+                        e.dataTransfer.effectAllowed = "move";
+                        e.dataTransfer.setData('itemId', doc.id);
+                        e.dataTransfer.setData('itemType', 'doc');
+                        e.dataTransfer.setData('text/plain', doc.id);
+                        setDraggingItem({id: doc.id, type: 'doc'});
+                        e.currentTarget.classList.add('opacity-50', 'scale-95');
+                      }}
+                      onDragEnd={(e: any) => {
+                        e.currentTarget.classList.remove('opacity-50', 'scale-95');
+                        setDraggingItem(null);
+                      }}
+                      className="h-full"
+                    >
+                      <Card 
+                        className={`group relative flex flex-col h-64 overflow-hidden transition-all duration-200 cursor-pointer rounded-2xl border ${
+                          selectedDocs.includes(doc.id)
+                            ? 'bg-primary/5 border-primary ring-1 ring-primary/50 shadow-md'
+                            : 'bg-card border-border/60 hover:bg-muted/20 shadow-sm hover:shadow-md'
+                        }`}
+                        onClick={(e) => {
+                           const isMod = (e as any).shiftKey || (e as any).ctrlKey || (e as any).metaKey;
+                           if (selectedDocs.length > 0 || selectedFolders.length > 0 || isMod) {
+                             toggleDocSelection(doc.id, e as any);
+                           } else {
+                             openEditor(doc);
+                           }
+                        }}
+                      >
+                        <div className={`absolute top-3 left-3 z-10 transition-opacity ${selectedDocs.includes(doc.id) ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                          <Checkbox 
+                            checked={selectedDocs.includes(doc.id)}
+                            onCheckedChange={() => toggleDocSelection(doc.id)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="w-4 h-4 rounded-sm"
+                          />
+                        </div>
+
+                        <div className="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="secondary" size="icon" className="h-8 w-8 rounded-full shadow-sm bg-background/80 backdrop-blur" onClick={(e) => e.stopPropagation()}>
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-48 rounded-xl border-border/40 shadow-xl">
+                              <DropdownMenuItem onClick={() => openEditor(doc)} className="gap-2 cursor-pointer py-2 px-3">
+                                <Edit3 className="h-4 w-4 text-primary" />
+                                <span className="font-medium">Editar Ahora</span>
+                              </DropdownMenuItem>
+                              <DropdownMenuItem 
+                                onClick={() => {
+                                  setItemToRename({id: doc.id, name: doc.filename, type: 'doc'});
+                                  setNewName(doc.filename);
+                                  setIsRenameDialogOpen(true);
+                                }} 
+                                className="gap-2 cursor-pointer py-2 px-3"
+                              >
+                                <Edit3 className="h-4 w-4" />
+                                <span className="font-medium">Renombrar</span>
+                              </DropdownMenuItem>
+                              <DropdownMenuItem className="gap-2 cursor-pointer py-2 px-3">
+                                <Download className="h-4 w-4" />
+                                <span className="font-medium">Descargar</span>
+                              </DropdownMenuItem>
+                               <DropdownMenuItem 
+                                onClick={(e) => { 
+                                  e.stopPropagation(); 
+                                  setItemToMove({id: doc.id, name: doc.filename, type: 'doc'});
+                                  setSelectedTargetFolderForMove("null");
+                                  setIsMoveItemDialogOpen(true);
+                                  fetchAllFolders();
+                                }} 
+                                className="gap-2 cursor-pointer py-2 px-3"
+                              >
+                                <FolderOutput className="h-4 w-4" />
+                                <span className="font-medium">Mover a...</span>
+                              </DropdownMenuItem>
+                               <DropdownMenuItem 
+                                onClick={() => {
+                                  setItemToMove({id: doc.id, name: doc.filename, type: 'doc'});
+                                  setSelectedWorkspaceForMove(doc.workspace_id || "none");
+                                  setIsMoveDialogOpen(true);
+                                }} 
+                                className="gap-2 cursor-pointer py-2 px-3"
+                              >
+                                <Briefcase className="h-4 w-4" />
+                                <span className="font-medium">Asociar Workspace</span>
+                              </DropdownMenuItem>
+                              <DropdownMenuItem 
+                                onClick={() => handleDuplicate(doc)}
+                                className="gap-2 cursor-pointer py-2 px-3"
+                              >
+                                <Copy className="h-4 w-4" />
+                                <span className="font-medium">Duplicar Documento</span>
+                              </DropdownMenuItem>
+                              <DropdownMenuItem 
+                                onClick={() => handleVectorize(doc)}
+                                className="gap-2 cursor-pointer py-2 px-3"
+                              >
+                                <Layers className="h-4 w-4 text-emerald-500" />
+                                <span className="font-medium text-emerald-500">Vectorizar (RAG)</span>
+                              </DropdownMenuItem>
+                              <div className="h-px bg-border/40 my-1" />
+                              <DropdownMenuItem 
+                                onClick={() => handleDelete(doc.id, doc.filename)} 
+                                className="gap-2 cursor-pointer py-2 px-3 text-destructive focus:text-destructive focus:bg-destructive/10"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                                <span className="font-medium">Eliminar</span>
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+
+                        {/* File Preview Area (Mock) */}
+                        <div className="flex-1 bg-muted/30 flex items-center justify-center p-6 border-b border-border/40">
+                          <div className={`p-4 rounded-3xl bg-background shadow-sm ${getIconColor(doc.extension)} transition-transform group-hover:scale-110 duration-500`}>
+                            <FileText className="h-14 w-14" />
+                          </div>
+                        </div>
+
+                        {/* File Info Area */}
+                        <div className="p-4 bg-card h-24 flex flex-col justify-center">
+                          <div className="flex items-center gap-2 mb-1">
+                            <FileText className={`h-4 w-4 shrink-0 ${getIconColor(doc.extension).split(' ')[0]}`} />
+                            <h3 className="font-medium text-sm leading-tight truncate text-foreground" title={doc.filename}>
+                              {doc.filename}
+                            </h3>
+                          </div>
+                          
+                          <div className="flex items-center justify-between mt-1">
+                            <span className="text-[11px] text-muted-foreground flex items-center gap-1">
+                              <Calendar className="h-3 w-3" />
+                              {new Date(doc.updated_at).toLocaleDateString()}
+                            </span>
+                            
+                            {doc.workspace_id && (
+                              <div
+                                className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full border uppercase tracking-wider"
+                                style={{
+                                  backgroundColor: doc.workspace_color ? `${doc.workspace_color}15` : '#f3f4f620',
+                                  borderColor: doc.workspace_color ? `${doc.workspace_color}40` : '#88888840',
+                                }}
+                                title={doc.workspace_name || 'Workspace'}
+                              >
+                                <span
+                                  className="h-1.5 w-1.5 rounded-full"
+                                  style={{ backgroundColor: doc.workspace_color || '#888888' }}
+                                ></span>
+                                <span style={{ color: doc.workspace_color || '#374151' }} className="truncate max-w-[60px]">
+                                  {doc.workspace_name}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </Card>
+                    </motion.div>
+                  ))}
+                  </AnimatePresence>
+                </div>
+              </div>
+            )}
           </div>
           ) : (
           <div className="flex flex-col gap-2">
             {/* List View Header */}
             <div className="grid grid-cols-12 gap-4 px-4 py-2 text-sm font-semibold text-muted-foreground border-b mb-2">
-              <div className="col-span-6 md:col-span-5">Nombre</div>
+              <div 
+                className="col-span-6 md:col-span-5 flex items-center gap-2 cursor-pointer hover:text-foreground transition-colors select-none" 
+                onClick={() => { if (sortBy === 'name') setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc'); else { setSortBy('name'); setSortOrder('asc'); } }}
+              >
+                Nombre <span className="text-xs">{sortBy === 'name' ? (sortOrder === 'asc' ? '↑' : '↓') : ''}</span>
+              </div>
               <div className="col-span-3 hidden md:block">Workspace</div>
-              <div className="col-span-4 md:col-span-3 text-right">Actualizado</div>
+              <div 
+                className="col-span-4 md:col-span-3 flex items-center justify-end gap-2 cursor-pointer hover:text-foreground transition-colors select-none"
+                onClick={() => { if (sortBy === 'date') setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc'); else { setSortBy('date'); setSortOrder('desc'); } }}
+              >
+                Actualizado <span className="text-xs">{sortBy === 'date' ? (sortOrder === 'asc' ? '↑' : '↓') : ''}</span>
+              </div>
               <div className="col-span-2 md:col-span-1 text-right"></div>
             </div>
             
@@ -1592,8 +1654,8 @@ export default function DocumentsPage() {
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
-                  className={`grid grid-cols-12 gap-4 items-center px-4 py-3 border rounded-xl cursor-pointer transition-colors ${
-                    selectedFolders.includes(folder.id) ? 'border-orange-500 bg-orange-500/10 hover:bg-orange-500/20' : 'bg-card/40 hover:bg-card/80'
+                  className={`grid grid-cols-12 gap-4 items-center px-4 py-2 rounded-xl cursor-pointer transition-colors border border-transparent ${
+                    selectedFolders.includes(folder.id) ? 'bg-primary/10 border-primary/20 hover:bg-primary/20' : 'hover:bg-muted/50'
                   }`}
                   onClick={(e) => {
                      const isMod = (e as any).shiftKey || (e as any).ctrlKey || (e as any).metaKey;
@@ -1697,8 +1759,8 @@ export default function DocumentsPage() {
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
-                  className={`grid grid-cols-12 gap-4 items-center px-4 py-3 border rounded-xl cursor-pointer transition-colors ${
-                    selectedDocs.includes(doc.id) ? 'bg-primary/10 border-primary hover:bg-primary/20' : 'bg-card/40 hover:bg-card/80'
+                  className={`grid grid-cols-12 gap-4 items-center px-4 py-2 rounded-xl cursor-pointer transition-colors border border-transparent ${
+                    selectedDocs.includes(doc.id) ? 'bg-primary/10 border-primary/20 hover:bg-primary/20' : 'hover:bg-muted/50'
                   }`}
                   onClick={(e) => {
                      const isMod = (e as any).shiftKey || (e as any).ctrlKey || (e as any).metaKey;
@@ -2105,6 +2167,16 @@ export default function DocumentsPage() {
               <p className="text-xs text-muted-foreground">
                 Crea un enlace para abrir el documento sin seleccionar una cuenta especifica.
               </p>
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="public-can-edit"
+                  checked={shareCanEdit}
+                  onCheckedChange={(checked) => setShareCanEdit(checked === true)}
+                />
+                <label htmlFor="public-can-edit" className="text-xs cursor-pointer">
+                  Permitir edicion (desactivar para solo vista)
+                </label>
+              </div>
               <Button onClick={handleCreatePublicShare} disabled={isCreatingShare} className="rounded-xl">
                 {isCreatingShare ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Link2 className="h-4 w-4 mr-2" />}
                 Crear Enlace Publico
@@ -2116,6 +2188,16 @@ export default function DocumentsPage() {
               <p className="text-xs text-muted-foreground">
                 Invita una cuenta de KognitoAI por nombre, usuario o email.
               </p>
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="private-can-edit"
+                  checked={shareCanEdit}
+                  onCheckedChange={(checked) => setShareCanEdit(checked === true)}
+                />
+                <label htmlFor="private-can-edit" className="text-xs cursor-pointer">
+                  Permitir edicion (desactivar para solo vista)
+                </label>
+              </div>
               <Input
                 placeholder="Escribe nombre, usuario o email"
                 value={privateSearch}
@@ -2173,6 +2255,9 @@ export default function DocumentsPage() {
                         <div className="min-w-0">
                           <p className="text-sm font-medium truncate">
                             {link.scope === 'public' ? 'Enlace publico' : `Privado: ${privateLabel}`}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {link.can_edit ? 'Con edicion' : 'Solo lectura'}
                           </p>
                           {shareUrl && (
                             <p className="text-xs text-muted-foreground truncate">{shareUrl}</p>
