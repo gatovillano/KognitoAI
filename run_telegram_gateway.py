@@ -60,6 +60,11 @@ async def lifespan(app: FastAPI):
     """Gestiona el ciclo de vida del gateway de Telegram."""
     logger.info("🚀 Iniciando telegram_gateway...")
 
+    if not config.telegram_bot_token:
+        logger.warning("⚠️ TELEGRAM_BOT_TOKEN no configurado. El gateway iniciará en modo sin bot (solo health check).")
+        yield
+        return
+
     # Construir la aplicación de Telegram
     ptb_app = Application.builder().token(config.telegram_bot_token).build()
     bot_manager.initialize(ptb_app)
