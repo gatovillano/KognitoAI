@@ -1327,6 +1327,18 @@ async def create_tables():
                 await conn.run_sync(Base.metadata.create_all)
                 logger.info("✅ Tablas de la base de datos verificadas/creadas exitosamente.")
 
+                # ── Migraciones seguras: añadir columnas nuevas a tablas existentes ──
+                migrations = [
+                    "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS cloud_storage_path VARCHAR",
+                    "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS local_base_path VARCHAR",
+                ]
+                for migration_sql in migrations:
+                    try:
+                        await conn.execute(text(migration_sql))
+                    except Exception as migration_err:
+                        logger.warning(f"⚠️ Migración omitida (ya existe o error): {migration_err}")
+                logger.info("✅ Migraciones de esquema verificadas/aplicadas.")
+
                 # Crear índices manualmente para AnalyzedPair con IF NOT EXISTS
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_analyzed_pairs_account_id ON analyzed_pairs (account_id)"))
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_analyzed_pairs_document_ids ON analyzed_pairs (document_id_a, document_id_b)"))
