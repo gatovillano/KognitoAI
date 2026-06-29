@@ -44,9 +44,6 @@ class GatewayConfig:
 
         # Validaciones críticas
         if not self.telegram_bot_token:
-            raise ValueError("TELEGRAM_BOT_TOKEN no está configurado.")
-
-        logger.info(f"✅ GatewayConfig cargada. core_api_url={self.core_api_url}, core_ws_url={self.core_ws_url}")
-
+            logger.warning("⚠️ TELEGRAM_BOT_TOKEN no está configurado. El bot de Telegram no iniciará.")
 
 config = GatewayConfig()

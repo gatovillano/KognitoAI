@@ -46,6 +46,19 @@ run_setup() {
 
     ENV_FILE="${INSTALL_DIR}/config/.env"
     if [ ! -f "${ENV_FILE}" ]; then
+        echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo -e "${BOLD}🔑 Configuración Inicial de Variables de Entorno${NC}"
+        echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo -e "${YELLOW}💡 Puedes dejar en blanco las opcionales y configurarlas luego en ~/.kognito/config/.env${NC}"
+        echo ""
+
+        printf "  Token del Bot de Telegram (TELEGRAM_BOT_TOKEN) [opcional]: "
+        read -r TG_TOKEN
+
+        printf "  URL de la Base de Datos [Enter para SQLite local]: "
+        read -r DB_URL
+        DB_URL="${DB_URL:-sqlite+aiosqlite:///${INSTALL_DIR}/kognito_db.sqlite}"
+
         cat <<EOF > "${ENV_FILE}"
 # Kognito AI Environment Configuration
 KOGNITO_HOME=${INSTALL_DIR}
@@ -54,7 +67,8 @@ MEDIA_ROOT=${INSTALL_DIR}/media/documents
 THUMBNAILS_ROOT=${INSTALL_DIR}/media/thumbnails
 ONLYOFFICE_DOCS_ROOT=${INSTALL_DIR}/storage/onlyoffice/documents
 KOGNITO_SECRETS_DIR=${INSTALL_DIR}/secrets
-DATABASE_URL=sqlite+aiosqlite:///${INSTALL_DIR}/kognito_db.sqlite
+DATABASE_URL=${DB_URL}
+TELEGRAM_BOT_TOKEN=${TG_TOKEN}
 EOF
         echo -e "${GREEN}✅ Configuración generada en ${ENV_FILE}.${NC}"
     else
@@ -84,12 +98,14 @@ EOF
         echo -e "${GREEN}✅ Dependencias Python instaladas.${NC}"
     fi
 
-    # Node modules
-    if [ ! -d "${PROJECT_DIR}/node_modules" ]; then
-        echo -e "${YELLOW}📦 Instalando paquetes Node...${NC}"
-        (cd "${PROJECT_DIR}" && npm install --silent)
-        echo -e "${GREEN}✅ Dependencias Node instaladas.${NC}"
-    fi
+    # Node modules + Production Build
+    echo -e "${YELLOW}📦 Instalando paquetes Node...${NC}"
+    (cd "${PROJECT_DIR}" && npm install --silent)
+    echo -e "${GREEN}✅ Dependencias Node instaladas.${NC}"
+
+    echo -e "${YELLOW}🏗️  Construyendo Frontend (npm run build)...${NC}"
+    (cd "${PROJECT_DIR}" && npm run build)
+    echo -e "${GREEN}✅ Frontend construido exitosamente.${NC}"
 
     # Install global kognitoai CLI
     CLI_TARGET="${HOME}/.local/bin/kognitoai"
@@ -109,6 +125,8 @@ run_update() {
     git pull origin main
     "${PROJECT_DIR}/venv_host/bin/pip" install -r requirements.txt --quiet 2>/dev/null || true
     npm install --silent
+    echo -e "${YELLOW}🏗️  Reconstruyendo Frontend (npm run build)...${NC}"
+    npm run build
     # Re-install CLI in case it changed
     cp "${PROJECT_DIR}/kognitoai" "${HOME}/.local/bin/kognitoai"
     chmod +x "${HOME}/.local/bin/kognitoai"
