@@ -25,7 +25,7 @@ class Neo4jAdapter:
         self.graph_db = graph_db
         logger.info("✅ Neo4jAdapter inicializado")
     
-    async def add_cognee_results_to_graph(self, entities: List[Dict], relationships: List[Dict], workspace_id: Optional[str] = None, account_id: Optional[str] = None, dataset_name: Optional[str] = None) -> Dict[str, Any]:
+    async def add_cognee_results_to_graph(self, entities: List[Dict], relationships: List[Dict], workspace_id: Optional[str] = None, account_id: Optional[str] = None, dataset_name: Optional[str] = None, workspace: Optional[str] = None) -> Dict[str, Any]:
         """
         Agrega entidades y relaciones del pipeline híbrido a Neo4j.
         
@@ -35,6 +35,7 @@ class Neo4jAdapter:
             workspace_id: ID del workspace actual
             account_id: ID de la cuenta del usuario
             dataset_name: Nombre del dataset (opcional, para sobrescribir/asegurar)
+            workspace: Nombre del workspace actual (opcional)
             
         Returns:
             Dict con estadísticas del proceso
@@ -58,10 +59,10 @@ class Neo4jAdapter:
             }
             
             # Agregar entidades
-            stats["entities_added"] = await self._add_entities_to_neo4j(entities, workspace_id, account_id, dataset_name)
+            stats["entities_added"] = await self._add_entities_to_neo4j(entities, workspace_id, account_id, dataset_name, workspace=workspace)
             
             # Agregar relaciones
-            stats["relationships_added"] = await self._add_relationships_to_neo4j(relationships, workspace_id, account_id, dataset_name)
+            stats["relationships_added"] = await self._add_relationships_to_neo4j(relationships, workspace_id, account_id, dataset_name, workspace=workspace)
             
             logger.info(f"✅ Integración completada: {stats}")
             return stats
@@ -88,7 +89,7 @@ class Neo4jAdapter:
         except Exception as e:
             logger.warning(f"⚠️ Error limpiando grafo: {e}")
     
-    async def create_conceptual_quote_nodes(self, quotes: List[Dict], account_id: Optional[str] = None, workspace_id: Optional[str] = None):
+    async def create_conceptual_quote_nodes(self, quotes: List[Dict], account_id: Optional[str] = None, workspace_id: Optional[str] = None, workspace: Optional[str] = None):
         """
         Crea nodos de tipo CONCEPTUAL_QUOTE en Neo4j.
         """
@@ -112,11 +113,12 @@ class Neo4jAdapter:
             props["type"] = "CONCEPTUAL_QUOTE"
             props["account_id"] = acc_id_str
             props["workspace_id"] = str(workspace_id) if workspace_id else None
+            props["workspace"] = workspace or quote.get("workspace") or props.get("workspace")
             batch_data.append({"id": quote["id"], "properties": props})
 
         await self.graph_db.execute_query(query, {"quotes": batch_data, "account_id": acc_id_str})
 
-    async def create_idea_profile_nodes(self, profiles: List[Dict], account_id: Optional[str] = None, workspace_id: Optional[str] = None):
+    async def create_idea_profile_nodes(self, profiles: List[Dict], account_id: Optional[str] = None, workspace_id: Optional[str] = None, workspace: Optional[str] = None):
         """
         Crea nodos de tipo IDEA_PROFILE en Neo4j.
         """
@@ -140,11 +142,12 @@ class Neo4jAdapter:
             props["type"] = "IDEA_PROFILE"
             props["account_id"] = acc_id_str
             props["workspace_id"] = str(workspace_id) if workspace_id else None
+            props["workspace"] = workspace or profile.get("workspace") or props.get("workspace")
             batch_data.append({"id": profile["id"], "properties": props})
 
         await self.graph_db.execute_query(query, {"profiles": batch_data, "account_id": acc_id_str})
 
-    async def create_conceptual_relationships(self, relationships: List[Dict], account_id: Optional[str] = None, workspace_id: Optional[str] = None):
+    async def create_conceptual_relationships(self, relationships: List[Dict], account_id: Optional[str] = None, workspace_id: Optional[str] = None, workspace: Optional[str] = None):
         """
         Crea relaciones temáticas entre nodos conceptuales en Neo4j.
         """
@@ -176,13 +179,15 @@ class Neo4jAdapter:
                 r.metadata_score = rel.metadata_score,
                 r.shared_signals = rel.shared_signals,
                 r.account_id = $account_id,
-                r.workspace_id = $workspace_id,
+                r.workspace_id = COALESCE(rel.workspace_id, $workspace_id),
+                r.workspace = COALESCE(rel.workspace, $workspace),
                 r.updated_at = datetime()
             """
             
             batch_data = []
             acc_id_str = str(account_id) if account_id else None
             ws_id_str = str(workspace_id) if workspace_id else None
+            ws_name_str = str(workspace) if workspace else None
             
             for rel in type_rels:
                 # SOPORTE: Manejar datos anidados bajo 'properties'
@@ -199,14 +204,17 @@ class Neo4jAdapter:
                     "similarity_score": rel_props.get("similarity_score") or rel.get("similarity_score"),
                     "metadata_score": rel_props.get("metadata_score") or rel.get("metadata_score"),
                     "shared_signals": rel_props.get("shared_signals") or rel.get("shared_signals", []),
+                    "workspace_id": rel.get("workspace_id") or rel_props.get("workspace_id"),
+                    "workspace": rel.get("workspace") or rel_props.get("workspace"),
                 })
             
             await self.graph_db.execute_query(query, {
                 "rels": batch_data, 
                 "account_id": acc_id_str,
-                "workspace_id": ws_id_str
+                "workspace_id": ws_id_str,
+                "workspace": ws_name_str
             })
-    async def _add_entities_to_neo4j(self, entities: List[Dict], workspace_id: Optional[str], account_id: Optional[str], dataset_name: Optional[str] = None) -> int:
+    async def _add_entities_to_neo4j(self, entities: List[Dict], workspace_id: Optional[str], account_id: Optional[str], dataset_name: Optional[str] = None, workspace: Optional[str] = None) -> int:
         """
         Agrega entidades a Neo4j.
         
@@ -215,6 +223,7 @@ class Neo4jAdapter:
             workspace_id: ID del workspace
             account_id: ID de la cuenta
             dataset_name: Nombre del dataset (opcional)
+            workspace: Nombre del workspace (opcional)
             
         Returns:
             Número de entidades agregadas
@@ -269,7 +278,8 @@ class Neo4jAdapter:
 
                     # Asegurar IDs como strings
                     acc_id_str = str(account_id) if account_id else None
-                    ws_id_str = str(workspace_id) if workspace_id else None
+                    ws_id_str = str(workspace_id) if workspace_id else (str(entity.get("workspace_id")) if entity.get("workspace_id") else None)
+                    ws_name_str = workspace if workspace else (entity.get("workspace") or props.get("workspace"))
 
                     entity_data = {
                         "id": str(entity_id),
@@ -283,7 +293,8 @@ class Neo4jAdapter:
                         "concept": concept, # Incluir concept
                         "category": category, # Incluir category
                         "source_document_id": str(entity.get("source_document_id")) if entity.get("source_document_id") else None,
-                        "dataset_name": final_dataset_name
+                        "dataset_name": final_dataset_name,
+                        "workspace": ws_name_str
                     }
                     entity_data["workspace_id"] = ws_id_str
                     entity_data["account_id"] = acc_id_str
@@ -325,6 +336,7 @@ class Neo4jAdapter:
                         n.created_at = entity.created_at,
                         n.extraction_method = entity.extraction_method,
                         n.workspace_id = entity.workspace_id,
+                        n.workspace = entity.workspace,
                         n.account_id = entity.account_id,
                         n.dataset_name = entity.dataset_name,
                         n.concept = entity.concept,
@@ -354,7 +366,7 @@ class Neo4jAdapter:
             logger.error(f"❌ Error agregando entidades: {e}")
             raise
     
-    async def _add_relationships_to_neo4j(self, relationships: List[Dict], workspace_id: Optional[str], account_id: Optional[str], dataset_name: Optional[str] = None) -> int:
+    async def _add_relationships_to_neo4j(self, relationships: List[Dict], workspace_id: Optional[str], account_id: Optional[str], dataset_name: Optional[str] = None, workspace: Optional[str] = None) -> int:
         """
         Agrega relaciones a Neo4j.
         
@@ -363,6 +375,7 @@ class Neo4jAdapter:
             workspace_id: ID del workspace
             account_id: ID de la cuenta
             dataset_name: Nombre del dataset (opcional)
+            workspace: Nombre del workspace (opcional)
             
         Returns:
             Número de relaciones agregadas
@@ -407,7 +420,8 @@ class Neo4jAdapter:
 
                     # Asegurar que account_id y workspace_id sean strings para evitar problemas de tipos en Neo4j
                     final_account_id = str(account_id) if account_id else None
-                    final_workspace_id = str(workspace_id) if workspace_id else None
+                    final_workspace_id = str(workspace_id) if workspace_id else (str(relationship.get("workspace_id") or relationship.get("properties", {}).get("workspace_id") or "") or None)
+                    final_workspace_name = workspace if workspace else (relationship.get("workspace") or relationship.get("properties", {}).get("workspace"))
 
                     if source_id and target_id:  # Solo agregar si ambas entidades existen
                         # El pipeline híbrido usa 'relationship_type', no 'type'
@@ -438,7 +452,8 @@ class Neo4jAdapter:
                             "confidence": confidence,
                             "source": source,
                             "created_at": created_at,
-                            "extraction_method": extraction_method
+                            "extraction_method": extraction_method,
+                            "workspace": final_workspace_name
                         }
                         rel_data["workspace_id"] = final_workspace_id
                         rel_data["account_id"] = final_account_id
@@ -493,6 +508,7 @@ class Neo4jAdapter:
                         r.extraction_method = rel.extraction_method,
                         r.type = rel.type,
                         r.workspace_id = rel.workspace_id,
+                        r.workspace = rel.workspace,
                         r.account_id = rel.account_id,
                         r.dataset_name = rel.dataset_name
                     RETURN count(r) as created
@@ -669,6 +685,7 @@ class Neo4jAdapter:
                     "created_at": doc.get("created_at", datetime.now().isoformat()),
                     "updated_at": doc.get("updated_at", datetime.now().isoformat()),
                     "workspace_id": doc.get("workspace_id"),
+                    "workspace": doc.get("workspace"),
                     "account_id": doc.get("account_id"),
                     "dataset_name": doc.get("dataset_name"),
                     "type": doc_type
@@ -694,6 +711,7 @@ class Neo4jAdapter:
                 d.created_at = doc.created_at,
                 d.updated_at = doc.updated_at,
                 d.workspace_id = doc.workspace_id,
+                d.workspace = doc.workspace,
                 d.account_id = doc.account_id,
                 d.dataset_name = doc.dataset_name,
                 d.type = doc.type
@@ -759,6 +777,7 @@ class Neo4jAdapter:
                 "memory_type": m.get("memory_type", ""),
                 "node_type": node_type,
                 "workspace_id": m.get("workspace_id") or "",
+                "workspace": m.get("workspace") or "",
                 "thread_id": m.get("thread_id") or "",
                 "account_id": m.get("account_id", ""),
                 "original_uuid": m.get("original_uuid", ""),
@@ -778,6 +797,7 @@ class Neo4jAdapter:
             m.type        = mem.node_type,
             m.dataset_name = 'Agent Memories',
             m.workspace_id = mem.workspace_id,
+            m.workspace   = mem.workspace,
             m.thread_id   = mem.thread_id,
             m.original_uuid = mem.original_uuid,
             m.created_at  = mem.created_at,
@@ -829,7 +849,9 @@ class Neo4jAdapter:
         MATCH (e {{id: pair.entity_id, account_id: $account_id}})
         MERGE (m)-[r:{relationship_type}]->(e)
         SET r.created_at = toString(datetime()),
-            r.extraction_method = 'memory_entity_linking'
+            r.extraction_method = 'memory_entity_linking',
+            r.workspace_id = m.workspace_id,
+            r.workspace = m.workspace
         RETURN count(r) AS created
         """
         try:
@@ -916,7 +938,9 @@ class Neo4jAdapter:
                 {
                     "source_id": str(ent["source_document_id"]),
                     "target_id": str(ent["id"]),
-                    "dataset_name": dataset_name or ent.get("dataset_name")
+                    "dataset_name": dataset_name or ent.get("dataset_name"),
+                    "workspace_id": ent.get("workspace_id"),
+                    "workspace": ent.get("workspace")
                 }
                 for ent in entities if ent.get("source_document_id")
             ]
@@ -931,7 +955,9 @@ class Neo4jAdapter:
             MERGE (d)-[r:MENTIONS]->(e)
             SET r.dataset_name = mention.dataset_name,
                 r.created_at = toString(datetime()),
-                r.extraction_method = 'hybrid_mention'
+                r.extraction_method = 'hybrid_mention',
+                r.workspace_id = mention.workspace_id,
+                r.workspace = mention.workspace
             """
             await self.graph_db.execute_query(query, {"mentions": mentions})
             logger.info(f"🔗 Creadas {len(mentions)} relaciones MENTIONS entre documentos y entidades")

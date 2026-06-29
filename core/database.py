@@ -180,6 +180,7 @@ class Account(Base):
     ssh_port = Column(String(10), nullable=True, default="22", comment="Puerto SSH, por defecto 22.")
     ssh_user = Column(String(255), nullable=True, comment="Usuario SSH.")
     local_base_path = Column(String(512), nullable=True, comment="Directorio raíz al que se restringe el acceso SSH.")
+    cloud_storage_path = Column(String(512), nullable=True, comment="Ruta local elegida por el usuario para guardar archivos de la nube (fotos y documentos).")
 
     # Campos para MFA
     mfa_enabled = Column(Boolean, default=False, nullable=False, comment="Indica si el usuario tiene MFA habilitado.")
@@ -662,17 +663,18 @@ class Album(Base):
     name = Column(String, nullable=False)
     description = Column(Text, nullable=True)
     account_id = Column(UUID(as_uuid=True), ForeignKey('accounts.id'), nullable=False)
+    workspace_id = Column(UUID(as_uuid=True), ForeignKey('workspaces.id', ondelete='CASCADE'), nullable=True, index=True)
     cover_photo_id = Column(UUID(as_uuid=True), ForeignKey('photos.id', use_alter=True, name='fk_album_cover_photo'), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     owner = relationship("Account")
+    workspace = relationship("Workspace", backref="albums")
     cover_photo = relationship("Photo", foreign_keys=[cover_photo_id], post_update=True)
     photos = relationship("Photo",
                           back_populates="album",
                           cascade="all, delete-orphan",
                           foreign_keys="[Photo.album_id]")
-    contact_profiles = relationship("ContactProfile", secondary="contact_profile_album_association", back_populates="albums")
     contact_profiles = relationship("ContactProfile", secondary="contact_profile_album_association", back_populates="albums")
 
 

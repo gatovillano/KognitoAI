@@ -122,22 +122,6 @@ async def get_all_langchain_tools(
     """
     logger.debug("⚙️ Assembling agent toolbox via SkillManager...")
 
-    # Selección dinámica de categorías (DESACTIVADA por preferencia del usuario)
-    relevant_categories = None
-    logger.info("🗂️ Carga completa de todas las categorías de skills (filtro dinámico desactivado).")
-
-
-    
-    # Fetch disabled skills for this user
-    disabled_skills = []
-    try:
-        async with SessionLocal() as db:
-            account = await db.get(Account, uuid.UUID(account_id))
-            if account:
-                disabled_skills = account.disabled_skills or []
-    except Exception as e:
-        logger.warning(f"Could not fetch disabled_skills for account {account_id}: {e}")
-
     workspace_name = None
     try:
         if workspace_id:
@@ -154,7 +138,50 @@ async def get_all_langchain_tools(
     try:
         from core.skill_manager import get_skill_manager
         skill_manager = get_skill_manager()
-        
+
+        # Selección dinámica de categorías basada en la consulta (Semántica + Keywords)
+        relevant_categories = None
+        if query:
+            relevant_categories = []
+            
+            # 1. Búsqueda por palabras clave (rápida)
+            keyword_cats = select_relevant_categories(query)
+            if keyword_cats:
+                relevant_categories.extend(keyword_cats)
+                
+            # 2. Búsqueda por similitud semántica (vectorial)
+            try:
+                semantic_results = await skill_manager.search_skills_semantic(
+                    query=query, 
+                    top_k=4, 
+                    account_id=account_id, 
+                    workspace_name=workspace_name
+                )
+                if semantic_results:
+                    for res in semantic_results:
+                        if res["id"] not in relevant_categories:
+                            relevant_categories.append(res["id"])
+            except Exception as e:
+                logger.warning(f"Error en búsqueda semántica de skills: {e}")
+                
+            if not relevant_categories:
+                relevant_categories = None # Fallback a cargar todas si ambas fallan
+
+        if relevant_categories is not None:
+            logger.info(f"🗂️ Carga de skills filtrada dinámicamente por query (Semántica + Keywords): {relevant_categories}")
+        else:
+            logger.info("🗂️ Carga completa de todas las categorías de skills (filtro dinámico desactivado o sin query).")
+
+        # Fetch disabled skills for this user
+        disabled_skills = []
+        try:
+            async with SessionLocal() as db:
+                account = await db.get(Account, uuid.UUID(account_id))
+                if account:
+                    disabled_skills = account.disabled_skills or []
+        except Exception as e:
+            logger.warning(f"Could not fetch disabled_skills for account {account_id}: {e}")
+
         # El SkillManager maneja la inicialización de dependencias compartidas (Neo4j, etc)
         # y la inyección de account_id, workspace_id, etc.
         tools = await skill_manager.load_skills(

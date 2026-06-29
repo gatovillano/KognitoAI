@@ -362,6 +362,12 @@ _main_agent_llm_instance: Optional[ChatLiteLLM] = None
 _fast_task_llm_instance: Optional[ChatLiteLLM] = None
 _vision_llm_instance: Optional[ChatLiteLLM] = None
 
+# --- LLM Instance Cache ---
+# Cache LLM instances per user to avoid repeated DB queries
+# Key: (account_id, purpose) -> (instance, timestamp)
+_llm_cache: Dict[tuple, tuple] = {}
+_LLM_CACHE_TTL = 300  # 5 minutes
+
 
 def get_main_llm() -> Optional[ChatLiteLLM]:  # More specific return type
     """Returns the initialized main agent LLM instance."""
@@ -522,7 +528,7 @@ def _sanitize_ascii(value: Any) -> Any:
 
 def _sanitize_llm_kwargs(kwargs: dict) -> dict:
     """
-    Sanitizes common LLM kwargs that end up in HTTP headers.
+    Sanitizes common LLM kwargs that end up in HTTP headers or cause LiteLLM kwarg conflicts.
     """
     if "api_key" in kwargs:
         kwargs["api_key"] = _sanitize_ascii(kwargs["api_key"])
@@ -537,7 +543,20 @@ def _sanitize_llm_kwargs(kwargs: dict) -> dict:
             k: _sanitize_ascii(v) for k, v in kwargs["extra_headers"].items()
         }
 
+    # Remover el kwarg 'provider' que causa conflictos en LiteLLM/OpenAI SDK
+    if "provider" in kwargs:
+        prov_val = kwargs.pop("provider")
+        if prov_val in ("google_ai_studio", "google", "gemini"):
+            prov_val = "gemini"
+        if prov_val and "custom_llm_provider" not in kwargs:
+            kwargs["custom_llm_provider"] = prov_val
+
+    # Normalizar custom_llm_provider si es google_ai_studio o google
+    if kwargs.get("custom_llm_provider") in ("google_ai_studio", "google"):
+        kwargs["custom_llm_provider"] = "gemini"
+
     return kwargs
+
 
 
 async def get_llm_for_user(
@@ -549,6 +568,15 @@ async def get_llm_for_user(
     """
     if not account_id:
         return get_main_llm()
+
+    # Check cache first to avoid repeated DB queries
+    cache_key = (account_id, purpose)
+    if cache_key in _llm_cache:
+        instance, ts = _llm_cache[cache_key]
+        if time.time() - ts < _LLM_CACHE_TTL:
+            return instance
+        else:
+            del _llm_cache[cache_key]
 
     try:
         async with SessionLocal() as db:
@@ -909,6 +937,8 @@ async def get_llm_for_user(
             llm_instance = ChatLiteLLM(**llm_kwargs)
             if "custom_llm_provider" in llm_kwargs:
                 llm_instance.custom_llm_provider = llm_kwargs["custom_llm_provider"]
+            # Cache the instance for future calls
+            _llm_cache[cache_key] = (llm_instance, time.time())
             return llm_instance
 
     except Exception as e:
@@ -1349,6 +1379,7 @@ async def initialize_llms():
 
             # Asegurarnos de que el model_name tenga prefijo openai/ para LiteLLM
             fast_llm_kwargs["model_name"] = f"openai/{actual_model}"
+            fast_llm_kwargs["custom_llm_provider"] = "openai"
 
         # --- FIX: Sanitize kwargs to prevent UnicodeEncodeError in headers ---
         fast_llm_kwargs = _sanitize_llm_kwargs(fast_llm_kwargs)
@@ -1435,6 +1466,7 @@ async def initialize_llms():
 
             # Asegurarnos de que el model_name tenga prefijo openai/ para LiteLLM
             vision_llm_kwargs["model_name"] = f"openai/{actual_model}"
+            vision_llm_kwargs["custom_llm_provider"] = "openai"
 
         # --- FIX: Sanitize kwargs to prevent UnicodeEncodeError in headers ---
         vision_llm_kwargs = _sanitize_llm_kwargs(vision_llm_kwargs)

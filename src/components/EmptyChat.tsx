@@ -5,16 +5,7 @@ import Image from 'next/image';
 import { motion, Variants, Transition } from 'framer-motion';
 import ChatInputBar from '@/components/ChatInputBar';
 import { Send } from 'lucide-react';
-
-interface SelectedContextItem {
-  id: string;
-  type: 'document' | 'collection' | 'repository';
-  name: string;
-  title?: string;
-  topic?: string;
-  content?: string;
-  file_name?: string;
-}
+import { SelectedContextItem } from '@/types/context';
 
 interface EmptyChatProps {
   onSendMessage: (e?: React.FormEvent) => void;

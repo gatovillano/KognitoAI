@@ -466,7 +466,7 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
               </Link>
             )}
 
-            <Link href="/documents" passHref onClick={onLinkClick} title="OnlyOffice" className="w-full block">
+            <Link href="/documents" passHref onClick={onLinkClick} title="Documentos" className="w-full block">
               <Button
                 variant={pathname?.startsWith('/documents') ? 'secondary' : 'ghost'}
                 className={cn(
@@ -476,7 +476,7 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
                 )}
               >
                 <FileText className={cn("h-4 w-4 transition-transform group-hover:scale-110", showToolText && "mr-2")} />
-                {showToolText && <span className="text-sm font-medium">OnlyOffice</span>}
+                {showToolText && <span className="text-sm font-medium">Documentos</span>}
               </Button>
             </Link>
 

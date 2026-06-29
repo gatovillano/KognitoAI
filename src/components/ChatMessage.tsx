@@ -181,14 +181,14 @@ const stripHtml = (text: string) => {
 const ToolCallBlock = ({ part, scrollToBottom }: { part: MessageContentPart, scrollToBottom?: (behavior?: 'smooth' | 'auto', force?: boolean) => void }) => {
   const { user, token } = useAuth();
   const isTerminal = part.tool_name === 'terminal_executor' && !!part.pty_session;
-  const [isExpanded, setIsExpanded] = useState(isTerminal);
+  const [isExpanded, setIsExpanded] = useState(isTerminal || part.status === 'error');
   const hasContent = (!!part.content && part.status !== 'start') || isTerminal;
 
   useEffect(() => {
-    if (isTerminal) {
+    if (isTerminal || part.status === 'error') {
       setIsExpanded(true);
     }
-  }, [isTerminal]);
+  }, [isTerminal, part.status]);
 
   useEffect(() => {
     if (isExpanded) {
@@ -196,24 +196,32 @@ const ToolCallBlock = ({ part, scrollToBottom }: { part: MessageContentPart, scr
     }
   }, [isExpanded, scrollToBottom]);
 
+  const isError = part.status === 'error';
+
   return (
     <div className="mb-4">
       <div 
-        className={`flex flex-col bg-primary/5 rounded-lg border border-primary/10 overflow-hidden transition-all duration-300 ${isExpanded ? 'ring-1 ring-primary/20 shadow-sm' : ''}`}
+        className={`flex flex-col rounded-lg border overflow-hidden transition-all duration-300 ${
+          isError 
+            ? 'bg-destructive/10 border-destructive/30 ring-1 ring-destructive/20 shadow-sm' 
+            : 'bg-primary/5 border-primary/10'
+        } ${isExpanded && !isError ? 'ring-1 ring-primary/20 shadow-sm' : ''}`}
       >
         <button
           onClick={() => hasContent && setIsExpanded(!isExpanded)}
           disabled={!hasContent}
-          className={`flex items-center gap-2 p-2 w-full text-left transition-colors ${hasContent ? 'hover:bg-primary/10 cursor-pointer' : 'cursor-default'}`}
+          className={`flex items-center gap-2 p-2 w-full text-left transition-colors ${
+            hasContent ? (isError ? 'hover:bg-destructive/20 cursor-pointer' : 'hover:bg-primary/10 cursor-pointer') : 'cursor-default'
+          }`}
         >
           {part.status === 'start' ? (
             <Loader2 className="h-3.5 w-3.5 text-primary animate-spin" />
-          ) : part.status === 'error' ? (
+          ) : isError ? (
             <X className="h-3.5 w-3.5 text-destructive" />
           ) : (
             <Folder className="h-3.5 w-3.5 text-primary" />
           )}
-          <p className="text-[11px] font-medium text-primary/80 flex-1">
+          <p className={`text-[11px] font-medium flex-1 ${isError ? 'text-destructive font-semibold' : 'text-primary/80'}`}>
             {part.tool_name ? `Herramienta: ${part.tool_name}` : 'Ejecutando herramienta...'}
             {part.status === 'end' && ' - Completado'}
             {part.status === 'error' && ' - Falló'}
@@ -223,7 +231,7 @@ const ToolCallBlock = ({ part, scrollToBottom }: { part: MessageContentPart, scr
                animate={{ rotate: isExpanded ? 180 : 0 }}
                transition={{ duration: 0.3 }}
              >
-               <ChevronDown className="h-3 w-3 text-primary/60" />
+               <ChevronDown className={`h-3 w-3 ${isError ? 'text-destructive/80' : 'text-primary/60'}`} />
              </motion.div>
           )}
         </button>

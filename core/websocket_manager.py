@@ -1,6 +1,8 @@
 import logging
 import asyncio
+import time
 from typing import Dict, Any, List, Optional
+from collections import defaultdict
 from fastapi import WebSocket, WebSocketDisconnect
 import httpx
 from core.config import settings
@@ -134,17 +136,38 @@ class WebSocketManager:
                     f"Enviando mensaje WS a {account_id} (tipo conexión: {connection_type or 'todos'}, "
                     f"tipo mensaje: {message_type}, conexiones: {len(connections_to_send)})."
                 )
-            for connection in connections_to_send:
-                try:
-                    await connection.send_json(message)
-                except WebSocketDisconnect:
-                    logger.warning(f"WebSocketDisconnect al enviar mensaje a {account_id} (conexión {id(connection)}). Desconectando.")
-                    for c_type, conns in self.active_connections.get(account_id, {}).items():
-                        if connection in conns:
-                            self.disconnect(connection, account_id, c_type)
-                            break
-                except Exception as e:
-                    logger.error(f"Error al enviar mensaje a {account_id} (conexión {id(connection)}): {e}")
+            # OPTIMIZACIÓN: Enviar mensajes en paralelo para reducir latencia
+            # Agrupar envíos en gather para conexiones múltiples
+            if len(connections_to_send) > 1:
+                send_tasks = []
+                for connection in connections_to_send:
+                    send_tasks.append(self._safe_send(connection, message, account_id))
+                await asyncio.gather(*send_tasks, return_exceptions=True)
+            else:
+                for connection in connections_to_send:
+                    try:
+                        await connection.send_json(message)
+                    except WebSocketDisconnect:
+                        logger.warning(f"WebSocketDisconnect al enviar mensaje a {account_id} (conexión {id(connection)}). Desconectando.")
+                        for c_type, conns in self.active_connections.get(account_id, {}).items():
+                            if connection in conns:
+                                self.disconnect(connection, account_id, c_type)
+                                break
+                    except Exception as e:
+                        logger.error(f"Error al enviar mensaje a {account_id} (conexión {id(connection)}): {e}")
+
+    async def _safe_send(self, connection: WebSocket, message: Dict[str, Any], account_id: str):
+        """Envía un mensaje de forma segura manejando desconexiones."""
+        try:
+            await connection.send_json(message)
+        except WebSocketDisconnect:
+            logger.warning(f"WebSocketDisconnect al enviar mensaje a {account_id} (conexión {id(connection)}). Desconectando.")
+            for c_type, conns in self.active_connections.get(account_id, {}).items():
+                if connection in conns:
+                    self.disconnect(connection, account_id, c_type)
+                    break
+        except Exception as e:
+            logger.error(f"Error al enviar mensaje a {account_id} (conexión {id(connection)}): {e}")
 
     async def broadcast(self, message: Dict[str, Any]):
         for account_id, connections_by_type in self.active_connections.items():

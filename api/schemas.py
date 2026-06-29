@@ -52,6 +52,7 @@ class UserSettingsResponse(BaseModel):
     ssh_port: Optional[str] = "22"
     ssh_user: Optional[str] = None
     local_base_path: Optional[str] = None
+    cloud_storage_path: Optional[str] = None
     # Campos de Heartbeat
     custom_heartbeat_instructions: Optional[str] = None
     custom_heartbeat_interval_minutes: Optional[int] = 60
@@ -107,6 +108,7 @@ class UserSettingsUpdateRequest(BaseModel):
     ssh_port: Optional[str] = None
     ssh_user: Optional[str] = None
     local_base_path: Optional[str] = None
+    cloud_storage_path: Optional[str] = None
     # Campos de Heartbeat
     custom_heartbeat_instructions: Optional[str] = None
     custom_heartbeat_interval_minutes: Optional[int] = None

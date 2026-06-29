@@ -208,6 +208,7 @@ async def get_user_settings(current_account_id: str = Depends(get_current_accoun
         ssh_port=account.ssh_port,
         ssh_user=account.ssh_user,
         local_base_path=account.local_base_path,
+        cloud_storage_path=account.cloud_storage_path,
         custom_heartbeat_instructions=account.custom_heartbeat_instructions,
         custom_heartbeat_interval_minutes=account.custom_heartbeat_interval_minutes,
         custom_heartbeat_allowed_tools=account.custom_heartbeat_allowed_tools
@@ -289,6 +290,7 @@ async def update_user_settings(
         ssh_port=account.ssh_port,
         ssh_user=account.ssh_user,
         local_base_path=account.local_base_path,
+        cloud_storage_path=account.cloud_storage_path,
         custom_heartbeat_instructions=account.custom_heartbeat_instructions,
         custom_heartbeat_interval_minutes=account.custom_heartbeat_interval_minutes,
         custom_heartbeat_allowed_tools=account.custom_heartbeat_allowed_tools

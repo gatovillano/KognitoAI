@@ -65,6 +65,7 @@ from api.schemas import ProfileLinkRequest
 class AlbumBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100, description="Nombre del álbum.")
     description: Optional[str] = Field(None, max_length=500, description="Descripción opcional del álbum.")
+    workspace_id: Optional[uuid.UUID] = Field(None, description="Workspace al que pertenece el álbum.")
 
 class AlbumCreate(AlbumBase):
     pass
@@ -72,6 +73,7 @@ class AlbumCreate(AlbumBase):
 class AlbumUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100, description="Nuevo nombre del álbum.")
     description: Optional[str] = Field(None, max_length=500, description="Nueva descripción opcional del álbum.")
+    workspace_id: Optional[uuid.UUID] = Field(None, description="Nuevo workspace asociado al álbum.")
 
 class SetCoverRequest(BaseModel):
     photo_id: uuid.UUID
@@ -79,6 +81,7 @@ class SetCoverRequest(BaseModel):
 class AlbumResponse(AlbumBase):
     id: uuid.UUID
     account_id: uuid.UUID
+    workspace_id: Optional[uuid.UUID] = None
     created_at: datetime
     updated_at: datetime
     cover_photo_id: Optional[uuid.UUID] = None
@@ -114,6 +117,13 @@ class SharedLinkAccess(BaseModel):
 # --- Constants ---
 MEDIA_ROOT = settings.media_root
 THUMBNAIL_ROOT = settings.thumbnails_root
+
+def get_account_media_root(account: Optional[Account]) -> str:
+    if account and getattr(account, "cloud_storage_path", None):
+        path = os.path.join(account.cloud_storage_path, "photos")
+        os.makedirs(path, exist_ok=True)
+        return path
+    return MEDIA_ROOT
 
 # --- Helper Functions ---
 async def get_photo_and_verify_ownership(photo_id: uuid.UUID, current_account: Account, db: AsyncSession) -> Photo:
@@ -152,6 +162,7 @@ async def create_album(
     try:
         new_album = Album(
             account_id=current_account.id,
+            workspace_id=album_data.workspace_id,
             name=album_data.name,
             description=album_data.description
         )
@@ -165,6 +176,7 @@ async def create_album(
         return AlbumResponse(
             id=new_album.id,
             account_id=new_album.account_id,
+            workspace_id=new_album.workspace_id,
             name=new_album.name,
             description=new_album.description,
             created_at=new_album.created_at,
@@ -179,6 +191,7 @@ async def create_album(
 
 @router.get("/albums", response_model=List[AlbumResponse], summary="Listar todos los álbumes")
 async def get_albums(
+    workspace_id: Optional[str] = Query(None),
     current_account: Account = Depends(get_current_account),
     db: AsyncSession = Depends(get_db_session)
 ):
@@ -187,11 +200,16 @@ async def get_albums(
     """
     try:
         # Fetch albums
-        result = await db.execute(
-            select(Album)
-            .where(Album.account_id == current_account.id)
-            .order_by(Album.created_at.desc())
-        )
+        stmt = select(Album).where(Album.account_id == current_account.id)
+        if workspace_id and workspace_id != "all":
+            try:
+                ws_uuid = uuid.UUID(workspace_id)
+                stmt = stmt.where(Album.workspace_id == ws_uuid)
+            except ValueError:
+                pass
+        stmt = stmt.order_by(Album.created_at.desc())
+        
+        result = await db.execute(stmt)
         albums = result.scalars().all()
 
         # For each album, get the total photo count and construct AlbumResponse
@@ -220,6 +238,7 @@ async def get_albums(
             albums_response.append(AlbumResponse(
                 id=album.id,
                 account_id=album.account_id,
+                workspace_id=album.workspace_id,
                 name=album.name,
                 description=album.description,
                 created_at=album.created_at,
@@ -368,7 +387,8 @@ async def delete_album(
             await db.delete(link)
 
         # Delete the physical album directory if it exists
-        album_dir = os.path.join(MEDIA_ROOT, str(album_id))
+        account_media_root = get_account_media_root(current_account)
+        album_dir = os.path.join(account_media_root, str(album_id))
         if os.path.isdir(album_dir):
             import shutil
             shutil.rmtree(album_dir)
@@ -536,11 +556,17 @@ async def upload_photos(
     if not album or album.account_id != current_account.id:
         raise HTTPException(status_code=404, detail="Álbum no encontrado o no autorizado.")
 
-    album_dir = os.path.join(MEDIA_ROOT, str(album_id))
+    account_media_root = get_account_media_root(current_account)
+    album_dir = os.path.join(account_media_root, str(album_id))
     os.makedirs(album_dir, exist_ok=True)
 
+    # Get the current total number of photos in the album to set the starting order
+    total_photos_stmt = select(func.count(Photo.id)).where(Photo.album_id == album_id)
+    total_photos_result = await db.execute(total_photos_stmt)
+    current_total_photos = total_photos_result.scalar_one()
+
     created_photos = []
-    for file in files:
+    for idx, file in enumerate(files):
         try:
             unique_filename = f"{uuid.uuid4()}-{file.filename}"
             file_path = os.path.join(album_dir, unique_filename)
@@ -559,12 +585,12 @@ async def upload_photos(
             await run_in_threadpool(generate_thumbnail_sync, file_path, thumbnail_path)
             db_thumbnail_path = os.path.join(str(album_id), thumbnail_filename)
 
-            # Get the current total number of photos in the album to set the order
-            total_photos_stmt = select(func.count(Photo.id)).where(Photo.album_id == album_id)
-            total_photos_result = await db.execute(total_photos_stmt)
-            current_total_photos = total_photos_result.scalar_one()
-
-            new_photo = Photo(album_id=album_id, file_path=db_file_path, thumbnail_path=db_thumbnail_path, order=current_total_photos)
+            new_photo = Photo(
+                album_id=album_id,
+                file_path=db_file_path,
+                thumbnail_path=db_thumbnail_path,
+                order=current_total_photos + idx
+            )
             db.add(new_photo)
             created_photos.append(new_photo)
         except Exception as e:

@@ -535,8 +535,10 @@ async def add_document_to_collection(
         logger.error(f"Error al obtener/crear carpeta OnlyOffice para la colección '{topic}': {folder_err}")
         
     # Crear directorio físico si no existe
+    account_obj = await db.get(Account, uuid.UUID(current_account_id))
+    cloud_storage_path = getattr(account_obj, "cloud_storage_path", None)
     clean_topic = topic.replace("/", "_").replace("\\", "_")
-    user_dir = ensure_onlyoffice_account_dir(current_account_id)
+    user_dir = ensure_onlyoffice_account_dir(current_account_id, cloud_storage_path=cloud_storage_path)
     collection_dir = user_dir / clean_topic
     collection_dir.mkdir(parents=True, exist_ok=True)
     

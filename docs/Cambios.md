@@ -1892,3 +1892,43 @@ El script `start_local.sh` actúa como proceso padre de los servicios. Al matar 
 - ✅ Sintaxis verificada con `python -m py_compile kai.py`
 - ✅ Todas las funciones compilan correctamente
 
+---
+
+## 27-02-26 Configuración de Puerto Frontend en start_local.sh 🚀
+
+Se ha modificado el script `start_local.sh` para que el servidor Frontend (Next.js) se ejecute explícitamente en el puerto 3002.
+
+- **Archivo modificado**: `start_local.sh`
+- **Cambio**: Se añadió la variable de entorno `PORT=3002` antes de ejecutar `npm run start`
+- **Línea modificada**: 
+  ```bash
+  # Antes:
+  npm run start >> logs/frontend.log 2>&1 &
+  
+  # Después:
+  PORT=3002 npm run start >> logs/frontend.log 2>&1 &
+  ```
+- **Razón**: Asegurar que el frontend se levante en el puerto 3002, evitando conflictos con otros servicios que puedan usar el puerto por defecto (3000) y manteniendo consistencia con la configuración del script `dev` en `package.json`.
+- **Verificación**: El script ya mostraba correctamente la URL `http://localhost:3002` en la salida informativa, pero ahora se asegura que el servidor efectivamente escuche en ese puerto.
+
+---
+
+## 27-06-26 Clarificación de Tamaño de Página A4 en CreatePDFTool 📄📏
+
+Se ha actualizado la documentación de la herramienta `CreatePDFTool` para hacer explícito que el tamaño de página generado es estrictamente A4 y guiar al agente en el diseño de layouts que se ajusten a estas dimensiones.
+
+- **Problema**: Si el agente generaba layouts asumiendo otros tamaños de página o no respetaba las dimensiones de A4 (210mm x 297mm), el PDF resultante se desalineaba o dividía incorrectamente.
+- **Cambios realizados (`skills/document_management_skill/scripts/create_pdf_tool.py`)**:
+  - Se modificó la descripción del campo `content` en el esquema de entrada `CreatePDFInput` indicando explícitamente el tamaño de página A4, el ancho imprimible aproximado (~17cm debido a los márgenes de 2cm) y el alto aproximado (~25.7cm por página).
+  - Se modificó la descripción de la herramienta `CreatePDFTool` para recalcar que el tamaño de página es estrictamente A4 y añadir una regla de diseño obligatoria que guíe al agente a diseñar todo asumiendo el ancho de ~17cm y el alto de ~25.7cm por página, evitando anchos/altos fijos que excedan estos límites.
+
+---
+## 29-06-26 Configuración de Clave de Cifrado de Base de Datos (DB_ENCRYPTION_KEY) 🔑🛡️
+
+Se ha configurado la variable de entorno `DB_ENCRYPTION_KEY` en el archivo de configuración `.env` con una clave secreta segura de 32 bytes generada aleatoriamente.
+
+- **Causa**: El sistema generaba una advertencia de seguridad crítica indicando que `DB_ENCRYPTION_KEY` no estaba configurada o usaba el valor por defecto inseguro (`'super-secret-db-encryption-key'`) en el entorno de desarrollo.
+- **Solución (`.env`)**: [MODIFICADO]
+  - Se generó una clave secreta de 32 bytes en formato hexadecimal (`17253f95c61e9015a657ef7517a6567397d2970b4abdca36d214f665e78b208d`) usando `openssl rand -hex 32`.
+  - Se añadió la variable `DB_ENCRYPTION_KEY` al archivo `.env` en la sección de seguridad.
+- **Resultado**: La advertencia de seguridad crítica ha sido resuelta para futuras inicializaciones del sistema, garantizando que el cifrado de datos sensibles en la base de datos (como credenciales de cuentas externas) utilice una clave robusta y única.

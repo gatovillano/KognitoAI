@@ -41,6 +41,8 @@ export default function PtyTerminalEmbedded({
     // Inicializar terminal
     const term = new Terminal({
       cursorBlink: true,
+      convertEol: true,
+      scrollback: 5000,
       theme: {
         background: "#0d1117",
         foreground: "#e6edf3",
@@ -101,9 +103,16 @@ export default function PtyTerminalEmbedded({
     ws.onopen = () => {
       setIsConnected(true);
       setError(null);
-      if (initialCommand) {
+      if (initialCommand && !sessionId) {
         ws.send(JSON.stringify({ type: "input", data: initialCommand + "\n" }));
       }
+      if (fitAddonRef.current && termRef.current) {
+        const dims = fitAddonRef.current.proposeDimensions();
+        if (dims) {
+          ws.send(JSON.stringify({ type: "resize", cols: dims.cols, rows: dims.rows }));
+        }
+      }
+      term.focus();
     };
 
     ws.onmessage = (event) => {
@@ -180,7 +189,11 @@ export default function PtyTerminalEmbedded({
       </div>
       
       {/* Terminal container */}
-      <div ref={terminalRef} className="h-[280px] w-full" />
+      <div 
+        ref={terminalRef} 
+        className="h-[280px] w-full cursor-text" 
+        onClick={() => termRef.current?.focus()}
+      />
       
       {/* Error overlay */}
       {error && (

@@ -17,6 +17,17 @@ logger = logging.getLogger(__name__)
 
 SYSTEM_ACCOUNT_ID = uuid.UUID("00000000-0000-0000-0000-000000000000")
 
+_http_client = None
+
+def get_http_client():
+    global _http_client
+    if _http_client is None:
+        _http_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(8.0, connect=3.0),
+            limits=httpx.Limits(max_keepalive_connections=10, max_connections=20)
+        )
+    return _http_client
+
 async def ensure_system_account(db):
     account = await db.get(Account, SYSTEM_ACCOUNT_ID)
     if not account:
@@ -31,7 +42,7 @@ async def ensure_system_account(db):
         await db.commit()
 
 class BaseReranker:
-    async def rerank(self, query: str, documents: list, top_n: int = None, threshold: float = None) -> list:
+    async def rerank(self, query: str, documents: list, top_n: Optional[int] = None, threshold: Optional[float] = None) -> list:
         raise NotImplementedError()
 
 class LocalReranker(BaseReranker):
@@ -54,7 +65,7 @@ class LocalReranker(BaseReranker):
             self._model = None
             self._tokenizer = None
 
-    async def rerank(self, query: str, documents: list, top_n: int = None, threshold: float = None) -> list:
+    async def rerank(self, query: str, documents: list, top_n: Optional[int] = None, threshold: Optional[float] = None) -> list:
         self._load_model()
         if not self._model or not self._tokenizer:
             logger.warning("Modelo local de reranking no cargado. Saltando reranking.")
@@ -98,6 +109,9 @@ class LocalReranker(BaseReranker):
         return final_documents
 
 class CloudReranker(BaseReranker):
+    _cache = {}
+    _cache_limit = 2000
+
     def __init__(self, provider: str, model: str, api_base: Optional[str] = None, api_key: Optional[str] = None):
         self.provider = provider.lower()
         self.model = model
@@ -112,34 +126,60 @@ class CloudReranker(BaseReranker):
         self.api_base = api_base
         self.api_key = api_key
 
-    async def rerank(self, query: str, documents: list, top_n: int = None, threshold: float = None) -> list:
+    async def rerank(self, query: str, documents: list, top_n: Optional[int] = None, threshold: Optional[float] = None) -> list:
         if not documents:
             return []
+
+        if len(documents) == 1:
+            documents[0].metadata['rerank_score'] = documents[0].metadata.get('rerank_score', 1.0)
+            return documents
 
         # Determine endpoint URL
         url = self.api_base
         if not url.endswith("/rerank"):
             url = url.rstrip("/") + "/rerank"
 
-        headers = {
-            "Content-Type": "application/json"
-        }
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-        headers["HTTP-Referer"] = "https://kognito.ai"
-        headers["X-Title"] = "KognitoAI"
+        # Buscar en cache local
+        cached_results = {}
+        uncached_docs = []
+        uncached_indices = []
+
+        for i, doc in enumerate(documents):
+            cache_key = (self.provider, self.model, query, doc.page_content)
+            if cache_key in self._cache:
+                cached_results[i] = self._cache[cache_key]
+            else:
+                uncached_docs.append(doc)
+                uncached_indices.append(i)
 
         final_top_n = top_n if top_n is not None else settings.reranker_top_n
-        payload = {
-            "model": self.model,
-            "query": query,
-            "documents": [doc.page_content for doc in documents],
-            "top_n": final_top_n
-        }
 
-        try:
-            logger.info(f"🌐 Enviando petición de reranking en la nube a {url} usando modelo {self.model}...")
-            async with httpx.AsyncClient(timeout=8.0) as client:
+        if not uncached_docs:
+            logger.info(f"🎯 Reranker Cache HIT completo para {len(documents)} documentos.")
+            for i, doc in enumerate(documents):
+                doc.metadata['rerank_score'] = cached_results[i]
+        else:
+            if len(uncached_docs) < len(documents):
+                logger.info(f"🎯 Reranker Cache HIT parcial: {len(documents) - len(uncached_docs)} recuperados de caché, {len(uncached_docs)} pendientes.")
+
+            headers = {
+                "Content-Type": "application/json"
+            }
+            if self.api_key:
+                headers["Authorization"] = f"Bearer {self.api_key}"
+            headers["HTTP-Referer"] = "https://kognito.ai"
+            headers["X-Title"] = "KognitoAI"
+
+            payload = {
+                "model": self.model,
+                "query": query,
+                "documents": [doc.page_content for doc in uncached_docs],
+                "top_n": final_top_n
+            }
+
+            try:
+                logger.info(f"🌐 Enviando petición de reranking en la nube a {url} usando modelo {self.model} ({len(uncached_docs)} docs)...")
+                client = get_http_client()
                 response = await client.post(url, headers=headers, json=payload)
                 if response.status_code != 200:
                     logger.error(f"❌ Petición de rerank en la nube falló con código {response.status_code}: {response.text}")
@@ -156,30 +196,43 @@ class CloudReranker(BaseReranker):
                     if idx is not None and score is not None:
                         score_map[idx] = score
 
+                # Guardar en cache y asignar
+                if len(self._cache) > self._cache_limit:
+                    self._cache.clear()
+
+                for i, doc in enumerate(uncached_docs):
+                    score = score_map.get(i, 0.0)
+                    doc.metadata['rerank_score'] = score
+                    
+                    cache_key = (self.provider, self.model, query, doc.page_content)
+                    self._cache[cache_key] = score
+
+                # Asignar caché a los que ya estaban cacheados
                 for i, doc in enumerate(documents):
-                    doc.metadata['rerank_score'] = score_map.get(i, 0.0)
+                    if i in cached_results:
+                        doc.metadata['rerank_score'] = cached_results[i]
 
-                # 1. Ordenar por score
-                reranked_documents = sorted(documents, key=lambda x: x.metadata['rerank_score'], reverse=True)
-                
-                # 2. Filtrar por umbral de relevancia (Thresholding)
-                final_threshold = threshold if threshold is not None else settings.reranker_threshold
-                filtered_documents = [doc for doc in reranked_documents if doc.metadata['rerank_score'] >= final_threshold]
-                
-                # 3. Limitar a Top N
-                limit = max(20, final_top_n)
-                final_documents = filtered_documents[:limit]
-                
-                logger.info(f"✨ Reranking nube completado: Recibidos {len(documents)}, filtrados {len(filtered_documents)}, devueltos {len(final_documents)}")
-                if final_documents:
-                    top_scores = [doc.metadata['rerank_score'] for doc in final_documents[:3]]
-                    logger.info(f"📊 Top 3 scores post-filtro nube: {[round(s, 4) for s in top_scores]}")
-                
-                return final_documents
+            except Exception as e:
+                logger.error(f"❌ Error en CloudReranker: {e}. Lanzando excepción para activar fallback.")
+                raise e
 
-        except Exception as e:
-            logger.error(f"❌ Error en CloudReranker: {e}. Lanzando excepción para activar fallback.")
-            raise e
+        # 1. Ordenar por score
+        reranked_documents = sorted(documents, key=lambda x: x.metadata.get('rerank_score', 0.0), reverse=True)
+        
+        # 2. Filtrar por umbral de relevancia (Thresholding)
+        final_threshold = threshold if threshold is not None else settings.reranker_threshold
+        filtered_documents = [doc for doc in reranked_documents if doc.metadata.get('rerank_score', 0.0) >= final_threshold]
+        
+        # 3. Limitar a Top N
+        limit = max(20, final_top_n)
+        final_documents = filtered_documents[:limit]
+        
+        logger.info(f"✨ Reranking nube completado: Recibidos {len(documents)}, filtrados {len(filtered_documents)}, devueltos {len(final_documents)}")
+        if final_documents:
+            top_scores = [doc.metadata.get('rerank_score', 0.0) for doc in final_documents[:3]]
+            logger.info(f"📊 Top 3 scores post-filtro nube: {[round(s, 4) for s in top_scores]}")
+        
+        return final_documents
 
 class Reranker:
     _local_reranker = None
@@ -193,7 +246,7 @@ class Reranker:
             cls._local_reranker = LocalReranker(model_name)
         return cls._local_reranker
 
-    async def rerank(self, query: str, documents: list, top_n: int = None, threshold: float = None, account_id: str = None) -> list:
+    async def rerank(self, query: str, documents: list, top_n: Optional[int] = None, threshold: Optional[float] = None, account_id: Optional[str] = None) -> list:
         provider = "local"
         model = "cross-encoder/ms-marco-MiniLM-L-6-v2"
         api_base = None

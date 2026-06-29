@@ -8,7 +8,9 @@ import { toast } from 'sonner';
 import { ArrowUp, X, Paperclip, Loader2, Mic, Square, BookMarked } from 'lucide-react';
 import { MoreActionsMenu } from './MoreActionsMenu';
 import ContextSelectorDialog from './ContextSelectorDialog';
+import { LLMSelectorMenu } from './LLMSelectorMenu';
 import { useAuth } from '@/contexts/AuthContext';
+import { SelectedContextItem } from '@/types/context';
 
 interface AutocompleteState {
   isVisible: boolean;
@@ -17,16 +19,6 @@ interface AutocompleteState {
   options: string[];
   activeIndex: number;
   wordStartIndex: number;
-}
-
-interface SelectedContextItem {
-  id: string;
-  type: 'document' | 'collection' | 'repository';
-  name: string;
-  title?: string;
-  topic?: string;
-  content?: string;
-  file_name?: string;
 }
 
 interface ChatMessage {
@@ -546,6 +538,7 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
                 >
                   <BookMarked className="h-5 w-5" />
                 </Button>
+                <LLMSelectorMenu />
               </div>
               <div className="flex items-center gap-2">
                 <Button

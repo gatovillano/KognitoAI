@@ -22,8 +22,10 @@ import logging
 from typing import Optional, List
 from utils.docker_secrets import get_secret
 
-# Carga las variables de entorno desde un archivo .env en la raíz del proyecto.
-# Se usa override=True para permitir que los cambios en el archivo montado tomen precedencia.
+# Carga las variables de entorno desde un archivo .env en la raíz del proyecto o ~/.kognito/config/.env.
+user_env_path = os.getenv("KOGNITO_ENV_PATH", os.path.expanduser("~/.kognito/config/.env"))
+if os.path.exists(user_env_path):
+    load_dotenv(user_env_path, override=True)
 load_dotenv(override=True)
 
 def get_model_name_from_provider_format(model_string: str) -> str:
@@ -100,12 +102,18 @@ class Config:
 
 
         # --- Configuración de Directorios ---
+        kognito_home = os.getenv("KOGNITO_HOME", os.path.expanduser("~/.kognito"))
+
+        default_media = os.path.join(kognito_home, "media/documents") if os.path.exists(kognito_home) else "media/documents"
+        default_thumbnails = os.path.join(kognito_home, "media/thumbnails") if os.path.exists(kognito_home) else "media/thumbnails"
+        default_onlyoffice = os.path.join(kognito_home, "storage/onlyoffice/documents") if os.path.exists(kognito_home) else "storage/onlyoffice/documents"
+
         # Directorio base para almacenamiento de medios (documentos, imágenes, etc.)
-        self.media_root: str = os.getenv("MEDIA_ROOT", "media/documents")
+        self.media_root: str = os.getenv("MEDIA_ROOT", default_media)
         # Directorio para almacenamiento de miniaturas (thumbnails)
-        self.thumbnails_root: str = os.getenv("THUMBNAILS_ROOT", "media/thumbnails")
+        self.thumbnails_root: str = os.getenv("THUMBNAILS_ROOT", default_thumbnails)
         # Directorio para documentos de OnlyOffice
-        self.onlyoffice_docs_root: str = os.getenv("ONLYOFFICE_DOCS_ROOT", "storage/onlyoffice/documents")
+        self.onlyoffice_docs_root: str = os.getenv("ONLYOFFICE_DOCS_ROOT", default_onlyoffice)
         # Directorio para archivos temporales
         self.temp_root: str = os.getenv("TEMP_ROOT", ".kognito_tmp")
 
@@ -275,7 +283,8 @@ class Config:
 
 
         # Modelo de Visión Multimodal (OCR y análisis de imágenes)
-        self.vision_model: str = os.getenv("VISION_MODEL", "openrouter/mistralai/mistral-small-3.1-24b-instruct:free")
+        self.vision_model: str = os.getenv("VISION_MODEL", "openrouter/google/gemini-2.0-flash-lite-001")
+
 
         # Búsqueda Web Avanzada
         self.tavily_api_key: Optional[str] = os.getenv("TAVILY_API_KEY")

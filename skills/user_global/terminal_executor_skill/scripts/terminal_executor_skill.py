@@ -186,6 +186,33 @@ class TerminalExecutor(BaseTool):
     # Inyectado por SkillManager: permite crear sesiones PTY ligadas a la cuenta
     account_id: Optional[str] = None
 
+    def _create_pty_session_html(self, command: str, cwd: Optional[str] = None, account_id: Optional[str] = None) -> str:
+        try:
+            from core.pty_sessions import create_session
+            acct = account_id or getattr(self, "account_id", None)
+            if not acct:
+                return "❌ Error: account_id no disponible para crear sesión PTY."
+
+            coro = create_session(command=command, account_id=acct, cwd=cwd)
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+
+            if loop and loop.is_running():
+                import concurrent.futures
+                fut = asyncio.run_coroutine_threadsafe(coro, loop)
+                session_id = fut.result(timeout=10)
+            else:
+                session_id = asyncio.run(coro)
+
+            import html as _html
+            safe_cmd = _html.escape(command)
+            return f'<div class="pty-session-placeholder" data-session-id="{session_id}" data-cmd="{safe_cmd}"></div>'
+        except Exception as e:
+            logger.exception(f"Error creando sesión PTY interactiva: {e}")
+            return f"❌ Error al crear terminal interactiva: {e}"
+
     def _run(
         self,
         command: str,
@@ -198,10 +225,8 @@ class TerminalExecutor(BaseTool):
         if streaming:
             # --- Modo PTY: salida progresiva acumulada o terminal interactivo ---
             if interactive:
-                # Devolver un placeholder HTML que el frontend hidratará como un terminal PTY
-                import html as _html
-                safe_cmd = _html.escape(command)
-                return f'<div class="pty-session-placeholder" data-cmd="{safe_cmd}"></div>'
+                acct = getattr(self, "account_id", None) or kwargs.get("account_id")
+                return self._create_pty_session_html(command=command, cwd=cwd, account_id=acct)
             if cwd:
                 command = f"cd {cwd!r} && {command}"
             return _run_in_pty(command, timeout)
@@ -271,5 +296,5 @@ class TerminalExecutor(BaseTool):
             loop = asyncio.get_event_loop()
             return await loop.run_in_executor(
                 None,
-                lambda: self._run(command, timeout, streaming, cwd, interactive),
+                lambda: self._run(command, timeout, streaming, cwd, interactive, **kwargs),
             )

@@ -22,6 +22,7 @@ import DeepResearchVisualizer from '@/components/DeepResearchVisualizer';
 import { AnalysisDetailDialog } from '@/app/(dashboard)/analysis/analysis-detail-dialog';
 import { Analysis } from '@/lib/models';
 import { ShareChatDialog } from '@/components/ShareChatDialog';
+import { SelectedContextItem } from '@/types/context';
 
 const INITIAL_RENDERED_MESSAGES = 40;
 const RENDER_BATCH_SIZE = 30;
@@ -139,16 +140,6 @@ const areSameRetryPrompt = (first: ChatMessageType, second: ChatMessageType): bo
 
   return sameText && sameContext && sameImages;
 };
-
-interface SelectedContextItem {
-  id: string;
-  type: 'document' | 'collection' | 'repository';
-  name: string;
-  title?: string;
-  topic?: string;
-  content?: string;
-  file_name?: string;
-}
 
 interface Artifact {
   id: number;
@@ -581,6 +572,19 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
             setResearchStatus(data.message);
           }
           break;
+        case 'error': {
+          setIsResponding(false);
+          setIsThinking(false);
+          setToolName(undefined);
+          setReactState(undefined);
+          
+          if (taskId && taskId === currentTaskIdRef.current) {
+            setCurrentTaskId(null);
+          }
+          const errMsg = (data as any).message || (data as any).detail || (data as any).error || "Error al procesar la solicitud.";
+          toast.error(`Error: ${errMsg}`, { duration: 6000 });
+          break;
+        }
       }
 
       setMessages(prevMessages => {
@@ -797,6 +801,37 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
               };
             }
             break;
+
+          case 'error': {
+            const errMsg = (data as any).message || (data as any).detail || (data as any).error || "Error al procesar la solicitud.";
+            let errorMsgIndex = updatedMessages.findIndex(msg => msg.taskId === taskId);
+            if (errorMsgIndex === -1 && taskId) {
+              errorMsgIndex = updatedMessages.length - 1;
+            }
+            if (errorMsgIndex !== -1) {
+              const existingMessage = updatedMessages[errorMsgIndex];
+              let newParts = [...(existingMessage.content_parts || [])];
+              newParts.push({ type: 'text', content: `\n\n> ⚠️ **Error en el procesamiento:** ${errMsg}` });
+              updatedMessages[errorMsgIndex] = {
+                ...existingMessage,
+                text: existingMessage.text ? `${existingMessage.text}\n\n⚠️ **Error:** ${errMsg}` : `⚠️ **Error:** ${errMsg}`,
+                chunks: undefined,
+                taskId: undefined,
+                content_parts: newParts,
+              };
+            } else {
+              updatedMessages.push({
+                text: `⚠️ **Error:** ${errMsg}`,
+                sender: 'ai',
+                created_at: new Date().toISOString(),
+                model_name: settings?.llm_model,
+                sources: [],
+                chunks: undefined,
+                content_parts: [{ type: 'text', content: `⚠️ **Error:** ${errMsg}` }],
+              });
+            }
+            break;
+          }
         }
         return updatedMessages;
       });

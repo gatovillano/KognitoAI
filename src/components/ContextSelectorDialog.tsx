@@ -7,25 +7,18 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Loader2, FileText, Github } from 'lucide-react';
+import { Loader2, FileText, Github, Image as ImageIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import apiClient from '@/lib/api';
+import { AlbumResponse, PhotoResponse } from '@/types/gallery';
+import { SelectedContextItem } from '@/types/context';
+import NextImage from 'next/image';
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
 import { ChevronRight, Folder, File as FileIcon } from 'lucide-react';
-
-interface SelectedContextItem {
-  id: string;
-  type: 'document' | 'collection' | 'repository';
-  name: string;
-  title?: string;
-  topic?: string;
-  content?: string; // Para el arbol de archivos si es repositorio
-  file_name?: string;
-}
 
 interface Note {
   id: number;
@@ -46,7 +39,7 @@ interface ContextSelectorDialogProps {
   onSelectNote: (note: Note) => void;
   currentContext: SelectedContextItem[];
   workspaceId?: string;
-  initialTab?: 'context' | 'notes' | 'onlyoffice';
+  initialTab?: 'context' | 'notes' | 'onlyoffice' | 'github' | 'galleries';
 }
 
 interface OnlyOfficeDocument {
@@ -72,7 +65,7 @@ const ContextSelectorDialog: React.FC<ContextSelectorDialogProps> = ({
   const [notes, setNotes] = useState<Note[]>([]);
   const [loadingNotes, setLoadingNotes] = useState<boolean>(false);
   const [searchTerm, setSearchTerm] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'context' | 'notes' | 'onlyoffice' | 'github'>(initialTab as any);
+  const [activeTab, setActiveTab] = useState<'context' | 'notes' | 'onlyoffice' | 'github' | 'galleries'>(initialTab as any);
 
   // Estado para OnlyOffice
   const [onlyOfficeDocuments, setOnlyOfficeDocuments] = useState<OnlyOfficeDocument[]>([]);
@@ -82,6 +75,11 @@ const ContextSelectorDialog: React.FC<ContextSelectorDialogProps> = ({
   const [githubRepos, setGithubRepos] = useState<any[]>([]);
   const [isLoadingGithub, setIsLoadingGithub] = useState(false);
   const [githubUrl, setGithubUrl] = useState('');
+
+  // Estado para Galerías y Fotos
+  const [albums, setAlbums] = useState<AlbumResponse[]>([]);
+  const [isLoadingGalleries, setIsLoadingGalleries] = useState(false);
+  const [expandedAlbums, setExpandedAlbums] = useState<Record<string, boolean>>({});
 
   const fetchDocuments = useCallback(async () => {
     setIsLoadingContext(true);
@@ -176,6 +174,103 @@ const ContextSelectorDialog: React.FC<ContextSelectorDialogProps> = ({
     }
   }, []);
 
+  const fetchGalleries = useCallback(async () => {
+    setIsLoadingGalleries(true);
+    try {
+      const params: Record<string, any> = {};
+      if (workspaceId) {
+        params.workspace_id = workspaceId;
+      }
+      const response = await apiClient.get<AlbumResponse[]>('/api/galleries/albums', { params });
+      setAlbums(response.data || []);
+    } catch (error) {
+      console.error('Error fetching galleries:', error);
+      toast.error('Error al cargar galerías y fotos.');
+    } finally {
+      setIsLoadingGalleries(false);
+    }
+  }, [workspaceId]);
+
+  const toggleAlbumExpansion = async (albumId: string) => {
+    setExpandedAlbums(prev => ({ ...prev, [albumId]: !prev[albumId] }));
+    const targetAlbum = albums.find(a => a.id === albumId);
+    if (targetAlbum && (!targetAlbum.photos || targetAlbum.photos.length === 0)) {
+      try {
+        const res = await apiClient.get<AlbumResponse>(`/api/galleries/albums/${albumId}`);
+        if (res.data) {
+          setAlbums(prev => prev.map(a => a.id === albumId ? { ...a, photos: res.data.photos || [] } : a));
+        }
+      } catch (error) {
+        console.error('Error fetching album photos:', error);
+      }
+    }
+  };
+
+  const handleSelectPhoto = (album: AlbumResponse, photo: PhotoResponse) => {
+    const photoId = photo.id;
+    setSelectedDocuments(prev => {
+      const isSelected = prev.some(d => d.id === photoId && d.type === 'image');
+      if (isSelected) {
+        return prev.filter(d => !(d.id === photoId && d.type === 'image'));
+      } else {
+        const fileName = photo.file_path.split('/').pop() || photo.id;
+        const photoItem: SelectedContextItem = {
+          id: photoId,
+          type: 'image',
+          name: `[Foto] ${album.name} - ${fileName}`,
+          title: fileName,
+          topic: album.name,
+          file_name: photo.file_path,
+          content: `${process.env.NEXT_PUBLIC_API_URL || ''}/media/${photo.file_path}`
+        };
+        return [...prev, photoItem];
+      }
+    });
+  };
+
+  const handleSelectAlbumGroup = async (album: AlbumResponse) => {
+    let currentPhotos = album.photos || [];
+    if (currentPhotos.length === 0) {
+      try {
+        const res = await apiClient.get<AlbumResponse>(`/api/galleries/albums/${album.id}`);
+        if (res.data && res.data.photos) {
+          currentPhotos = res.data.photos;
+          setAlbums(prev => prev.map(a => a.id === album.id ? { ...a, photos: currentPhotos } : a));
+        }
+      } catch (error) {
+        console.error('Error fetching album photos for group selection:', error);
+        return;
+      }
+    }
+
+    if (currentPhotos.length === 0) return;
+
+    setSelectedDocuments(prev => {
+      const allSelected = currentPhotos.every(p => prev.some(d => d.id === p.id && d.type === 'image'));
+      if (allSelected) {
+        return prev.filter(selected => !currentPhotos.some(p => p.id === selected.id && selected.type === 'image'));
+      } else {
+        const newSelected = [...prev];
+        currentPhotos.forEach(photo => {
+          if (!newSelected.some(d => d.id === photo.id && d.type === 'image')) {
+            const fileName = photo.file_path.split('/').pop() || photo.id;
+            const photoItem: SelectedContextItem = {
+              id: photo.id,
+              type: 'image',
+              name: `[Foto] ${album.name} - ${fileName}`,
+              title: fileName,
+              topic: album.name,
+              file_name: photo.file_path,
+              content: `${process.env.NEXT_PUBLIC_API_URL || ''}/media/${photo.file_path}`
+            };
+            newSelected.push(photoItem);
+          }
+        });
+        return newSelected;
+      }
+    });
+  };
+
   const fetchNotes = useCallback(async () => {
     setLoadingNotes(true);
     try {
@@ -215,8 +310,9 @@ const ContextSelectorDialog: React.FC<ContextSelectorDialogProps> = ({
       fetchNotes();
       fetchOnlyOfficeDocuments();
       fetchGithubRepositories();
+      fetchGalleries();
     }
-  }, [isOpen, initialTab, currentContext, fetchDocuments, fetchNotes, fetchOnlyOfficeDocuments, fetchGithubRepositories]);
+  }, [isOpen, initialTab, currentContext, fetchDocuments, fetchNotes, fetchOnlyOfficeDocuments, fetchGithubRepositories, fetchGalleries]);
 
   const toggleTopicExpansion = (topic: string) => {
     setExpandedTopics(prev => ({ ...prev, [topic]: !prev[topic] }));
@@ -362,11 +458,12 @@ const ContextSelectorDialog: React.FC<ContextSelectorDialogProps> = ({
           </DialogDescription>
         </DialogHeader>
         <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as any)} className="w-full min-w-0 overflow-hidden">
-          <TabsList className="grid w-full grid-cols-4 gap-1 min-w-0 overflow-hidden">
+          <TabsList className="grid w-full grid-cols-5 gap-1 min-w-0 overflow-hidden">
             <TabsTrigger value="context" className="min-w-0 px-2 text-xs sm:text-sm truncate">Contexto</TabsTrigger>
             <TabsTrigger value="notes" className="min-w-0 px-2 text-xs sm:text-sm truncate">Notas</TabsTrigger>
             <TabsTrigger value="onlyoffice" className="min-w-0 px-2 text-xs sm:text-sm truncate">OnlyOffice</TabsTrigger>
             <TabsTrigger value="github" className="min-w-0 px-2 text-xs sm:text-sm truncate">GitHub</TabsTrigger>
+            <TabsTrigger value="galleries" className="min-w-0 px-2 text-xs sm:text-sm truncate">Galerías</TabsTrigger>
           </TabsList>
           <TabsContent value="context" className="space-y-4">
             <div className="flex justify-between items-center">
@@ -629,6 +726,111 @@ const ContextSelectorDialog: React.FC<ContextSelectorDialogProps> = ({
               )}
             </ScrollArea>
             <Button onClick={handleApplyContext} disabled={isLoadingGithub} className="w-full">
+              Aplicar Contexto
+            </Button>
+          </TabsContent>
+          <TabsContent value="galleries" className="space-y-4">
+            <div className="flex justify-between items-center">
+              <p className="text-sm text-muted-foreground">
+                {selectedDocuments.filter(d => d.type === 'image').length} foto(s) de galería seleccionada(s)
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setSelectedDocuments(prev => prev.filter(d => d.type !== 'image'))}
+                disabled={!selectedDocuments.some(d => d.type === 'image')}
+              >
+                Limpiar Selección de Fotos
+              </Button>
+            </div>
+            <ScrollArea className="h-60">
+              {isLoadingGalleries ? (
+                <div className="flex items-center justify-center p-4">
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  <span className="text-sm text-muted-foreground">Cargando galerías...</span>
+                </div>
+              ) : albums.length === 0 ? (
+                <div className="p-4 text-center text-sm text-muted-foreground">
+                  No hay álbumes ni fotos disponibles en este espacio.
+                </div>
+              ) : (
+                <div className="p-2 space-y-2">
+                  {albums.map((album) => {
+                    const isExpanded = expandedAlbums[album.id];
+                    const albumPhotos = album.photos || [];
+                    const isGroupSelected = albumPhotos.length > 0 && albumPhotos.every(p => selectedDocuments.some(d => d.id === p.id && d.type === 'image'));
+
+                    return (
+                      <Collapsible key={album.id} open={isExpanded} onOpenChange={() => toggleAlbumExpansion(album.id)} className="border rounded-md p-2 bg-card">
+                        <div className="flex items-center justify-between">
+                          <CollapsibleTrigger asChild>
+                            <div className="flex items-center space-x-2 cursor-pointer flex-grow min-w-0 py-1">
+                              <ChevronRight className={`h-4 w-4 transition-transform flex-shrink-0 ${isExpanded ? 'rotate-90' : ''}`} />
+                              <ImageIcon className="h-4 w-4 text-primary flex-shrink-0" />
+                              <span className="font-medium text-sm truncate">{album.name}</span>
+                              <span className="text-xs text-muted-foreground">
+                                ({album.total_photos !== undefined ? album.total_photos : albumPhotos.length} fotos)
+                              </span>
+                            </div>
+                          </CollapsibleTrigger>
+                          <div className="flex items-center space-x-2 pl-2">
+                            <Checkbox
+                              id={`album-${album.id}`}
+                              checked={isGroupSelected}
+                              onCheckedChange={() => handleSelectAlbumGroup(album)}
+                            />
+                            <label htmlFor={`album-${album.id}`} className="text-xs text-muted-foreground cursor-pointer select-none">
+                              Seleccionar Todo
+                            </label>
+                          </div>
+                        </div>
+
+                        <CollapsibleContent className="pt-3">
+                          {albumPhotos.length === 0 ? (
+                            <div className="text-xs text-muted-foreground py-2 pl-6">
+                              No hay fotos en este álbum o cargando...
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 pl-4 pr-1">
+                              {albumPhotos.map((photo) => {
+                                const isSelected = selectedDocuments.some(d => d.id === photo.id && d.type === 'image');
+                                const mediaUrl = `${process.env.NEXT_PUBLIC_API_URL || ''}/media/${photo.thumbnail_path || photo.file_path}`;
+
+                                return (
+                                  <div
+                                    key={photo.id}
+                                    onClick={() => handleSelectPhoto(album, photo)}
+                                    className={`relative group rounded-md overflow-hidden border-2 cursor-pointer aspect-square bg-muted transition-all ${
+                                      isSelected ? 'border-primary ring-2 ring-primary/20' : 'border-transparent hover:border-border'
+                                    }`}
+                                  >
+                                    <img
+                                      src={mediaUrl}
+                                      alt="Thumbnail"
+                                      className="w-full h-full object-cover"
+                                    />
+                                    <div className={`absolute inset-0 bg-black/40 transition-opacity flex items-top justify-end p-1 ${
+                                      isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                                    }`}>
+                                      <Checkbox
+                                        checked={isSelected}
+                                        onCheckedChange={() => handleSelectPhoto(album, photo)}
+                                        className="bg-background/80 border-white data-[state=checked]:bg-primary"
+                                      />
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </CollapsibleContent>
+                      </Collapsible>
+                    );
+                  })}
+                </div>
+              )}
+            </ScrollArea>
+            <Button onClick={handleApplyContext} disabled={isLoadingGalleries} className="w-full">
               Aplicar Contexto
             </Button>
           </TabsContent>

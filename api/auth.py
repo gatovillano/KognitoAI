@@ -111,6 +111,58 @@ class TelegramLoginRequest(BaseModel):
     auth_date: int
     hash: str
 
+class SetupStatusResponse(BaseModel):
+    is_initialized: bool
+
+class InitialSetupRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(..., min_length=8)
+    name: Optional[str] = None
+    cloud_storage_path: Optional[str] = None
+    llm_provider: Optional[str] = None
+    llm_model: Optional[str] = None
+    fast_llm_provider: Optional[str] = None
+    fast_llm_model: Optional[str] = None
+    vision_llm_provider: Optional[str] = None
+    vision_llm_model: Optional[str] = None
+    llm_api_base: Optional[str] = None
+
+# --- Endpoints de Asistente de Instalación ---
+@router.get("/auth/setup-status", response_model=SetupStatusResponse, summary="Verificar estado de instalación del sistema")
+async def check_setup_status(db: AsyncSession = Depends(get_db_session)):
+    from sqlalchemy import func
+    result = await db.execute(select(func.count(Account.id)))
+    count = result.scalar_one_or_none() or 0
+    return SetupStatusResponse(is_initialized=(count > 0))
+
+@router.post("/auth/setup-initial-admin", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED, summary="Configuración inicial del primer usuario administrador")
+async def setup_initial_admin(request_data: InitialSetupRequest, db: AsyncSession = Depends(get_db_session)):
+    from sqlalchemy import func
+    count_result = await db.execute(select(func.count(Account.id)))
+    count = count_result.scalar_one_or_none() or 0
+    if count > 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El sistema ya ha sido inicializado.")
+
+    new_account = Account(
+        email=request_data.email,
+        hashed_password=get_password_hash(request_data.password),
+        name=request_data.name or request_data.email.split('@')[0],
+        username=request_data.name or request_data.email.split('@')[0],
+        cloud_storage_path=request_data.cloud_storage_path,
+        llm_provider=request_data.llm_provider or "gemini",
+        llm_model=request_data.llm_model,
+        fast_llm_provider=request_data.fast_llm_provider or "gemini",
+        fast_llm_model=request_data.fast_llm_model,
+        vision_llm_provider=request_data.vision_llm_provider or "gemini",
+        vision_llm_model=request_data.vision_llm_model,
+        llm_api_base=request_data.llm_api_base
+    )
+    db.add(new_account)
+    await db.commit()
+    await db.refresh(new_account)
+    access_token = create_access_token(data={"sub": str(new_account.id)})
+    return RegisterResponse(access_token=access_token, message="¡Instalación inicial completada exitosamente!")
+
 # --- Endpoints de Email/Pass y Social Login ---
 @router.post("/auth/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED, summary="Registrar con email/pass")
 @limiter.limit("5/minute")

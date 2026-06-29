@@ -209,6 +209,36 @@ class GraphIntegration:
         
         await self._create_fulltext_indexes()
 
+        # Si no se proporciona workspace_id pero hay documentos con metadata, obtenerlo
+        if not workspace_id and documents:
+            for doc in documents:
+                meta = doc.get("metadata") or {}
+                if isinstance(meta, str):
+                    try:
+                        meta = json.loads(meta)
+                    except Exception:
+                        meta = {}
+                ws_id = meta.get("workspace_id")
+                if ws_id:
+                    workspace_id = ws_id
+                    break
+
+        # Obtener el nombre del workspace
+        workspace_name = None
+        if workspace_id:
+            try:
+                import uuid
+                from core.database import Workspace
+                from sqlalchemy import select
+                stmt = select(Workspace).where(Workspace.id == (uuid.UUID(workspace_id) if isinstance(workspace_id, str) else workspace_id))
+                res = await db_session.execute(stmt)
+                workspace_obj = res.scalar_one_or_none()
+                if workspace_obj:
+                    workspace_name = workspace_obj.name
+                    logger.info(f"💼 Workspace resolved to name: '{workspace_name}'")
+            except Exception as e:
+                logger.error(f"Error resolviendo workspace_name en process_documents: {e}")
+
         # ═══════════════════════════════════════════════════════════════
         # FASE INICIAL: Obtener documentos
         # ═══════════════════════════════════════════════════════════════
@@ -277,9 +307,10 @@ class GraphIntegration:
                 conceptual_processor = ConceptualGraphProcessor(
                     llm=self.llm, 
                     fast_llm=self.fast_llm, 
-                    neo4j_adapter=self.hybrid_adapter
+                    neo4j_adapter=self.hybrid_adapter,
+                    workspace_name=workspace_name
                 )
-                workspace_id = documents[0].get("metadata", {}).get("workspace_id") if documents else None
+                workspace_id = documents[0].get("metadata", {}).get("workspace_id") if documents else workspace_id
                 await conceptual_processor._create_document_nodes(processed_documents, workspace_id, account_id, dataset_name)
 
                 hybrid_result = await self.hybrid_processor.process_documents(
@@ -294,9 +325,10 @@ class GraphIntegration:
                 stats = await self.hybrid_adapter.add_cognee_results_to_graph(
                     hybrid_result["entities"], 
                     hybrid_result["relationships"],
-                    workspace_id=documents[0].get("metadata", {}).get("workspace_id") if documents else None,
+                    workspace_id=workspace_id,
                     account_id=account_id,
-                    dataset_name=dataset_name
+                    dataset_name=dataset_name,
+                    workspace=workspace_name
                 )
                 
                 # Marcar como completado
@@ -337,7 +369,8 @@ class GraphIntegration:
                     llm=llm, 
                     fast_llm=fast_llm,
                     neo4j_adapter=self.hybrid_adapter,
-                    progress_tracker=tracker
+                    progress_tracker=tracker,
+                    workspace_name=workspace_name
                 )
 
 
@@ -367,6 +400,7 @@ class GraphIntegration:
                     workspace_id=workspace_id,
                     account_id=account_id,
                     dataset_name=dataset_name,
+                    workspace=workspace_name
                 )
 
                 logger.info(

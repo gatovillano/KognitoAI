@@ -137,15 +137,40 @@ class GraphReasoningNode:
 
         # Identificar conceptos clave
         concepts = []
+        heuristic_concepts = []
         try:
-            # Usar siempre el LLM para mejor calidad, con un prompt más robusto para capturar el intento
-            concepts_prompt = f"Extrae los 3 conceptos o entidades más importantes de esta consulta para buscar en un grafo: '{user_query}'. Responde solo con los nombres separados por comas, sin explicaciones."
-            concepts_resp = await llm_to_use.ainvoke(concepts_prompt)
-            concepts = [c.strip() for c in str(concepts_resp.content).split(",") if c.strip() and len(c) > 2]
-            logger.info(f"🧠 Conceptos clave identificados vía LLM: {concepts}")
+            import re
+            # Extraer palabras limpias
+            words = re.findall(r'\b\w+\b', user_query.lower())
+            custom_stopwords = {
+                "quien", "quién", "como", "cómo", "donde", "dónde", "cuando", "cuándo", "porque", "por", "para", "sobre", "entre", "desde",
+                "el", "la", "los", "las", "un", "una", "unos", "unas", "y", "o", "e", "u", "pero", "sino", "que", "qué", "de", "del", "en", "con",
+                "para", "por", "si", "no", "es", "son", "fue", "ser", "estar", "tiene", "tienen", "hace", "hacen", "dime", "sobre", "este", "esta",
+                "mis", "tus", "sus", "mi", "tu", "su", "me", "te", "se", "lo", "la", "le", "les", "nos", "os", "relacion", "relación", "conexion", 
+                "conexión", "buscar", "busca", "encuentra", "analiza", "analisis", "análisis", "concepto", "conceptos", "grafo"
+            }
+            for w in words:
+                if len(w) > 3 and w not in custom_stopwords:
+                    if w not in heuristic_concepts:
+                        heuristic_concepts.append(w)
+            heuristic_concepts = heuristic_concepts[:3]
         except Exception as e:
-            logger.error(f"Error extrayendo conceptos vía LLM: {e}")
-            concepts = [w for w in user_query.split() if len(w) > 4][:3] # Fallback simple
+            logger.warning(f"Error en extracción heurística de conceptos: {e}")
+
+        # Si la heurística encuentra suficientes conceptos, los usamos para ahorrar latencia (0ms)
+        if len(heuristic_concepts) >= 2:
+            concepts = heuristic_concepts
+            logger.info(f"🧠 Conceptos clave identificados heurísticamente (0ms): {concepts}")
+        else:
+            try:
+                # Usar el LLM solo si la heurística no detectó suficientes conceptos únicos
+                concepts_prompt = f"Extrae los 3 conceptos o entidades más importantes de esta consulta para buscar en un grafo: '{user_query}'. Responde solo con los nombres separados por comas, sin explicaciones."
+                concepts_resp = await llm_to_use.ainvoke(concepts_prompt)
+                concepts = [c.strip() for c in str(concepts_resp.content).split(",") if c.strip() and len(c) > 2]
+                logger.info(f"🧠 Conceptos clave identificados vía LLM: {concepts}")
+            except Exception as e:
+                logger.error(f"Error extrayendo conceptos vía LLM: {e}")
+                concepts = heuristic_concepts if heuristic_concepts else [w for w in user_query.split() if len(w) > 4][:3]
         
         all_neural_data = []
         
@@ -153,6 +178,9 @@ class GraphReasoningNode:
         if target_datasets:
             dataset_filter_sp = f"AND ALL(node IN nodes(p) WHERE node.dataset_name IN {target_datasets})"
 
+        # Ejecutar todas las consultas a Neo4j en paralelo para reducir latencia
+        tasks = []
+        
         # Profundidad Dinámica: Si hay más de un concepto, intentar encontrar el camino más corto entre los dos primeros
         if len(concepts) >= 2:
             concept1 = concepts[0]
@@ -181,10 +209,7 @@ class GraphReasoningNode:
             RETURN p as path
             LIMIT 5
             """
-            sp_results = await self.graph_db.execute_query(shortest_path_query, params_sp)
-            if sp_results:
-                logger.info(f"🕸️ Camino más corto encontrado entre '{concept1}' y '{concept2}': {len(sp_results)} caminos.")
-                all_neural_data.extend(sp_results)
+            tasks.append(self.graph_db.execute_query(shortest_path_query, params_sp))
 
         for concept in concepts:
             # Query de expansión: busca el concepto y sus vecinos hasta 2 saltos
@@ -210,10 +235,14 @@ class GraphReasoningNode:
             RETURN p as path
             LIMIT 10
             """
-            results = await self.graph_db.execute_query(neural_query, params)
-            if results:
-                logger.info(f"🕸️ Exploración para '{concept}': {len(results)} caminos encontrados.")
-                all_neural_data.extend(results)
+            tasks.append(self.graph_db.execute_query(neural_query, params))
+            
+        if tasks:
+            import asyncio
+            results_list = await asyncio.gather(*tasks, return_exceptions=True)
+            for res in results_list:
+                if isinstance(res, list) and res:
+                    all_neural_data.extend(res)
             
         if not all_neural_data:
             logger.info("🧠 No se encontraron conexiones latentes relevantes.")
@@ -261,43 +290,54 @@ Analiza estos fragmentos de relaciones encontrados en el grafo de conocimiento p
 Genera un breve análisis (3-4 frases) sobre conexiones interesantes o patrones que el usuario podría no haber notado. 
 Enfócate en cómo estos conceptos se entrelazan y qué revelan sobre el contexto de la pregunta.
 """
-        logger.info("🧠 Sintetizando insights a partir de las conexiones encontradas...")
-        response = await llm_to_use.ainvoke(thinking_prompt)
-        insight = str(response.content).strip()
-        logger.info(f"🧠 Síntesis completada.")
-
-        # Guardar el insight como un AnalysisTask si tenemos account_id
-        analysis_id = None
-        if account_id and insight:
+        # Ejecutar la síntesis en segundo plano para no bloquear el flujo del agente
+        async def _synthesize_and_save():
             try:
-                async with DBSession(SessionLocal) as db:
-                    result_payload = {
-                        "summary": insight,
-                        "neural_data_sample": simplified_data,
-                        "user_query": user_query,
-                        "concepts": concepts,
-                        "analysis_metadata": {
-                            "analysis_type": "neural_insight",
-                            "created_at": datetime.now().isoformat(),
-                            "workspace_id": workspace_id
+                import uuid
+                from datetime import datetime
+                from core.database import SessionLocal, AnalysisTask
+                from utils.db_session import DBSession
+                
+                logger.info("🧠 Sintetizando insights a partir de las conexiones encontradas (en segundo plano)...")
+                response = await llm_to_use.ainvoke(thinking_prompt)
+                insight = str(response.content).strip()
+                logger.info(f"🧠 Síntesis completada en segundo plano.")
+                
+                if account_id and insight:
+                    async with DBSession(SessionLocal) as db:
+                        result_payload = {
+                            "summary": insight,
+                            "neural_data_sample": simplified_data,
+                            "user_query": user_query,
+                            "concepts": concepts,
+                            "analysis_metadata": {
+                                "analysis_type": "neural_insight",
+                                "created_at": datetime.now().isoformat(),
+                                "workspace_id": workspace_id
+                            }
                         }
-                    }
-                    
-                    new_task = AnalysisTask(
-                        account_id=uuid.UUID(account_id),
-                        file_name=f"Neural Insight: {concepts[0] if concepts else 'General'}",
-                        status="completed",
-                        analysis_type="neural_insight",
-                        result_payload=result_payload
-                    )
-                    db.add(new_task)
-                    await db.commit()
-                    analysis_id = str(new_task.id)
-                    logger.info(f"💾 Neural Insight guardado como AnalysisTask (ID: {new_task.id})")
+                        
+                        new_task = AnalysisTask(
+                            account_id=uuid.UUID(account_id),
+                            file_name=f"Neural Insight: {concepts[0] if concepts else 'General'}",
+                            status="completed",
+                            analysis_type="neural_insight",
+                            result_payload=result_payload
+                        )
+                        db.add(new_task)
+                        await db.commit()
+                        logger.info(f"💾 Neural Insight guardado como AnalysisTask (ID: {new_task.id})")
             except Exception as e:
-                logger.error(f"❌ Error al guardar Neural Insight en BD: {e}", exc_info=True)
+                logger.error(f"❌ Error al guardar Neural Insight en BD (segundo plano): {e}", exc_info=True)
 
-        return insight, analysis_id, all_neural_data
+        import asyncio
+        asyncio.create_task(_synthesize_and_save())
+        
+        # Devolvemos un mensaje temporal para que el agente sepa que se está procesando
+        insight_msg = "Se encontraron conexiones latentes. Puedes analizarlas a partir de las fuentes del grafo proporcionadas."
+        analysis_id = None
+        
+        return insight_msg, analysis_id, all_neural_data
 
     def _get_last_user_message(self, messages: List[BaseMessage]) -> Optional[str]:
         """Extrae el contenido del último HumanMessage."""
