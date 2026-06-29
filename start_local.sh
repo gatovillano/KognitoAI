@@ -11,13 +11,18 @@ NC='\033[0m' # Sin color
 mkdir -p logs
 touch logs/backend.log logs/frontend.log logs/telegram_gateway.log
 
-echo -e "${BLUE}🐳 Verificando contenedores de base de datos (Docker)...${NC}"
-if command -v docker &> /dev/null && docker compose version &> /dev/null; then
-    docker compose up -d
-elif command -v docker-compose &> /dev/null; then
-    docker-compose up -d
+echo -e "${BLUE}🐳 Verificando contenedores de base de datos...${NC}"
+if docker ps --format "{{.Names}}" 2>/dev/null | grep -q "^kognito_db$"; then
+    echo -e "${GREEN}✅ Contenedores de base de datos ya están en ejecución. Omitiendo inicio de Docker.${NC}"
 else
-    echo -e "${YELLOW}⚠️ Docker no encontrado o no activo. Asegúrate de iniciar la base de datos.${NC}"
+    echo -e "${YELLOW}🔄 Contenedores no detectados en ejecución. Iniciando Docker Compose...${NC}"
+    if command -v docker &> /dev/null && docker compose version &> /dev/null; then
+        docker compose up -d
+    elif command -v docker-compose &> /dev/null; then
+        docker-compose up -d
+    else
+        echo -e "${YELLOW}⚠️ Docker no encontrado o no activo. Asegúrate de iniciar la base de datos.${NC}"
+    fi
 fi
 
 echo -e "${GREEN}Iniciando el servidor Backend (Kognito API)...${NC}"

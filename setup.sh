@@ -103,11 +103,13 @@ if [ -d "${PROJECT_DIR}/storage/onlyoffice/documents" ] && [ "$(ls -A "${PROJECT
 fi
 
 # 4. Check and Start Docker Containers (Postgres, Neo4j, Redis, Kokoro TTS)
-echo -e "${BLUE}🐳 4. Starting database & AI backend containers (Docker)...${NC}"
-if command -v docker &> /dev/null && docker compose version &> /dev/null; then
-    docker compose up -d --build || docker compose up -d
+echo -e "${BLUE}🐳 4. Checking database & AI backend containers (Docker)...${NC}"
+if docker ps --format "{{.Names}}" 2>/dev/null | grep -q "^kognito_db$"; then
+    echo -e "${GREEN}✅ Database containers are already running. Skipping Docker launch.${NC}"
+elif command -v docker &> /dev/null && docker compose version &> /dev/null; then
+    docker compose up -d
 elif command -v docker-compose &> /dev/null; then
-    docker-compose up -d --build || docker-compose up -d
+    docker-compose up -d
 else
     echo -e "${RED}⚠️  Docker or Docker Compose not found. Please ensure Docker is running.${NC}"
 fi
