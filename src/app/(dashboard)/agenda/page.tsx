@@ -2,7 +2,7 @@
 
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import apiClient from '@/lib/api';
@@ -78,7 +78,7 @@ export default function AgendaPage() {
     }
   }, []);
 
-  const fetchEvents = async () => {
+  const fetchEvents = useCallback(async () => {
     setIsLoading(true);
     try {
       const eventsPayload: { include_past: boolean; workspace_id?: string } = { include_past: true };
@@ -101,9 +101,9 @@ export default function AgendaPage() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [workspaceId]);
 
-  useEffect(() => { fetchEvents(); }, [workspaceId]);
+  useEffect(() => { fetchEvents(); }, [fetchEvents]);
 
   const handleSaveSuccess = (updatedEvent: AgendaEvent) => {
     setAllEvents(prev => {
@@ -570,7 +570,7 @@ export default function AgendaPage() {
                                           className="h-6 w-6 rounded-lg border-2 border-primary/20 data-[state=checked]:bg-primary data-[state=checked]:border-primary transition-all"
                                         />
                                         <div className={task.is_completed ? "opacity-50" : ""}>
-                                          <p className={`font-bold text-sm sm:text-base truncate ${task.is_completed ? "line-through" : ""}`}>
+                                          <p className={`font-bold text-sm sm:text-base whitespace-normal break-words ${task.is_completed ? "line-through" : ""}`}>
                                             {task.description}
                                           </p>
                                           {task.end_date && (

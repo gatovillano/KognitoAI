@@ -25,6 +25,7 @@ export const UploadPhotosModal: React.FC<UploadPhotosModalProps> = ({
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string>('');
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     setFiles(prevFiles => [...prevFiles, ...acceptedFiles]);
@@ -50,25 +51,43 @@ export const UploadPhotosModal: React.FC<UploadPhotosModalProps> = ({
     setUploading(true);
     setUploadProgress(0);
     setUploadError(null);
+    setStatusMessage('');
 
-    const formData = new FormData();
-    files.forEach(file => {
-      formData.append('files', file);
-    });
+    const BATCH_SIZE = 10;
+    const totalFiles = files.length;
+    let uploadedCount = 0;
 
     try {
-      await apiClient.post(`/api/galleries/albums/${albumId}/photos`, formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-        onUploadProgress: (progressEvent) => {
-          if (progressEvent.total) {
-            const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-            setUploadProgress(percentCompleted);
-          }
-        },
-        timeout: 300000, // Añadir un timeout de 5 minutos
-      });
+      for (let i = 0; i < totalFiles; i += BATCH_SIZE) {
+        const batchFiles = files.slice(i, i + BATCH_SIZE);
+        const formData = new FormData();
+        batchFiles.forEach(file => {
+          formData.append('files', file);
+        });
+
+        const batchStartNumber = i + 1;
+        const batchEndNumber = Math.min(i + BATCH_SIZE, totalFiles);
+        setStatusMessage(`Subiendo fotos ${batchStartNumber} a ${batchEndNumber} de ${totalFiles}...`);
+
+        await apiClient.post(`/api/galleries/albums/${albumId}/photos`, formData, {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
+          onUploadProgress: (progressEvent) => {
+            if (progressEvent.total) {
+              const batchLoadedFraction = progressEvent.loaded / progressEvent.total;
+              const overallPercent = Math.round(
+                ((uploadedCount + batchLoadedFraction * batchFiles.length) / totalFiles) * 100
+              );
+              setUploadProgress(overallPercent);
+            }
+          },
+          timeout: 300000,
+        });
+
+        uploadedCount += batchFiles.length;
+        setUploadProgress(Math.round((uploadedCount / totalFiles) * 100));
+      }
 
       toast.success('Fotos subidas correctamente.');
       setFiles([]); // Clear selected files
@@ -81,6 +100,7 @@ export const UploadPhotosModal: React.FC<UploadPhotosModalProps> = ({
     } finally {
       setUploading(false);
       setUploadProgress(0);
+      setStatusMessage('');
     }
   };
 
@@ -127,9 +147,11 @@ export const UploadPhotosModal: React.FC<UploadPhotosModalProps> = ({
           )}
 
           {uploading && (
-            <div className="mt-4">
+            <div className="mt-4 space-y-2">
               <Progress value={uploadProgress} className="w-full" />
-              <p className="text-center text-sm mt-2">{uploadProgress}% completado</p>
+              <p className="text-center text-sm text-muted-foreground">
+                {statusMessage || `${uploadProgress}% completado`}
+              </p>
             </div>
           )}
 

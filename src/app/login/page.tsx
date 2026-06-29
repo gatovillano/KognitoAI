@@ -136,6 +136,20 @@ export default function LoginPage() {
   const { login, isAuthenticated, isLoading } = useAuth();
 
   useEffect(() => {
+    const checkSetup = async () => {
+      try {
+        const res = await apiClient.get('/api/auth/setup-status');
+        if (res.data && res.data.is_initialized === false) {
+          router.replace('/setup');
+        }
+      } catch (e) {
+        console.error('Error checking setup status', e);
+      }
+    };
+    checkSetup();
+  }, [router]);
+
+  useEffect(() => {
     if (!isLoading && isAuthenticated) {
       router.replace('/chat');
     }

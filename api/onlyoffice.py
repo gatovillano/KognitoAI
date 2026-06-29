@@ -149,7 +149,9 @@ async def upload_document(
 
     # Guardar archivo físicamente
     unique_filename = f"{uuid.uuid4()}.{extension}"
-    user_dir = ensure_onlyoffice_account_dir(current_account_id)
+    account_obj = await db.get(Account, uuid.UUID(current_account_id))
+    cloud_storage_path = getattr(account_obj, "cloud_storage_path", None)
+    user_dir = ensure_onlyoffice_account_dir(current_account_id, cloud_storage_path=cloud_storage_path)
     
     file_path = user_dir / unique_filename
     
@@ -361,9 +363,10 @@ async def create_document(
 
     # Guardar archivo físicamente
     unique_filename = f"{uuid.uuid4()}.{extension}"
-    user_dir = os.path.join(DOCUMENTS_ROOT, current_account_id)
-    os.makedirs(user_dir, exist_ok=True)
-    file_path = os.path.join(user_dir, unique_filename)
+    account_obj = await db.get(Account, uuid.UUID(current_account_id))
+    cloud_storage_path = getattr(account_obj, "cloud_storage_path", None)
+    user_dir = ensure_onlyoffice_account_dir(current_account_id, cloud_storage_path=cloud_storage_path)
+    file_path = os.path.join(str(user_dir), unique_filename)
 
     try:
         if type == 'word':
@@ -542,11 +545,25 @@ async def get_onlyoffice_config(
     if not await _can_access_document(doc, current_account_id, db, token=share_token):
         raise HTTPException(status_code=403, detail="No tienes acceso a este documento")
 
-    # URL del Document Server (Usamos el proxy de Next.js para simplificar el acceso externo)
+    can_edit = True
+    if share_token:
+        share_entry = (await db.execute(
+            select(OnlyOfficeDocumentShare).where(OnlyOfficeDocumentShare.token == share_token)
+        )).scalars().first()
+        if share_entry:
+            can_edit = share_entry.can_edit
+    elif str(doc.account_id) != current_account_id:
+        share_entry = (await db.execute(
+            select(OnlyOfficeDocumentShare).where(
+                OnlyOfficeDocumentShare.document_id == doc.id,
+                OnlyOfficeDocumentShare.shared_with_account_id == uuid.UUID(current_account_id),
+            )
+        )).scalars().first()
+        if share_entry:
+            can_edit = share_entry.can_edit
+
     onlyoffice_api_url = os.getenv("ONLYOFFICE_URL", "/onlyoffice")
     
-    # URL del backend que usará Document Server para descargar y guardar documentos.
-    # Si existe una URL interna dedicada, debe preferirse sobre la URL pública.
     onlyoffice_internal_backend = os.getenv(
         "ONLYOFFICE_INTERNAL_BACKEND",
         settings.internal_api_server_url,
@@ -556,9 +573,10 @@ async def get_onlyoffice_config(
     file_url = f"{backend_url}/api/onlyoffice/download/{doc.id}"
     callback_url = f"{backend_url}/api/onlyoffice/office-callback/{doc.id}"
     
-    # Generar una clave única para la sesión de edición basada en el ID y la última actualización
     from hashlib import md5
     key = md5(f"{doc.id}-{doc.updated_at.isoformat()}".encode()).hexdigest()
+    
+    editor_mode = "edit" if can_edit else "view"
     
     config = {
         "document": {
@@ -571,7 +589,7 @@ async def get_onlyoffice_config(
         "editorConfig": {
             "callbackUrl": callback_url,
             "lang": "es",
-            "mode": "edit",
+            "mode": editor_mode,
             "user": {
                 "id": current_account_id,
                 "name": "Usuario"
@@ -579,8 +597,9 @@ async def get_onlyoffice_config(
             "customization": {
                 "forcesave": True,
                 "chat": False,
-                "comments": True,
-                "help": False
+                "comments": can_edit,
+                "help": False,
+                "editRights": can_edit,
             }
         }
     }
@@ -592,10 +611,11 @@ async def get_onlyoffice_config(
         config["token"] = token if isinstance(token, str) else token.decode("utf-8")
 
     logger.info(
-        "OnlyOffice config generated for %s using backend %s (jwt=%s)",
+        "OnlyOffice config generated for %s using backend %s (jwt=%s, can_edit=%s)",
         document_id,
         backend_url,
         "enabled" if jwt_secret and jwt_enabled else "disabled",
+        can_edit,
     )
 
     return {"config": config, "onlyoffice_url": onlyoffice_api_url}
@@ -632,6 +652,8 @@ async def get_onlyoffice_public_config(
     from hashlib import md5
     key = md5(f"{doc.id}-{doc.updated_at.isoformat()}".encode()).hexdigest()
 
+    editor_mode = "edit" if share_entry.can_edit else "view"
+
     config = {
         "document": {
             "fileType": doc.extension,
@@ -643,7 +665,7 @@ async def get_onlyoffice_public_config(
         "editorConfig": {
             "callbackUrl": callback_url,
             "lang": "es",
-            "mode": "edit",
+            "mode": editor_mode,
             "user": {
                 "id": "public-share",
                 "name": "Invitado"
@@ -651,8 +673,9 @@ async def get_onlyoffice_public_config(
             "customization": {
                 "forcesave": True,
                 "chat": False,
-                "comments": True,
-                "help": False
+                "comments": share_entry.can_edit,
+                "help": False,
+                "editRights": share_entry.can_edit,
             }
         }
     }

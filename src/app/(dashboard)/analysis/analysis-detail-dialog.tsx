@@ -1301,7 +1301,7 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
           </div>
         );
     }
-  }, [currentAnalysis, isLoading, isPlaying, activeText, textToRead, play, handleThemeClick, handleConceptClick, openGapsSlider, openQuestionsSlider, openSimpleListDialog]);
+  }, [currentAnalysis, isLoading, isPlaying, activeText, textToRead, play, handleThemeClick, handleConceptClick, openGapsSlider, openQuestionsSlider, openSimpleListDialog, isOpen, onOpenChange]);
 
   if (!currentAnalysis) {
     return (

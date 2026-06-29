@@ -17,7 +17,7 @@ import { InlineMarkdownRenderer } from "@/components/InlineMarkdownRenderer";
 export default function TeamDashboardPage() {
   const params = useParams();
   const router = useRouter();
-  const teamId = params.id as string;
+  const teamId = params?.id as string;
   const [team, setTeam] = useState<any>(null);
   const [sharedItems, setSharedItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);

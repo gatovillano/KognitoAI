@@ -18,6 +18,10 @@ logger = logging.getLogger(__name__)
 KNOWLEDGE_EXTRACTION_PROMPT = """
 **Tarea**: Eres un experto en extracción de conocimiento y síntesis conceptual. Tu objetivo es transformar la conversación en un grafo de conocimiento rico que capture tanto detalles granulares como ideas de gran envergadura (Conceptual Insights).
 
+**CONTEXTO CRÍTICO DE PROYECTO / WORKSPACE**:
+- El proyecto y workspace actual en el que estás trabajando es: "{workspace_name}".
+- Todas las entidades, conceptos, citas y relaciones deben pertenecer estrictamente a este proyecto y workspace. No asumas ni generes relaciones con elementos que pertenezcan a otros proyectos o que sean externos al contexto de "{workspace_name}". Evita mezclar proyectos.
+
 **Instrucciones**:
 1. **Identifica Entidades (Micro)**: Personas, organizaciones, tecnologías, herramientas, etc.
 2. **Extrae Citas Conceptuales (Macro)**: Busca "Ideas Maestras", conclusiones estratégicas o citas de gran envergadura que el usuario o el asistente hayan expresado. No te limites a palabras sueltas; captura la frase o párrafo que contiene la "esencia" de la idea.
@@ -117,7 +121,24 @@ class KnowledgeExtractionNode:
 
         messages = state.get("messages", [])
         account_id = state.get("account_id")
+        workspace_id = state.get("workspace_id")
         
+        # Obtener nombre de workspace
+        workspace_name = None
+        if workspace_id:
+            try:
+                from core.database import SessionLocal, Workspace
+                from sqlalchemy import select
+                async with SessionLocal() as db_session:
+                    stmt = select(Workspace).where(Workspace.id == (uuid.UUID(workspace_id) if isinstance(workspace_id, str) else workspace_id))
+                    res = await db_session.execute(stmt)
+                    workspace_obj = res.scalar_one_or_none()
+                    if workspace_obj:
+                        workspace_name = workspace_obj.name
+                        logger.info(f"💼 Workspace resolved to name: '{workspace_name}'")
+            except Exception as e:
+                logger.error(f"Error resolviendo workspace_name en KnowledgeExtractionNode: {e}")
+
         # Intentar obtener un LLM específico para el usuario si está disponible
         llm_to_use = self.llm
         if account_id:
@@ -165,16 +186,16 @@ class KnowledgeExtractionNode:
                 logger.warning(f"Error en predicción GLiNER: {e}")
 
         # 2. Refinamiento y Relaciones con LLM
-        extracted_data = await self._refine_with_llm(user_message, ai_message, gliner_entities, llm=llm_to_use)
+        extracted_data = await self._refine_with_llm(user_message, ai_message, gliner_entities, llm=llm_to_use, workspace_name=workspace_name)
         if not extracted_data:
             return state
 
         # 3. Persistir en Neo4j
-        await self._persist_knowledge(extracted_data, state)
+        await self._persist_knowledge(extracted_data, state, workspace_name=workspace_name)
 
         return state
 
-    async def _refine_with_llm(self, user_msg: str, ai_msg: str, gliner_ents: List[Dict], llm: Optional[Any] = None) -> Optional[Dict]:
+    async def _refine_with_llm(self, user_msg: str, ai_msg: str, gliner_ents: List[Dict], llm: Optional[Any] = None, workspace_name: Optional[str] = None) -> Optional[Dict]:
         """Usa el LLM para conectar las entidades y extraer relaciones."""
         llm_to_use = llm or self.llm
         if not llm_to_use:
@@ -188,7 +209,8 @@ class KnowledgeExtractionNode:
             response = await chain.ainvoke({
                 "gliner_entities": gliner_json,
                 "user_message": user_msg[:1000],
-                "ai_message": ai_msg[:2000]
+                "ai_message": ai_msg[:2000],
+                "workspace_name": workspace_name or "General / Desconocido"
             })
             
             content = str(response.content).strip()
@@ -207,7 +229,7 @@ class KnowledgeExtractionNode:
         normalized_name = name.lower().replace(" ", "_").replace("-", "_")
         return f"entity_{normalized_name}"
 
-    async def _persist_knowledge(self, data: Dict[str, Any], state: Dict[str, Any]):
+    async def _persist_knowledge(self, data: Dict[str, Any], state: Dict[str, Any], workspace_name: Optional[str] = None):
         """Guarda las entidades, relaciones y citas conceptuales en Neo4j."""
         account_id = state.get("account_id")
         workspace_id = state.get("workspace_id")
@@ -239,11 +261,13 @@ class KnowledgeExtractionNode:
                 "type": type_,
                 "name": name,
                 "dataset_name": dataset_name,
+                "workspace": workspace_name,
                 "properties": {
                     "name": name,
                     "description": ent.get("description"),
                     "account_id": account_id,
                     "workspace_id": workspace_id,
+                    "workspace": workspace_name,
                     "dataset_name": dataset_name,
                     "source": "conversation"
                 }
@@ -263,6 +287,7 @@ class KnowledgeExtractionNode:
                 "type": "CONCEPTUAL_QUOTE",
                 "name": concept,
                 "dataset_name": dataset_name,
+                "workspace": workspace_name,
                 "properties": {
                     "name": concept,
                     "concept": concept,
@@ -271,6 +296,7 @@ class KnowledgeExtractionNode:
                     "importance": insight.get("importance", "media"),
                     "account_id": account_id,
                     "workspace_id": workspace_id,
+                    "workspace": workspace_name,
                     "dataset_name": dataset_name,
                     "source": "conversation_insight"
                 }
@@ -291,10 +317,12 @@ class KnowledgeExtractionNode:
                     "target_id": target_id,
                     "type": rel.get("type", "RELATED_TO").upper(),
                     "dataset_name": dataset_name,
+                    "workspace": workspace_name,
                     "properties": {
                         "description": rel.get("description"),
                         "account_id": account_id,
                         "workspace_id": workspace_id,
+                        "workspace": workspace_name,
                         "dataset_name": dataset_name
                     }
                 })
@@ -304,7 +332,8 @@ class KnowledgeExtractionNode:
                 entities=formatted_entities,
                 relationships=formatted_relationships,
                 account_id=account_id,
-                workspace_id=workspace_id
+                workspace_id=workspace_id,
+                workspace=workspace_name
             )
             logger.info(f"✅ Conocimiento persistido: {len(formatted_entities)} entidades/insights, {len(formatted_relationships)} relaciones.")
         except Exception as e:

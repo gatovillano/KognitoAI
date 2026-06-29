@@ -65,7 +65,8 @@ class ConceptualGraphProcessor:
         self.fast_llm = kwargs.get("fast_llm")
         self.neo4j_adapter = kwargs.get("neo4j_adapter")
         self.progress_tracker = kwargs.get("progress_tracker")
-        logger.info("🧠 ConceptualGraphProcessor inicializado")
+        self.workspace_name = kwargs.get("workspace_name")
+        logger.info(f"🧠 ConceptualGraphProcessor inicializado (workspace: {self.workspace_name})")
     
     async def initialize(self):
         """Inicializa los modelos necesarios."""
@@ -287,6 +288,9 @@ Criterios de extracción:
 
 Categorías válidas: teoría, metodología, conclusión, definición, definición_conceptual, enfoque_metodológico, marco_teórico, hallazgo_empírico, ejemplo_práctico, análisis_crítico, desarrollo_teórico
 Importancia: alta o media"""
+
+        if getattr(self, "workspace_name", None):
+            system_prompt += f"\n\n**CONTEXTO CRÍTICO DE PROYECTO / WORKSPACE**: Las citas extraídas deben pertenecer y enmarcarse estrictamente dentro de la temática e información del proyecto/workspace '{self.workspace_name}'. Evita extraer elementos o ideas ajenas a este proyecto."
 
         prompt = f"""Analiza el siguiente texto y extrae 5-10 citas clave que expresen ideas conceptuales completas:
 
@@ -1053,6 +1057,9 @@ Ejemplos:
 - "neurociencia, plasticidad cerebral, aprendizaje" -> "Mecanismos Neuronales Subyacentes a la Plasticidad Cerebral y la Adquisición de Nuevas Habilidades"
 - "algoritmos de machine learning, redes neuronales, deep learning" -> "Aplicaciones Avanzadas de Redes Neuronales Profundas en el Procesamiento de Lenguaje Natural" """
 
+        if getattr(self, "workspace_name", None):
+            system_prompt += f"\n\n**CONTEXTO CRÍTICO DE PROYECTO / WORKSPACE**: El concepto central formulado debe alinearse y pertenecer al proyecto/workspace '{self.workspace_name}'."
+
         prompt = f"""Dado el siguiente conjunto de conceptos relacionados: "{combined_concepts}".
 
 Identifica la idea principal o concepto central **altamente granular y específico** que agrupe estos conceptos. Genera una frase o título descriptivo para este "Perfil de Idea"."""
@@ -1101,6 +1108,9 @@ La descripción debe:
 3. Mencionar las principales categorías involucradas
 4. Proporcionar un resumen coherente del conocimiento que representa el perfil
 5. Ser exhaustiva y detallada, sin límite de palabras"""
+
+        if getattr(self, "workspace_name", None):
+            system_prompt += f"\n\n**CONTEXTO CRÍTICO DE PROYECTO / WORKSPACE**: La descripción redactada debe enmarcarse y pertenecer estrictamente al proyecto/workspace '{self.workspace_name}'."
 
         prompt = f"""El siguiente conjunto de {quotes_count} citas conceptuales se agrupa bajo el concepto central: "{central_concept}"
 
@@ -1232,6 +1242,9 @@ Tipos de relación válidos:
 - RELACION_TEMATICA: Relación temática general
 
 Niveles de confianza: alta, media, baja"""
+
+        if getattr(self, "workspace_name", None):
+            system_prompt += f"\n\n**CONTEXTO CRÍTICO DE PROYECTO / WORKSPACE**: Los conceptos y citas que estás analizando pertenecen al proyecto/workspace '{self.workspace_name}'. Determina su relación semántica bajo este contexto."
 
         prompt = self._build_relationship_prompt(quote1, quote2, similarity)
 

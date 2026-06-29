@@ -26,7 +26,12 @@ class CreatePDFInput(BaseModel):
     """Input schema for the Create PDF tool."""
     content: str = Field(
         ...,
-        description="El contenido a convertir. DEBE ser un texto largo y estructurado. PREFERIBLEMENTE HTML con etiquetas estructuradas (h2, p, ul, table). NUNCA envíes este campo vacío."
+        description=(
+            "El contenido a convertir. DEBE ser un texto largo y estructurado. PREFERIBLEMENTE HTML. "
+            "EL TAMAÑO DE PÁGINA ES ESTRICTAMENTE A4 (21cm x 29.7cm). Diseña tu HTML para que encaje en este formato: "
+            "el ancho imprimible es de ~17cm (debido a márgenes de 2cm) y el alto de ~25.7cm por página. "
+            "Usa clases estructuradas y evita desbordar estas dimensiones."
+        )
     )
     is_html: bool = Field(
         True,
@@ -45,18 +50,34 @@ class CreatePDFTool(BaseTool):
     """
     A LangChain tool that converts HTML or Markdown text into a styled PDF document.
     """
-    name: str = "create_pdf_tool"
     description: str = (
         "Genera documentos PDF de CALIDAD PROFESIONAL y diseño avanzado. "
+        "EL TAMAÑO DE PÁGINA ES ESTRICTAMENTE A4 (210mm x 297mm / 21cm x 29.7cm). "
+        "IMPORTANTE: El CSS define márgenes de 2cm en todos los bordes para páginas normales, "
+        "pero la primera página (portada) NO tiene márgenes para permitir fondos de color a página completa. "
+        "El tamaño máximo de página es 21cm x 29.7cm (A4 completo). "
         "REGLAS DE DISEÑO OBLIGATORIAS PARA EL AGENTE:\n"
         "1. ESTRUCTURA PREMIUM: Usa 'is_html=True' y envía un HTML completo.\n"
-        "2. PORTADA IMPACTANTE: Usa <div class='cover'><h1>Título</h1><p>Subtítulo</p></div> al inicio.\n"
-        "3. COMPONENTES VISUALES: Usa clases CSS disponibles:\n"
+        "2. DIMENSIONES ESTRICTAS: "
+        "Tamaño máximo de página: 21cm x 29.7cm (A4 completo). "
+        "Márgenes de página: 2cm en todos los bordes (definidos en CSS para páginas normales). "
+        "Portada (primera página): SIN MÁRGENES para fondos de color a página completa. "
+        "NUNCA generes HTML que exceda 21cm de ancho o 29.7cm de alto. "
+        "Usa max-width: 17cm en contenedores de contenido principal.\n"
+        "3. PORTADA (cover): Usa <div class='cover'><h1>Título</h1><p>Subtítulo</p></div> al inicio. "
+        "La clase .cover ocupa toda la primera página A4 (21cm x 29.7cm) SIN MÁRGENES. "
+        "Ideal para fondos de color o imagen de portada. No añadas márgenes negativos ni padding excesivo.\n"
+        "4. CONTENIDO: Todo cuerpo de texto debe ir dentro de <div class='content'>. "
+        "Las imágenes deben tener max-width: 100%. Las tablas deben tener width: 100%.\n"
+        "5. COMPONENTES VISUALES CSS DISPONIBLES:\n"
         "   - <div class='card'> para resaltar secciones o datos clave.\n"
-        "   - <div class='info-box'>, <div class='warning-box'> para notas o advertencias.\n"
+        "   - <div class='info-box'>, <div class='warning-box'>, <div class='error-box'> para notas.\n"
         "   - <div class='grid-2'> para diseños de dos columnas.\n"
-        "4. TABLAS: Usa <table> con <thead> para datos comparativos.\n"
-        "5. DIAGRAMAS: Incluye bloques ```mermaid para visualizaciones automáticas."
+        "   - <table><thead>...</thead></table> para datos comparativos.\n"
+        "6. DIAGRAMAS: Incluye bloques ```mermaid para visualizaciones automáticas.\n"
+        "7. ADVERTENCIA CRÍTICA: Si el contenido excede las dimensiones A4, WeasyPrint lo cortará o lo pondrá en una nueva página. "
+        "Diseña el HTML para que cada página encaje perfectamente en 21cm x 29.7cm. "
+        "Usa page-break-before: always en secciones largas y page-break-inside: avoid en tablas y tarjetas."
     )
     
     # Standard context attributes
@@ -146,6 +167,7 @@ class CreatePDFTool(BaseTool):
         return """
         @page {
             size: A4;
+            /* Márgenes definidos en CSS - configurables según necesidad */
             margin: 2cm;
             @top-right {
                 content: "Página " counter(page) " de " counter(pages);
@@ -159,6 +181,13 @@ class CreatePDFTool(BaseTool):
                 font-size: 8pt;
                 color: #a0aec0;
             }
+        }
+
+        /* Página sin márgenes para fondos completos */
+        @page :first {
+            margin: 0;
+            @top-right { content: none; }
+            @bottom-left { content: none; }
         }
         
         :root {
@@ -176,31 +205,68 @@ class CreatePDFTool(BaseTool):
             font-family: 'Inter', 'Segoe UI', Roboto, sans-serif;
             line-height: 1.6;
             color: var(--dark);
-            background-color: #fff;
-            font-size: 10.5pt;
-        }
-
-        /* Cover Page */
-        .cover {
-            height: 25cm;
+        /* Cover Page */        .cover {
+            width: 21cm;
+            height: 29.7cm;
+            margin: 0;
+            padding: 0;
             display: flex;
             flex-direction: column;
             justify-content: center;
+            align-items: center;
             text-align: center;
-            border-bottom: 8px solid var(--primary);
+            background-color: #0a0e27;
+            box-sizing: border-box;
             page-break-after: always;
-            margin-top: -1cm;
+            position: relative;
+        }
+        .cover * {
+            color: #ffffff;
         }
         .cover h1 {
-            font-size: 36pt;
-            color: var(--dark);
-            margin-bottom: 0.2em;
+            font-size: 32pt;
+            margin-bottom: 0.3em;
             border: none;
+            line-height: 1.2;
         }
-        .cover p {
+        .cover .subtitle {
             font-size: 14pt;
-            color: var(--secondary);
-            text-align: center;
+            color: #c8d6e5;
+            max-width: 17cm;
+            margin: 0 auto;
+            line-height: 1.4;
+        }
+        .cover .meta {
+            font-size: 9pt;
+            color: #8899bb;
+            margin-top: 2em;
+        }            box-sizing: border-box;
+            page-break-after: always;
+        }
+        .cover * {
+            color: #ffffff;
+        }
+        .cover h1 {
+            font-size: 32pt;
+            margin-bottom: 0.3em;
+            border: none;
+            line-height: 1.2;
+        }
+        .cover .subtitle {
+            font-size: 14pt;
+            color: #c8d6e5;
+            max-width: 12cm;
+            margin: 0 auto;
+            line-height: 1.4;
+        }
+        .cover .meta {
+            font-size: 9pt;
+            color: #8899bb;
+            margin-top: 2em;
+        }
+
+        .content {
+            max-width: 17cm;
         }
 
         h1 {
