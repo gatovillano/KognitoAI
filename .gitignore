@@ -73,4 +73,4 @@ core/agents/*_backup.py
 # Large assets and models
 *.cast
 *.gif
-kokoro_service/models/
+kokoro_service/models/extensions/
