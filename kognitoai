@@ -50,6 +50,8 @@ cmd_upgrade() {
     fi
     echo -e "${BLUE}📦 Actualizando dependencias de Node...${NC}"
     npm install --silent
+    echo -e "${YELLOW}🏗️  Reconstruyendo Frontend (npm run build)...${NC}"
+    npm run build
     echo -e "${GREEN}✅ Actualización completada. Reiniciando...${NC}"
     exec bash start_local.sh
 }

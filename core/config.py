@@ -401,7 +401,7 @@ class Config:
         """
         # Esenciales para el funcionamiento básico.
         if not self.telegram_bot_token:
-            raise ValueError("ERROR CRÍTICO: TELEGRAM_BOT_TOKEN no está definido en el archivo .env.")
+            logger.warning("⚠️ TELEGRAM_BOT_TOKEN no está definido. La integración con Telegram no estará disponible.")
         if not self.database_url:
             raise ValueError("ERROR CRÍTICO: DATABASE_URL no está definido. La persistencia no funcionará.")
 
