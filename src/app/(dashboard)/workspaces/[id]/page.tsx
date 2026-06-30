@@ -7,6 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   ArrowLeft,
   Bot,
@@ -27,7 +29,12 @@ import {
   Edit3,
   Trash2,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  LayoutDashboard,
+  History,
+  Info,
+  HelpCircle,
+  CheckCircle2
 } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { InlineMarkdownRenderer } from '@/components/InlineMarkdownRenderer';
@@ -83,6 +90,9 @@ interface OnlyOfficeDocument {
 interface Workspace {
   id: string;
   name: string;
+  system_prompt: string | null;
+  color: string | null;
+  created_at: string;
 }
 
 interface PageProps {
@@ -132,6 +142,22 @@ export default function WorkspaceDashboard({ params }: PageProps) {
   const [analysisResult, setAnalysisResult] = useState<Analysis | null>(null); // New state for analysis result
   const [isAnalysisResultDialogOpen, setIsAnalysisResultDialogOpen] = useState(false); // New state for AnalysisDetailDialog
   const [isAgendaExpanded, setIsAgendaExpanded] = useState(false);
+  const [activeTab, setActiveTab] = useState('hub');
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get('tab');
+    if (tab) {
+      setActiveTab(tab);
+    }
+  }, []);
+
+  const handleTabChange = (value: string) => {
+    setActiveTab(value);
+    const params = new URLSearchParams(window.location.search);
+    params.set('tab', value);
+    window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`);
+  };
 
   const handleAnalyzeAllNotes = async () => {
     if (notes.length === 0) {
@@ -788,24 +814,55 @@ export default function WorkspaceDashboard({ params }: PageProps) {
     setIsViewNoteDialogOpen(true);
   };
 
+  const workspaceColor = workspace?.color || 'hsl(var(--primary))';
+  const lightWorkspaceColor = workspace?.color ? `${workspace.color}15` : 'hsl(var(--primary)/0.1)';
+  const borderWorkspaceColor = workspace?.color ? `${workspace.color}30` : 'border-border/50';
+
   return (
     // <DndProvider backend={HTML5Backend}>
     <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
         <div className="flex items-center gap-3">
-          <div className="h-10 w-10 sm:h-12 sm:w-12 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
-            <Bot className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
+          <div 
+            className="h-10 w-10 sm:h-12 sm:w-12 rounded-xl flex items-center justify-center flex-shrink-0 border"
+            style={{ 
+              backgroundColor: lightWorkspaceColor, 
+              borderColor: borderWorkspaceColor 
+            }}
+          >
+            <Bot className="h-5 w-5 sm:h-6 sm:w-6" style={{ color: workspaceColor }} />
           </div>
           <div className="min-w-0">
-            <h1 className="text-xl sm:text-3xl font-bold truncate">{workspace.name}</h1>
+            <h1 className="text-xl sm:text-3xl font-bold truncate flex items-center gap-2">
+              {workspace.name}
+              {workspace.system_prompt && (
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-primary rounded-full">
+                      <Info className="h-4 w-4" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-80 p-4 bg-popover border-border shadow-xl rounded-xl z-[1050]" align="start">
+                    <div className="space-y-2">
+                      <h4 className="font-semibold text-sm text-foreground flex items-center gap-1.5">
+                        <Bot className="h-4 w-4 text-primary" />
+                        Prompt de Sistema
+                      </h4>
+                      <p className="text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap max-h-60 overflow-y-auto">
+                        {workspace.system_prompt}
+                      </p>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              )}
+            </h1>
             <p className="text-xs sm:text-sm text-muted-foreground truncate">Espacio de trabajo especializado</p>
           </div>
         </div>
         <div className="flex items-center gap-2 w-full sm:w-auto">
           <Button variant="outline" size="sm" onClick={() => setIsShareWorkspaceDialogOpen(true)} className="flex-1 sm:flex-none text-xs sm:text-sm">
             <Share2 className="mr-1.5 sm:mr-2 h-3.5 w-3.5 sm:h-4 sm:w-4" />
-            <span className="hidden xs:inline">Compartir</span>
-            <span className="xs:hidden">Compartir</span>
+            <span>Compartir</span>
           </Button>
           <Button variant="outline" size="sm" onClick={() => router.push('/workspaces')} className="flex-1 sm:flex-none text-xs sm:text-sm">
             <ArrowLeft className="mr-1.5 sm:mr-2 h-3.5 w-3.5 sm:h-4 sm:w-4" />
@@ -827,372 +884,626 @@ export default function WorkspaceDashboard({ params }: PageProps) {
         </div>
       </div>
 
-      <div className="mb-12">
-        <div className="mb-6">
-          <div>
-            <h2 className="text-xl sm:text-2xl font-semibold flex items-center">
-              <MessageSquare className="mr-2 sm:mr-3 h-5 w-5 sm:h-6 sm:w-6 text-primary" />
-              Chats del Workspace
-            </h2>
-            <p className="text-xs sm:text-sm text-muted-foreground mt-1">Conversaciones específicas de este espacio</p>
-          </div>
+      <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
+        <div className="flex justify-between items-center border-b border-border/40 pb-px mb-6 overflow-x-auto">
+          <TabsList className="bg-transparent h-12 p-0 justify-start gap-6 border-b-0 rounded-none w-full md:w-auto">
+            <TabsTrigger 
+              value="hub" 
+              className="bg-transparent hover:text-foreground text-muted-foreground border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-foreground rounded-none h-12 px-1 py-3 text-sm font-semibold gap-1.5 transition-all shadow-none"
+            >
+              <LayoutDashboard className="h-4 w-4" />
+              Resumen
+            </TabsTrigger>
+            <TabsTrigger 
+              value="chats" 
+              className="bg-transparent hover:text-foreground text-muted-foreground border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-foreground rounded-none h-12 px-1 py-3 text-sm font-semibold gap-1.5 transition-all shadow-none"
+            >
+              <MessageSquare className="h-4 w-4" />
+              Chats
+              <span className="text-xs bg-muted text-muted-foreground px-1.5 py-0.5 rounded-full font-normal ml-1">
+                {chats.length}
+              </span>
+            </TabsTrigger>
+            <TabsTrigger 
+              value="knowledge" 
+              className="bg-transparent hover:text-foreground text-muted-foreground border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-foreground rounded-none h-12 px-1 py-3 text-sm font-semibold gap-1.5 transition-all shadow-none"
+            >
+              <BookMarked className="h-4 w-4" />
+              Conocimientos
+              <span className="text-xs bg-muted text-muted-foreground px-1.5 py-0.5 rounded-full font-normal ml-1">
+                {collections.length + onlyofficeDocuments.length}
+              </span>
+            </TabsTrigger>
+            <TabsTrigger 
+              value="agenda" 
+              className="bg-transparent hover:text-foreground text-muted-foreground border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-foreground rounded-none h-12 px-1 py-3 text-sm font-semibold gap-1.5 transition-all shadow-none"
+            >
+              <Calendar className="h-4 w-4" />
+              Agenda
+              {tasks.filter(t => !t.is_completed).length > 0 && (
+                <span className="text-xs bg-purple-500/10 text-purple-600 px-1.5 py-0.5 rounded-full font-normal ml-1">
+                  {tasks.filter(t => !t.is_completed).length}
+                </span>
+              )}
+            </TabsTrigger>
+            <TabsTrigger 
+              value="notes" 
+              className="bg-transparent hover:text-foreground text-muted-foreground border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-foreground rounded-none h-12 px-1 py-3 text-sm font-semibold gap-1.5 transition-all shadow-none"
+            >
+              <Notebook className="h-4 w-4" />
+              Notas
+              <span className="text-xs bg-muted text-muted-foreground px-1.5 py-0.5 rounded-full font-normal ml-1">
+                {notes.length}
+              </span>
+            </TabsTrigger>
+          </TabsList>
         </div>
 
-        {filteredChats.length === 0 ? (
-          <div className="text-center py-16 border-2 border-dashed border-border rounded-xl">
-            <MessageSquare className="mx-auto h-16 w-16 text-muted-foreground/50 mb-4" />
-            <h3 className="text-xl font-semibold mb-2">
-              {searchTerm ? 'No se encontraron chats' : 'No hay chats aún'}
-            </h3>
-            <p className="text-muted-foreground mb-6 max-w-md mx-auto">
-              {searchTerm
-                ? 'No hay chats que coincidan con tu búsqueda. Intenta con otros términos.'
-                : 'Comienza una nueva conversación especializada en este workspace.'
-              }
-            </p>
-            {!searchTerm && (
-              <Button onClick={handleNewChat} size="lg">
-                <Plus className="mr-2 h-5 w-5" />
-                Crear primer Chat
+        {/* TAB 1: HUB / OVERVIEW */}
+        <TabsContent value="hub" className="focus-visible:outline-none focus-visible:ring-0">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-8">
+            {/* Card 1: Chats Stat */}
+            <Card className="bg-card/40 backdrop-blur-xl border-border/40 hover:-translate-y-1 transition-all duration-300 cursor-pointer shadow-sm" onClick={() => handleTabChange('chats')}>
+              <CardContent className="p-6 flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Conversaciones</p>
+                  <h3 className="text-3xl font-bold mt-1">{chats.length}</h3>
+                  <p className="text-[10px] text-muted-foreground mt-1">Chats activos</p>
+                </div>
+                <div className="h-12 w-12 rounded-xl flex items-center justify-center bg-green-500/10 text-green-600">
+                  <MessageSquare className="h-6 w-6" />
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Card 2: Knowledge Stat */}
+            <Card className="bg-card/40 backdrop-blur-xl border-border/40 hover:-translate-y-1 transition-all duration-300 cursor-pointer shadow-sm" onClick={() => handleTabChange('knowledge')}>
+              <CardContent className="p-6 flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Conocimientos</p>
+                  <h3 className="text-3xl font-bold mt-1">{collections.length + onlyofficeDocuments.length}</h3>
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    {collections.length} Col. / {onlyofficeDocuments.length} Docs
+                  </p>
+                </div>
+                <div className="h-12 w-12 rounded-xl flex items-center justify-center bg-blue-500/10 text-blue-600">
+                  <BookMarked className="h-6 w-6" />
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Card 3: Agenda Stat */}
+            <Card className="bg-card/40 backdrop-blur-xl border-border/40 hover:-translate-y-1 transition-all duration-300 cursor-pointer shadow-sm" onClick={() => handleTabChange('agenda')}>
+              <CardContent className="p-6 flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Tareas Pendientes</p>
+                  <h3 className="text-3xl font-bold mt-1">{tasks.filter(t => !t.is_completed).length}</h3>
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    {agendaEvents.length} Eventos programados
+                  </p>
+                </div>
+                <div className="h-12 w-12 rounded-xl flex items-center justify-center bg-purple-500/10 text-purple-600">
+                  <Calendar className="h-6 w-6" />
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Card 4: Notes Stat */}
+            <Card className="bg-card/40 backdrop-blur-xl border-border/40 hover:-translate-y-1 transition-all duration-300 cursor-pointer shadow-sm" onClick={() => handleTabChange('notes')}>
+              <CardContent className="p-6 flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-muted-foreground">Notas Guardadas</p>
+                  <h3 className="text-3xl font-bold mt-1">{notes.length}</h3>
+                  <p className="text-[10px] text-muted-foreground mt-1">Apuntes de interés</p>
+                </div>
+                <div className="h-12 w-12 rounded-xl flex items-center justify-center bg-yellow-500/10 text-yellow-600">
+                  <Notebook className="h-6 w-6" />
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mt-4">
+            {/* Columna Izquierda: Chats & Notas */}
+            <div className="space-y-6">
+              <div className="flex items-center justify-between border-b border-border/20 pb-2">
+                <h3 className="text-lg font-bold flex items-center gap-2">
+                  <MessageSquare className="h-5 w-5 text-green-600" />
+                  Conversaciones Recientes
+                </h3>
+                <Button variant="ghost" size="sm" onClick={() => handleTabChange('chats')} className="text-xs text-primary">
+                  Ver todas
+                </Button>
+              </div>
+
+              <div className="space-y-3">
+                {filteredChats.slice(0, 3).map((chat) => (
+                  <Card key={chat.id} className="cursor-pointer hover:bg-muted/30 transition-colors border border-border/40 bg-card/20" onClick={() => handleChatClick(chat.id)}>
+                    <CardContent className="p-4 flex items-center justify-between">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="h-8 w-8 rounded-lg bg-green-500/10 flex items-center justify-center text-green-600 shrink-0">
+                          <MessageSquare className="h-4 w-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium truncate"><InlineMarkdownRenderer content={chat.title} /></p>
+                          <p className="text-xs text-muted-foreground">{chat.created_at ? new Date(chat.created_at).toLocaleDateString() : 'Sin fecha'}</p>
+                        </div>
+                      </div>
+                      <ArrowLeft className="h-4 w-4 text-muted-foreground rotate-180" />
+                    </CardContent>
+                  </Card>
+                ))}
+                {filteredChats.length === 0 && (
+                  <p className="text-sm text-muted-foreground italic p-4 text-center border border-dashed rounded-xl">No hay chats recientes.</p>
+                )}
+              </div>
+
+              <div className="flex items-center justify-between border-b border-border/20 pb-2 pt-4">
+                <h3 className="text-lg font-bold flex items-center gap-2">
+                  <Notebook className="h-5 w-5 text-yellow-600" />
+                  Notas Recientes
+                </h3>
+                <Button variant="ghost" size="sm" onClick={() => handleTabChange('notes')} className="text-xs text-primary">
+                  Ver todas
+                </Button>
+              </div>
+
+              <div className="space-y-3">
+                {filteredNotes.slice(0, 3).map((note) => (
+                  <Card key={note.id} className="cursor-pointer hover:bg-muted/30 transition-colors border border-border/40 bg-card/20" onClick={() => handleNoteClick(note)}>
+                    <CardContent className="p-4 flex flex-col gap-1.5">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-semibold truncate">{note.title || 'Nota sin título'}</p>
+                        <span className="text-[9px] bg-muted px-2 py-0.5 rounded-full font-medium text-muted-foreground">{note.category}</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground line-clamp-2">{note.content}</p>
+                    </CardContent>
+                  </Card>
+                ))}
+                {filteredNotes.length === 0 && (
+                  <p className="text-sm text-muted-foreground italic p-4 text-center border border-dashed rounded-xl">No hay notas recientes.</p>
+                )}
+              </div>
+            </div>
+
+            {/* Columna Derecha: Tareas & Documentos */}
+            <div className="space-y-6">
+              <div className="flex items-center justify-between border-b border-border/20 pb-2">
+                <h3 className="text-lg font-bold flex items-center gap-2">
+                  <ListTodo className="h-5 w-5 text-purple-600" />
+                  Tareas Pendientes
+                </h3>
+                <Button variant="ghost" size="sm" onClick={() => handleTabChange('agenda')} className="text-xs text-primary">
+                  Ver agenda
+                </Button>
+              </div>
+
+              <div className="space-y-3">
+                {tasks.filter(t => !t.is_completed).slice(0, 3).map((task) => (
+                  <Card key={task.id} className="border border-border/40 bg-card/20 hover:bg-muted/30 transition-all duration-200">
+                    <CardContent className="p-4 flex items-center justify-between">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <input
+                          type="checkbox"
+                          checked={task.is_completed}
+                          onChange={() => handleToggleTaskCompleted(task)}
+                          className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary shrink-0 cursor-pointer"
+                        />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium truncate">{task.description}</p>
+                          <p className="text-xs text-muted-foreground">
+                            Vence: {task.end_date ? new Date(task.end_date).toLocaleDateString() : 'Sin fecha'}
+                          </p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+                {tasks.filter(t => !t.is_completed).length === 0 && (
+                  <p className="text-sm text-muted-foreground italic p-4 text-center border border-dashed rounded-xl">¡Felicidades! No hay tareas pendientes.</p>
+                )}
+              </div>
+
+              <div className="flex items-center justify-between border-b border-border/20 pb-2 pt-4">
+                <h3 className="text-lg font-bold flex items-center gap-2">
+                  <FileText className="h-5 w-5 text-blue-600" />
+                  Documentos Recientes
+                </h3>
+                <Button variant="ghost" size="sm" onClick={() => handleTabChange('knowledge')} className="text-xs text-primary">
+                  Ver todos
+                </Button>
+              </div>
+
+              <div className="space-y-3">
+                {[...onlyofficeDocuments]
+                  .sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
+                  .slice(0, 3)
+                  .map((doc) => (
+                    <Card key={doc.id} className="cursor-pointer hover:bg-muted/30 transition-colors border border-border/40 bg-card/20" onClick={() => handleOnlyOfficeClick(doc)}>
+                      <CardContent className="p-4 flex items-center justify-between">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="h-8 w-8 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-600 shrink-0">
+                            <FileType className="h-4 w-4" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium truncate">{doc.filename}</p>
+                            <p className="text-xs text-muted-foreground">Actualizado: {new Date(doc.updated_at).toLocaleDateString()}</p>
+                          </div>
+                        </div>
+                        <ArrowLeft className="h-4 w-4 text-muted-foreground rotate-180" />
+                      </CardContent>
+                    </Card>
+                  ))}
+                {onlyofficeDocuments.length === 0 && (
+                  <p className="text-sm text-muted-foreground italic p-4 text-center border border-dashed rounded-xl">No hay documentos recientes.</p>
+                )}
+              </div>
+            </div>
+          </div>
+        </TabsContent>
+
+        {/* TAB 2: CHATS */}
+        <TabsContent value="chats" className="focus-visible:outline-none focus-visible:ring-0">
+          <div className="mb-6 flex justify-between items-center">
+            <div>
+              <h2 className="text-xl sm:text-2xl font-semibold flex items-center">
+                <MessageSquare className="mr-2 sm:mr-3 h-5 w-5 sm:h-6 sm:w-6 text-primary" />
+                Chats del Workspace
+              </h2>
+              <p className="text-xs sm:text-sm text-muted-foreground mt-1">Conversaciones específicas de este espacio</p>
+            </div>
+            <Button onClick={handleNewChat} size="sm">
+              <Plus className="mr-1.5 h-4 w-4" />
+              Nuevo Chat
+            </Button>
+          </div>
+
+          {filteredChats.length === 0 ? (
+            <div className="text-center py-16 border-2 border-dashed border-border rounded-xl">
+              <MessageSquare className="mx-auto h-16 w-16 text-muted-foreground/50 mb-4" />
+              <h3 className="text-xl font-semibold mb-2">
+                {searchTerm ? 'No se encontraron chats' : 'No hay chats aún'}
+              </h3>
+              <p className="text-muted-foreground mb-6 max-w-md mx-auto">
+                {searchTerm
+                  ? 'No hay chats que coincidan con tu búsqueda. Intenta con otros términos.'
+                  : 'Comienza una nueva conversación especializada en este workspace.'
+                }
+              </p>
+              {!searchTerm && (
+                <Button onClick={handleNewChat} size="lg">
+                  <Plus className="mr-2 h-5 w-5" />
+                  Crear primer Chat
+                </Button>
+              )}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
+              <Card
+                className="group border-2 border-dashed border-border hover:border-primary hover:bg-primary/5 transition-all duration-200 flex flex-col items-center justify-center text-center p-6 cursor-pointer min-h-[180px]"
+                onClick={handleNewChat}
+              >
+                <div className="h-12 w-12 rounded-full bg-green-500/10 flex items-center justify-center mb-3 group-hover:bg-green-500/20 transition-colors">
+                  <Plus className="h-6 w-6 text-green-600" />
+                </div>
+                <h3 className="font-semibold text-lg mb-1">Nuevo Chat</h3>
+                <p className="text-sm text-muted-foreground">Iniciar nueva conversación</p>
+              </Card>
+              {filteredChats.map((chat) => (
+                <Card key={chat.id} className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20 min-h-[180px] flex flex-col" onClick={() => handleChatClick(chat.id)}>
+                  <CardHeader className="pb-3 flex-1">
+                    <CardTitle className="flex items-start justify-between gap-3 h-full">
+                      <div className="flex items-start gap-3 min-w-0 flex-1 h-full">
+                        <div className="h-10 w-10 rounded-lg bg-green-500/10 flex items-center justify-center flex-shrink-0">
+                          <MessageSquare className="h-5 w-5 text-green-600" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="font-semibold text-sm leading-relaxed whitespace-normal break-words line-clamp-3">
+                            <InlineMarkdownRenderer content={chat.title} />
+                          </div>
+                        </div>
+                      </div>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleChatClick(chat.id); }}>
+                            <MessageSquare className="mr-2 h-4 w-4" />
+                            Abrir Chat
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleOpenRenameDialog(chat); }}>
+                            <svg className="mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                            </svg>
+                            Renombrar
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDeleteChat(chat.id); }} className="text-destructive">
+                            <svg className="mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                            Eliminar
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="pt-0 mt-auto">
+                    <div className="flex items-center justify-between pt-3 border-t border-border/50">
+                      <span className="text-xs text-muted-foreground">
+                        {chat.created_at ? new Date(chat.created_at).toLocaleDateString() : 'Sin fecha'}
+                      </span>
+                      <div className="flex items-center gap-1">
+                        <div className="h-2 w-2 rounded-full bg-green-500"></div>
+                        <span className="text-xs text-muted-foreground">Activo</span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+          {hasMoreChats && !searchTerm && (
+            <div className="flex justify-end mt-6">
+              <Button variant="outline" onClick={handleLoadMoreChats} disabled={isFetchingMoreChats}>
+                {isFetchingMoreChats ? "Cargando..." : "Cargar más chats"}
               </Button>
+            </div>
+          )}
+        </TabsContent>
+
+        {/* TAB 3: KNOWLEDGE (COLLECTIONS + DOCUMENTS) */}
+        <TabsContent value="knowledge" className="focus-visible:outline-none focus-visible:ring-0 space-y-12">
+          {/* Colecciones */}
+          <div>
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h2 className="text-xl sm:text-2xl font-semibold flex items-center">
+                  <BookMarked className="mr-3 h-6 w-6 text-primary" />
+                  Colecciones de Conocimiento
+                </h2>
+                <p className="text-sm text-muted-foreground mt-1">Carpetas especializadas para organizar documentos</p>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={handleOpenAddExistingCollectionDialog}>
+                  <Plus className="mr-1 h-3.5 w-3.5" />
+                  Asociar Existente
+                </Button>
+                <Button size="sm" onClick={() => setCreateCollectionDialogOpen(true)}>
+                  <Plus className="mr-1 h-3.5 w-3.5" />
+                  Crear Colección
+                </Button>
+              </div>
+            </div>
+
+            {filteredCollections.length === 0 ? (
+              <div className="text-center py-12 border border-dashed border-border rounded-xl">
+                <BookMarked className="mx-auto h-12 w-12 text-muted-foreground/40 mb-3" />
+                <p className="text-sm text-muted-foreground">No hay colecciones asociadas a este workspace.</p>
+                <Button variant="outline" size="sm" className="mt-4" onClick={() => setCreateCollectionDialogOpen(true)}>
+                  Crear Colección
+                </Button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
+                <Card
+                  className="group border-2 border-dashed border-border hover:border-primary hover:bg-primary/5 transition-all duration-200 flex flex-col items-center justify-center text-center p-6 cursor-pointer"
+                  onClick={() => setCreateCollectionDialogOpen(true)}
+                >
+                  <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center mb-3 group-hover:bg-primary/20 transition-colors">
+                    <Plus className="h-6 w-6 text-primary" />
+                  </div>
+                  <h3 className="font-semibold mb-1">Crear Colección</h3>
+                  <p className="text-xs text-muted-foreground">Nuevo tema de documentos</p>
+                </Card>
+                {filteredCollections.map((collection) => (
+                  <Card key={collection.id || collection.name || collection.topic} className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20" onClick={() => handleCollectionClick(collection.name || collection.topic || collection.id)}>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="flex items-start justify-between gap-3">
+                        <div className="flex items-start gap-3 min-w-0 flex-1">
+                          <div className="h-10 w-10 rounded-lg bg-blue-500/10 flex items-center justify-center flex-shrink-0">
+                            <BookMarked className="h-5 w-5 text-blue-600" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="font-semibold text-sm line-clamp-2">
+                              <InlineMarkdownRenderer content={collection.name || collection.topic || ''} />
+                            </div>
+                          </div>
+                        </div>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleCollectionClick(collection.id); }}>
+                              <BookMarked className="mr-2 h-4 w-4" />
+                              Abrir Colección
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleOpenRenameCollectionDialog(collection); }}>
+                              <svg className="mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                              </svg>
+                              Renombrar
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleOpenShareCollectionDialog(collection); }}>
+                              <svg className="mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                              </svg>
+                              Compartir
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDeleteCollection(collection.id); }} className="text-destructive">
+                              <svg className="mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                              Eliminar
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="pt-0">
+                      <p className="text-xs text-muted-foreground line-clamp-2 mb-3">
+                        {collection.description || 'Colección de documentos especializados'}
+                      </p>
+                      <div className="flex items-center justify-between pt-3 border-t border-border/50">
+                        <div className="flex items-center gap-3">
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger className="flex items-center gap-1.5">
+                                <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                                <span className="text-xs text-muted-foreground">
+                                  {collection.document_count || 0}
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent>Documentos</TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger className="flex items-center gap-1.5">
+                                <Folder className="h-3.5 w-3.5 text-muted-foreground" />
+                                <span className="text-xs text-muted-foreground">
+                                  {collection.subcollection_count || 0}
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent>Subcolecciones</TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <div className="h-2 w-2 rounded-full bg-blue-500"></div>
+                          <span className="text-xs text-muted-foreground">Disponible</span>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
             )}
           </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
-            <Card
-              className="group border-2 border-dashed border-border hover:border-primary hover:bg-primary/5 transition-all duration-200 flex flex-col items-center justify-center text-center p-6 cursor-pointer min-h-[180px]"
-              onClick={handleNewChat}
-            >
-              <div className="h-12 w-12 rounded-full bg-green-500/10 flex items-center justify-center mb-3 group-hover:bg-green-500/20 transition-colors">
-                <Plus className="h-6 w-6 text-green-600" />
-              </div>
-              <h3 className="font-semibold text-lg mb-1">Nuevo Chat</h3>
-              <p className="text-sm text-muted-foreground">Iniciar nueva conversación</p>
-            </Card>
-            {filteredChats.map((chat) => (
-              <Card key={chat.id} className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20 min-h-[180px] flex flex-col" onClick={() => handleChatClick(chat.id)}>
-                <CardHeader className="pb-3 flex-1">
-                  <CardTitle className="flex items-start justify-between gap-3 h-full">
-                    <div className="flex items-start gap-3 min-w-0 flex-1 h-full">
-                      <div className="h-10 w-10 rounded-lg bg-green-500/10 flex items-center justify-center flex-shrink-0">
-                        <MessageSquare className="h-5 w-5 text-green-600" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="font-semibold text-sm leading-relaxed whitespace-normal break-words line-clamp-3">
-                          <InlineMarkdownRenderer content={chat.title} />
-                        </div>
-                      </div>
-                    </div>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
-                          <MoreVertical className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleChatClick(chat.id); }}>
-                          <MessageSquare className="mr-2 h-4 w-4" />
-                          Abrir Chat
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleOpenRenameDialog(chat); }}>
-                          <svg className="mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                          </svg>
-                          Renombrar
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDeleteChat(chat.id); }} className="text-destructive">
-                          <svg className="mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                          </svg>
-                          Eliminar
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="pt-0 mt-auto">
-                  <div className="flex items-center justify-between pt-3 border-t border-border/50">
-                    <span className="text-xs text-muted-foreground">
-                      {chat.created_at ? new Date(chat.created_at).toLocaleDateString() : 'Sin fecha'}
-                    </span>
-                    <div className="flex items-center gap-1">
-                      <div className="h-2 w-2 rounded-full bg-green-500"></div>
-                      <span className="text-xs text-muted-foreground">Activo</span>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
-        {hasMoreChats && !searchTerm && (
-          <div className="flex justify-end mt-6">
-            <Button variant="outline" onClick={handleLoadMoreChats} disabled={isFetchingMoreChats}>
-              {isFetchingMoreChats ? "Cargando..." : "Cargar más chats"}
-            </Button>
-          </div>
-        )}
-      </div>
 
-      <div className="mb-12">
-        <div className="flex items-center justify-between mb-6">
+          {/* Documentos */}
           <div>
-            <h2 className="text-2xl font-semibold flex items-center">
-              <BookMarked className="mr-3 h-6 w-6 text-primary" />
-              Conocimientos del Workspace
-            </h2>
-            <p className="text-muted-foreground mt-1">Documentos y colecciones especializadas</p>
-          </div>
-          <Button variant="outline" onClick={handleOpenAddExistingCollectionDialog}>
-            <Plus className="mr-2 h-4 w-4" />
-            Añadir Existente
-          </Button>
-        </div>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+              <div>
+                <h2 className="text-xl sm:text-2xl font-semibold flex items-center">
+                  <FileText className="mr-2 sm:mr-3 h-5 w-5 sm:h-6 sm:w-6 text-primary" />
+                  Documentos del Workspace
+                </h2>
+                <p className="text-xs sm:text-sm text-muted-foreground mt-1">Archivos editables e indexables en OnlyOffice</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="file"
+                  id="workspace-onlyoffice-upload-tab"
+                  className="hidden"
+                  onChange={handleOnlyOfficeUpload}
+                  accept=".docx,.xlsx,.pptx,.doc,.xls,.ppt,.txt,.csv"
+                />
+                <Button asChild size="sm" className="text-xs cursor-pointer">
+                  <label htmlFor="workspace-onlyoffice-upload-tab" className="flex items-center gap-1.5 cursor-pointer">
+                    <Plus className="h-3.5 w-3.5" />
+                    Subir Documento
+                  </label>
+                </Button>
+              </div>
+            </div>
 
-        {filteredCollections.length === 0 ? (
-          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-            <Card
-              className="group border-2 border-dashed border-border hover:border-primary hover:bg-primary/5 transition-all duration-200 flex flex-col items-center justify-center text-center p-8 cursor-pointer min-h-[200px]"
-              onClick={() => setCreateCollectionDialogOpen(true)}
-            >
-              <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center mb-4 group-hover:bg-primary/20 transition-colors">
-                <Plus className="h-8 w-8 text-primary" />
+            {onlyofficeDocuments.length === 0 ? (
+              <div className="text-center py-16 border-2 border-dashed border-border rounded-xl">
+                <FileText className="mx-auto h-16 w-16 text-muted-foreground/50 mb-4" />
+                <h3 className="text-xl font-semibold mb-2 text-muted-foreground">No hay documentos aún</h3>
+                <p className="text-muted-foreground mb-6 max-w-md mx-auto text-sm">
+                  Sube documentos de Office para editarlos colaborativamente en este workspace.
+                </p>
               </div>
-              <h3 className="font-semibold text-lg mb-2">Crear Colección</h3>
-              <p className="text-sm text-muted-foreground leading-relaxed">
-                Define un nuevo tema para organizar tus documentos y conocimientos.
-              </p>
-            </Card>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
-            <Card
-              className="group border-2 border-dashed border-border hover:border-primary hover:bg-primary/5 transition-all duration-200 flex flex-col items-center justify-center text-center p-6 cursor-pointer"
-              onClick={() => setCreateCollectionDialogOpen(true)}
-            >
-              <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center mb-3 group-hover:bg-primary/20 transition-colors">
-                <Plus className="h-6 w-6 text-primary" />
-              </div>
-              <h3 className="font-semibold mb-1">Crear Colección</h3>
-              <p className="text-xs text-muted-foreground">Nuevo tema de documentos</p>
-            </Card>
-            {filteredCollections.map((collection) => (
-              <Card key={collection.id || collection.name || collection.topic} className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20" onClick={() => handleCollectionClick(collection.name || collection.topic || collection.id)}>
-                <CardHeader className="pb-3">
-                  <CardTitle className="flex items-start justify-between gap-3">
-                    <div className="flex items-start gap-3 min-w-0 flex-1">
-                      <div className="h-10 w-10 rounded-lg bg-blue-500/10 flex items-center justify-center flex-shrink-0">
-                        <BookMarked className="h-5 w-5 text-blue-600" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="font-semibold text-sm line-clamp-2">
-                          <InlineMarkdownRenderer content={collection.name || collection.topic || ''} />
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                {onlyofficeDocuments.map((doc) => (
+                  <Card key={doc.id} className="group hover:border-primary/30 transition-all cursor-pointer" onClick={() => handleOnlyOfficeClick(doc)}>
+                    <CardHeader className="p-4 pb-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-3 overflow-hidden">
+                          <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
+                            <FileType className="h-5 w-5 text-primary" />
+                          </div>
+                          <div className="overflow-hidden">
+                            <CardTitle className="text-sm font-semibold truncate" title={doc.filename}>
+                              {doc.filename}
+                            </CardTitle>
+                            <p className="text-[10px] text-muted-foreground uppercase">{doc.extension}</p>
+                          </div>
                         </div>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleOnlyOfficeClick(doc); }}>
+                              <Edit3 className="mr-2 h-4 w-4" />
+                              Editar
+                            </DropdownMenuItem>
+                            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDeleteOnlyOfficeDoc(doc.id); }} className="text-destructive">
+                              <Trash2 className="mr-2 h-4 w-4" />
+                              Eliminar
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       </div>
-                    </div>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
-                          <MoreVertical className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleCollectionClick(collection.id); }}>
-                          <BookMarked className="mr-2 h-4 w-4" />
-                          Abrir Colección
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleOpenRenameCollectionDialog(collection); }}>
-                          <svg className="mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                          </svg>
-                          Renombrar
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleOpenShareCollectionDialog(collection); }}>
-                          <svg className="mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
-                          </svg>
-                          Compartir
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDeleteCollection(collection.id); }} className="text-destructive">
-                          <svg className="mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                          </svg>
-                          Eliminar
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="pt-0">
-                  <p className="text-xs text-muted-foreground line-clamp-2 mb-3">
-                    {collection.description || 'Colección de documentos especializados'}
-                  </p>
-                  <div className="flex items-center justify-between pt-3 border-t border-border/50">
-                    <div className="flex items-center gap-3">
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger className="flex items-center gap-1.5">
-                            <FileText className="h-3.5 w-3.5 text-muted-foreground" />
-                            <span className="text-xs text-muted-foreground">
-                              {collection.document_count || 0}
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent>Documentos</TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger className="flex items-center gap-1.5">
-                            <Folder className="h-3.5 w-3.5 text-muted-foreground" />
-                            <span className="text-xs text-muted-foreground">
-                              {collection.subcollection_count || 0}
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent>Subcolecciones</TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <div className="h-2 w-2 rounded-full bg-blue-500"></div>
-                      <span className="text-xs text-muted-foreground">Disponible</span>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
-        <p className="text-xs text-muted-foreground/70 mt-4 text-center">
-          Las colecciones están aisladas y solo son accesibles dentro de este workspace
-        </p>
-      </div>
-
-      {/* Documentos Section (NEW) */}
-      <div className="mb-12">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-          <div>
-            <h2 className="text-xl sm:text-2xl font-semibold flex items-center">
-              <FileText className="mr-2 sm:mr-3 h-5 w-5 sm:h-6 sm:w-6 text-primary" />
-              Documentos del Workspace
-            </h2>
-            <p className="text-xs sm:text-sm text-muted-foreground mt-1">Archivos editables de OnlyOffice</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <input
-              type="file"
-              id="workspace-onlyoffice-upload"
-              className="hidden"
-              onChange={handleOnlyOfficeUpload}
-              accept=".docx,.xlsx,.pptx,.doc,.xls,.ppt,.txt,.csv"
-            />
-            <Button asChild size="sm" className="text-xs cursor-pointer">
-              <label htmlFor="workspace-onlyoffice-upload" className="flex items-center gap-1.5 cursor-pointer">
-                <Plus className="h-3.5 w-3.5" />
-                Subir Documento
-              </label>
-            </Button>
-          </div>
-        </div>
-
-        {onlyofficeDocuments.length === 0 ? (
-          <div className="text-center py-16 border-2 border-dashed border-border rounded-xl">
-            <FileText className="mx-auto h-16 w-16 text-muted-foreground/50 mb-4" />
-            <h3 className="text-xl font-semibold mb-2 text-muted-foreground">No hay documentos aún</h3>
-            <p className="text-muted-foreground mb-6 max-w-md mx-auto text-sm">
-              Sube documentos de Office para editarlos colaborativamente en este workspace.
-            </p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {onlyofficeDocuments.map((doc) => (
-              <Card key={doc.id} className="group hover:border-primary/30 transition-all cursor-pointer" onClick={() => handleOnlyOfficeClick(doc)}>
-                <CardHeader className="p-4 pb-2">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-3 overflow-hidden">
-                      <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
-                        <FileType className="h-5 w-5 text-primary" />
+                    </CardHeader>
+                    <CardContent className="p-4 pt-0">
+                      <div className="flex items-center justify-between mt-2 text-[10px] text-muted-foreground">
+                        <span>{new Date(doc.updated_at).toLocaleDateString()}</span>
                       </div>
-                      <div className="overflow-hidden">
-                        <CardTitle className="text-sm font-semibold truncate" title={doc.filename}>
-                          {doc.filename}
-                        </CardTitle>
-                        <p className="text-[10px] text-muted-foreground uppercase">{doc.extension}</p>
-                      </div>
-                    </div>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
-                          <MoreVertical className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleOnlyOfficeClick(doc); }}>
-                          <Edit3 className="mr-2 h-4 w-4" />
-                          Editar
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleDeleteOnlyOfficeDoc(doc.id); }} className="text-destructive">
-                          <Trash2 className="mr-2 h-4 w-4" />
-                          Eliminar
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                </CardHeader>
-                <CardContent className="p-4 pt-0">
-                  <div className="flex items-center justify-between mt-2 text-[10px] text-muted-foreground">
-                    <span>{new Date(doc.updated_at).toLocaleDateString()}</span>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        </TabsContent>
 
-      {/* Agenda Section (NEW) */}
-      <div className="mb-12">
-        <div
-          className="mb-6 cursor-pointer select-none"
-          onClick={() => setIsAgendaExpanded(prev => !prev)}
-        >
-          <div className="flex items-center justify-between">
+        {/* TAB 4: AGENDA (EVENTS & TASKS) */}
+        <TabsContent value="agenda" className="focus-visible:outline-none focus-visible:ring-0 space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <h2 className="text-xl sm:text-2xl font-semibold flex items-center">
                 <Calendar className="mr-2 sm:mr-3 h-5 w-5 sm:h-6 sm:w-6 text-primary" />
                 Agenda del Workspace
               </h2>
-              <p className="text-xs sm:text-sm text-muted-foreground mt-1">Eventos y tareas programadas</p>
+              <p className="text-xs sm:text-sm text-muted-foreground mt-1">Eventos y tareas programadas en este espacio</p>
             </div>
-            <Button variant="ghost" size="sm" className="h-8 w-8 p-0 flex-shrink-0" onClick={(e) => { e.stopPropagation(); setIsAgendaExpanded(prev => !prev); }}>
-              {isAgendaExpanded ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={() => {
+                setSelectedEvent(null);
+                setIsEventDialogOpen(true);
+              }} className="text-xs">
+                <Plus className="mr-1 h-3.5 w-3.5" />
+                Evento
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => {
+                setSelectedTask(null);
+                setIsTaskDialogOpen(true);
+              }} className="text-xs">
+                <Plus className="mr-1 h-3.5 w-3.5" />
+                Tarea
+              </Button>
+            </div>
           </div>
-        </div>
-        {isAgendaExpanded && (
-          <>
-            <div className="flex flex-col gap-4 mb-6">
-              <div className="flex bg-muted/50 p-1 rounded-lg w-fit">
-                <Button variant={viewMode === 'list' ? 'default' : 'ghost'} size="sm" onClick={() => setViewMode('list')} className="text-xs px-3">Lista</Button>
-                <Button variant={viewMode === 'kanban' ? 'default' : 'ghost'} size="sm" onClick={() => setViewMode('kanban')} className="text-xs px-3">Kanban</Button>
-                <Button variant={viewMode === 'gantt' ? 'default' : 'ghost'} size="sm" onClick={() => setViewMode('gantt')} className="text-xs px-3">Gantt</Button>
-              </div>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={() => {
-                  setSelectedEvent(null);
-                  setIsEventDialogOpen(true);
-                }} className="flex-1 sm:flex-none text-xs">
-                  <Plus className="mr-1 h-3.5 w-3.5" />
-                  Evento
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => {
-                  setSelectedTask(null);
-                  setIsTaskDialogOpen(true);
-                }} className="flex-1 sm:flex-none text-xs">
-                  <Plus className="mr-1 h-3.5 w-3.5" />
-                  Tarea
-                </Button>
-              </div>
-            </div>
+
+          <div className="flex bg-muted/50 p-1 rounded-lg w-fit">
+            <Button variant={viewMode === 'list' ? 'default' : 'ghost'} size="sm" onClick={() => setViewMode('list')} className="text-xs px-3">Lista</Button>
+            <Button variant={viewMode === 'kanban' ? 'default' : 'ghost'} size="sm" onClick={() => setViewMode('kanban')} className="text-xs px-3">Kanban</Button>
+            <Button variant={viewMode === 'gantt' ? 'default' : 'ghost'} size="sm" onClick={() => setViewMode('gantt')} className="text-xs px-3">Gantt</Button>
+          </div>
+
+          <div className="mt-4 min-h-[400px]">
             {viewMode === 'list' && (
               <WeeklyScheduleView
                 currentDate={currentDate}
@@ -1213,114 +1524,115 @@ export default function WorkspaceDashboard({ params }: PageProps) {
               ...agendaEvents.map(event => ({ ...event, type: 'event' as const })),
               ...tasks.map(task => ({ ...task, type: 'task' as const }))
             ]} />}
-          </>
-        )}
-      </div>
+          </div>
+        </TabsContent>
 
-      {/* Notes Section (NEW) */}
-      <div className="mb-12">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-          <div>
-            <h2 className="text-xl sm:text-2xl font-semibold flex items-center">
-              <Notebook className="mr-2 sm:mr-3 h-5 w-5 sm:h-6 sm:w-6 text-primary" />
-              Notas del Workspace
-            </h2>
-            <p className="text-xs sm:text-sm text-muted-foreground mt-1">Notas y apuntes específicos</p>
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 mb-6">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="text-xs">
-                Categoría: {selectedNoteCategory}
+        {/* TAB 5: NOTES */}
+        <TabsContent value="notes" className="focus-visible:outline-none focus-visible:ring-0">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+            <div>
+              <h2 className="text-xl sm:text-2xl font-semibold flex items-center">
+                <Notebook className="mr-2 sm:mr-3 h-5 w-5 sm:h-6 sm:w-6 text-primary" />
+                Notas del Workspace
+              </h2>
+              <p className="text-xs sm:text-sm text-muted-foreground mt-1">Notas y apuntes específicos para análisis IA</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="text-xs">
+                    Categoría: {selectedNoteCategory}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  {uniqueNoteCategories.map(category => (
+                    <DropdownMenuItem key={category} onClick={() => setSelectedNoteCategory(category)}>
+                      {category}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <Button variant="outline" size="sm" onClick={handleAnalyzeAllNotes} disabled={notes.length === 0} className="text-xs">
+                <Lightbulb className="mr-1.5 h-3.5 w-3.5 text-yellow-500" />
+                Analizar Colección
               </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
-              {uniqueNoteCategories.map(category => (
-                <DropdownMenuItem key={category} onClick={() => setSelectedNoteCategory(category)}>
-                  {category}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <Button variant="outline" size="sm" onClick={handleAnalyzeAllNotes} disabled={notes.length === 0} className="text-xs">
-            <Lightbulb className="mr-1.5 h-3.5 w-3.5 text-yellow-500" />
-            Analizar
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setIsNoteDialogOpen(true)} className="text-xs ml-auto sm:ml-0">
-            <Plus className="mr-1.5 h-3.5 w-3.5" />
-            Nueva Nota
-          </Button>
-        </div>
-        {filteredNotes.length === 0 ? (
-          <div className="text-center py-16 border-2 border-dashed border-border rounded-xl">
-            <Notebook className="mx-auto h-16 w-16 text-muted-foreground/50 mb-4" />
-            <h3 className="text-xl font-semibold mb-2">
-              {searchTerm ? 'No hay notas que coincidan' : 'No hay notas aún'}
-            </h3>
-            <p className="text-muted-foreground mb-6 max-w-md mx-auto">
-              Crea notas para organizar tus ideas y conocimientos en este workspace.
-            </p>
-            {!searchTerm && (
-              <Button onClick={() => setIsNoteDialogOpen(true)} size="lg">
-                <Plus className="mr-2 h-5 w-5" />
-                Crear primera Nota
+              <Button size="sm" onClick={() => setIsNoteDialogOpen(true)} className="text-xs">
+                <Plus className="mr-1.5 h-3.5 w-3.5" />
+                Nueva Nota
               </Button>
-            )}
+            </div>
           </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
-            {filteredNotesByCategory.map((note) => (
-              <Card key={note.id} className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20" onClick={() => handleNoteClick(note)}>
-                <CardHeader className="pb-3">
-                  <CardTitle className="flex items-start justify-between gap-3">
-                    <div className="flex items-start gap-3 min-w-0 flex-1">
-                      <div className="h-10 w-10 rounded-lg bg-yellow-500/10 flex items-center justify-center flex-shrink-0">
-                        <Notebook className="h-5 w-5 text-yellow-600" />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="font-semibold text-sm line-clamp-2">
-                          {note.title || 'Nota sin título'}
+
+          {filteredNotes.length === 0 ? (
+            <div className="text-center py-16 border-2 border-dashed border-border rounded-xl">
+              <Notebook className="mx-auto h-16 w-16 text-muted-foreground/50 mb-4" />
+              <h3 className="text-xl font-semibold mb-2">
+                {searchTerm ? 'No hay notas que coincidan' : 'No hay notas aún'}
+              </h3>
+              <p className="text-muted-foreground mb-6 max-w-md mx-auto">
+                Crea notas para organizar tus ideas y conocimientos en este workspace.
+              </p>
+              {!searchTerm && (
+                <Button onClick={() => setIsNoteDialogOpen(true)} size="lg">
+                  <Plus className="mr-2 h-5 w-5" />
+                  Crear primera Nota
+                </Button>
+              )}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-6">
+              {filteredNotesByCategory.map((note) => (
+                <Card key={note.id} className="group cursor-pointer hover:shadow-xl hover:scale-[1.02] transition-all duration-200 border-2 hover:border-primary/20" onClick={() => handleNoteClick(note)}>
+                  <CardHeader className="pb-3">
+                    <CardTitle className="flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-3 min-w-0 flex-1">
+                        <div className="h-10 w-10 rounded-lg bg-yellow-500/10 flex items-center justify-center flex-shrink-0">
+                          <Notebook className="h-5 w-5 text-yellow-600" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="font-semibold text-sm line-clamp-2">
+                            {note.title || 'Nota sin título'}
+                          </div>
                         </div>
                       </div>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleNoteClick(note); }}>
+                            <Notebook className="mr-2 h-4 w-4" />
+                            Ver Nota
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleAnalyzeSingleNote(note); }}>
+                            <Lightbulb className="mr-2 h-4 w-4" />
+                            Analizar Nota
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="pt-0">
+                    <p className="text-xs text-muted-foreground line-clamp-2 mb-3">
+                      {note.content}
+                    </p>
+                    <div className="flex items-center justify-between pt-2 border-t border-border/50">
+                      <span className="text-xs text-muted-foreground">
+                        {note.category}
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {new Date(note.created_at).toLocaleDateString()}
+                      </span>
                     </div>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
-                          <MoreVertical className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleNoteClick(note); }}>
-                          <Notebook className="mr-2 h-4 w-4" />
-                          Ver Nota
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleAnalyzeSingleNote(note); }}>
-                          <Lightbulb className="mr-2 h-4 w-4" />
-                          Analizar Nota
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="pt-0">
-                  <p className="text-xs text-muted-foreground line-clamp-2 mb-3">
-                    {note.content}
-                  </p>
-                  <div className="flex items-center justify-between pt-2 border-t border-border/50">
-                    <span className="text-xs text-muted-foreground">
-                      {note.category}
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      {new Date(note.created_at).toLocaleDateString()}
-                    </span>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
-      </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+        </TabsContent>
+      </Tabs>
 
       <CreateWorkspaceCollectionDialog
         isOpen={createCollectionDialogOpen}
