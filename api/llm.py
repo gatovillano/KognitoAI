@@ -35,6 +35,12 @@ async def get_user_api_key(account_id: str, provider: str) -> Optional[str]:
             if not api_key and provider.lower() in ["gemini", "google"]:
                 api_key = await repo.get_decrypted_secret(uuid.UUID(account_id), "GOOGLE_API_KEY")
 
+            if not api_key:
+                system_id = uuid.UUID("00000000-0000-0000-0000-000000000000")
+                api_key = await repo.get_decrypted_secret(system_id, key_name)
+                if not api_key and provider.lower() in ["gemini", "google"]:
+                    api_key = await repo.get_decrypted_secret(system_id, "GOOGLE_API_KEY")
+
             if api_key:
                 if not api_key.isascii():
                     logger.warning(f"API key for {provider} contains non-ASCII characters. Stripping them.")
