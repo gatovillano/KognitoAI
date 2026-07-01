@@ -89,44 +89,53 @@ class ImageGenerationTool(BaseTool):
 
         try:
             # Llama a la función que realmente se conecta con la API de generación.
-            image_result = await generar_imagen_vertex_ai_binario(prompt)
+            image_result = await generar_imagen_vertex_ai_binario(prompt, account_id=self.account_id)
 
             if isinstance(image_result, BytesIO):
-                # Si la generación fue exitosa, el resultado es un objeto BytesIO.
-                import base64
-                image_data = base64.b64encode(image_result.getvalue()).decode('utf-8')
-                
-                try:
-                    success = await store_telegram_user_data(
-                        telegram_id=int(self.telegram_id),
-                        key=GENERATED_IMAGE_KEY,
-                        data=image_data
-                    )
-                    if not success:
-                        raise ValueError("Failed to store image on Telegram gateway.")
+                # Caso Telegram (si telegram_id está disponible)
+                if self.telegram_id and str(self.telegram_id).strip():
+                    try:
+                        import base64
+                        image_data = base64.b64encode(image_result.getvalue()).decode('utf-8')
+                        success = await store_telegram_user_data(
+                            telegram_id=int(self.telegram_id),
+                            key=GENERATED_IMAGE_KEY,
+                            data=image_data
+                        )
+                        if not success:
+                            raise ValueError("Failed to store image on Telegram gateway.")
+                            
+                        logger.info(f"✅ Imagen enviada al gateway de Telegram para el usuario {self.telegram_id}.")
                         
-                    logger.info(f"✅ Imagen enviada al gateway de Telegram para el usuario {self.telegram_id}.")
-                    
-                    # Enviar un mensaje de seguimiento al chat de Telegram para activar el envío de la imagen.
-                    await send_telegram_message(
-                        telegram_id=int(self.telegram_id),
-                        text="¡Hecho! He generado la imagen y te la enviaré en un momento."
-                    )
-                    logger.info(f"✅ Mensaje de seguimiento enviado al chat de Telegram para el usuario {self.telegram_id}.")
-                    return "¡Hecho! He generado la imagen y te la enviaré en un momento."
-                except Exception as e:
-                    logger.error(f"Error al enviar imagen al gateway de Telegram: {e}", exc_info=True)
-                    # Si falla, guardamos en archivo temporal como respaldo.
+                        await send_telegram_message(
+                            telegram_id=int(self.telegram_id),
+                            text="¡Hecho! He generado la imagen y te la enviaré en un momento."
+                        )
+                        logger.info(f"✅ Mensaje de seguimiento enviado al chat de Telegram para el usuario {self.telegram_id}.")
+                        return "¡Hecho! He generado la imagen y te la enviaré en un momento."
+                    except Exception as telegram_err:
+                        logger.error(f"Error al enviar imagen al gateway de Telegram: {telegram_err}", exc_info=True)
+                
+                # Caso por defecto (Web chat) o fallback: Guardar en media_root para visualización directa
+                try:
                     import os
                     import datetime
-                    temp_dir = settings.temp_root
-                    os.makedirs(temp_dir, exist_ok=True)
+                    media_dir = settings.media_root
+                    os.makedirs(media_dir, exist_ok=True)
                     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                    temp_filename = f"{temp_dir}/imagen_{self.account_id}_{timestamp}.png"
-                    with open(temp_filename, "wb") as temp_file:
-                        temp_file.write(image_result.getvalue())
-                    logger.info(f"✅ Imagen guardada en archivo temporal {temp_filename} debido a error en endpoint.")
-                    return f"¡Hecho! He generado la imagen, pero no pude enviarla directamente. Puedes acceder a ella en: {temp_filename}"
+                    filename = f"generated_{self.account_id}_{timestamp}.png"
+                    filepath = os.path.join(media_dir, filename)
+                    
+                    with open(filepath, "wb") as file:
+                        file.write(image_result.getvalue())
+                    
+                    # Generamos el formato markdown que el chat renderiza como una imagen interactiva
+                    markdown_image = f"![Imagen Generada](/media/{filename})"
+                    logger.info(f"✅ Imagen guardada localmente en {filepath}. Retornando: {markdown_image}")
+                    return f"¡Listo! He generado la imagen:\n\n{markdown_image}"
+                except Exception as save_err:
+                    logger.error(f"Error al guardar la imagen en media_root: {save_err}", exc_info=True)
+                    return f"He generado la imagen, pero no se pudo guardar en el servidor: {save_err}"
             else:
                 # Si no es BytesIO, es un mensaje de error de la función de generación.
                 error_message = str(image_result)
