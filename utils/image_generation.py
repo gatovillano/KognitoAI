@@ -52,7 +52,6 @@ async def generar_imagen_vertex_ai_binario(description: str, account_id: Optiona
         model_id = "imagen-3.0-generate-002"
         api_key = None
 
-        logger.debug("Cargando configuración de base de datos para generación de imágenes...")
         async with SessionLocal() as db:
             # Obtener el modelo configurado en los ajustes globales
             try:
@@ -60,6 +59,10 @@ async def generar_imagen_vertex_ai_binario(description: str, account_id: Optiona
                 model_id = db_settings.get("image_generation_model") or settings.google_image_generation_model_name or "imagen-3.0-generate-002"
             except Exception as e:
                 logger.error(f"Error al cargar configuración de modelo de imagen: {e}")
+            
+            # Limpiar prefijos de proveedor si existen
+            if model_id:
+                model_id = model_id.replace("gemini/", "").replace("google/", "")
             
             # Intentar obtener la API Key del usuario
             if account_id:
