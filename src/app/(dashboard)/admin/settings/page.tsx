@@ -76,7 +76,8 @@ export default function AdminSettingsPage() {
   const [mainModels, setMainModels] = useState<any[]>([]);
   const [fastModels, setFastModels] = useState<any[]>([]);
   const [visionModels, setVisionModels] = useState<any[]>([]);
-  const [loadingModels, setLoadingModels] = useState({ main: false, fast: false, vision: false });
+  const [imageModels, setImageModels] = useState<any[]>([]);
+  const [loadingModels, setLoadingModels] = useState({ main: false, fast: false, vision: false, image: false });
 
   const fetchGlobalSettings = async () => {
     setLoading(true);
@@ -117,7 +118,7 @@ export default function AdminSettingsPage() {
     }
   };
 
-  const fetchModels = async (provider: string, type: 'main' | 'fast' | 'vision', options: { apiBase?: string; refresh?: boolean } = {}) => {
+  const fetchModels = async (provider: string, type: 'main' | 'fast' | 'vision' | 'image', options: { apiBase?: string; refresh?: boolean } = {}) => {
     setLoadingModels(prev => ({ ...prev, [type]: true }));
     try {
       const { apiBase, refresh } = options;
@@ -130,10 +131,23 @@ export default function AdminSettingsPage() {
       if (queryString) url += `?${queryString}`;
 
       const resp = await apiClient.get(url);
-      const models = resp?.data || [];
-      if (type === 'main') setMainModels(models);
-      else if (type === 'fast') setFastModels(models);
-      else if (type === 'vision') setVisionModels(models);
+      const fetchedModels = resp?.data || [];
+      
+      if (type === 'image') {
+        const filtered = fetchedModels.filter((m: any) => {
+          const id = typeof m === 'string' ? m : (m.id || '');
+          return id.toLowerCase().includes('imagen');
+        });
+        setImageModels(filtered);
+      } else {
+        const filtered = fetchedModels.filter((m: any) => {
+          const id = typeof m === 'string' ? m : (m.id || '');
+          return !id.toLowerCase().includes('imagen');
+        });
+        if (type === 'main') setMainModels(filtered);
+        else if (type === 'fast') setFastModels(filtered);
+        else if (type === 'vision') setVisionModels(filtered);
+      }
     } catch (e) {
       console.error(`Error fetching ${type} models for ${provider}:`, e);
     } finally {
@@ -225,6 +239,7 @@ export default function AdminSettingsPage() {
   useEffect(() => {
     fetchGlobalSettings();
     fetchGlobalSecrets();
+    fetchModels('gemini', 'image');
   }, []);
 
   useEffect(() => {
@@ -555,8 +570,16 @@ export default function AdminSettingsPage() {
                           <SelectValue placeholder="Seleccionar Modelo de Imagen" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="imagen-3.0-generate-002">Imagen 3 (Alta Calidad)</SelectItem>
-                          <SelectItem value="imagen-3.0-fast-generate-002">Imagen 3 Fast (Rápido)</SelectItem>
+                          {loadingModels.image ? (
+                            <SelectItem value="loading" disabled>Cargando modelos...</SelectItem>
+                          ) : imageModels.length > 0 ? (
+                            imageModels.map(m => renderModelItem(m, 'gemini'))
+                          ) : (
+                            <>
+                              <SelectItem value="imagen-3.0-generate-002">imagen-3.0-generate-002 (Alta Calidad)</SelectItem>
+                              <SelectItem value="imagen-3.0-fast-generate-002">imagen-3.0-fast-generate-002 (Fast)</SelectItem>
+                            </>
+                          )}
                         </SelectContent>
                       </Select>
                     </div>
