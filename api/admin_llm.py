@@ -46,6 +46,7 @@ class GlobalLLMSettingsResponse(BaseModel):
     fast_llm_provider: Optional[str] = None
     vision_llm_model: Optional[str] = None
     vision_llm_provider: Optional[str] = None
+    image_generation_model: Optional[str] = "imagen-3.0-generate-002"
     use_prompt_tooling: bool = False
     reranker_provider: Optional[str] = None
     reranker_model: Optional[str] = None
@@ -60,6 +61,7 @@ class GlobalLLMSettingsUpdateRequest(BaseModel):
     fast_llm_provider: Optional[str] = None
     vision_llm_model: Optional[str] = None
     vision_llm_provider: Optional[str] = None
+    image_generation_model: Optional[str] = None
     use_prompt_tooling: Optional[bool] = None
     reranker_provider: Optional[str] = None
     reranker_model: Optional[str] = None

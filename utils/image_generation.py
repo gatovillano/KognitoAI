@@ -1,26 +1,12 @@
 # utils/image_generation.py
 
 """
-Módulo para la generación de imágenes utilizando Google Vertex AI.
+Módulo para la generación de imágenes utilizando Google AI Studio.
 
 Este módulo proporciona una función asíncrona para generar imágenes a partir de
-una descripción textual (prompt) utilizando los modelos de generación de imágenes
-de Vertex AI, como Imagen. Se encarga de la autenticación con Google Cloud,
-la construcción de la petición a la API y el procesamiento de la respuesta.
-
-Características Clave:
--   **Autenticación ADC:** Utiliza Application Default Credentials (ADC) para
-    autenticarse de forma segura con Google Cloud, lo que es ideal para entornos
-    de producción en GCP o para desarrollo local configurado con `gcloud auth`.
--   **Manejo de Respuesta Binaria:** La función devuelve un objeto `BytesIO` con
-    los datos de la imagen en formato binario, listo para ser enviado a través
-    de Telegram o guardado en disco, en lugar de solo la cadena base64.
--   **Detección de Relación de Aspecto:** Analiza el prompt en busca de palabras
-    clave como "horizontal", "vertical" o "cuadrada" para ajustar automáticamente
-    la relación de aspecto de la imagen generada.
--   **Configuración Centralizada:** Lee el ID del proyecto, la ubicación y el
-    nombre del modelo desde el módulo `telegram_bot.config`, manteniendo toda la
-    configuración en un solo lugar.
+una descripción textual (prompt) utilizando la API de Google AI Studio (como Imagen 3).
+Se encarga de recuperar la API key adecuada (de usuario o del sistema),
+construir la petición REST y decodificar el resultado binario.
 """
 
 import logging
@@ -28,12 +14,9 @@ import asyncio
 import base64
 import re
 import json
+import os
 from io import BytesIO
-from typing import Union
-
-import requests
-import google.auth
-import google.auth.transport.requests
+from typing import Union, Optional
 
 # Importaciones del proyecto
 from core.config import settings
@@ -46,41 +29,75 @@ logger = logging.getLogger(__name__)
 GENERATED_IMAGE_KEY = "generated_image_bytesio"
 
 
-async def generar_imagen_vertex_ai_binario(description: str) -> Union[BytesIO, str]:
+async def generar_imagen_vertex_ai_binario(description: str, account_id: Optional[str] = None) -> Union[BytesIO, str]:
     """
-    Realiza una petición a la API de Vertex AI para generar una imagen.
+    Realiza una petición a la API de Google AI Studio para generar una imagen utilizando Imagen 3.
 
     Args:
         description: El prompt detallado para la generación de la imagen.
+        account_id: El identificador de la cuenta del usuario para buscar credenciales personalizadas.
 
     Returns:
         Un objeto BytesIO con los datos de la imagen si tiene éxito,
         o una cadena de texto con un mensaje de error si falla.
     """
     try:
-        # --- 1. Autenticación con Google Cloud ---
-        # Obtiene las credenciales por defecto del entorno (gcloud, variables de entorno).
-        logger.debug("Obteniendo credenciales de Google (ADC)...")
-        credentials, project_id_from_auth = google.auth.default(scopes=['https://www.googleapis.com/auth/cloud-platform'])
-        auth_req = google.auth.transport.requests.Request()
-        credentials.refresh(auth_req)  # Obtiene un token de acceso fresco.
-        access_token = credentials.token
-        logger.debug("Credenciales de Google obtenidas exitosamente.")
+        import httpx
+        import uuid
+        from core.database import SessionLocal
+        from core.llm_manager import get_global_llm_settings, get_global_api_key
+        from core.repositories.secret_repository import SecretRepository
 
-        # --- 2. Verificación y Construcción del Endpoint ---
-        if not all([settings.google_project_id, settings.google_project_location, settings.google_image_generation_model_name]):
-            error_msg = "Configuración de Vertex AI incompleta. Faltan GOOGLE_PROJECT_ID, GOOGLE_PROJECT_LOCATION o GOOGLE_IMAGE_GENERATION_MODEL_NAME."
+        # --- 1. Obtener Configuración y Credenciales desde la Base de Datos ---
+        model_id = "imagen-3.0-generate-002"
+        api_key = None
+
+        logger.debug("Cargando configuración de base de datos para generación de imágenes...")
+        async with SessionLocal() as db:
+            # Obtener el modelo configurado en los ajustes globales
+            try:
+                db_settings = await get_global_llm_settings(db)
+                model_id = db_settings.get("image_generation_model") or settings.google_image_generation_model_name or "imagen-3.0-generate-002"
+            except Exception as e:
+                logger.error(f"Error al cargar configuración de modelo de imagen: {e}")
+            
+            # Intentar obtener la API Key del usuario
+            if account_id:
+                try:
+                    repo = SecretRepository(db)
+                    api_key = await repo.get_decrypted_secret(uuid.UUID(account_id), "GOOGLE_API_KEY")
+                    if not api_key:
+                        api_key = await repo.get_decrypted_secret(uuid.UUID(account_id), "GEMINI_API_KEY")
+                    if api_key:
+                        logger.debug("Se utilizará la API Key personalizada del usuario.")
+                except Exception as e:
+                    logger.error(f"Error al obtener API Key personalizada del usuario: {e}")
+
+            # Si no hay API Key del usuario, intentar obtener la API Key global
+            if not api_key:
+                try:
+                    api_key = await get_global_api_key(db, "gemini")
+                    if api_key:
+                        logger.debug("Se utilizará la API Key global del sistema.")
+                except Exception as e:
+                    logger.error(f"Error al obtener la API Key global del sistema: {e}")
+
+        # Si aún no hay API Key, usar de variables de entorno o config
+        if not api_key:
+            api_key = settings.google_api_key or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+            if api_key:
+                logger.debug("Se utilizará la API Key configurada en las variables de entorno.")
+
+        if not api_key:
+            error_msg = "Configuración incompleta. No se encontró ninguna API Key de Google (Gemini/Google AI Studio) activa."
             logger.error(f"❌ {error_msg}")
             return error_msg
 
-        project_id = settings.google_project_id
-        location = settings.google_project_location
-        model_id = settings.google_image_generation_model_name
-        
-        endpoint = f"https://{location}-aiplatform.googleapis.com/v1/projects/{project_id}/locations/{location}/publishers/google/models/{model_id}:predict"
+        # --- 2. Construcción del Endpoint ---
+        endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:predict"
         
         headers = {
-            "Authorization": f"Bearer {access_token}",
+            "x-goog-api-key": api_key,
             "Content-Type": "application/json; charset=utf-8",
         }
 
@@ -93,6 +110,10 @@ async def generar_imagen_vertex_ai_binario(description: str) -> Union[BytesIO, s
             aspect_ratio_param = "9:16"
         elif re.search(r'\b(cuadrada|1:1)\b', prompt_lower):
             aspect_ratio_param = "1:1"
+        elif re.search(r'\b(3:4|3/4)\b', prompt_lower):
+            aspect_ratio_param = "3:4"
+        elif re.search(r'\b(4:3|4/3)\b', prompt_lower):
+            aspect_ratio_param = "4:3"
         
         if aspect_ratio_param:
             logger.info(f"Relación de aspecto detectada en el prompt: '{aspect_ratio_param}'")
@@ -105,53 +126,48 @@ async def generar_imagen_vertex_ai_binario(description: str) -> Union[BytesIO, s
         if aspect_ratio_param:
             data["parameters"]["aspectRatio"] = aspect_ratio_param
 
-        logger.debug(f"Enviando petición a Vertex AI. Endpoint: {endpoint}")
-        logger.debug(f"Payload de la petición: {json.dumps(data, indent=2)}")
-
+        logger.debug(f"Enviando petición a Google AI Studio. Endpoint: {endpoint}")
+        
         # --- 5. Realizar la Petición HTTP ---
-        # `requests.post` es una llamada síncrona, la ejecutamos en un hilo para no bloquear el bucle de asyncio.
-        response = await asyncio.to_thread(
-            requests.post,
-            endpoint,
-            headers=headers,
-            data=json.dumps(data),
-            timeout=180  # Timeout generoso para la generación de la imagen.
-        )
-        response.raise_for_status()  # Lanza una excepción para errores 4xx/5xx.
-        resp_json = response.json()
-        logger.debug(f"Respuesta recibida de Vertex AI: {json.dumps(resp_json, indent=2)}")
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                endpoint,
+                headers=headers,
+                json=data,
+                timeout=180.0
+            )
+            response.raise_for_status()
+            resp_json = response.json()
+        
+        logger.debug("Respuesta recibida exitosamente de Google AI Studio.")
 
         # --- 6. Procesamiento de la Respuesta ---
         if "predictions" in resp_json and resp_json["predictions"]:
             prediction = resp_json["predictions"][0]
-            if "bytesBase64Encoded" in prediction:
-                image_base64 = prediction["bytesBase64Encoded"]
+            image_base64 = prediction.get("bytesBase64Encoded") or prediction.get("imageBytes")
+            if image_base64:
                 image_bytes = base64.b64decode(image_base64)
                 
                 # Envolver los bytes de la imagen en un objeto BytesIO.
                 bio = BytesIO(image_bytes)
-                bio.name = 'generated_image.png'  # Asignar un nombre de archivo por defecto.
+                bio.name = 'generated_image.png'
                 
-                logger.info("✅ Imagen generada y decodificada exitosamente desde Vertex AI.")
+                logger.info(f"✅ Imagen generada y decodificada exitosamente usando {model_id} desde Google AI Studio.")
                 return bio
 
         # Si no se encuentra la imagen en la respuesta esperada.
         error_detail = resp_json.get("error", {}).get("message", "La respuesta no contenía una imagen válida.")
-        logger.error(f"❌ Respuesta inesperada de Vertex AI: {error_detail}")
+        logger.error(f"❌ Respuesta inesperada de Google AI Studio: {error_detail}")
         return f"Error: No se recibió la imagen en la respuesta de la API. Detalle: {error_detail}"
 
-    except google.auth.exceptions.DefaultCredentialsError:
-        error_msg = "Error de credenciales de Google. Asegúrate de haber ejecutado 'gcloud auth application-default login' o de tener configurada una cuenta de servicio en tu entorno."
-        logger.error(f"❌ {error_msg}", exc_info=True)
-        return error_msg
-    except requests.exceptions.HTTPError as e:
+    except httpx.HTTPStatusError as e:
         response_text = e.response.text if e.response else "Sin respuesta del servidor."
-        logger.error(f"❌ Error HTTP a Vertex AI: {e}. Respuesta: {response_text}", exc_info=True)
+        logger.error(f"❌ Error HTTP a Google AI Studio: {e}. Respuesta: {response_text}", exc_info=True)
         try:
             error_detail = e.response.json().get("error", {}).get("message", response_text)
             return f"Error al generar imagen: Fallo en la API. Detalle: {error_detail}"
         except json.JSONDecodeError:
             return f"Error al generar imagen: Fallo en la API con status {e.response.status_code}. Respuesta no es JSON."
     except Exception as e:
-        logger.error(f"❌ Error inesperado al generar imagen con Vertex AI: {e}", exc_info=True)
+        logger.error(f"❌ Error inesperado al generar imagen con Google AI Studio: {e}", exc_info=True)
         return f"Error inesperado al procesar la solicitud de imagen: {e}"
