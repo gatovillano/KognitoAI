@@ -70,6 +70,7 @@ export default function AdminSettingsPage() {
     vision_llm_model: 'gemini/gemini-2.0-flash',
     vision_llm_provider: 'gemini',
     use_prompt_tooling: false,
+    image_generation_model: 'imagen-3.0-generate-002',
   });
 
   const [mainModels, setMainModels] = useState<any[]>([]);
@@ -92,6 +93,7 @@ export default function AdminSettingsPage() {
           vision_llm_model: resp.data.vision_llm_model || '',
           vision_llm_provider: resp.data.vision_llm_provider || 'gemini',
           use_prompt_tooling: !!resp.data.use_prompt_tooling,
+          image_generation_model: resp.data.image_generation_model || 'imagen-3.0-generate-002',
         });
       }
     } catch (e) {
@@ -530,6 +532,31 @@ export default function AdminSettingsPage() {
                           ) : (
                             (MODELS_BY_PROVIDER[localLLM.vision_llm_provider] || []).map(m => renderModelItem(m, localLLM.vision_llm_provider))
                           )}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Image Generation Model */}
+                <div className="p-4 rounded-xl bg-teal-500/5 border border-teal-500/10 space-y-4">
+                  <div className="flex items-center gap-2 mb-1">
+                    <ImageIcon className="h-5 w-5 text-teal-500" />
+                    <h3 className="font-bold text-sm uppercase tracking-wider text-teal-500">Generación de Imágenes (Google AI Studio)</h3>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label className="text-[11px] font-bold uppercase text-muted-foreground">Modelo</Label>
+                      <Select
+                        value={localLLM.image_generation_model}
+                        onValueChange={(v) => setLocalLLM(prev => ({ ...prev, image_generation_model: v }))}
+                      >
+                        <SelectTrigger className="bg-background/50 border-teal-500/20">
+                          <SelectValue placeholder="Seleccionar Modelo de Imagen" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="imagen-3.0-generate-002">Imagen 3 (Alta Calidad)</SelectItem>
+                          <SelectItem value="imagen-3.0-fast-generate-002">Imagen 3 Fast (Rápido)</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>

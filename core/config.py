@@ -67,7 +67,7 @@ class Config:
         self.google_summary_model_name: str = get_model_name_from_provider_format(os.getenv("FAST_LLM_MODEL", "gemini-2.0-flash"))
         
         # El modelo de Vertex AI para la generación de imágenes (ej. Imagen 3).
-        self.google_image_generation_model_name: str = os.getenv("GOOGLE_IMAGE_GENERATION_MODEL_NAME", "imagegeneration@006")
+        self.google_image_generation_model_name: str = os.getenv("GOOGLE_IMAGE_GENERATION_MODEL_NAME", "imagen-3.0-generate-002")
         
         # ¡NUEVO! El modelo de Vertex AI para la generación de embeddings.
         self.google_embedding_model_name: str = os.getenv("GOOGLE_EMBEDDING_MODEL_NAME", "text-embedding-004")
@@ -189,6 +189,8 @@ class Config:
         self.github_token: Optional[str] = get_secret("github_token", "GITHUB_TOKEN")
         # ¡NUEVA LÍNEA! Clave de API para OpenRouter.
         self.openrouter_api_key: Optional[str] = get_secret("openrouter_api_key", "OPENROUTER_API_KEY")
+        # ¡NUEVA LÍNEA! Clave de API para OpenAI.
+        self.openai_api_key: Optional[str] = get_secret("openai_api_key", "OPENAI_API_KEY")
         # ¡NUEVA LÍNEA! Clave de API para Ollama Cloud.
         self.ollama_api_key: Optional[str] = get_secret("ollama_api_key", "OLLAMA_API_KEY")
         # ¡NUEVA LÍNEA! Clave de API para Kilocode Gateway.
