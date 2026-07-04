@@ -15,26 +15,63 @@ RED='\033[0;31m'
 BOLD='\033[1m'
 NC='\033[0m'
 
-# 0. Resolve PROJECT_DIR (local or clone from GitHub)
+# 0. Resolve PROJECT_DIR (clone from GitHub or use local checkout)
 REPO_URL="https://github.com/gatovillano/KognitoAI.git"
-TARGET_REPO_DIR="${HOME}/KognitoAI"
+BASE_TARGET_DIR="${HOME}/KognitoAI"
+
+_clone_fresh() {
+    local dest="$1"
+    echo -e "${YELLOW}🌐 Clonando Kognito AI (rama: ${BOLD}main${NC}${YELLOW}) en ${dest}...${NC}"
+    git clone -b main "${REPO_URL}" "${dest}"
+}
 
 if [ -n "${SCRIPT_DIR}" ] && [ -f "${SCRIPT_DIR}/run_api.py" ]; then
+    # Running from inside an existing checkout — use it directly
     PROJECT_DIR="${SCRIPT_DIR}"
-elif [ -f "./run_api.py" ]; then
-    PROJECT_DIR="$(pwd)"
+elif [ -d "${BASE_TARGET_DIR}" ]; then
+    # ~/KognitoAI already exists — ask the user
+    echo -e "${YELLOW}⚠️  El directorio ${BOLD}${BASE_TARGET_DIR}${NC}${YELLOW} ya existe.${NC}"
+    echo ""
+    echo -e "  ${GREEN}1)${NC} Actualizar instalación existente (git pull)"
+    echo -e "  ${BLUE}2)${NC} Crear nueva instancia paralela (${BASE_TARGET_DIR}_1, _2…)"
+    echo -e "  ${RED}3)${NC} Abortar"
+    echo ""
+    printf "  Selecciona una opción [1-3]: "
+    read -r CLONE_CHOICE
+
+    case "${CLONE_CHOICE}" in
+        1)
+            PROJECT_DIR="${BASE_TARGET_DIR}"
+            echo -e "${YELLOW}🔄 Actualizando repositorio existente...${NC}"
+            git -C "${PROJECT_DIR}" pull
+            ;;
+        2)
+            COUNT=1
+            while [ -d "${BASE_TARGET_DIR}_${COUNT}" ]; do ((COUNT++)); done
+            PROJECT_DIR="${BASE_TARGET_DIR}_${COUNT}"
+            _clone_fresh "${PROJECT_DIR}"
+            ;;
+        *)
+            echo "Instalación abortada."
+            exit 1
+            ;;
+    esac
 else
-    echo -e "${YELLOW}🌐 Clonando Kognito AI desde GitHub...${NC}"
-    if [ ! -d "${TARGET_REPO_DIR}" ]; then
-        git clone "${REPO_URL}" "${TARGET_REPO_DIR}"
-    else
-        echo -e "${YELLOW}ℹ️ Directorio ${TARGET_REPO_DIR} ya existe. Actualizando...${NC}"
-        (cd "${TARGET_REPO_DIR}" && git pull origin main || true)
-    fi
-    PROJECT_DIR="${TARGET_REPO_DIR}"
+    # Fresh install — clone into ~/KognitoAI
+    _clone_fresh "${BASE_TARGET_DIR}"
+    PROJECT_DIR="${BASE_TARGET_DIR}"
 fi
 
 cd "${PROJECT_DIR}"
+
+# Persist the resolved repo path so the kognitoai CLI can find it on any machine
+mkdir -p "${HOME}/.kognito/config"
+_KOGNITO_ENV="${HOME}/.kognito/config/.env"
+if [ -f "${_KOGNITO_ENV}" ] && grep -q '^KOGNITO_REPO_DIR=' "${_KOGNITO_ENV}"; then
+    sed -i "s|^KOGNITO_REPO_DIR=.*|KOGNITO_REPO_DIR=${PROJECT_DIR}|" "${_KOGNITO_ENV}"
+else
+    echo "KOGNITO_REPO_DIR=${PROJECT_DIR}" >> "${_KOGNITO_ENV}"
+fi
 
 echo ""
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
