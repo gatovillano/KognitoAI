@@ -13,7 +13,11 @@ import shutil
 import asyncio
 import subprocess
 
-BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+BASE_DIR = os.environ.get("KOGNITO_REPO_DIR")
+if not BASE_DIR:
+    BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+else:
+    BASE_DIR = os.path.abspath(BASE_DIR)
 EXT_DIR = os.path.dirname(__file__)
 
 # Paths for Frontend Modifications
@@ -63,7 +67,7 @@ except Exception as e:
 async def create_database_tables():
     """Dynamically initializes SQLAlchemy models and database schema updates."""
     try:
-        sys.path.insert(0, BASE_DIR)
+        sys.path.insert(0, str(BASE_DIR))
         from sqlalchemy import text
         from core.database import engine, Base
         import extensions.gallery_selection_panel.backend.models  # Registers models with Base

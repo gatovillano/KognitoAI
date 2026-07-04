@@ -74,3 +74,6 @@ core/agents/*_backup.py
 *.cast
 *.gif
 kokoro_service/models/extensions/
+
+# Extension symlinks
+/extensions/
