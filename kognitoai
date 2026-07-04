@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # kognitoai - Global CLI for managing Kognito AI
 # Installed at: ~/.local/bin/kognitoai
-# Usage: kognitoai [start|stop|upgrade|status|setup]
+# Usage: kognitoai [install|start|stop|upgrade|status|setup]
 
-REPO_DIR="${HOME}/KognitoAI"
+KOGNITO_CONFIG="${HOME}/.kognito/config/.env"
 REPO_URL="https://github.com/gatovillano/KognitoAI.git"
 
 GREEN='\033[0;32m'
@@ -13,27 +13,127 @@ RED='\033[0;31m'
 BOLD='\033[1m'
 NC='\033[0m'
 
+# ── Resolve REPO_DIR ──────────────────────────────────────────────────────────
+# Priority:
+#   1. KOGNITO_REPO_DIR env var (user override)
+#   2. Value stored in ~/.kognito/config/.env (written by installer)
+#   3. Default fallback ~/KognitoAI
+
+_load_repo_dir() {
+    if [ -n "${KOGNITO_REPO_DIR:-}" ]; then
+        echo "${KOGNITO_REPO_DIR}"
+        return
+    fi
+
+    if [ -f "${KOGNITO_CONFIG}" ]; then
+        local stored
+        stored=$(grep -E '^KOGNITO_REPO_DIR=' "${KOGNITO_CONFIG}" | cut -d'=' -f2- | tr -d '"' | tr -d "'")
+        if [ -n "${stored}" ]; then
+            echo "${stored}"
+            return
+        fi
+    fi
+
+    echo "${HOME}/KognitoAI"
+}
+
+REPO_DIR="$(_load_repo_dir)"
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
 show_help() {
     echo -e "${BOLD}Kognito AI CLI${NC}"
     echo ""
-    echo -e "  ${GREEN}kognitoai start${NC}    - Inicia todos los servicios de Kognito AI"
-    echo -e "  ${YELLOW}kognitoai upgrade${NC}  - Descarga la última versión y reinicia servicios"
-    echo -e "  ${BLUE}kognitoai setup${NC}    - Reconfigura el entorno de usuario (~/.kognito)"
-    echo -e "  ${BLUE}kognitoai status${NC}   - Muestra el estado de los servicios"
-    echo -e "  ${RED}kognitoai stop${NC}     - Detiene todos los servicios"
+    echo -e "  ${GREEN}kognitoai install${NC}    - Instala Kognito AI desde GitHub en ~/KognitoAI"
+    echo -e "  ${GREEN}kognitoai start${NC}      - Inicia todos los servicios"
+    echo -e "  ${YELLOW}kognitoai upgrade${NC}    - Descarga la última versión y reinicia"
+    echo -e "  ${BLUE}kognitoai setup${NC}      - Reconfigura el entorno de usuario (~/.kognito)"
+    echo -e "  ${BLUE}kognitoai status${NC}     - Muestra el estado de los servicios"
+    echo -e "  ${RED}kognitoai stop${NC}       - Detiene todos los servicios"
+    echo -e "  ${RED}kognitoai uninstall${NC}  - Desinstala Kognito AI"
     echo ""
+    echo -e "  Instalación activa: ${BOLD}${REPO_DIR}${NC}"
+    echo ""
+}
+
+_detect_branch() {
+    git -C "${REPO_DIR}" symbolic-ref --short HEAD 2>/dev/null \
+        || git ls-remote --symref "${REPO_URL}" HEAD \
+            | awk '/^ref: refs\/heads\// {print $2}' \
+            | sed 's/refs\/heads\///' \
+        || echo "main"
 }
 
 check_repo() {
     if [ ! -d "${REPO_DIR}" ]; then
-        echo -e "${YELLOW}⚠️  Kognito AI no está instalado. Clonando desde GitHub...${NC}"
-        git clone "${REPO_URL}" "${REPO_DIR}"
+        echo -e "${YELLOW}⚠️  Kognito AI no está instalado en ${REPO_DIR}.${NC}"
+        echo -e "${YELLOW}   Ejecuta: ${BOLD}kognitoai install${NC}"
+        exit 1
     fi
+}
+
+# ── Commands ──────────────────────────────────────────────────────────────────
+
+cmd_install() {
+    local BASE_DIR="${HOME}/KognitoAI"
+
+    if [ -d "${BASE_DIR}" ]; then
+        echo -e "${YELLOW}⚠️  El directorio ${BOLD}${BASE_DIR}${NC}${YELLOW} ya existe.${NC}"
+        echo ""
+        echo -e "  ${GREEN}1)${NC} Actualizar instalación existente (git pull)"
+        echo -e "  ${BLUE}2)${NC} Crear nueva instancia paralela (${BASE_DIR}_1, _2…)"
+        echo -e "  ${RED}3)${NC} Abortar"
+        echo ""
+        printf "  Selecciona una opción [1-3]: "
+        read -r CHOICE
+
+        case "${CHOICE}" in
+            1)
+                REPO_DIR="${BASE_DIR}"
+                echo -e "${YELLOW}🔄 Actualizando repositorio existente...${NC}"
+                git -C "${REPO_DIR}" pull
+                ;;
+            2)
+                local COUNT=1
+                while [ -d "${BASE_DIR}_${COUNT}" ]; do ((COUNT++)); done
+                REPO_DIR="${BASE_DIR}_${COUNT}"
+                echo -e "${YELLOW}🌐 Clonando rama ${BOLD}main${NC}${YELLOW} en ${REPO_DIR}...${NC}"
+                git clone -b main "${REPO_URL}" "${REPO_DIR}"
+                ;;
+            *)
+                echo "Instalación abortada."
+                exit 1
+                ;;
+        esac
+    else
+        echo -e "${YELLOW}🌐 Clonando Kognito AI (rama: ${BOLD}main${NC}${YELLOW}) en ${BASE_DIR}...${NC}"
+        git clone -b main "${REPO_URL}" "${BASE_DIR}"
+        REPO_DIR="${BASE_DIR}"
+    fi
+
+    # Persist REPO_DIR to ~/.kognito/config/.env
+    mkdir -p "${HOME}/.kognito/config"
+    local env_file="${HOME}/.kognito/config/.env"
+    if [ -f "${env_file}" ]; then
+        # Update or append
+        if grep -q '^KOGNITO_REPO_DIR=' "${env_file}"; then
+            sed -i "s|^KOGNITO_REPO_DIR=.*|KOGNITO_REPO_DIR=${REPO_DIR}|" "${env_file}"
+        else
+            echo "KOGNITO_REPO_DIR=${REPO_DIR}" >> "${env_file}"
+        fi
+    else
+        echo "KOGNITO_REPO_DIR=${REPO_DIR}" > "${env_file}"
+    fi
+
+    echo -e "${GREEN}✅ Instalación registrada en ${env_file}${NC}"
+    echo -e "${YELLOW}⚙️  Ejecutando setup...${NC}"
+    cd "${REPO_DIR}"
+    exec bash install.sh
 }
 
 cmd_start() {
     check_repo
-    echo -e "${GREEN}🚀 Iniciando Kognito AI...${NC}"
+    echo -e "${GREEN}🚀 Iniciando Kognito AI desde ${REPO_DIR}...${NC}"
     cd "${REPO_DIR}"
     exec bash start_local.sh
 }
@@ -42,7 +142,9 @@ cmd_upgrade() {
     check_repo
     echo -e "${YELLOW}🔄 Actualizando Kognito AI desde GitHub...${NC}"
     cd "${REPO_DIR}"
-    git pull origin main
+    local branch
+    branch=$(_detect_branch)
+    git pull origin "${branch}"
     echo -e "${BLUE}🐍 Actualizando dependencias de Python...${NC}"
     if [ -d "venv_host" ]; then
         ./venv_host/bin/pip install -r requirements.txt --quiet
@@ -64,6 +166,7 @@ cmd_setup() {
 
 cmd_status() {
     echo -e "${BOLD}Estado de Kognito AI:${NC}"
+    echo -e "  Instalación: ${BLUE}${REPO_DIR}${NC}"
     echo ""
     echo -e "Contenedores Docker:"
     docker ps --format "  {{.Names}}\t{{.Status}}" 2>/dev/null | grep -E "kognito|kokoro" || echo "  (ninguno en ejecución)"
@@ -82,13 +185,83 @@ cmd_stop() {
     echo -e "${GREEN}✅ Todos los servicios detenidos.${NC}"
 }
 
-# Main dispatcher
+cmd_uninstall() {
+    echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${BOLD}⚠️  Desinstalación de Kognito AI${NC}"
+    echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo -e "  Instalación activa: ${BOLD}${REPO_DIR}${NC}"
+    echo ""
+
+    # 1. Stop services first
+    echo -e "${YELLOW}🛑 Deteniendo servicios en ejecución...${NC}"
+    pkill -f "run_api.py" 2>/dev/null && echo "  Backend detenido." || true
+    pkill -f "run_telegram_gateway" 2>/dev/null && echo "  Telegram Gateway detenido." || true
+    pkill -f "next-server" 2>/dev/null && echo "  Frontend detenido." || true
+
+    # 2. Stop Docker containers
+    if [ -d "${REPO_DIR}" ] && [ -f "${REPO_DIR}/docker-compose.yml" ]; then
+        echo -e "${YELLOW}🐳 Deteniendo contenedores Docker...${NC}"
+        docker compose -f "${REPO_DIR}/docker-compose.yml" down 2>/dev/null || true
+    fi
+
+    # 3. Remove repo directory
+    if [ -d "${REPO_DIR}" ]; then
+        printf "  ¿Eliminar directorio del repositorio ${BOLD}${REPO_DIR}${NC}? [s/N]: "
+        read -r CONFIRM_REPO
+        if [[ "${CONFIRM_REPO}" =~ ^[sS]$ ]]; then
+            rm -rf "${REPO_DIR}"
+            echo -e "${GREEN}✅ Repositorio eliminado.${NC}"
+        else
+            echo -e "${YELLOW}   Repositorio conservado.${NC}"
+        fi
+    fi
+
+    # 4. Remove user data (~/.kognito)
+    if [ -d "${HOME}/.kognito" ]; then
+        echo ""
+        echo -e "  ${RED}⚠️  ${HOME}/.kognito contiene tus datos de usuario (skills, media, configuración).${NC}"
+        printf "  ¿Eliminar datos de usuario ${BOLD}~/.kognito${NC}? [s/N]: "
+        read -r CONFIRM_DATA
+        if [[ "${CONFIRM_DATA}" =~ ^[sS]$ ]]; then
+            rm -rf "${HOME}/.kognito"
+            echo -e "${GREEN}✅ Datos de usuario eliminados.${NC}"
+        else
+            echo -e "${YELLOW}   Datos de usuario conservados en ~/.kognito${NC}"
+            # Just remove the KOGNITO_REPO_DIR entry from the config
+            local env_file="${HOME}/.kognito/config/.env"
+            if [ -f "${env_file}" ]; then
+                sed -i '/^KOGNITO_REPO_DIR=/d' "${env_file}"
+            fi
+        fi
+    fi
+
+    # 5. Remove CLI binary
+    local cli_bin="${HOME}/.local/bin/kognitoai"
+    if [ -f "${cli_bin}" ]; then
+        printf "  ¿Eliminar el comando 'kognitoai' de ${cli_bin}? [s/N]: "
+        read -r CONFIRM_CLI
+        if [[ "${CONFIRM_CLI}" =~ ^[sS]$ ]]; then
+            rm -f "${cli_bin}"
+            echo -e "${GREEN}✅ Comando 'kognitoai' eliminado.${NC}"
+        else
+            echo -e "${YELLOW}   CLI conservado.${NC}"
+        fi
+    fi
+
+    echo ""
+    echo -e "${GREEN}✅ Desinstalación completada.${NC}"
+}
+
+# ── Main dispatcher ───────────────────────────────────────────────────────────────
 COMMAND="${1:-help}"
 case "${COMMAND}" in
-    start)   cmd_start ;;
-    upgrade) cmd_upgrade ;;
-    setup)   cmd_setup ;;
-    status)  cmd_status ;;
-    stop)    cmd_stop ;;
-    *)       show_help ;;
+    install)   cmd_install ;;
+    start)     cmd_start ;;
+    upgrade)   cmd_upgrade ;;
+    setup)     cmd_setup ;;
+    status)    cmd_status ;;
+    stop)      cmd_stop ;;
+    uninstall) cmd_uninstall ;;
+    *)         show_help ;;
 esac

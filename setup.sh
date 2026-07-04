@@ -5,7 +5,6 @@
 # Or via curl: curl -sSL https://raw.githubusercontent.com/gatovillano/KognitoAI/main/setup.sh | bash
 
 INSTALL_DIR="${HOME}/.kognito"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
 
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
@@ -15,26 +14,68 @@ BOLD='\033[1m'
 NC='\033[0m'
 
 REPO_URL="https://github.com/gatovillano/KognitoAI.git"
-TARGET_REPO_DIR="${HOME}/KognitoAI"
+BASE_TARGET_DIR="${HOME}/KognitoAI"
 
-# Determine PROJECT_DIR (local repo or auto-clone)
+# ── Resolve PROJECT_DIR ───────────────────────────────────────────────────────
+# Priority:
+#   1. Already running from inside a local checkout  → use it directly.
+#   2. ~/KognitoAI exists                           → ask what to do.
+#   3. ~/KognitoAI does NOT exist                   → fresh clone from GitHub.
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
+
 if [ -n "${SCRIPT_DIR}" ] && [ -f "${SCRIPT_DIR}/run_api.py" ]; then
+    # Case 1: Running directly from an existing checkout
     PROJECT_DIR="${SCRIPT_DIR}"
-elif [ -f "./run_api.py" ]; then
-    PROJECT_DIR="$(pwd)"
+
+elif [ -d "${BASE_TARGET_DIR}" ]; then
+    # Case 2: ~/KognitoAI already exists — ask the user
+    echo -e "${YELLOW}⚠️  El directorio ${BOLD}${BASE_TARGET_DIR}${NC}${YELLOW} ya existe.${NC}"
+    echo ""
+    echo -e "  ${GREEN}1)${NC} Usar la instalación existente (actualizar con git pull)"
+    echo -e "  ${BLUE}2)${NC} Crear una nueva instancia paralela (se clonará en ${BASE_TARGET_DIR}_1, _2 …)"
+    echo -e "  ${RED}3)${NC} Abortar"
+    echo ""
+    printf "  Selecciona una opción [1-3]: "
+    read -r CLONE_CHOICE
+
+    case "${CLONE_CHOICE}" in
+        1)
+            PROJECT_DIR="${BASE_TARGET_DIR}"
+            echo -e "${YELLOW}🔄 Actualizando repositorio existente...${NC}"
+            git -C "${PROJECT_DIR}" pull
+            ;;
+        2)
+            COUNT=1
+            while [ -d "${BASE_TARGET_DIR}_${COUNT}" ]; do ((COUNT++)); done
+            PROJECT_DIR="${BASE_TARGET_DIR}_${COUNT}"
+            echo -e "${YELLOW}🌐 Clonando Kognito AI (rama: ${BOLD}main${NC}${YELLOW}) en ${PROJECT_DIR}...${NC}"
+            git clone -b main "${REPO_URL}" "${PROJECT_DIR}"
+            ;;
+        *)
+            echo "Abortando."
+            exit 1
+            ;;
+    esac
+
 else
-    if [ ! -d "${TARGET_REPO_DIR}" ]; then
-        echo -e "${YELLOW}🌐 Clonando Kognito AI desde GitHub en ${TARGET_REPO_DIR}...${NC}"
-        git clone "${REPO_URL}" "${TARGET_REPO_DIR}"
-    else
-        echo -e "${YELLOW}ℹ️ Repositorio encontrado en ${TARGET_REPO_DIR}.${NC}"
-    fi
-    PROJECT_DIR="${TARGET_REPO_DIR}"
+    # Case 3: Fresh install — clone directly into ~/KognitoAI
+    echo -e "${YELLOW}🌐 Clonando Kognito AI (rama: ${BOLD}main${NC}${YELLOW}) en ${BASE_TARGET_DIR}...${NC}"
+    git clone -b main "${REPO_URL}" "${BASE_TARGET_DIR}"
+    PROJECT_DIR="${BASE_TARGET_DIR}"
 fi
 
 cd "${PROJECT_DIR}"
 
-# ── Helpers ──────────────────────────────────────────────────────────────────
+# Persist the resolved repo path so the kognitoai CLI can find it on any machine
+mkdir -p "${HOME}/.kognito/config"
+_KOGNITO_ENV="${HOME}/.kognito/config/.env"
+if [ -f "${_KOGNITO_ENV}" ] && grep -q '^KOGNITO_REPO_DIR=' "${_KOGNITO_ENV}"; then
+    sed -i "s|^KOGNITO_REPO_DIR=.*|KOGNITO_REPO_DIR=${PROJECT_DIR}|" "${_KOGNITO_ENV}"
+else
+    echo "KOGNITO_REPO_DIR=${PROJECT_DIR}" >> "${_KOGNITO_ENV}"
+fi
+
 
 run_setup() {
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -122,7 +163,7 @@ EOF
 run_update() {
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${BOLD}🔄 Actualizando Kognito AI desde GitHub...${NC}"
-    git pull origin main
+    git pull
     "${PROJECT_DIR}/venv_host/bin/pip" install -r requirements.txt --quiet 2>/dev/null || true
     npm install --silent
     echo -e "${YELLOW}🏗️  Reconstruyendo Frontend (npm run build)...${NC}"
@@ -146,7 +187,56 @@ check_and_start_docker() {
     fi
 }
 
-# ── Menu ─────────────────────────────────────────────────────────────────────
+run_install() {
+    local BASE_DIR="${HOME}/KognitoAI"
+    local INSTALL_TARGET
+
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${BOLD}🆕 Instalación de Kognito AI desde GitHub${NC}"
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+
+    if [ -d "${BASE_DIR}" ]; then
+        echo -e "${YELLOW}⚠️  El directorio ${BOLD}${BASE_DIR}${NC}${YELLOW} ya existe.${NC}"
+        echo ""
+        echo -e "  ${GREEN}1)${NC} Actualizar instalación existente (git pull)"
+        echo -e "  ${BLUE}2)${NC} Crear nueva instancia paralela (${BASE_DIR}_1, _2…)"
+        echo -e "  ${RED}3)${NC} Cancelar"
+        echo ""
+        printf "  Selección [1-3]: "
+        read -r INST_CHOICE
+
+        case "${INST_CHOICE}" in
+            1)
+                INSTALL_TARGET="${BASE_DIR}"
+                echo -e "${YELLOW}🔄 Actualizando repositorio existente...${NC}"
+                git -C "${INSTALL_TARGET}" pull
+                ;;
+            2)
+                local COUNT=1
+                while [ -d "${BASE_DIR}_${COUNT}" ]; do ((COUNT++)); done
+                INSTALL_TARGET="${BASE_DIR}_${COUNT}"
+                echo -e "${YELLOW}🌐 Clonando rama ${BOLD}main${NC}${YELLOW} en ${INSTALL_TARGET}...${NC}"
+                git clone -b main "${REPO_URL}" "${INSTALL_TARGET}"
+                ;;
+            *)
+                echo "Instalación cancelada."
+                return
+                ;;
+        esac
+    else
+        echo -e "${YELLOW}🌐 Clonando Kognito AI (rama: ${BOLD}main${NC}${YELLOW}) en ${BASE_DIR}...${NC}"
+        git clone -b main "${REPO_URL}" "${BASE_DIR}"
+        INSTALL_TARGET="${BASE_DIR}"
+    fi
+
+    # Switch PROJECT_DIR to the newly cloned/updated install
+    PROJECT_DIR="${INSTALL_TARGET}"
+    cd "${PROJECT_DIR}"
+
+    run_setup
+}
+
+# ── Menu ──────────────────────────────────────────────────────────────────────
 
 # Allow non-interactive direct command: bash setup.sh setup|update|start
 NONINTERACTIVE_CMD="${1:-}"
@@ -165,30 +255,36 @@ echo ""
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${BOLD}  🚀 Kognito AI — Gestión del Sistema${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "  ${GREEN}1)${NC} Iniciar Kognito AI"
-echo -e "  ${YELLOW}2)${NC} 🔄 Actualizar software (descarga últimos cambios)"
-echo -e "  ${BLUE}3)${NC} ⚙️  Re-configurar entorno (~/.kognito)"
-echo -e "  ${RED}4)${NC} ❌ Salir"
+echo -e "  ${GREEN}1)${NC} 🆕 Instalar Kognito AI (primera instalación)"
+echo -e "  ${GREEN}2)${NC} ▶️  Iniciar Kognito AI"
+echo -e "  ${YELLOW}3)${NC} 🔄 Actualizar software (descarga últimos cambios)"
+echo -e "  ${BLUE}4)${NC} ⚙️  Re-configurar entorno (~/.kognito)"
+echo -e "  ${RED}5)${NC} ❌ Salir"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-printf "  Selecciona una opción [1-4]: "
+printf "  Selecciona una opción [1-5]: "
 read -r OPTION
 
 case "${OPTION}" in
     1)
+        run_install
         check_and_start_docker
         exec ./start_local.sh
         ;;
     2)
-        run_update
         check_and_start_docker
         exec ./start_local.sh
         ;;
     3)
-        run_setup
+        run_update
         check_and_start_docker
         exec ./start_local.sh
         ;;
     4)
+        run_setup
+        check_and_start_docker
+        exec ./start_local.sh
+        ;;
+    5)
         echo "Saliendo."
         exit 0
         ;;
