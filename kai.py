@@ -902,58 +902,7 @@ def thread_delete(thread_id):
         else:
             console.print(f"[error]❌ Error eliminando hilo: {resp.text}[/error]")
 
-# --- DASHBOARD / RESOLUTION BOARD ---
-@cli.command()
-def dashboard():
-    """📊 Ver el Tablero de Resolución de Kognito AI con alertas y tareas proactivas."""
-    data = make_sync_request("GET", "/api/resolution-board")
-    if not data: return
-    
-    tasks = data.get("tasks", [])
-    insights = data.get("insights", [])
-    
-    tasks_table = Table(title="📋 Tareas del Tablero de Resolución", border_style="spring_green3", box=ROUNDED)
-    tasks_table.add_column("ID", style="dim", width=8)
-    tasks_table.add_column("Descripción", style="bold white")
-    tasks_table.add_column("Completado", justify="center")
-    tasks_table.add_column("Estado", style="cyan")
-    
-    for t in tasks:
-        comp_str = "[green]✔ Sí[/green]" if t.get("is_completed") else "[red]✗ No[/red]"
-        desc = t.get("description") or ""
-        if desc.startswith("[Tablero de Resolución]"):
-            desc = desc[len("[Tablero de Resolución]"):].strip()
-        tasks_table.add_row(
-            t["id"][:8],
-            desc,
-            comp_str,
-            t.get("status") or "Pending"
-        )
-        
-    insights_table = Table(title="💡 Alertas e Insights Proactivos", border_style="yellow", box=ROUNDED)
-    insights_table.add_column("ID", style="dim", width=6)
-    insights_table.add_column("Título", style="bold yellow")
-    insights_table.add_column("Mensaje de Insight", style="white")
-    insights_table.add_column("Sugerencia de Acción", style="italic cyan")
-    insights_table.add_column("Confianza", justify="center")
-    
-    for ins in insights:
-        score = ins.get("confidence_score") or 0.0
-        conf_str = f"{int(score * 100)}%"
-        insights_table.add_row(
-            str(ins["id"])[:6] if ins.get("id") else "-",
-            ins.get("title") or "Insight",
-            ins.get("insight_message") or "",
-            ins.get("action_suggestion") or "-",
-            conf_str
-        )
-        
-    console.print("\n")
-    console.print(Panel("[bold magenta]🧠 KOGNITO AI - RESOLUTION BOARD & DASHBOARD[/bold magenta]", border_style="magenta", box=DOUBLE_EDGE, expand=True))
-    console.print(tasks_table)
-    console.print("\n")
-    console.print(insights_table)
-    console.print("\n")
+
 
 @cli.command()
 def chat():
@@ -1113,39 +1062,6 @@ async def list_memories_chat(api_url, token):
                 console.print(table)
         except Exception as e: console.print(f"[error]Error: {e}[/error]")
 
-async def show_dashboard_chat(api_url, token):
-    async with httpx.AsyncClient() as client:
-        try:
-            resp = await client.get(f"{api_url}/api/resolution-board", headers={"Authorization": f"Bearer {token}"})
-            if resp.status_code == 200:
-                data = resp.json() if isinstance(resp.json(), dict) else {}
-                tasks = data.get("tasks", [])
-                insights = data.get("insights", [])
-                
-                tasks_table = Table(title="📋 Tareas del Tablero de Resolución", border_style="spring_green3", box=ROUNDED)
-                tasks_table.add_column("ID", style="dim")
-                tasks_table.add_column("Descripción", style="bold white")
-                tasks_table.add_column("Completado", justify="center")
-                for t in tasks:
-                    comp_str = "[green]✔ Sí[/green]" if t.get("is_completed") else "[red]✗ No[/red]"
-                    desc = t.get("description") or ""
-                    if desc.startswith("[Tablero de Resolución]"):
-                        desc = desc[len("[Tablero de Resolución]"):].strip()
-                    tasks_table.add_row(t["id"][:8], desc, comp_str)
-                    
-                insights_table = Table(title="💡 Alertas e Insights Proactivos", border_style="yellow", box=ROUNDED)
-                insights_table.add_column("Título", style="bold yellow")
-                insights_table.add_column("Mensaje de Insight", style="white")
-                insights_table.add_column("Sugerencia", style="italic cyan")
-                for ins in insights:
-                    insights_table.add_row(ins.get("title") or "Insight", ins.get("insight_message") or "", ins.get("action_suggestion") or "-")
-                    
-                console.print("\n")
-                console.print(Panel("[bold magenta]📊 RESOLUTION BOARD & DASHBOARD[/bold magenta]", border_style="magenta", box=ROUNDED))
-                console.print(tasks_table)
-                console.print(insights_table)
-                console.print("\n")
-        except Exception as e: console.print(f"[error]Error: {e}[/error]")
 
 async def prompt_workspace_create(api_url, token, session):
     try:
@@ -1415,7 +1331,7 @@ Esta interfaz (KognitoCLI) te permite interactuar con un agente de IA avanzado q
   [metacmd]/thread <id>[/metacmd]           - Cambia a una conversación específica.
   [metacmd]/thread create[/metacmd]        - Crea una nueva conversación.
   [metacmd]/thread delete <id>[/metacmd]      - Elimina una conversación por ID.
-  [metacmd]/dashboard[/metacmd]             - Muestra el Tablero de Resolución.
+
 
 [bold yellow]Comandos Locales (!):[/bold yellow]
   [metacmd]!<comando>[/metacmd]             - Ejecuta un comando bash directamente (ej: !ls -la).
@@ -1479,9 +1395,7 @@ async def interactive_chat():
                 console.clear()
                 print_banner()
                 continue
-            elif cmd == "dashboard":
-                await show_dashboard_chat(api_url, token)
-                continue
+
             elif cmd == "ws" or cmd == "workspace":
                 if subcmd == "create":
                     await prompt_workspace_create(api_url, token, session)
