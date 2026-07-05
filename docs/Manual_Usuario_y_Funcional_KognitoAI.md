@@ -94,7 +94,6 @@ mindmap
   root((KognitoAI WebApp))
     Productividad
       Escritorio
-      Tablero de Resolucion
       Agenda Inteligente
     Conocimiento
       Conocimientos RAG
@@ -129,26 +128,6 @@ Es el centro de operaciones y la página de inicio personalizada del usuario. Of
 2.  **Iniciar una consulta:** Escriba su pregunta en la caja inferior. Si desea que la IA realice una búsqueda web en tiempo real, active el botón **Búsqueda Web** (icono de red). Si requiere un reporte exhaustivo que investigue a fondo, active **Deep Research** (icono de investigación).
 3.  **Dictar nota de voz:** Haga clic en el icono del micrófono para grabar una consulta oral. El sistema transcribirá el audio en tiempo real y rellenará la caja de texto para su envío.
 4.  **Procesar archivos rápidamente:** Arrastre un archivo (PDF, DOCX, imagen) al área de chat para que KAI lo ingeste y lo asocie al nuevo hilo de conversación.
-
----
-
-### 5.2. Tablero de Resolución (`/resolution-board`)
-
-#### ¿Para qué sirve?
-Es un panel operativo diseñado bajo el principio de acción corporativa. Convierte patrones detectados de forma repetida (insights) en compromisos y tareas reales con plazos de cumplimiento estrictos de 48 horas, evitando la parálisis por análisis en la toma de decisiones.
-
-#### Funcionalidades Principales
-*   **Detección de Recurrencia:** El backend monitoriza las interacciones; si un problema, brecha o idea se identifica más de 2 veces, se autogenera una tarea en este tablero.
-*   **Controles de Tiempo (Plazo de 48 horas):** Cada tarea posee una cuenta regresiva que muestra las horas restantes en tiempo real.
-*   **Mecanismo de Escalación:** Las tareas que expiran sin resolverse se agrupan en una sección de emergencia ("Decisión Requerida: Tareas Escaladas"). El usuario debe forzar su postergación por 48 horas adicionales o cancelarla formalmente con una justificación.
-*   **Historial de Cierres:** Registro de tareas completadas o canceladas para auditar la agilidad operativa.
-*   **Alertas de Escalación Proactivas:** Tarjetas con alertas generadas de manera autónoma por el sistema de monitoreo.
-
-#### ¿Cómo se usa?
-1.  **Revisar tareas activas:** Acceda a la sección central de *Tareas Activas en Resolución* para ver qué compromisos están próximos a vencer.
-2.  **Completar una resolución:** Cuando la acción física asociada a la tarea se haya realizado, haga clic en el botón verde **Completar**. La tarea se guardará en el historial.
-3.  **Gestionar tareas escaladas (Expiradas):** Si tiene tareas en color rojo (escaladas), pulse **Postergar (48h)** para otorgar más tiempo o **Cancelar Tarea** si la acción ya no es relevante o viable.
-4.  **Consultar alertas proactivas:** Lea la columna derecha para ver los eventos del sistema e incidentes analizados automáticamente por KAI, aplicando las sugerencias de acción sugeridas al pie de cada alerta.
 
 ---
 
