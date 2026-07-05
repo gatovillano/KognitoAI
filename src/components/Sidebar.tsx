@@ -383,19 +383,7 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
                 {showToolText && <span className="text-sm font-medium">Escritorio</span>}
               </Button>
             </Link>
-            <Link href="/resolution-board" passHref onClick={onLinkClick} title="Tablero de Resolución" className="w-full block">
-              <Button
-                variant={pathname?.startsWith('/resolution-board') ? 'secondary' : 'ghost'}
-                className={cn(
-                  "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
-                  isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-9 px-2",
-                  pathname?.startsWith('/resolution-board') && "bg-primary/10 text-primary border border-primary/20"
-                )}
-              >
-                <ClipboardList className={cn("h-4 w-4 transition-transform group-hover:scale-110", showToolText && "mr-2")} />
-                {showToolText && <span className="text-sm font-medium">Resolución</span>}
-              </Button>
-            </Link>
+
             <Link href="/inbox" passHref onClick={onLinkClick} title="Bandeja de entrada" className="w-full block">
               <Button
                 variant={pathname?.startsWith('/inbox') ? 'secondary' : 'ghost'}

@@ -210,32 +210,6 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* 2.5 Resolution Board Promo Banner */}
-      <motion.div 
-        initial={{ opacity: 0, y: 10 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="relative overflow-hidden rounded-3xl p-6 bg-gradient-to-br from-primary/10 via-secondary/5 to-background border border-primary/20 shadow-lg group"
-      >
-        <div className="absolute -right-16 -top-16 w-32 h-32 bg-primary/10 rounded-full blur-2xl group-hover:bg-primary/20 transition-all duration-700" />
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 relative">
-          <div className="space-y-1.5">
-            <span className="inline-flex items-center gap-1 bg-primary/15 text-primary px-2.5 py-0.5 rounded-full text-xs font-semibold uppercase tracking-wider">
-              Nuevo: Tablero de Resolución
-            </span>
-            <h3 className="text-lg font-bold tracking-tight text-foreground">
-              De la Identificación a la Acción y Verificación
-            </h3>
-            <p className="text-muted-foreground text-sm max-w-2xl">
-              Tus insights recurrentes se traducen automáticamente en tareas con límites estrictos de 48 horas. Monitorea y toma decisiones de escalación en tiempo real.
-            </p>
-          </div>
-          <Link href="/resolution-board">
-            <Button className="bg-primary hover:bg-primary/95 text-primary-foreground font-semibold rounded-2xl">
-              Ir al Tablero <ChevronRight className="ml-1.5 h-4 w-4 group-hover:translate-x-1 transition-transform" />
-            </Button>
-          </Link>
-        </div>
-      </motion.div>
 
       {/* 3. Temas Principales (Bar Chart) */}
       <div className="space-y-4">

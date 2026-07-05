@@ -53,11 +53,6 @@ A continuación, se detalla el análisis de cada módulo de KognitoAI desde una 
 *   **La Solución de KognitoAI:** Un panel gerencial centralizado de control cognitivo que resalta proactivamente **Brechas de Conocimiento** (vulnerabilidades críticas por falta de información) y **Temas Clave** recurrentes que emergen de la actividad diaria de la empresa.
 *   **Impacto & ROI:** Reducción del 30% en el tiempo de preparación diario para ejecutivos. Prevención de la toma de decisiones ciegas mediante alertas de brechas de conocimiento críticas automatizadas.
 
-### 3.2. Tablero de Resolución (`/resolution-board`)
-*   **El Problema Corporativo:** Gran parte de los análisis o recomendaciones estratégicas de los consultores de IA quedan en el olvido al no estar conectados con un sistema de tareas real, generando inercia y retrasos.
-*   **La Solución de KognitoAI:** Motor de resolución que traduce de forma autónoma patrones reiterados en tareas operativas con plazos estrictos de 48 horas. Si expiran, se escalan a la dirección exigiendo intervención explícita para postergación o cancelación.
-*   **Impacto & ROI:** Disminución del 40% en el tiempo de resolución de incidentes repetidos (MTTR - *Mean Time To Repair*). Evita que los problemas recurrentes se oculten bajo la burocracia documental.
-
 ### 3.3. Conocimientos / RAG (`/rag`)
 *   **El Problema Corporativo:** La información útil está aislada en servidores locales, PDFs, transcripciones de audio e imágenes escaneadas de pizarras, resultando invisibles para los motores de búsqueda estándar.
 *   **La Solución de KognitoAI:** Ingesta y vectorización masiva de documentos multimodales (textos, audios de reuniones, fotos de diagramas) organizados de forma semántica en PostgreSQL + pgvector con etiquetado de tópicos.
