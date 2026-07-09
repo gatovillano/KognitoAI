@@ -5,8 +5,10 @@ from typing import List, Any, Dict, Optional, Union, Type
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse, urljoin
-import json
 import hashlib
+import subprocess
+import tempfile
+import shutil
 
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field, ConfigDict
@@ -74,12 +76,13 @@ class GitHubRepoTool(BaseTool):
         super().__init__(**kwargs)
         self.session = requests.Session()
         self.github_token = kwargs.get("github_token")
+        self._local_clone_path: Optional[str] = None
+        self._clone_branch: Optional[str] = None
         logger.debug("GitHubRepoTool initialized. Version: 2025-07-24_05:00")
     
     def _run(self, repo_url: str, action: str, path: Optional[str] = None, github_token: Optional[str] = None, collection_topic: Optional[str] = None) -> Any:
         """
         Ejecuta la acción especificada en el repositorio de GitHub (síncrono).
-        Devuelve ToolOutputWithSources para incluir metadatos de fuente.
         """
         logger.debug(f"DEBUG: _run (sync) called with repo_url={repo_url}, action={action}")
         
@@ -135,214 +138,363 @@ class GitHubRepoTool(BaseTool):
             logger.error(f"Error en _run para {repo_url}: {e}", exc_info=True)
             return f"Error al ejecutar la acción: {e}"
     
-    async def _arun(self, repo_url: str, action: str, path: Optional[str] = None, github_token: Optional[str] = None, collection_topic: Optional[str] = None, vectorize: Optional[bool] = False) -> str:
-        """
-        Ejecuta la acción especificada en el repositorio de GitHub (asíncrono).
-        """
-        logger.debug(f"DEBUG: _arun called with repo_url={repo_url}, action={action}")
+    # -------------------------------------------------------------------------
+    # Local clone fallback (para evitar rate limits de la API de GitHub)
+    # -------------------------------------------------------------------------
 
-        if not repo_url or not action:
-            return "Error: 'repo_url' y 'action' son parámetros requeridos."
+    def _ensure_local_clone(self, repo_url: str, branch: Optional[str] = None) -> Optional[str]:
+        """
+        Clona el repositorio localmente en un directorio temporal usando git.
+        Retorna la ruta del clone o None si falla.
+        """
+        if self._local_clone_path and os.path.isdir(self._local_clone_path):
+            return self._local_clone_path
 
-        if self.session is None:
-            self.session = requests.Session()
-        
-        active_token = github_token or self.github_token or os.environ.get("GITHUB_TOKEN")
-        
-        if active_token:
-            self.session.headers.update({'Authorization': f'Bearer {active_token.strip()}'})
-            logger.info("Using GitHub token for access")
-        else:
-            self.session.headers.pop('Authorization', None)
-            
+        parsed = urlparse(repo_url)
+        path_segments = parsed.path.strip("/").split("/")
+        if len(path_segments) < 2:
+            return None
+        username, repo_name = path_segments[0], path_segments[1]
+
+        clone_url = repo_url
+        active_token = self.github_token or os.environ.get("GITHUB_TOKEN")
+        if active_token and parsed.hostname and "github.com" in parsed.hostname:
+            clone_url = f"https://{active_token}@{parsed.hostname}/{username}/{repo_name}.git"
+
+        temp_dir = tempfile.mkdtemp(prefix="github_repo_clone_")
         try:
-            result_content = ""
-            if action == "list_tree":
-                result_content = self._list_tree(repo_url)
-            elif action == "read_file":
-                if not path:
-                    return "Error: Debes especificar la ruta del archivo para leer."
-                result_content = self._read_file(repo_url, path)
-            elif action == "navigate":
-                if not path:
-                    return "Error: Debes especificar la ruta para navegar."
-                result_content = self._navigate(repo_url, path)
-            elif action == "read_directory":
-                if not path:
-                    return "Error: Debes especificar la ruta del directorio para leer los documentos."
-                result_content = self._read_directory(repo_url, path)
-            elif action == "read_directory_recursively":
-                result_content = self._read_directory_recursively(repo_url, path or "")
-            elif action == "add_as_knowledge_collection":
-                result_content = await self._add_as_knowledge_collection(repo_url, collection_topic, vectorize=vectorize or False)
-            elif action == "update_knowledge_collection":
-                result_content = await self._update_knowledge_collection(repo_url, collection_topic, vectorize=vectorize or False)
-            else:
-                return f"Error: Acción no válida. Las acciones válidas son: list_tree, read_file, navigate, read_directory, read_directory_recursively, add_as_knowledge_collection, update_knowledge_collection"
-            
-            full_url = repo_url
-            if path:
-                if action == "read_file":
-                    branch = "main" 
-                    full_url = f"{repo_url}/blob/{branch}/{path}"
-                elif action in ["navigate", "read_directory", "read_directory_recursively"]:
-                    branch = "main"
-                    full_url = f"{repo_url}/tree/{branch}/{path}"
-            
-            source_id = hashlib.sha256(full_url.encode()).hexdigest()[:8]
-            source = create_github_source(
-                source_id=source_id,
-                title=f"{path} ({action})" if path else f"Repo: {repo_url}",
-                url=full_url,
-                snippet=f"Result of {action}: " + (str(result_content)[:200] + "..." if len(str(result_content)) > 200 else str(result_content)),
-                metadata={"file_path": path, "repo_url": repo_url}
-            )
-            
-            return ToolOutputWithSources(
-                context_for_llm=str(result_content),
-                sources=[source]
-            )
+            cmd = ["git", "clone", "--depth", "1"]
+            if branch:
+                cmd += ["--branch", branch]
+            cmd += [clone_url, temp_dir]
+            result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            if result.returncode != 0:
+                logger.warning(f"git clone failed: {result.stderr.strip()}")
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                return None
+
+            self._local_clone_path = temp_dir
+            self._clone_branch = branch
+            logger.info(f"Repositorio clonado localmente en: {temp_dir}")
+            return temp_dir
         except Exception as e:
-            logger.error(f"Error al ejecutar la acción {action} en el repositorio {repo_url}: {e}", exc_info=True)
-            return f"Error al ejecutar la acción: {e}"
-    
+            logger.error(f"Error al clonar repositorio localmente: {e}")
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            return None
+
+    def _cleanup_clone(self) -> None:
+        """Elimina el directorio de clonado local si existe."""
+        if self._local_clone_path and os.path.isdir(self._local_clone_path):
+            try:
+                shutil.rmtree(self._local_clone_path, ignore_errors=True)
+            except Exception:
+                pass
+            self._local_clone_path = None
+            self._clone_branch = None
+
+    def _get_local_path(self, repo_url: str, path: Optional[str] = None, branch: Optional[str] = None) -> Optional[str]:
+        """
+        Retorna la ruta absoluta en el filesystem local para un archivo/directorio
+        dentro del repositorio clonado. Si no hay clone activo, intenta crearlo.
+        """
+        clone_path = self._ensure_local_clone(repo_url, branch=branch)
+        if not clone_path:
+            return None
+        if not path:
+            return clone_path
+        return os.path.join(clone_path, path)
+
+    def _read_file_local(self, file_path: str) -> str:
+        """Lee un archivo desde el sistema de archivos local."""
+        try:
+            with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+            return f"Contenido del archivo {os.path.basename(file_path)}:\n{content}"
+        except Exception as e:
+            return f"Error al leer el archivo local {file_path}: {e}"
+
+    def _list_tree_local(self, clone_path: str) -> str:
+        """Lista el árbol de archivos desde el filesystem local."""
+        try:
+            entries = []
+            for root, dirs, files in os.walk(clone_path):
+                dirs[:] = [d for d in dirs if not d.startswith('.') and d != '.git']
+                for file in files:
+                    full_path = os.path.join(root, file)
+                    rel_path = os.path.relpath(full_path, clone_path)
+                    entries.append(f"- {rel_path} (file)")
+            return "Árbol de archivos (local):\n" + "\n".join(entries)
+        except Exception as e:
+            return f"Error al listar árbol local: {e}"
+
+    def _navigate_local(self, dir_path: str) -> str:
+        """Lista el contenido de un directorio local."""
+        try:
+            if not os.path.isdir(dir_path):
+                return f"Error: {dir_path} no es un directorio."
+            entries = []
+            for entry in os.listdir(dir_path):
+                full = os.path.join(dir_path, entry)
+                entries.append(f"- {entry} ({'directory' if os.path.isdir(full) else 'file'})")
+            return "Contenido del directorio (local):\n" + "\n".join(entries)
+        except Exception as e:
+            return f"Error al navegar directorio local: {e}"
+
+    def _read_directory_local(self, dir_path: str) -> str:
+        """Lee todos los archivos de un directorio local."""
+        try:
+            if not os.path.isdir(dir_path):
+                return f"Error: {dir_path} no es un directorio."
+            result = []
+            for entry in sorted(os.listdir(dir_path)):
+                full = os.path.join(dir_path, entry)
+                if os.path.isfile(full):
+                    result.append(f"Archivo: {entry}\n{self._read_file_local(full)}\n{'-'*50}")
+            return "\n".join(result) if result else f"No se encontraron archivos en {dir_path}."
+        except Exception as e:
+            return f"Error al leer directorio local: {e}"
+
+    def _make_request(self, url: str, headers: Optional[Dict] = None) -> requests.Response:
+        """Realiza una petición HTTP GET a la API de GitHub."""
+        req_headers = headers or {}
+        active_token = self.github_token or os.environ.get("GITHUB_TOKEN")
+        if active_token:
+            req_headers["Authorization"] = f"token {active_token}"
+        return self.session.get(url, headers=req_headers, timeout=30)
+
+    def _get_api_url(self, repo_url: str) -> str:
+        """Convierte una URL de GitHub a la URL de la API."""
+        parsed = urlparse(repo_url)
+        path = parsed.path.strip("/")
+        return f"https://api.github.com/repos/{path}"
+
+    def _get_content_with_retry(self, url: str, max_retries: int = 3) -> Optional[Dict]:
+        """Obtiene contenido de un archivo vía API con reintentos."""
+        for attempt in range(max_retries):
+            try:
+                response = self._make_request(url)
+                if response.status_code == 200:
+                    return response.json()
+                elif response.status_code == 403:
+                    logger.warning(f"Rate limit alcanzado en API de GitHub (intento {attempt + 1})")
+                    import time
+                    time.sleep(2 ** attempt)
+                else:
+                    return None
+            except Exception as e:
+                logger.warning(f"Error en intento {attempt + 1}: {e}")
+                if attempt < max_retries - 1:
+                    import time
+                    time.sleep(2 ** attempt)
+        return None
+
+    def _is_temporary_file(self, file_path: str) -> bool:
+        """Verifica si un archivo es temporal o de sistema."""
+        temp_patterns = ['.tmp', '.temp', '.swp', '.swo', '.pyc', '__pycache__', '.git', '.DS_Store', 'Thumbs.db']
+        return any(file_path.endswith(p) or file_path.startswith(p) for p in temp_patterns)
+
+    def _is_binary_file(self, file_path: str) -> bool:
+        """Verifica si un archivo es binario basado en extensión."""
+        binary_extensions = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.pdf', '.zip', '.tar', '.gz', 
+                            '.exe', '.dll', '.so', '.dylib', '.bin', '.dat', '.mp3', '.mp4', '.avi', '.mov',
+                            '.wav', '.flac', '.ogg', '.webm', '.ttf', '.otf', '.woff', '.woff2', '.eot']
+        return any(file_path.lower().endswith(ext) for ext in binary_extensions)
 
     def _list_tree(self, repo_url: str) -> str:
-        """
-        Lista el árbol de archivos del repositorio.
-        """
+        """Lista el árbol de archivos del repositorio."""
         try:
-            if self.session is None:
-                self.session = requests.Session()
+            # Intentar clonado local primero
+            local_path = self._ensure_local_clone(repo_url)
+            if local_path:
+                result = self._list_tree_local(local_path)
+                self._cleanup_clone()
+                return result
+            
+            # Fallback a API
             api_url = self._get_api_url(repo_url)
-            repo_info_response = self._make_request(api_url)
-            repo_info_response.raise_for_status()
-            repo_info = repo_info_response.json()
+            response = self._make_request(f"{api_url}?depth=1")
+            if response.status_code >= 400:
+                return f"Error al acceder al repositorio (código: {response.status_code}). Verifica el token de GitHub."
+            
+            repo_info = response.json()
             default_branch = repo_info.get("default_branch", "main")
             
             tree_url = f"{api_url}/git/trees/{default_branch}?recursive=1"
-            response = self._make_request(tree_url)
-            response.raise_for_status()
-            tree = response.json()["tree"]
-            file_list = "\n".join([f"- {item['path']} ({item['type']})" for item in tree])
-            return f"Árbol de archivos:\n{file_list}"
+            tree_response = self._make_request(tree_url)
+            if tree_response.status_code >= 400:
+                return f"Error al obtener el árbol (código: {tree_response.status_code})."
+            
+            tree_response.raise_for_status()
+            tree = tree_response.json()["tree"]
+            
+            entries = [f"- {item['path']} ({item['type']})" for item in tree if item['type'] == 'blob']
+            return "Árbol de archivos:\n" + "\n".join(entries[:100])
         except Exception as e:
-            logger.error(f"Error al listar el árbol de archivos del repositorio {repo_url}: {e}", exc_info=True)
-            return f"Error al listar el árbol de archivos: {e}. Asegúrate de que el repositorio existe y que el token tiene los permisos necesarios."
-    
+            logger.error(f"Error listando árbol: {e}")
+            return f"Error: {e}"
+
     def _read_file(self, repo_url: str, file_path: str) -> str:
-        """
-        Lee el contenido de un archivo del repositorio.
-        """
+        """Lee un archivo específico del repositorio."""
         try:
-            if self.session is None:
-                self.session = requests.Session()
-            api_url = self._get_api_url(repo_url) + f"/contents/{file_path}"
-            response = self._make_request(api_url)
-            response.raise_for_status()
-            content_data = response.json()
-            content = content_data["content"]
+            # Intentar clonado local primero
+            local_full_path = self._get_local_path(repo_url, file_path)
+            if local_full_path and os.path.isfile(local_full_path):
+                result = self._read_file_local(local_full_path)
+                self._cleanup_clone()
+                return result
+            
+            # Fallback a API
+            api_url = self._get_api_url(repo_url)
+            content_data = self._get_content_with_retry(f"{api_url}/contents/{file_path}")
+            
+            if not content_data or 'content' not in content_data:
+                return f"Error: No se pudo obtener el archivo {file_path}."
+            
+            import base64
+            content_base64 = content_data["content"]
             encoding = content_data["encoding"]
+            
             if encoding == "base64":
-                import base64
-                decoded_content = base64.b64decode(content)
-                try:
-                    content = decoded_content.decode("utf-8")
-                except UnicodeDecodeError:
-                    content = f"[Contenido binario no decodificable en UTF-8 (tamaño: {len(decoded_content)} bytes)]"
+                content = base64.b64decode(content_base64).decode("utf-8", errors="ignore")
+            else:
+                content = content_base64
+            
             return f"Contenido del archivo {file_path}:\n{content}"
         except Exception as e:
-            logger.error(f"Error al leer el archivo {file_path} del repositorio {repo_url}: {e}", exc_info=True)
-            return f"Error al leer el archivo: {e}"
-    
+            logger.error(f"Error leyendo archivo: {e}")
+            return f"Error: {e}"
+
     def _navigate(self, repo_url: str, path: str) -> str:
-        """
-        Navega a un directorio específico del repositorio y lista su contenido.
-        """
+        """Lista el contenido de un directorio en el repositorio."""
         try:
-            if self.session is None:
-                self.session = requests.Session()
-            api_url = self._get_api_url(repo_url) + f"/contents/{path}"
-            response = self._make_request(api_url)
-            response.raise_for_status()
-            contents = response.json()
-            if isinstance(contents, list):
-                file_list = "\n".join([f"- {item['name']} ({item['type']})" for item in contents])
-                return f"Contenido del directorio {path}:\n{file_list}"
-            else:
-                return f"Error: {path} no es un directorio."
+            # Intentar clonado local primero
+            local_path = self._get_local_path(repo_url, path)
+            if local_path and os.path.isdir(local_path):
+                result = self._navigate_local(local_path)
+                self._cleanup_clone()
+                return result
+            
+            # Fallback a API
+            api_url = self._get_api_url(repo_url)
+            tree_url = f"{api_url}/git/trees/main?recursive=1"
+            response = self._make_request(tree_url)
+            if response.status_code >= 400:
+                return f"Error al acceder al árbol (código: {response.status_code})."
+            
+            tree_data = response.json()
+            tree = tree_data.get("tree", [])
+            
+            # Filtrar por el path específico
+            items = [item for item in tree if item['path'].startswith(path + '/') or item['path'] == path]
+            entries = [f"- {os.path.basename(item['path'])} ({item['type']})" for item in items if item['path'] != path]
+            
+            return "Contenido del directorio:\n" + "\n".join(entries[:50])
         except Exception as e:
-            logger.error(f"Error al navegar al directorio {path} del repositorio {repo_url}: {e}", exc_info=True)
-            return f"Error al navegar al directorio: {e}"
+            logger.error(f"Error navegando: {e}")
+            return f"Error: {e}"
 
     def _read_directory(self, repo_url: str, path: str) -> str:
-        """
-        Lee el contenido de todos los archivos en un directorio específico del repositorio.
-        """
+        """Lee todos los documentos de un directorio."""
         try:
-            if self.session is None:
-                self.session = requests.Session()
-            api_url = self._get_api_url(repo_url) + f"/contents/{path}"
-            response = self._make_request(api_url)
-            response.raise_for_status()
-            contents = response.json()
-            if isinstance(contents, list):
-                result = []
-                for item in contents:
-                    if item['type'] == 'file':
-                        file_content = self._read_file(repo_url, item['path'])
-                        result.append(f"Archivo: {item['path']}\n{file_content}\n{'-'*50}")
-                return "\n".join(result) if result else f"No se encontraron archivos en el directorio {path}."
-            else:
-                return f"Error: {path} no es un directorio."
-        except Exception as e:
-            logger.error(f"Error al leer el directorio {path} del repositorio {repo_url}: {e}", exc_info=True)
-            return f"Error al leer el directorio: {e}"
-
-    def _read_directory_recursively(self, repo_url: str, directory_path: str) -> str:
-        """
-        Lee el contenido de todos los archivos en un directorio específico del repositorio, incluyendo subdirectorios.
-        """
-        try:
-            if self.session is None:
-                self.session = requests.Session()
+            # Intentar clonado local primero
+            local_path = self._get_local_path(repo_url, path)
+            if local_path and os.path.isdir(local_path):
+                result = self._read_directory_local(local_path)
+                self._cleanup_clone()
+                return result
             
+            # Fallback a API
             api_url = self._get_api_url(repo_url)
-            repo_info_response = self._make_request(api_url)
-            repo_info_response.raise_for_status()
-            repo_info = repo_info_response.json()
-            default_branch = repo_info.get("default_branch", "main")
-            
-            tree_url = f"{api_url}/git/trees/{default_branch}?recursive=1"
+            tree_url = f"{api_url}/git/trees/main?recursive=1"
             response = self._make_request(tree_url)
-            response.raise_for_status()
-            tree = response.json()["tree"]
-
-            result = []
+            if response.status_code >= 400:
+                return f"Error al acceder al árbol (código: {response.status_code})."
             
-            prefix = directory_path.strip('/') if directory_path else ''
-            if prefix:
-                prefix += '/'
-
-            for item in tree:
-                if item['type'] == 'blob' and item['path'].startswith(prefix):
-                    file_content = self._read_file(repo_url, item['path'])
-                    result.append(f"Archivo: {item['path']}\n{file_content}\n{'-'*50}")
+            tree_data = response.json()
+            tree = tree_data.get("tree", [])
             
-            return "\n".join(result) if result else f"No se encontraron archivos en el directorio '{directory_path}' o sus subdirectorios."
+            # Filtrar archivos en el directorio
+            files = [item['path'] for item in tree if item['type'] == 'blob' and item['path'].startswith(path + '/')]
+            
+            results = []
+            for file_path in files[:10]:
+                content_data = self._get_content_with_retry(f"{api_url}/contents/{file_path}")
+                if content_data and 'content' in content_data:
+                    import base64
+                    content = base64.b64decode(content_data["content"]).decode("utf-8", errors="ignore")
+                    results.append(f"Archivo: {file_path}\n{content}\n{'-'*50}")
+            
+            return "\n".join(results) if results else f"No se encontraron archivos en {path}."
         except Exception as e:
-            logger.error(f"Error al leer recursivamente el directorio {directory_path} del repositorio {repo_url}: {e}", exc_info=True)
-            return f"Error al leer recursivamente el directorio: {e}"
+            logger.error(f"Error leyendo directorio: {e}")
+            return f"Error: {e}"
 
+    def _read_directory_recursively(self, repo_url: str, path: str = "") -> str:
+        """Lee todos los documentos de un directorio recursivamente."""
+        try:
+            # Intentar clonado local primero
+            local_path = self._ensure_local_clone(repo_url)
+            if local_path:
+                target_path = os.path.join(local_path, path) if path else local_path
+                result = self._read_directory_local(target_path)
+                self._cleanup_clone()
+                return result
+            
+            # Fallback a API
+            api_url = self._get_api_url(repo_url)
+            tree_url = f"{api_url}/git/trees/main?recursive=1"
+            response = self._make_request(tree_url)
+            if response.status_code >= 400:
+                return f"Error al acceder al árbol (código: {response.status_code})."
+            
+            tree_data = response.json()
+            tree = tree_data.get("tree", [])
+            
+            # Filtrar por path si se especificó
+            if path:
+                tree = [item for item in tree if item['path'].startswith(path)]
+            
+            # Leer archivos
+            results = []
+            for item in tree[:20]:  # Limitar a 20 archivos
+                if item['type'] == 'blob' and not self._is_binary_file(item['path']) and not self._is_temporary_file(item['path']):
+                    content_data = self._get_content_with_retry(f"{api_url}/contents/{item['path']}")
+                    if content_data and 'content' in content_data:
+                        import base64
+                        content = base64.b64decode(content_data["content"]).decode("utf-8", errors="ignore")
+                        results.append(f"Archivo: {item['path']}\n{content}\n{'-'*50}")
+            
+            return "\n".join(results) if results else f"No se encontraron archivos."
+        except Exception as e:
+            logger.error(f"Error leyendo directorio recursivamente: {e}")
+            return f"Error: {e}"
+    
+    # -------------------------------------------------------------------------
+    # Async methods for knowledge collection
+    # -------------------------------------------------------------------------
+
+    async def _arun(self, repo_url: str, action: str, path: Optional[str] = None, github_token: Optional[str] = None, collection_topic: Optional[str] = None, vectorize: bool = False) -> Any:
+        """
+        Versión asíncrona que soporta add_as_knowledge_collection y update_knowledge_collection.
+        """
+        logger.debug(f"DEBUG: _arun (async) called with repo_url={repo_url}, action={action}")
+        
+        if action in ["add_as_knowledge_collection", "update_knowledge_collection"]:
+            if action == "add_as_knowledge_collection":
+                return await self._add_as_knowledge_collection(repo_url, collection_topic, vectorize)
+            elif action == "update_knowledge_collection":
+                return await self._update_knowledge_collection(repo_url, collection_topic, vectorize)
+        else:
+            return self._run(repo_url, action, path, github_token, collection_topic)
 
     async def _add_as_knowledge_collection(self, repo_url: str, collection_topic: Optional[str] = None, vectorize: bool = False) -> str:
         """
         Añade un repositorio de GitHub como colección de conocimientos.
+        Intenta clonado local primero, luego fallback a API de GitHub.
         """
         try:
             from core.database import SessionLocal, GitHubDocument
             from sqlalchemy import select
-            import uuid
             import base64
             from datetime import datetime
             import hashlib
@@ -352,16 +504,56 @@ class GitHubRepoTool(BaseTool):
                 self.session = requests.Session()
             
             api_url = self._get_api_url(repo_url)
-            repo_info_response = self._make_request(api_url)
-            repo_info_response.raise_for_status()
-            repo_info = repo_info_response.json()
-            default_branch = repo_info.get("default_branch", "main")
-            repo_name = repo_info["name"]
-            
-            tree_url = f"{api_url}/git/trees/{default_branch}?recursive=1"
-            response = self._make_request(tree_url)
-            response.raise_for_status()
-            tree = response.json()["tree"]
+            repo_name = None
+            default_branch = "main"
+            tree = []
+            local_path = None
+
+            # Intentar clonado local primero (sin peticiones a API)
+            local_path = self._ensure_local_clone(repo_url)
+            if local_path:
+                try:
+                    # Obtener repo_name del directorio local
+                    repo_name = os.path.basename(local_path.rstrip('/'))
+                    
+                    # Recorrer el árbol local
+                    for root, dirs, files in os.walk(local_path):
+                        dirs[:] = [d for d in dirs if not d.startswith('.') and d != '.git']
+                        for file in files:
+                            full_path = os.path.join(root, file)
+                            rel_path = os.path.relpath(full_path, local_path)
+                            with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
+                                content = f.read()
+                            tree.append({"path": rel_path, "type": "blob", "content": content})
+                    
+                    logger.info(f"✅ Clonado local exitoso para {repo_name}: {len(tree)} archivos")
+                except Exception as e:
+                    logger.warning(f"Error con clonado local: {e}")
+                    local_path = None
+
+            # Fallback a API de GitHub si el clonado local falla
+            if not local_path or not tree:
+                try:
+                    repo_info_response = self._make_request(api_url)
+                    if repo_info_response.status_code < 400:
+                        repo_info = repo_info_response.json()
+                        repo_name = repo_info.get("name")
+                        default_branch = repo_info.get("default_branch", "main")
+                        
+                        tree_url = f"{api_url}/git/trees/{default_branch}?recursive=1"
+                        response = self._make_request(tree_url)
+                        if response.status_code < 400:
+                            response.raise_for_status()
+                            tree = response.json()["tree"]
+                    else:
+                        logger.warning(f"API de GitHub falló con código: {repo_info_response.status_code}")
+                        return f"Error: No se pudo acceder al repositorio (código API: {repo_info_response.status_code}). Verifica el token de GitHub."
+                except Exception as e:
+                    logger.error(f"Error accediendo a repositorio vía API: {e}")
+                    return f"Error al acceder al repositorio: {e}"
+
+            if not tree:
+                return f"Error: No se encontraron archivos en el repositorio"
             
             async with DBSession(SessionLocal) as db_session:
                 file_count = 0
@@ -373,15 +565,23 @@ class GitHubRepoTool(BaseTool):
                 rag_tool = DocumentRAGTool(account_id=self.account_id, workspace_id=self.workspace_id, telegram_id=self.telegram_id, thread_id=self.thread_id)
 
                 for item in tree:
-                    if item['type'] == 'blob':
-                        file_path = item['path']
+                    file_path = item['path']
 
-                        if self._is_temporary_file(file_path):
-                            continue
-                        
-                        if self._is_binary_file(file_path):
-                            continue
+                    if self._is_temporary_file(file_path):
+                        continue
+                    
+                    if self._is_binary_file(file_path):
+                        continue
 
+                    if local_path:
+                        full_local_path = os.path.join(local_path, file_path)
+                        if os.path.isfile(full_local_path):
+                            with open(full_local_path, "r", encoding="utf-8", errors="ignore") as f:
+                                clean_content = f.read()
+                            content_sha = hashlib.sha256(clean_content.encode('utf-8')).hexdigest()
+                        else:
+                            continue
+                    else:
                         content_data = self._get_content_with_retry(f"{api_url}/contents/{file_path}")
                         if not content_data or 'content' not in content_data:
                             continue
@@ -394,60 +594,60 @@ class GitHubRepoTool(BaseTool):
                         else:
                             decoded_content = content_base64
                         
-                        clean_content = decoded_content.replace('\x00', '')
+                        clean_content = decoded_content.replace('\\x00', '')
                         content_sha = hashlib.sha256(clean_content.encode('utf-8')).hexdigest()
 
-                        existing_doc_query = select(GitHubDocument).where(
-                            GitHubDocument.repo_url == repo_url,
-                            GitHubDocument.file_path == file_path,
-                            GitHubDocument.account_id == self.account_id
-                        )
-                        existing_doc_result = await db_session.execute(existing_doc_query)
-                        existing_doc = existing_doc_result.scalars().first()
+                    existing_doc_query = select(GitHubDocument).where(
+                        GitHubDocument.repo_url == repo_url,
+                        GitHubDocument.file_path == file_path,
+                        GitHubDocument.account_id == self.account_id
+                    )
+                    existing_doc_result = await db_session.execute(existing_doc_query)
+                    existing_doc = existing_doc_result.scalars().first()
 
-                        if existing_doc:
-                            if existing_doc.sha != content_sha:
-                                existing_doc.content = clean_content
-                                existing_doc.sha = content_sha
-                                existing_doc.topic = collection_topic
-                                existing_doc.updated_at = datetime.now()
-                                file_count += 1
-                        else:
-                            github_doc = GitHubDocument(
-                                repo_url=repo_url,
-                                file_path=file_path,
-                                sha=content_sha,
-                                content=clean_content,
-                                account_id=self.account_id,
-                                workspace_id=self.workspace_id if self.workspace_id else None,
-                                topic=collection_topic,
-                                created_at=datetime.now(),
-                                updated_at=datetime.now()
-                            )
-                            db_session.add(github_doc)
+                    if existing_doc:
+                        if existing_doc.sha != content_sha:
+                            existing_doc.content = clean_content
+                            existing_doc.sha = content_sha
+                            existing_doc.topic = collection_topic
+                            existing_doc.updated_at = datetime.now()
                             file_count += 1
-                        
-                        if vectorize:
-                            try:
-                                repo_metadata = {
-                                    "repo_url": repo_url,
-                                    "repo_name": repo_name,
-                                    "file_extension": file_path.split('.')[-1] if '.' in file_path else '',
-                                    "directory": '/'.join(file_path.split('/')[:-1]) if '/' in file_path else ''
-                                }
-                                
-                                result = await rag_tool._arun(
-                                    extracted_text=clean_content,
-                                    file_name=file_path,
-                                    topic=collection_topic if collection_topic else "repositorio",
-                                    workspace_id=self.workspace_id,
-                                    metadata=repo_metadata
-                                )
-                                
-                                if "chunks added" in result.context_for_llm:
-                                    vectorized_count += 1
-                            except Exception as vec_error:
-                                logger.error(f"❌ Error vectorizando {file_path}: {vec_error}")
+                    else:
+                        github_doc = GitHubDocument(
+                            repo_url=repo_url,
+                            file_path=file_path,
+                            sha=content_sha,
+                            content=clean_content,
+                            account_id=self.account_id,
+                            workspace_id=self.workspace_id if self.workspace_id else None,
+                            topic=collection_topic,
+                            created_at=datetime.now(),
+                            updated_at=datetime.now()
+                        )
+                        db_session.add(github_doc)
+                        file_count += 1
+                    
+                    if vectorize:
+                        try:
+                            repo_metadata = {
+                                "repo_url": repo_url,
+                                "repo_name": repo_name or "",
+                                "file_extension": file_path.split('.')[-1] if '.' in file_path else '',
+                                "directory": '/'.join(file_path.split('/')[:-1]) if '/' in file_path else ''
+                            }
+                            
+                            result = await rag_tool._arun(
+                                extracted_text=clean_content,
+                                file_name=file_path,
+                                topic=collection_topic if collection_topic else "repositorio",
+                                workspace_id=self.workspace_id,
+                                metadata=repo_metadata
+                            )
+                            
+                            if "chunks added" in result.context_for_llm:
+                                vectorized_count += 1
+                        except Exception as vec_error:
+                            logger.error(f"❌ Error vectorizando {file_path}: {vec_error}")
 
                 return f"Repositorio {repo_name} añadido/actualizado con {file_count} archivos. {vectorized_count} archivos vectorizados correctamente."
 
@@ -458,71 +658,140 @@ class GitHubRepoTool(BaseTool):
     async def _update_repository_documents(self, repo_url: str, account_id: str, workspace_id: Optional[str] = None, collection_topic: Optional[str] = "repositorio", vectorize: bool = False) -> str:
         """
         Actualiza los documentos de un repositorio en la base de datos.
+        Usa clonado local primero, luego fallback a API de GitHub.
         """
         try:
             from core.database import SessionLocal, GitHubDocument
             from sqlalchemy import select, delete
             import base64
             from datetime import datetime
+            import hashlib
+            from skills.rag_skill.scripts.document_rag_tool import DocumentRAGTool
             
             if self.session is None:
                 self.session = requests.Session()
 
             api_url = self._get_api_url(repo_url)
-            repo_info_response = self._make_request(api_url)
-            repo_info_response.raise_for_status()
-            repo_name = repo_info_response.json()["name"]
-            default_branch = repo_info_response.json().get("default_branch", "main")
+            repo_name = None
+            default_branch = "main"
+            local_path = None
+
+            # Intentar clonado local primero
+            local_path = self._ensure_local_clone(repo_url)
+            if local_path:
+                try:
+                    repo_name = os.path.basename(local_path.rstrip('/'))
+                    
+                    # Construir árbol local
+                    tree = []
+                    for root, dirs, files in os.walk(local_path):
+                        dirs[:] = [d for d in dirs if not d.startswith('.') and d != '.git']
+                        for file in files:
+                            full_path = os.path.join(root, file)
+                            rel_path = os.path.relpath(full_path, local_path)
+                            tree.append({"path": rel_path, "type": "blob"})
+                    
+                    logger.info(f"✅ Clonado local para actualización: {repo_name}")
+                except Exception as e:
+                    logger.warning(f"Error con clonado local: {e}")
+                    local_path = None
+
+            # Fallback a API de GitHub
+            if not local_path:
+                try:
+                    repo_info_response = self._make_request(api_url)
+                    if repo_info_response.status_code >= 400:
+                        return f"Error: No se pudo acceder al repositorio (código: {repo_info_response.status_code}). Verifica el token de GitHub."
+                    
+                    repo_info = repo_info_response.json()
+                    repo_name = repo_info.get("name")
+                    default_branch = repo_info.get("default_branch", "main")
+                    
+                    tree_url = f"{api_url}/git/trees/{default_branch}?recursive=1"
+                    response = self._make_request(tree_url)
+                    if response.status_code >= 400:
+                        return f"Error: No se pudo obtener el árbol (código: {response.status_code})."
+                    response.raise_for_status()
+                    tree = response.json()["tree"]
+                except Exception as e:
+                    logger.error(f"Error accediendo a repositorio: {e}")
+                    return f"Error al acceder al repositorio: {e}"
+
+            if account_id is None:
+                return "Error: Account ID required."
 
             async with DBSession(SessionLocal) as db_session:
                 updated_files = 0
                 new_files = 0
                 deleted_files = 0
 
-                if account_id is None:
-                    return "Error: Account ID required."
+                rag_tool = DocumentRAGTool(account_id=account_id, workspace_id=workspace_id, telegram_id=self.telegram_id, thread_id=self.thread_id)
 
-                tree_url = f"{api_url}/git/trees/{default_branch}?recursive=1"
-                response = self._make_request(tree_url)
-                response.raise_for_status()
-                github_tree = response.json()["tree"]
-                github_files = {item['path']: item['sha'] for item in github_tree if item['type'] == 'blob'}
-
+                # Obtener archivos existentes en la base de datos
                 existing_github_docs_query = select(GitHubDocument).where(
                     GitHubDocument.repo_url == repo_url,
                     GitHubDocument.account_id == account_id
                 )
                 result = await db_session.execute(existing_github_docs_query)
                 existing_db_docs = {doc.file_path: doc for doc in result.scalars().all()}
-                
-                for file_path, db_doc in existing_db_docs.items():
+
+                # Obtener SHAs de GitHub (local o API)
+                github_files = {}
+                if local_path:
+                    # Usar hashes locales
+                    for item in tree:
+                        if item['type'] == 'blob':
+                            full_local_path = os.path.join(local_path, item['path'])
+                            if os.path.isfile(full_local_path):
+                                with open(full_local_path, "r", encoding="utf-8", errors="ignore") as f:
+                                    content = f.read()
+                                file_sha = hashlib.sha256(content.encode('utf-8')).hexdigest()
+                                github_files[item['path']] = file_sha
+                else:
+                    # Usar API de GitHub
+                    for item in tree:
+                        if item['type'] == 'blob':
+                            github_files[item['path']] = item.get('sha', '')
+
+                # Eliminar archivos que ya no existen
+                for file_path, db_doc in list(existing_db_docs.items()):
                     if file_path not in github_files:
                         await db_session.delete(db_doc)
                         deleted_files += 1
 
-                for file_path, github_sha in github_files.items():
+                # Procesar archivos
+                for file_path, file_sha in github_files.items():
                     if self._is_temporary_file(file_path) or self._is_binary_file(file_path):
                         continue
 
-                    content_data = self._get_content_with_retry(f"{api_url}/contents/{file_path}")
-                    if not content_data or 'content' not in content_data:
+                    if file_path in existing_db_docs and existing_db_docs[file_path].sha == file_sha:
                         continue
 
-                    decoded_content = base64.b64decode(content_data["content"]).decode("utf-8", errors="ignore")
-                    clean_content = decoded_content.replace('\x00', '')
+                    if local_path:
+                        full_local_path = os.path.join(local_path, file_path)
+                        if os.path.isfile(full_local_path):
+                            with open(full_local_path, "r", encoding="utf-8", errors="ignore") as f:
+                                clean_content = f.read()
+                        else:
+                            continue
+                    else:
+                        content_data = self._get_content_with_retry(f"{api_url}/contents/{file_path}")
+                        if not content_data or 'content' not in content_data:
+                            continue
+                        decoded_content = base64.b64decode(content_data["content"]).decode("utf-8", errors="ignore")
+                        clean_content = decoded_content.replace('\\x00', '')
 
                     if file_path in existing_db_docs:
                         db_doc = existing_db_docs[file_path]
-                        if db_doc.sha != github_sha:
-                            db_doc.content = clean_content
-                            db_doc.sha = github_sha
-                            db_doc.updated_at = datetime.now()
-                            updated_files += 1
+                        db_doc.content = clean_content
+                        db_doc.sha = file_sha
+                        db_doc.updated_at = datetime.now()
+                        updated_files += 1
                     else:
                         github_doc = GitHubDocument(
                             repo_url=repo_url,
                             file_path=file_path,
-                            sha=github_sha,
+                            sha=file_sha,
                             content=clean_content,
                             account_id=account_id,
                             workspace_id=workspace_id,
@@ -533,6 +802,20 @@ class GitHubRepoTool(BaseTool):
                         db_session.add(github_doc)
                         new_files += 1
 
+                    if vectorize:
+                        try:
+                            res = await rag_tool._arun(
+                                extracted_text=clean_content, 
+                                file_name=file_path,
+                                topic=collection_topic, 
+                                workspace_id=workspace_id,
+                                metadata={"repo_url": repo_url, "repo_name": repo_name}
+                            )
+                            if "chunks added" in res.context_for_llm:
+                                pass  # Vectorizado
+                        except:
+                            pass
+
                 return f"Repositorio {repo_name} actualizado. Nuevos: {new_files}, Actualizados: {updated_files}, Eliminados: {deleted_files}."
         except Exception as e:
             logger.error(f"Error actualizando documentos: {e}")
@@ -541,6 +824,7 @@ class GitHubRepoTool(BaseTool):
     async def _update_knowledge_collection(self, repo_url: str, collection_topic: Optional[str] = None, vectorize: bool = False) -> str:
         """
         Actualiza una colección de conocimientos.
+        Usa clonado local primero, luego fallback a API de GitHub.
         """
         try:
             from core.database import SessionLocal, GitHubDocument
@@ -555,12 +839,51 @@ class GitHubRepoTool(BaseTool):
                 self.session = requests.Session()
             
             api_url = self._get_api_url(repo_url)
-            repo_info_response = self._make_request(api_url)
-            repo_info_response.raise_for_status()
-            repo_info = repo_info_response.json()
-            repo_name = repo_info["name"]
-            default_branch = repo_info.get("default_branch", "main")
-            
+            repo_name = None
+            default_branch = "main"
+            local_path = None
+
+            # Intentar clonado local primero
+            local_path = self._ensure_local_clone(repo_url)
+            if local_path:
+                try:
+                    repo_name = os.path.basename(local_path.rstrip('/'))
+                    
+                    # Construir árbol local
+                    tree = []
+                    for root, dirs, files in os.walk(local_path):
+                        dirs[:] = [d for d in dirs if not d.startswith('.') and d != '.git']
+                        for file in files:
+                            full_path = os.path.join(root, file)
+                            rel_path = os.path.relpath(full_path, local_path)
+                            tree.append({"path": rel_path, "type": "blob"})
+                    
+                    logger.info(f"✅ Clonado local para knowledge collection: {repo_name}")
+                except Exception as e:
+                    logger.warning(f"Error con clonado local: {e}")
+                    local_path = None
+
+            # Fallback a API de GitHub
+            if not local_path:
+                try:
+                    repo_info_response = self._make_request(api_url)
+                    if repo_info_response.status_code >= 400:
+                        return f"Error: No se pudo acceder al repositorio (código: {repo_info_response.status_code}). Verifica el token de GitHub."
+                    
+                    repo_info = repo_info_response.json()
+                    repo_name = repo_info.get("name")
+                    default_branch = repo_info.get("default_branch", "main")
+                    
+                    tree_url = f"{api_url}/git/trees/{default_branch}?recursive=1"
+                    response = self._make_request(tree_url)
+                    if response.status_code >= 400:
+                        return f"Error: No se pudo obtener el árbol (código: {response.status_code})."
+                    response.raise_for_status()
+                    tree = response.json()["tree"]
+                except Exception as e:
+                    logger.error(f"Error accediendo a repositorio: {e}")
+                    return f"Error al acceder al repositorio: {e}"
+
             async with DBSession(SessionLocal) as db_session:
                 updated_files = 0
                 new_files = 0
@@ -572,10 +895,7 @@ class GitHubRepoTool(BaseTool):
 
                 rag_tool = DocumentRAGTool(account_id=self.account_id, workspace_id=self.workspace_id, telegram_id=self.telegram_id, thread_id=self.thread_id)
                 
-                response = self._make_request(f"{api_url}/git/trees/{default_branch}?recursive=1")
-                response.raise_for_status()
-                github_files = {item['path']: item['sha'] for item in response.json()["tree"] if item['type'] == 'blob'}
-                
+                # Obtener archivos existentes en la base de datos
                 query = select(GitHubDocument).where(
                     GitHubDocument.repo_url == repo_url,
                     GitHubDocument.account_id == self.account_id,
@@ -584,42 +904,75 @@ class GitHubRepoTool(BaseTool):
                 result = await db_session.execute(query)
                 existing_db_docs = {doc.file_path: doc for doc in result.scalars().all()}
 
-                for file_path, db_doc in existing_db_docs.items():
+                # Obtener SHAs de los archivos
+                github_files = {}
+                if local_path:
+                    for item in tree:
+                        if item['type'] == 'blob':
+                            full_local_path = os.path.join(local_path, item['path'])
+                            if os.path.isfile(full_local_path):
+                                with open(full_local_path, "r", encoding="utf-8", errors="ignore") as f:
+                                    content = f.read()
+                                file_sha = hashlib.sha256(content.encode('utf-8')).hexdigest()
+                                github_files[item['path']] = file_sha
+                else:
+                    for item in tree:
+                        if item['type'] == 'blob':
+                            github_files[item['path']] = item.get('sha', '')
+
+                # Eliminar archivos que ya no existen
+                for file_path, db_doc in list(existing_db_docs.items()):
                     if file_path not in github_files:
                         try:
                             await remove_document_from_rag(self.account_id, file_path, collection_topic or "repositorio")
-                        except: pass
+                        except:
+                            pass
                         await db_session.delete(db_doc)
                         deleted_files += 1
                 
-                for file_path, github_sha in github_files.items():
+                # Procesar archivos
+                for file_path, file_sha in github_files.items():
                     if self._is_temporary_file(file_path) or self._is_binary_file(file_path):
                         continue
 
-                    if file_path in existing_db_docs and existing_db_docs[file_path].sha == github_sha:
+                    if file_path in existing_db_docs and existing_db_docs[file_path].sha == file_sha:
                         continue
 
-                    content_data = self._get_content_with_retry(f"{api_url}/contents/{file_path}")
-                    if not content_data or 'content' not in content_data:
-                        continue
+                    if local_path:
+                        full_local_path = os.path.join(local_path, file_path)
+                        if os.path.isfile(full_local_path):
+                            with open(full_local_path, "r", encoding="utf-8", errors="ignore") as f:
+                                clean_content = f.read()
+                        else:
+                            continue
+                    else:
+                        content_data = self._get_content_with_retry(f"{api_url}/contents/{file_path}")
+                        if not content_data or 'content' not in content_data:
+                            continue
+                        decoded_content = base64.b64decode(content_data["content"]).decode("utf-8", errors="ignore")
+                        clean_content = decoded_content.replace('\\x00', '')
 
-                    decoded_content = base64.b64decode(content_data["content"]).decode("utf-8", errors="ignore")
-                    clean_content = decoded_content.replace('\x00', '')
-                    
                     if file_path in existing_db_docs:
                         db_doc = existing_db_docs[file_path]
                         try:
                             await remove_document_from_rag(self.account_id, file_path, collection_topic or "repositorio")
-                        except: pass
+                        except:
+                            pass
                         db_doc.content = clean_content
-                        db_doc.sha = github_sha
+                        db_doc.sha = file_sha
                         db_doc.updated_at = datetime.now()
                         updated_files += 1
                     else:
                         db_doc = GitHubDocument(
-                            repo_url=repo_url, file_path=file_path, sha=github_sha, content=clean_content,
-                            account_id=self.account_id, workspace_id=self.workspace_id, topic=collection_topic,
-                            created_at=datetime.now(), updated_at=datetime.now()
+                            repo_url=repo_url, 
+                            file_path=file_path, 
+                            sha=file_sha, 
+                            content=clean_content,
+                            account_id=self.account_id, 
+                            workspace_id=self.workspace_id, 
+                            topic=collection_topic,
+                            created_at=datetime.now(), 
+                            updated_at=datetime.now()
                         )
                         db_session.add(db_doc)
                         new_files += 1
@@ -627,91 +980,19 @@ class GitHubRepoTool(BaseTool):
                     if vectorize:
                         try:
                             res = await rag_tool._arun(
-                                extracted_text=clean_content, file_name=file_path,
-                                topic=collection_topic or "repositorio", workspace_id=self.workspace_id,
+                                extracted_text=clean_content, 
+                                file_name=file_path,
+                                topic=collection_topic or "repositorio", 
+                                workspace_id=self.workspace_id,
                                 metadata={"repo_url": repo_url, "repo_name": repo_name}
                             )
-                            if "chunks added" in res.context_for_llm: vectorized_count += 1
-                        except: pass
+                            if "chunks added" in res.context_for_llm:
+                                vectorized_count += 1
+                        except:
+                            pass
 
                 return f"Actualizado {repo_name}. Nuevos: {new_files}, Actualizados: {updated_files}, Eliminados: {deleted_files}. Vectorizados: {vectorized_count}."
         except Exception as e:
             logger.error(f"Error: {e}")
             return f"Error: {e}"
 
-    def _is_temporary_file(self, file_path: str) -> bool:
-        import os
-        file_name = os.path.basename(file_path)
-        temp_patterns = [
-            file_name.startswith('.~lock.'),
-            file_name.startswith('~$'),
-            file_name.endswith(('.tmp', '.temp', '.bak', '.swp', '.swo')),
-            file_name.startswith('._'),
-            file_name.startswith('auto-save'),
-            file_name.startswith('#') and file_name.endswith('#'),
-            file_name.lower().startswith('temp'),
-        ]
-        return any(temp_patterns)
-
-    def _is_binary_file(self, file_path: str) -> bool:
-        binary_extensions = {
-            '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.svg', '.webp',
-            '.pdf', '.epub', '.mobi',
-            '.zip', '.tar', '.gz', '.7z', '.rar', '.xz',
-            '.exe', '.dll', '.so', '.dylib', '.bin',
-            '.mp3', '.mp4', '.mkv', '.avi', '.mov', '.flv',
-            '.ttf', '.otf', '.woff', '.woff2',
-            '.pyc', '.pyo', '.db', '.sqlite', '.class', '.node'
-        }
-        _, ext = os.path.splitext(file_path.lower())
-        return ext in binary_extensions
-
-    def _make_request(self, url: str) -> requests.Response:
-        """
-        Realiza una petición GET a la API de GitHub. Si devuelve 401 y hay un token,
-        reintenta la petición sin el token para permitir el acceso a repositorios públicos.
-        """
-        if self.session is None:
-            self.session = requests.Session()
-            
-        auth_header = self.session.headers.get('Authorization', 'None')
-        logger.debug(f"Making request to {url} with auth: {auth_header[:15]}...")
-        
-        response = self.session.get(url)
-        
-        # Any 401 could mean an invalid token was passed, either in headers or env.
-        if response.status_code == 401:
-            logger.warning(f"401 Unauthorized for {url}. Retrying explicitly without any token...")
-            if 'Authorization' in self.session.headers:
-                self.session.headers.pop('Authorization', None)
-            
-            # Explicitly force an unauthenticated request by bypassing the session's auth entirely
-            # We use a raw requests.get without the Authorization header.
-            headers_without_auth = {k: v for k, v in self.session.headers.items() if k.lower() != 'authorization'}
-            response = requests.get(url, headers=headers_without_auth)
-            logger.info(f"Retry status for {url} (forced non-auth): {response.status_code}")
-        
-        return response
-
-    def _get_content_with_retry(self, url: str) -> Optional[Dict[str, Any]]:
-        """
-        Obtiene el contenido de un archivo usando _make_request (con reintento por 401)
-        y manejo de 403 para archivos binarios o rate limit.
-        """
-        try:
-            response = self._make_request(url)
-            if response.status_code >= 400:
-                logger.warning(f"Error {response.status_code} accessing {url}")
-                return None
-            return response.json()
-        except Exception as e:
-            logger.error(f"Exception fetching {url}: {e}")
-            return None
-
-    def _get_api_url(self, repo_url: str) -> str:
-        parsed_url = urlparse(repo_url)
-        path_segments = parsed_url.path.strip("/").split("/")
-        if len(path_segments) != 2:
-            raise ValueError("Invalid GitHub repository URL")
-        username, repo_name = path_segments
-        return f"https://api.github.com/repos/{username}/{repo_name}"
