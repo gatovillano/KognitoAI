@@ -452,7 +452,7 @@ Usa esta información para responder preguntas sobre el tiempo, programar evento
             "<hr>",
             installation_guidance,
             "<hr>" if installation_guidance else "",
-            "<b>Instrucción crítica:</b> Usa herramientas de una en una. No intentes usar más de una herramienta por respuesta. Espera la siguiente interacción.",
+            "<b>Instrucción crítica:</b> Tienes la capacidad de usar herramientas para realizar las tareas requeridas, incluso de forma paralela. No es necesario esperar al siguiente turno, puedes usarlas de forma secuencial en un mismo turno",
             "<hr>",
             system_prompt_content,
             "<hr>",
