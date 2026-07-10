@@ -192,6 +192,8 @@ def normalize_image_url(url_or_base64: Optional[str]) -> str:
 from core.tool_selector import filter_relevant_tools
 from core.tool_call_parser import parse_tool_calls_from_text
 
+_graph_db_instance = None
+_enhanced_memory_manager_instance = None
 
 async def get_shared_graph_dependencies():
     """
