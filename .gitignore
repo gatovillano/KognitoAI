@@ -77,3 +77,5 @@ kokoro_service/models/extensions/
 
 # Extension symlinks
 /extensions/
+# Package lock file (local changes, don't track)
+package-lock.json
