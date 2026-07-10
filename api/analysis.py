@@ -1068,6 +1068,55 @@ async def get_analysis_result_endpoint(
     }
 
 @router.get("/get-mindmap-result/{task_id}")
+@router.get("/get-analysis/{task_id}")
+async def get_analysis_endpoint(
+    task_id: str,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Alias para get-analysis-result con formato compatible con frontend.
+    Devuelve los datos en el formato esperado por AnalysisDetailDialog.
+    """
+    logger.info(f"Consulta de análisis: task_id={task_id}, account_id={current_account_id}")
+    task = await db.get(AnalysisTask, uuid.UUID(task_id))
+    if not task:
+        logger.warning(f"Tarea {task_id} no encontrada en la base de datos.")
+        raise HTTPException(status_code=404, detail="Tarea no encontrada.")
+    if str(task.account_id) != current_account_id:
+        logger.warning(f"Tarea {task_id} encontrada, pero account_id no coincide.")
+        raise HTTPException(status_code=404, detail="Tarea no pertenece al usuario.")
+
+    # Obtener result_payload y extraer summary si existe
+    result_payload = task.result_payload or {}
+    summary = ""
+
+    # Extraer summary según el tipo de análisis
+    if isinstance(result_payload, dict):
+        summary = (
+            result_payload.get("executive_summary") or
+            result_payload.get("collection_summary") or
+            result_payload.get("semantic_summary") or
+            result_payload.get("summary") or
+            ""
+        )
+
+    return {
+        "id": str(task.id),
+        "status": task.status,
+        "full_data": result_payload,  # Formato esperado por frontend
+        "type": task.analysis_type,
+        "title": task.file_name,
+        "summary": summary,
+        "error": task.error_message,
+        "progress": 100 if task.status == "completed" else 0,
+        "analysis_type": task.analysis_type,
+        "file_name": task.file_name,
+        "created_at": task.created_at.isoformat() if task.created_at else None
+    }
+
+@router.get("/get-mindmap-result/{task_id}")
+
 async def get_mindmap_result_endpoint(
     task_id: str,
     current_account_id: str = Depends(get_current_account_id),
@@ -2216,6 +2265,10 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
                 "code_structure": [],
                 "design_patterns": [],
                 "dependencies": [],
+                "security_analysis": [],
+                "performance_analysis": [],
+                "refactoring_opportunities": [],
+                "documentation_health": [],
                 "potential_issues": [],
                 "recommendations": []
             }
@@ -2252,6 +2305,10 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
                     combined_categories["code_structure"].extend(chunk_result.code_structure)
                     combined_categories["design_patterns"].extend(chunk_result.design_patterns)
                     combined_categories["dependencies"].extend(chunk_result.dependencies)
+                    combined_categories["security_analysis"].extend(chunk_result.security_analysis)
+                    combined_categories["performance_analysis"].extend(chunk_result.performance_analysis)
+                    combined_categories["refactoring_opportunities"].extend(chunk_result.refactoring_opportunities)
+                    combined_categories["documentation_health"].extend(chunk_result.documentation_health)
                     combined_categories["potential_issues"].extend(chunk_result.potential_issues)
                     combined_categories["recommendations"].extend(chunk_result.recommendations)
                 elif isinstance(chunk_result, dict):
@@ -2259,6 +2316,10 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
                     combined_categories["code_structure"].extend(chunk_result.get("code_structure", []))
                     combined_categories["design_patterns"].extend(chunk_result.get("design_patterns", []))
                     combined_categories["dependencies"].extend(chunk_result.get("dependencies", []))
+                    combined_categories["security_analysis"].extend(chunk_result.get("security_analysis", []))
+                    combined_categories["performance_analysis"].extend(chunk_result.get("performance_analysis", []))
+                    combined_categories["refactoring_opportunities"].extend(chunk_result.get("refactoring_opportunities", []))
+                    combined_categories["documentation_health"].extend(chunk_result.get("documentation_health", []))
                     combined_categories["potential_issues"].extend(chunk_result.get("potential_issues", []))
                     combined_categories["recommendations"].extend(chunk_result.get("recommendations", []))
                 else:
@@ -2342,6 +2403,10 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
                 "code_structure": combined_categories["code_structure"],
                 "design_patterns": combined_categories["design_patterns"],
                 "dependencies": combined_categories["dependencies"],
+                "security_analysis": combined_categories.get("security_analysis", []),
+                "performance_analysis": combined_categories.get("performance_analysis", []),
+                "refactoring_opportunities": combined_categories.get("refactoring_opportunities", []),
+                "documentation_health": combined_categories.get("documentation_health", []),
                 "potential_issues": combined_categories["potential_issues"],
                 "recommendations": combined_categories["recommendations"],
                 "progress_info": progress_info,

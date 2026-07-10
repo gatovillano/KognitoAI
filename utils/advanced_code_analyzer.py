@@ -119,35 +119,35 @@ async def analyze_code_content(
         if analysis_type == "all" or analysis_type == "structure":
             sections_desc += """
 - executive_summary: (string) Un resumen ejecutivo detallado que proporcione una visión global del código analizado. Debe incluir: 1) Una definición clara de la aplicación (qué es y qué problema resuelve). 2) Una descripción de sus funcionalidades principales. 3) Una reseña de sus características generales de diseño (estilo arquitectónico, patrones globales, etc.). 4) Un análisis técnico específico y profundo de ESTE código.
-- code_structure: Lista de objetos {component: string, description: string}
-- design_patterns: Lista de objetos {pattern: string, description: string}
-- dependencies: Lista de objetos {library: string, description: string}
+- code_structure: Lista de objetos {{component: string, description: string}}
+- design_patterns: Lista de objetos {{pattern: string, description: string}}
+- dependencies: Lista de objetos {{library: string, description: string}}
 """
         
         if analysis_type == "all" or analysis_type == "security":
             sections_desc += """
-- security_analysis: Lista de objetos {vulnerability: string, description: string, severity: string}
+- security_analysis: Lista de objetos {{vulnerability: string, description: string, severity: string}}
 """
 
         if analysis_type == "all" or analysis_type == "performance":
             sections_desc += """
-- performance_analysis: Lista de objetos {area: string, issue: string, suggestion: string}
+- performance_analysis: Lista de objetos {{area: string, issue: string, suggestion: string}}
 """
 
         if analysis_type == "all" or analysis_type == "refactoring":
             sections_desc += """
-- refactoring_opportunities: Lista de objetos {concept: string, description: string, benefit: string}
+- refactoring_opportunities: Lista de objetos {{concept: string, description: string, benefit: string}}
 """
 
         if analysis_type == "all" or analysis_type == "documentation":
             sections_desc += """
-- documentation_health: Lista de objetos {item: string, status: string, recommendation: string}
+- documentation_health: Lista de objetos {{item: string, status: string, recommendation: string}}
 """
 
         if analysis_type == "all":
             sections_desc += """
-- potential_issues: Lista de objetos {issue: string, description: string}
-- recommendations: Lista de objetos {recommendation: string, rationale: string, application: string, implementation: string}
+- potential_issues: Lista de objetos {{issue: string, description: string}}
+- recommendations: Lista de objetos {{recommendation: string, rationale: string, application: string, implementation: string}}
 """
 
         prompt_text = f"""Eres un experto en arquitectura. Analiza el código y responde en JSON.
