@@ -208,7 +208,7 @@ class GitHubRepoTool(BaseTool):
         """Lee un archivo desde el sistema de archivos local."""
         try:
             with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-                content = f.read()
+                content = self._sanitize_content(f.read())
             return f"Contenido del archivo {os.path.basename(file_path)}:\n{content}"
         except Exception as e:
             return f"Error al leer el archivo local {file_path}: {e}"
@@ -300,6 +300,12 @@ class GitHubRepoTool(BaseTool):
                             '.wav', '.flac', '.ogg', '.webm', '.ttf', '.otf', '.woff', '.woff2', '.eot']
         return any(file_path.lower().endswith(ext) for ext in binary_extensions)
 
+    def _sanitize_content(self, content: str) -> str:
+        """Sanitiza el contenido eliminando bytes NUL que PostgreSQL no acepta."""
+        if not isinstance(content, str):
+            content = str(content)
+        return content.replace('\x00', '')
+
     def _list_tree(self, repo_url: str) -> str:
         """Lista el árbol de archivos del repositorio."""
         try:
@@ -355,7 +361,7 @@ class GitHubRepoTool(BaseTool):
             encoding = content_data["encoding"]
             
             if encoding == "base64":
-                content = base64.b64decode(content_base64).decode("utf-8", errors="ignore")
+                content = self._sanitize_content(base64.b64decode(content_base64).decode("utf-8", errors="ignore"))
             else:
                 content = content_base64
             
@@ -421,7 +427,7 @@ class GitHubRepoTool(BaseTool):
                 content_data = self._get_content_with_retry(f"{api_url}/contents/{file_path}")
                 if content_data and 'content' in content_data:
                     import base64
-                    content = base64.b64decode(content_data["content"]).decode("utf-8", errors="ignore")
+                    content = self._sanitize_content(base64.b64decode(content_data["content"]).decode("utf-8", errors="ignore"))
                     results.append(f"Archivo: {file_path}\n{content}\n{'-'*50}")
             
             return "\n".join(results) if results else f"No se encontraron archivos en {path}."
@@ -461,7 +467,7 @@ class GitHubRepoTool(BaseTool):
                     content_data = self._get_content_with_retry(f"{api_url}/contents/{item['path']}")
                     if content_data and 'content' in content_data:
                         import base64
-                        content = base64.b64decode(content_data["content"]).decode("utf-8", errors="ignore")
+                        content = self._sanitize_content(base64.b64decode(content_data["content"]).decode("utf-8", errors="ignore"))
                         results.append(f"Archivo: {item['path']}\n{content}\n{'-'*50}")
             
             return "\n".join(results) if results else f"No se encontraron archivos."
@@ -523,8 +529,8 @@ class GitHubRepoTool(BaseTool):
                             full_path = os.path.join(root, file)
                             rel_path = os.path.relpath(full_path, local_path)
                             with open(full_path, "r", encoding="utf-8", errors="ignore") as f:
-                                content = f.read()
-                            tree.append({"path": rel_path, "type": "blob", "content": content})
+                                content = self._sanitize_content(f.read())
+                            tree.append({"path": rel_path, "type": "blob", "content": self._sanitize_content(content)})
                     
                     logger.info(f"✅ Clonado local exitoso para {repo_name}: {len(tree)} archivos")
                 except Exception as e:
@@ -577,7 +583,7 @@ class GitHubRepoTool(BaseTool):
                         full_local_path = os.path.join(local_path, file_path)
                         if os.path.isfile(full_local_path):
                             with open(full_local_path, "r", encoding="utf-8", errors="ignore") as f:
-                                clean_content = f.read()
+                                clean_content = self._sanitize_content(f.read())
                             content_sha = hashlib.sha256(clean_content.encode('utf-8')).hexdigest()
                         else:
                             continue
@@ -590,7 +596,7 @@ class GitHubRepoTool(BaseTool):
                         encoding = content_data["encoding"]
                         
                         if encoding == "base64":
-                            decoded_content = base64.b64decode(content_base64).decode("utf-8", errors="ignore")
+                            decoded_content = self._sanitize_content(base64.b64decode(content_base64).decode("utf-8", errors="ignore"))
                         else:
                             decoded_content = content_base64
                         
@@ -744,7 +750,7 @@ class GitHubRepoTool(BaseTool):
                             full_local_path = os.path.join(local_path, item['path'])
                             if os.path.isfile(full_local_path):
                                 with open(full_local_path, "r", encoding="utf-8", errors="ignore") as f:
-                                    content = f.read()
+                                    content = self._sanitize_content(f.read())
                                 file_sha = hashlib.sha256(content.encode('utf-8')).hexdigest()
                                 github_files[item['path']] = file_sha
                 else:
@@ -771,14 +777,14 @@ class GitHubRepoTool(BaseTool):
                         full_local_path = os.path.join(local_path, file_path)
                         if os.path.isfile(full_local_path):
                             with open(full_local_path, "r", encoding="utf-8", errors="ignore") as f:
-                                clean_content = f.read()
+                                clean_content = self._sanitize_content(f.read())
                         else:
                             continue
                     else:
                         content_data = self._get_content_with_retry(f"{api_url}/contents/{file_path}")
                         if not content_data or 'content' not in content_data:
                             continue
-                        decoded_content = base64.b64decode(content_data["content"]).decode("utf-8", errors="ignore")
+                        decoded_content = self._sanitize_content(base64.b64decode(content_data["content"]).decode("utf-8", errors="ignore"))
                         clean_content = decoded_content.replace('\\x00', '')
 
                     if file_path in existing_db_docs:
@@ -912,7 +918,7 @@ class GitHubRepoTool(BaseTool):
                             full_local_path = os.path.join(local_path, item['path'])
                             if os.path.isfile(full_local_path):
                                 with open(full_local_path, "r", encoding="utf-8", errors="ignore") as f:
-                                    content = f.read()
+                                    content = self._sanitize_content(f.read())
                                 file_sha = hashlib.sha256(content.encode('utf-8')).hexdigest()
                                 github_files[item['path']] = file_sha
                 else:
@@ -942,14 +948,14 @@ class GitHubRepoTool(BaseTool):
                         full_local_path = os.path.join(local_path, file_path)
                         if os.path.isfile(full_local_path):
                             with open(full_local_path, "r", encoding="utf-8", errors="ignore") as f:
-                                clean_content = f.read()
+                                clean_content = self._sanitize_content(f.read())
                         else:
                             continue
                     else:
                         content_data = self._get_content_with_retry(f"{api_url}/contents/{file_path}")
                         if not content_data or 'content' not in content_data:
                             continue
-                        decoded_content = base64.b64decode(content_data["content"]).decode("utf-8", errors="ignore")
+                        decoded_content = self._sanitize_content(base64.b64decode(content_data["content"]).decode("utf-8", errors="ignore"))
                         clean_content = decoded_content.replace('\\x00', '')
 
                     if file_path in existing_db_docs:
