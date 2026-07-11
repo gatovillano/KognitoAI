@@ -16,6 +16,8 @@ interface CodeAnalysisItem {
   library?: string;
   issue?: string;
   recommendation?: string;
+  name?: string;
+  context?: string;
   description: string;
   rationale?: string;
   application?: string;
