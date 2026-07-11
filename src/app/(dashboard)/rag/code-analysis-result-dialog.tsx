@@ -6,7 +6,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { InlineMarkdownRenderer } from '@/components/InlineMarkdownRenderer';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Code, FileText, Settings, AlertTriangle, Lightbulb, GitBranch } from 'lucide-react';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
@@ -101,8 +102,8 @@ export function CodeAnalysisResultDialog({ repoName, analysis, isOpen, onOpenCha
                     <CardTitle>Análisis Detallado</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="prose prose-sm max-w-none">
-                      <InlineMarkdownRenderer content={formattedResult} />
+                    <div className="prose prose-sm max-w-none dark:prose-invert break-words overflow-hidden">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{formattedResult}</ReactMarkdown>
                     </div>
                   </CardContent>
                 </Card>
