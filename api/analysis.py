@@ -2177,15 +2177,15 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
             )
             await db_session.execute(stmt_update)
             
-        await send_analysis_progress(
-            account_id,
-            task_id,
-            phase="fetching_github",
-            message="Obteniendo documentos de GitHub...",
-            progress_percent=10,
-            file_name=repo_name,
-            analysis_type="code",
-        )
+            await send_analysis_progress(
+                account_id,
+                task_id,
+                phase="fetching_github",
+                message="Obteniendo documentos de GitHub...",
+                progress_percent=10,
+                file_name=repo_name,
+                analysis_type="code",
+            )
             
             query = select(GitHubDocument).where(
                 GitHubDocument.account_id == account_id,
