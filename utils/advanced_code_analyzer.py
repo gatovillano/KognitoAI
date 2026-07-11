@@ -114,67 +114,35 @@ async def analyze_code_content(
                 potential_issues=[{"issue": "Sin código", "description": "No se proporcionó código para analizar."}]
             )
         
-        # Definir las secciones del prompt basadas en el tipo de análisis
-        sections_desc = ""
-        if analysis_type == "all" or analysis_type == "structure":
-            sections_desc += """
-- executive_summary: (string) Un resumen ejecutivo detallado que proporcione una visión global del código analizado. Debe incluir: 1) Una definición clara de la aplicación (qué es y qué problema resuelve). 2) Una descripción de sus funcionalidades principales. 3) Una reseña de sus características generales de diseño (estilo arquitectónico, patrones globales, etc.). 4) Un análisis técnico específico y profundo de ESTE código.
-- code_structure: Lista de objetos {{component: string, description: string}}
-- design_patterns: Lista de objetos {{pattern: string, description: string}}
-- dependencies: Lista de objetos {{library: string, description: string}}
-"""
-        
-        if analysis_type == "all" or analysis_type == "security":
-            sections_desc += """
-- security_analysis: Lista de objetos {{vulnerability: string, description: string, severity: string}}
-"""
-
-        if analysis_type == "all" or analysis_type == "performance":
-            sections_desc += """
-- performance_analysis: Lista de objetos {{area: string, issue: string, suggestion: string}}
-"""
-
-        if analysis_type == "all" or analysis_type == "refactoring":
-            sections_desc += """
-- refactoring_opportunities: Lista de objetos {{concept: string, description: string, benefit: string}}
-"""
-
-        if analysis_type == "all" or analysis_type == "documentation":
-            sections_desc += """
-- documentation_health: Lista de objetos {{item: string, status: string, recommendation: string}}
-"""
-
-        if analysis_type == "all":
-            sections_desc += """
-- potential_issues: Lista de objetos {{issue: string, description: string}}
-- recommendations: Lista de objetos {{recommendation: string, rationale: string, application: string, implementation: string}}
-"""
-
-        prompt_text = f"""Eres un experto en arquitectura. Analiza el código y responde en JSON.
-FOCO: {analysis_type.upper()}
-
-    Si devuelves executive_summary, debe describir la aplicacion: que es, que funcionalidades ofrece,
-    como esta organizada su arquitectura y que decisiones tecnicas globales se observan.
-    No describas el proceso de analisis. No menciones cantidad de archivos, chunks, partes del repositorio,
-    ni frases meta como 'analisis completo de...'.
-
-Código:
-{{code_content}}
-
-JSON keys:
-{sections_desc}
-"""
-        prompt = ChatPromptTemplate.from_template(prompt_text)
         parser = JsonOutputParser(pydantic_object=CodeAnalysisResult)
+        format_instructions = parser.get_format_instructions()
+        
+        prompt = ChatPromptTemplate.from_template(
+            "Eres un experto en arquitectura. Analiza el código y responde en JSON.\n"
+            "FOCO: {analysis_type}\n\n"
+            "Instrucciones sobre campos:\n"
+            "- executive_summary: debe describir la aplicación (qué es, qué funcionalidades ofrece, "
+            "cómo está organizada su arquitectura y qué decisiones técnicas globales se observan). "
+            "No describas el proceso de análisis. No menciones cantidad de archivos, chunks, partes del repositorio, "
+            "ni frases meta como 'analisis completo de...'.\n"
+            "Focalízate principalmente en generar información relevante para el foco '{analysis_type}'. "
+            "Las llaves no deseadas o irrelevantes pueden dejarse vacías (ej: listas vacías [] o strings vacíos '').\n\n"
+            "Instrucciones de formato JSON:\n{format_instructions}\n\n"
+            "Código:\n{code_content}"
+        )
         chain = prompt | llm | parser
         
-        result = await chain.ainvoke({"code_content": code_content})
+        result = await chain.ainvoke({
+            "analysis_type": analysis_type.upper(),
+            "format_instructions": format_instructions,
+            "code_content": code_content
+        })
         final_result = CodeAnalysisResult(**result) if isinstance(result, dict) else result
         final_result.executive_summary = _normalize_executive_summary(final_result.executive_summary)
         return final_result
         
     except Exception as e:
-        logger.error(f"Error en análisis: {e}")
+        logger.error(f"Error en análisis: {e}", exc_info=True)
         return CodeAnalysisResult(
             executive_summary="Error al analizar el código.",
             potential_issues=[{"issue": "Error de análisis", "description": str(e)}]
@@ -195,19 +163,31 @@ async def _analyze_module(code_content: str, module_type: str, account_id: Optio
         elif "documentation" in module_type:
             sections = "- documentation_health, - recommendations"
 
-        module_instructions = f"Analiza el código enfocado en {module_type}. Responde JSON con llaves: {sections}."
+        module_instructions = f"Analiza el código enfocado en {module_type}. Genera información en formato JSON para las llaves: {sections}."
         if module_type == "structure_and_summary":
             module_instructions += (
-                " executive_summary debe ser una descripcion de la aplicacion, incluyendo su proposito, "
-                "funcionalidades principales, arquitectura general y decisiones tecnicas visibles en el codigo. "
-                "No describas el proceso de analisis y no menciones cantidad de archivos, chunks o partes del repositorio."
+                " La llave executive_summary debe ser una descripción funcional de la aplicación, incluyendo su propósito, "
+                "funcionalidades principales, arquitectura general y decisiones técnicas visibles en el código. "
+                "No describas el proceso de análisis y no menciones cantidad de archivos, chunks o partes del repositorio."
             )
+        else:
+            module_instructions += " Deja las llaves no deseadas o irrelevantes vacías (ej: listas vacías [])."
+
+        parser = JsonOutputParser(pydantic_object=CodeAnalysisResult)
+        format_instructions = parser.get_format_instructions()
 
         prompt = ChatPromptTemplate.from_template(
-            f"{module_instructions}\n\nCódigo:\n{{code_content}}"
+            "Eres un experto en arquitectura y desarrollo de software.\n"
+            "{module_instructions}\n\n"
+            "Instrucciones de formato JSON:\n{format_instructions}\n\n"
+            "Código:\n{code_content}"
         )
-        chain = prompt | llm | JsonOutputParser(pydantic_object=CodeAnalysisResult)
-        res = await chain.ainvoke({"code_content": code_content})
+        chain = prompt | llm | parser
+        res = await chain.ainvoke({
+            "module_instructions": module_instructions,
+            "format_instructions": format_instructions,
+            "code_content": code_content
+        })
         
         # Filtramos solo lo que viene en el diccionario y creamos la instancia
         if isinstance(res, dict):
@@ -215,5 +195,7 @@ async def _analyze_module(code_content: str, module_type: str, account_id: Optio
             final_data["executive_summary"] = _normalize_executive_summary(final_data["executive_summary"])
             return CodeAnalysisResult(**final_data)
         return CodeAnalysisResult()
-    except Exception:
+    except Exception as e:
+        logger.error(f"Error en _analyze_module ({module_type}): {e}", exc_info=True)
         return CodeAnalysisResult()
+
