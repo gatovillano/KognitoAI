@@ -804,6 +804,7 @@ const ContextSelectorDialog: React.FC<ContextSelectorDialogProps> = ({
                                       isSelected ? 'border-primary ring-2 ring-primary/20' : 'border-transparent hover:border-border'
                                     }`}
                                   >
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
                                     <img
                                       src={mediaUrl}
                                       alt="Thumbnail"

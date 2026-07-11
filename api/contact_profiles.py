@@ -318,6 +318,7 @@ async def get_linked_objects(
             selectinload(ContactProfile.tasks),
             selectinload(ContactProfile.user_document_topics),
             selectinload(ContactProfile.albums).selectinload(Album.cover_photo),
+            selectinload(ContactProfile.albums).selectinload(Album.photos),
             selectinload(ContactProfile.form_responses).selectinload(FormResponse.form) # Cargar las respuestas de formulario y sus formularios asociados
         )
         .where(ContactProfile.id == profile_id, ContactProfile.account_id == current_account.id)

@@ -22,12 +22,7 @@ interface FaqItem {
   categoria: "general" | "tecnologia" | "seguridad";
 }
 
-export default function FaqPage() {
-  const [searchTerm, setSearchTerm] = useState("");
-  const [activeCategory, setActiveCategory] = useState<"todos" | "general" | "tecnologia" | "seguridad">("todos");
-  const [openId, setOpenId] = useState<number | null>(null);
-
-  const faqs: FaqItem[] = [
+const faqs: FaqItem[] = [
     {
       id: 1,
       categoria: "general",
@@ -65,6 +60,11 @@ export default function FaqPage() {
       respuesta: "Sí. Al estar diseñado bajo el principio de Soberanía Cognitiva y permitir despliegues 100% self-hosted, Kognito facilita el cumplimiento riguroso de normativas como GDPR, CCPA y regulaciones locales de manejo de información empresarial."
     }
   ];
+
+export default function FaqPage() {
+  const [searchTerm, setSearchTerm] = useState("");
+  const [activeCategory, setActiveCategory] = useState<"todos" | "general" | "tecnologia" | "seguridad">("todos");
+  const [openId, setOpenId] = useState<number | null>(null);
 
   // Filtrado y búsqueda
   const filteredFaqs = useMemo(() => {

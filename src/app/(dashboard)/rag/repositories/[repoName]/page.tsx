@@ -110,7 +110,8 @@ export default function RepositoryDetailPage() {
         .map((analysis: any) => {
           let fileName = 'Análisis sin título';
           if (analysis.result_payload && typeof analysis.result_payload === 'object') {
-            fileName = analysis.result_payload.file_name || analysis.result_payload.title || fileName;
+            const metadata = analysis.result_payload.analysis_metadata || {};
+            fileName = metadata.title || analysis.result_payload.title || metadata.file_name || analysis.result_payload.file_name || fileName;
           }
           return {
             ...analysis,
@@ -251,7 +252,7 @@ export default function RepositoryDetailPage() {
       } catch (err) { clearInterval(poller); setDocPollingId(null); toast.error('Error al consultar el análisis'); }
     }, 5000);
     return () => clearInterval(poller);
-  }, [docPollingId]);
+  }, [docPollingId, documentToAnalyze]);
 
   // Polling para análisis de colección
   useEffect(() => {
@@ -281,7 +282,7 @@ export default function RepositoryDetailPage() {
       } catch (err) { clearInterval(poller); setCollectionPollingId(null); toast.error('Error al consultar el análisis'); }
     }, 5000);
     return () => clearInterval(poller);
-  }, [collectionPollingId]);
+  }, [collectionPollingId, repoName]);
 
   // Polling para vectorización de repositorio
   useEffect(() => {
@@ -309,7 +310,7 @@ export default function RepositoryDetailPage() {
       } catch (err) { clearInterval(poller); setVectorizationPollingId(null); toast.error('Error al consultar la vectorización'); }
     }, 5000);
     return () => clearInterval(poller);
-  }, [vectorizationPollingId]);
+  }, [vectorizationPollingId, repoName]);
 
   const isAnyAnalysisInProgress = useMemo(() => {
     return !!docPollingId || !!collectionPollingId || !!vectorizationPollingId;

@@ -420,6 +420,7 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
                   {imagesToShow.map((img, imgIdx) => (
                     <Dialog key={imgIdx}>
                       <DialogTrigger asChild>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={img}
                           alt={`Imagen ${imgIdx + 1}`}
@@ -427,6 +428,7 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
                         />
                       </DialogTrigger>
                       <DialogContent className="max-w-[95vw] max-h-[95vh] p-0 overflow-hidden bg-black/80 backdrop-blur-sm border-none flex items-center justify-center">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={img} alt={`Imagen ${imgIdx + 1}`} className="max-w-full max-h-full object-contain" />
                       </DialogContent>
                     </Dialog>
@@ -556,6 +558,7 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
                     {imagesToShow.map((img, imgIdx) => (
                       <Dialog key={imgIdx}>
                         <DialogTrigger asChild>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
                             src={img}
                             alt={`Imagen ${imgIdx + 1}`}
@@ -563,6 +566,7 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
                           />
                         </DialogTrigger>
                         <DialogContent className="max-w-[95vw] max-h-[95vh] p-0 overflow-hidden bg-black/80 backdrop-blur-sm border-none flex items-center justify-center">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img src={img} alt={`Imagen ${imgIdx + 1}`} className="max-w-full max-h-full object-contain" />
                         </DialogContent>
                       </Dialog>
@@ -669,6 +673,7 @@ const SourcesList: React.FC<{
         {webSources.length > 0 && (
           <span className="flex -space-x-1 items-center mr-0.5">
             {webSources.slice(0, 3).map((s, i) => (
+              /* eslint-disable-next-line @next/next/no-img-element */
               <img
                 key={i}
                 src={`https://www.google.com/s2/favicons?sz=16&domain=${s.url}`}

@@ -220,3 +220,45 @@ Sistema avanzado de exocerebro digital en desarrollo activo. Muchas funcionalida
 
 **Completadas:**
 - [ ]
+
+---
+
+## ✅ Nuevas Funcionalidades Implementadas
+
+### API Pública KAI - Compatible con OpenAI
+
+**Fecha:** 2026-06-30
+
+**Descripción:** Implementación de una API pública compatible con OpenAI para permitir el uso del agente KAI desde aplicaciones externas.
+
+**Archivos creados/modificados:**
+- `core/api_key_model.py` - Modelo de base de datos para API Keys
+- `api/public_api.py` - Router de API pública (OpenAI-compatible)
+- `api/main.py` - Actualizado para incluir el nuevo router
+- `alembic/versions/20260630_create_api_keys_table.py` - Migración de base de datos
+- `scripts/init_api_keys_table.py` - Script de inicialización manual
+- `docs/API_PUBLICA.md` - Documentación de la API
+
+**Características:**
+- [x] Modelo de API Key con rate limiting
+- [x] Endpoint `/v1/chat/completions` (OpenAI-compatible)
+- [x] Endpoint `/v1/models` (OpenAI-compatible)
+- [x] Gestión de API Keys (crear, listar, revocar)
+- [x] Soporte para JWT y API Key en authentication
+- [x] Documentación de uso
+
+**Uso:**
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    api_key="sk-kaito-tu-api-key",
+    base_url="http://localhost:8000/v1"
+)
+
+completion = client.chat.completions.create(
+    model="gpt-4o",
+    messages=[{"role": "user", "content": "Hola"}]
+)
+```
+

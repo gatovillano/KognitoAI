@@ -289,7 +289,9 @@ export default function AllDocumentsPage() {
                   <div className="flex items-center gap-2 text-left flex-1 min-w-0">
                     {analysis.file_name.startsWith('Resumen Semántico:') ? <Brain className="h-4 w-4" /> :
                      analysis.file_name.startsWith('Colección:') ? <FolderKanban className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
-                    <span className="font-medium truncate">{analysis.file_name}</span>
+                    <span className="font-medium truncate">
+                      {analysis.result_payload?.analysis_metadata?.title || analysis.result_payload?.title || analysis.title || analysis.file_name}
+                    </span>
                     <span className="ml-auto text-xs text-muted-foreground pr-4">{new Date(analysis.created_at).toLocaleDateString()}</span>
                   </div>
                 </AccordionTrigger>

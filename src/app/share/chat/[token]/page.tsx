@@ -222,7 +222,7 @@ export default function SharedChatPage() {
         } catch {
             return false;
         }
-    }, [token, password, messages.length, scrollToBottom]);
+    }, [token, password, messages, scrollToBottom]);
 
     // Check the status of the background task
     const fetchReplyStatus = useCallback(async () => {

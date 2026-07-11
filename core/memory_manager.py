@@ -1590,15 +1590,23 @@ async def get_full_document_content(
                 "account_id": account_id,
             }
 
+            is_collection = False
             if file_name:
-                clauses.append("cmetadata->>'file_name' = :file_name")
-                params["file_name"] = file_name
+                if file_name.startswith("Colección:"):
+                    is_collection = True
+                    actual_topic = file_name.replace("Colección:", "").strip()
+                    clauses.append("topic = :topic")
+                    params["topic"] = actual_topic
+                else:
+                    clauses.append("cmetadata->>'file_name' = :file_name")
+                    params["file_name"] = file_name
             elif document_id:
                 clauses.append("cmetadata->>'document_id' = :document_id")
                 params["document_id"] = str(document_id)
             
             # Filtro por topic si se especifica
             if topic:
+                is_collection = True
                 clauses.append("topic = :topic")
                 params["topic"] = topic
 
@@ -1682,38 +1690,47 @@ async def get_full_document_content(
             doc_id = doc_metadata.get("document_id") or "unknown"
             chunks_by_doc.setdefault(doc_id, []).append((doc_content, doc_metadata))
             
-        # Elegir la versión más completa (con más chunks) para evitar fragmentaciones
-        best_doc_id = max(chunks_by_doc.keys(), key=lambda k: len(chunks_by_doc[k]))
-        selected_chunks = chunks_by_doc[best_doc_id]
-        
-        # Ordenar rigurosamente los fragmentos seleccionados por su chunk_index en Python
         def get_chunk_index(ch):
             try:
                 return int(ch[1].get("chunk_index", 0))
             except (ValueError, TypeError):
                 return 0
-                
-        selected_chunks.sort(key=get_chunk_index)
-        logger.info(f"Versiones encontradas: {len(chunks_by_doc)}. Seleccionado document_id '{best_doc_id}' con {len(selected_chunks)} chunks.")
 
-        # Reconstruir el contenido eliminando solapamientos (chunk_overlap) de forma inteligente
-        chunk_texts = [ch[0] for ch in selected_chunks]
-        
-        # Algoritmo de unión sin solapamientos
-        full_content = ""
-        if chunk_texts:
-            full_content = chunk_texts[0]
-            for next_chunk in chunk_texts[1:]:
-                max_overlap = min(len(full_content), len(next_chunk), 2000)
-                overlap_len = 0
-                for i in range(max_overlap, 0, -1):
-                    if full_content.endswith(next_chunk[:i]):
-                        overlap_len = i
-                        break
-                full_content += next_chunk[overlap_len:]
+        def reconstruct_doc_content(selected_chunks):
+            selected_chunks.sort(key=get_chunk_index)
+            chunk_texts = [ch[0] for ch in selected_chunks]
+            full_content = ""
+            if chunk_texts:
+                full_content = chunk_texts[0]
+                for next_chunk in chunk_texts[1:]:
+                    max_overlap = min(len(full_content), len(next_chunk), 2000)
+                    overlap_len = 0
+                    for i in range(max_overlap, 0, -1):
+                        if full_content.endswith(next_chunk[:i]):
+                            overlap_len = i
+                            break
+                    full_content += next_chunk[overlap_len:]
+            return full_content
 
-        logger.info(f"✅ Reconstruido documento '{file_name}' sin duplicaciones por overlap. Longitud final: {len(full_content)} chars.")
-        return full_content
+        if is_collection:
+            logger.info(f"Reconstruyendo colección completa con {len(chunks_by_doc)} documentos.")
+            docs_content = []
+            for doc_id, selected_chunks in chunks_by_doc.items():
+                if not selected_chunks:
+                    continue
+                doc_name = selected_chunks[0][1].get("file_name") or f"Documento_{doc_id}"
+                doc_text = reconstruct_doc_content(selected_chunks)
+                docs_content.append(f"--- Documento: {doc_name} ---\n{doc_text}\n")
+            
+            combined_content = "\n".join(docs_content)
+            logger.info(f"✅ Reconstruida colección completa '{file_name}'. Longitud final: {len(combined_content)} chars.")
+            return combined_content
+        else:
+            best_doc_id = max(chunks_by_doc.keys(), key=lambda k: len(chunks_by_doc[k]))
+            selected_chunks = chunks_by_doc[best_doc_id]
+            full_content = reconstruct_doc_content(selected_chunks)
+            logger.info(f"✅ Reconstruido documento '{file_name}' sin duplicaciones por overlap. Longitud final: {len(full_content)} chars.")
+            return full_content
 
     except Exception as e:
         logger.error(

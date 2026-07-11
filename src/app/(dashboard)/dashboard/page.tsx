@@ -398,8 +398,8 @@ export default function DashboardPage() {
                     <FileText className="h-4 w-4 text-primary" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <CardTitle className="text-sm font-semibold truncate group-hover:text-primary transition-colors" title={analysis.title || analysis.file_name}>
-                      {analysis.title || analysis.file_name}
+                    <CardTitle className="text-sm font-semibold truncate group-hover:text-primary transition-colors" title={analysis.result_payload?.analysis_metadata?.title || analysis.result_payload?.title || analysis.title || analysis.file_name}>
+                      {analysis.result_payload?.analysis_metadata?.title || analysis.result_payload?.title || analysis.title || analysis.file_name}
                     </CardTitle>
                   </div>
                 </div>
