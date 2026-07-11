@@ -53,6 +53,15 @@ class UserSettingsResponse(BaseModel):
     ssh_user: Optional[str] = None
     local_base_path: Optional[str] = None
     cloud_storage_path: Optional[str] = None
+    # Campos de Correo IMAP/SMTP
+    email_provider: Optional[str] = None
+    email_imap_host: Optional[str] = None
+    email_imap_port: Optional[str] = "993"
+    email_smtp_host: Optional[str] = None
+    email_smtp_port: Optional[str] = "465"
+    email_use_ssl: Optional[bool] = True
+    email_username: Optional[str] = None
+    email_password_secret: Optional[str] = None
     # Campos de Heartbeat
     custom_heartbeat_instructions: Optional[str] = None
     custom_heartbeat_interval_minutes: Optional[int] = 60
@@ -60,7 +69,6 @@ class UserSettingsResponse(BaseModel):
 
     class Config:
         from_attributes = True
-
 
 class UserSettingsUpdateRequest(BaseModel):
     """Define la estructura de datos para la actualización de la configuración de usuario."""
@@ -109,7 +117,15 @@ class UserSettingsUpdateRequest(BaseModel):
     ssh_user: Optional[str] = None
     local_base_path: Optional[str] = None
     cloud_storage_path: Optional[str] = None
-    # Campos de Heartbeat
+    # Campos de Email
+    email_provider: Optional[str] = None
+    email_imap_host: Optional[str] = None
+    email_imap_port: Optional[str] = None
+    email_smtp_host: Optional[str] = None
+    email_smtp_port: Optional[str] = None
+    email_use_ssl: Optional[bool] = None
+    email_username: Optional[str] = None
+    email_password_secret: Optional[str] = None
     custom_heartbeat_instructions: Optional[str] = None
     custom_heartbeat_interval_minutes: Optional[int] = None
     custom_heartbeat_allowed_tools: Optional[list] = None

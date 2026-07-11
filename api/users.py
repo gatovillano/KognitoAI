@@ -79,7 +79,9 @@ async def read_users_me(current_account_id: str = Depends(get_current_account_id
         telegram_id=telegram_id,
         is_admin=bool(account.is_admin),  # type: ignore
         has_password=bool(account.hashed_password)
-    )# --- Modelos de Respuesta para el Perfil de IA (Memoria Estructurada) ---
+    )
+
+# --- Modelos de Respuesta para el Perfil de IA (Memoria Estructurada) ---
 class AIUserProfileResponse(BaseModel):
     nombre: Optional[str] = None
     gustos: Optional[str] = None
@@ -117,6 +119,7 @@ async def get_user_ai_profile(
         otros_datos=perfil.otros_datos,
         system_prompt=perfil.system_prompt
     )
+
 
 @router.put("/users/me/profile", response_model=AIUserProfileResponse, summary="Actualizar perfil estructurado de IA del usuario actual")
 async def update_user_ai_profile(
@@ -194,11 +197,11 @@ async def get_user_settings(current_account_id: str = Depends(get_current_accoun
         tts_model=account.tts_model,
         tts_voice=account.tts_voice,
         tts_speed=account.tts_speed,
-        tts_region=account.tts_region, # Añadido campo tts_region
+        tts_region=account.tts_region,
         tts_api_base=account.tts_api_base,
-        embedding_provider=account.embedding_provider, # Añadido campo embedding_provider
-        embedding_model=account.embedding_model, # Añadido campo embedding_model
-        embedding_api_key_name=account.embedding_api_key_name, # Añadido campo embedding_api_key_name
+        embedding_provider=account.embedding_provider,
+        embedding_model=account.embedding_model,
+        embedding_api_key_name=account.embedding_api_key_name,
         embedding_api_base=account.embedding_api_base,
         reranker_provider=account.reranker_provider,
         reranker_model=account.reranker_model,
@@ -209,6 +212,13 @@ async def get_user_settings(current_account_id: str = Depends(get_current_accoun
         ssh_user=account.ssh_user,
         local_base_path=account.local_base_path,
         cloud_storage_path=account.cloud_storage_path,
+        email_provider=account.email_provider,
+        email_imap_host=account.email_imap_host,
+        email_imap_port=account.email_imap_port,
+        email_smtp_host=account.email_smtp_host,
+        email_smtp_port=account.email_smtp_port,
+        email_use_ssl=account.email_use_ssl,
+        email_username=account.email_username,
         custom_heartbeat_instructions=account.custom_heartbeat_instructions,
         custom_heartbeat_interval_minutes=account.custom_heartbeat_interval_minutes,
         custom_heartbeat_allowed_tools=account.custom_heartbeat_allowed_tools
@@ -227,18 +237,32 @@ async def update_user_settings(
     if not account:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuario no encontrado")
 
+    update_data = settings_update.dict(exclude_unset=True)
+    email_password_secret = update_data.pop("email_password_secret", None)
+
     # Aplicar actualizaciones
-    for field, value in settings_update.dict(exclude_unset=True).items():
+    for field, value in update_data.items():
         if field in ['name', 'bio'] and isinstance(value, str):
             value = sanitize_text(value)
         setattr(account, field, value)
+
+    # Si se actualizó la contraseña de correo, guardarla como secreto
+    if email_password_secret is not None:
+        repo = SecretRepository(db)
+        await repo.set_secret(
+            account_id=uuid.UUID(current_account_id),
+            key_name="email_password",
+            value=email_password_secret,
+            description="Contraseña de correo IMAP/SMTP"
+        )
+        logger.info(f"Contraseña de correo actualizada para la cuenta {current_account_id}")
     
     await db.commit()
     await db.refresh(account)
 
     # Si se actualizaron campos de heartbeat, reprogramar el job
     heartbeat_fields = ['custom_heartbeat_instructions', 'custom_heartbeat_interval_minutes', 'custom_heartbeat_allowed_tools']
-    if any(field in settings_update.dict(exclude_unset=True) for field in heartbeat_fields):
+    if any(field in update_data for field in heartbeat_fields):
         try:
             from utils.scheduled_tools_manager import schedule_custom_user_heartbeat
             await schedule_custom_user_heartbeat(
@@ -276,11 +300,11 @@ async def update_user_settings(
         tts_model=account.tts_model,
         tts_voice=account.tts_voice,
         tts_speed=account.tts_speed,
-        tts_region=account.tts_region, # Añadido campo tts_region
+        tts_region=account.tts_region,
         tts_api_base=account.tts_api_base,
-        embedding_provider=account.embedding_provider, # Añadido campo embedding_provider
-        embedding_model=account.embedding_model, # Añadido campo embedding_model
-        embedding_api_key_name=account.embedding_api_key_name, # Añadido campo embedding_api_key_name
+        embedding_provider=account.embedding_provider,
+        embedding_model=account.embedding_model,
+        embedding_api_key_name=account.embedding_api_key_name,
         embedding_api_base=account.embedding_api_base,
         reranker_provider=account.reranker_provider,
         reranker_model=account.reranker_model,
@@ -291,11 +315,17 @@ async def update_user_settings(
         ssh_user=account.ssh_user,
         local_base_path=account.local_base_path,
         cloud_storage_path=account.cloud_storage_path,
+        email_provider=account.email_provider,
+        email_imap_host=account.email_imap_host,
+        email_imap_port=account.email_imap_port,
+        email_smtp_host=account.email_smtp_host,
+        email_smtp_port=account.email_smtp_port,
+        email_use_ssl=account.email_use_ssl,
+        email_username=account.email_username,
         custom_heartbeat_instructions=account.custom_heartbeat_instructions,
         custom_heartbeat_interval_minutes=account.custom_heartbeat_interval_minutes,
         custom_heartbeat_allowed_tools=account.custom_heartbeat_allowed_tools
     )
-
 @router.put("/users/me/password", summary="Actualizar contraseña del usuario")
 async def update_user_password(
     password_update: UserPasswordUpdateRequest,
@@ -438,178 +468,18 @@ async def list_all_users(
     """
     Lista todos los usuarios registrados en el sistema. Requiere privilegios de administrador.
     """
-    logger.info(f"Admin {admin_account.id} listando todos los usuarios.")
-    stmt = select(Account).order_by(Account.created_at.desc())
-    result = await db.execute(stmt)
+    result = await db.execute(select(Account))
     accounts = result.scalars().all()
     
-    users_data = []
+    response = []
     for account in accounts:
-        telegram_identity = await db.execute(
-            select(PlatformIdentity).where(
-                PlatformIdentity.account_id == account.id,
-                PlatformIdentity.platform == 'telegram'
-            )
-        )
-        telegram_id = None
-        identity_obj = telegram_identity.scalars().first()
-        if identity_obj is not None and getattr(identity_obj, 'platform_user_id', None):
-            try:
-                telegram_id = int(getattr(identity_obj, 'platform_user_id', ''))
-            except ValueError:
-                pass  # No es un ID numérico válido
-
-        users_data.append(UserProfileResponse(
+        response.append(UserProfileResponse(
             id=str(account.id),
             account_id=str(account.id),
-            name=account.name,  # type: ignore
-            email=account.email,  # type: ignore
-            username=account.username,  # type: ignore
-            telegram_id=telegram_id,
-            is_admin=bool(account.is_admin)  # type: ignore
+            name=account.name,
+            email=account.email,
+            username=account.username,
+            is_admin=bool(account.is_admin),
+            has_password=bool(account.hashed_password)
         ))
-    return users_data
-
-@router.get("/users", response_model=List[UserProfileResponse], summary="Listar todos los usuarios (requiere autenticación)")
-async def list_all_users_public(
-    current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db_session)
-):
-    """
-    Lista todos los usuarios registrados en el sistema. Requiere estar autenticado.
-    """
-    logger.info(f"Usuario {current_account_id} listando todos los usuarios.")
-    stmt = select(Account).order_by(Account.created_at.desc())
-    result = await db.execute(stmt)
-    accounts = result.scalars().all()
-    
-    users_data = []
-    for account in accounts:
-        telegram_identity = await db.execute(
-            select(PlatformIdentity).where(
-                PlatformIdentity.account_id == account.id,
-                PlatformIdentity.platform == 'telegram'
-            )
-        )
-        telegram_id = None
-        identity_obj = telegram_identity.scalars().first()
-        if identity_obj is not None and getattr(identity_obj, 'platform_user_id', None):
-            try:
-                telegram_id = int(getattr(identity_obj, 'platform_user_id', ''))
-            except ValueError:
-                pass  # No es un ID numérico válido
-
-        users_data.append(UserProfileResponse(
-            id=str(account.id),
-            account_id=str(account.id),
-            name=account.name,  # type: ignore
-            email=account.email,  # type: ignore
-            username=account.username,  # type: ignore
-            telegram_id=telegram_id,
-            is_admin=bool(account.is_admin)  # type: ignore
-        ))
-    return users_data
-
-class DeleteUsersRequest(BaseModel):
-    """Define la estructura de datos para eliminar usuarios."""
-    account_ids: List[str]  # Lista de UUIDs de cuentas a eliminar
-
-@router.post("/admin/users/delete", summary="Eliminar usuarios por ID (solo admin)")
-async def delete_users_by_ids_endpoint(
-    request: DeleteUsersRequest,
-    admin_account: Account = Depends(get_current_admin_account),
-    db: AsyncSession = Depends(get_db_session)
-):
-    """
-    Elimina una o varias cuentas de usuario por sus IDs. Requiere privilegios de administrador.
-    IMPORTANTE: Esta acción es irreversible.
-    """
-    logger.warning(f"Admin {admin_account.id} solicitando eliminación de cuentas: {request.account_ids}")
-    
-    # Convertir los IDs de string a UUID
-    uuids_to_delete = [uuid.UUID(aid) for aid in request.account_ids]
-
-    # Prevenir la eliminación de la propia cuenta del administrador si está en la lista
-    if admin_account.id in uuids_to_delete:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No puedes eliminar tu propia cuenta de administrador.")
-    
-    # Llamar a la función de la base de datos para eliminar las cuentas
-    try:
-        deleted_count = await delete_accounts_by_ids(db, uuids_to_delete)
-        return {"message": f"Se eliminaron {deleted_count} cuentas correctamente."}
-    except Exception as e:
-        logger.error(f"Error al intentar eliminar cuentas por admin {admin_account.id}: {e}", exc_info=True)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error interno al eliminar cuentas.")
-
-@router.get("/users/search", summary="Buscar usuario por email o nombre de usuario")
-async def search_user(identifier: str = Query(...), current_account_id: str = Depends(get_current_account_id), db: AsyncSession = Depends(get_db_session)):
-    """
-    Busca un usuario por email o nombre de usuario de Telegram. Devuelve el account_id si se encuentra.
-    Solo accesible para usuarios autenticados.
-    """
-    logger.info(f"Buscando usuario con identificador: {identifier} por la cuenta: {current_account_id}")
-    
-    # Buscar por email
-    account_by_email = await db.scalar(select(Account).where(Account.email == identifier))
-    if account_by_email:
-        return {"account_id": str(account_by_email.id)}
-    
-    # Buscar por username
-    account_by_username = await db.scalar(select(Account).where(Account.username == identifier))
-    if account_by_username:
-        return {"account_id": str(account_by_username.id)}
-    
-    # Buscar por platform_user_id en PlatformIdentity si es un ID de Telegram
-    try:
-        telegram_id = int(identifier)
-        identity = await db.scalar(select(PlatformIdentity).where(
-            PlatformIdentity.platform == 'telegram',
-            PlatformIdentity.platform_user_id == str(telegram_id)
-        ))
-        if identity:
-            return {"account_id": str(identity.account_id)}
-    except ValueError:
-        pass  # No es un ID numérico, ignorar esta búsqueda
-    
-    raise HTTPException(status_code=404, detail="Usuario no encontrado con el identificador proporcionado.")
-
-
-@router.get("/users/autocomplete", summary="Autocompletar usuarios por nombre, email o username")
-async def autocomplete_users(
-    q: str = Query(..., min_length=1),
-    limit: int = Query(8, ge=1, le=20),
-    current_account_id: str = Depends(get_current_account_id),
-    db: AsyncSession = Depends(get_db_session),
-):
-    """Devuelve sugerencias de cuentas para flujos de invitacion/comparticion."""
-    query = q.strip()
-    if not query:
-        return []
-
-    account_uuid = uuid.UUID(current_account_id)
-    like_value = f"%{query}%"
-
-    stmt = (
-        select(Account)
-        .where(
-            Account.id != account_uuid,
-            (
-                Account.email.ilike(like_value)
-                | Account.username.ilike(like_value)
-                | Account.name.ilike(like_value)
-            ),
-        )
-        .order_by(Account.name.asc().nullslast(), Account.email.asc().nullslast())
-        .limit(limit)
-    )
-    rows = (await db.execute(stmt)).scalars().all()
-
-    return [
-        {
-            "account_id": str(acc.id),
-            "name": acc.name,
-            "username": acc.username,
-            "email": acc.email,
-        }
-        for acc in rows
-    ]
+    return response
