@@ -381,6 +381,10 @@ app.include_router(memory_router, prefix="/api", tags=["memory"]) # NUEVO: Inclu
 app.include_router(mcp_router) # NUEVO: Incluir el router de MCP
 app.include_router(tables_router, prefix="/api/tables", tags=["tables"])
 
+from api.email import router as email_router # Importar el router de email
+
+app.include_router(email_router, prefix="/api", tags=["email"]) # Incluir el router de email
+
 from api.terminal import router as terminal_router  # PTY terminal interactiva
 from api.skills import router as skills_router
 from api.deep_research import router as deep_research_router
