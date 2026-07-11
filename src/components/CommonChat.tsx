@@ -942,7 +942,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         setIsResponding(false);
       }
     },
-    [user, threadId, selectedContext, router, uploadedImages, scheduleStreamScroll, serializeSelectedContext]
+    [user, threadId, selectedContext, router, uploadedImages, scheduleStreamScroll, serializeSelectedContext, workspaceId]
   );
 
   const handleImageUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1360,7 +1360,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
     }
 
     setIsUploadingFile(false);
-  }, [workspaceId]);
+  }, [workspaceId, threadId]);
 
   // Memoizar las previsualizaciones de imágenes para evitar recrear el array en cada render
   const uploadedImagePreviews = useMemo(() => {

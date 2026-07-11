@@ -75,7 +75,8 @@ export default function RepositoriesPage() {
         const repoAnalyses = analysesRes.data.map((analysis: any) => {
           let fileName = 'Análisis sin título';
           if (analysis.result_payload && typeof analysis.result_payload === 'object') {
-            fileName = analysis.result_payload.file_name || analysis.result_payload.title || fileName;
+            const metadata = analysis.result_payload.analysis_metadata || {};
+            fileName = metadata.title || analysis.result_payload.title || metadata.file_name || analysis.result_payload.file_name || fileName;
           }
           return {
             ...analysis,

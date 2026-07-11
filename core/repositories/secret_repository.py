@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.database import UserSecret
 from core.config import settings
 import uuid
+
 import logging
 
 logger = logging.getLogger(__name__)
@@ -57,28 +58,30 @@ class SecretRepository:
         """
         Retrieves and decrypts a secret.
         """
+        encryption_key = settings.db_encryption_key
+        
+        # Expression to decrypt: pgp_sym_decrypt(dearmor(encrypted_value), key)
+        
+        stmt = select(
+            func.pgp_sym_decrypt(
+                func.dearmor(UserSecret.encrypted_value), 
+                encryption_key
+            )
+        ).where(
+            UserSecret.account_id == account_id,
+            UserSecret.key_name == key_name
+        )
+        
         try:
+            # Usar una transacción anidada (SAVEPOINT) para aislar posibles fallos de descifrado
+            # sin invalidar la transacción principal de la sesión ni expirar los objetos cargados.
             async with self.session.begin_nested():
-                encryption_key = settings.db_encryption_key
-                
-                # Expression to decrypt: pgp_sym_decrypt(dearmor(encrypted_value), key)
-                
-                stmt = select(
-                    func.pgp_sym_decrypt(
-                        func.dearmor(UserSecret.encrypted_value), 
-                        encryption_key
-                    )
-                ).where(
-                    UserSecret.account_id == account_id,
-                    UserSecret.key_name == key_name
-                )
-                
                 result = await self.session.execute(stmt)
                 return result.scalar()
         except Exception as e:
             logger.warning(
-                f"No se pudo desencriptar el secreto '{key_name}' para el usuario {account_id}. "
-                f"Esto puede deberse a que el secreto fue encriptado con una clave anterior o corrupta. Error: {e}"
+                f"⚠️ Error al desencriptar secreto '{key_name}' para la cuenta {account_id}: {e}. "
+                "Es posible que la clave de encriptación (DB_ENCRYPTION_KEY) haya cambiado o que los datos estén corruptos."
             )
             return None
 

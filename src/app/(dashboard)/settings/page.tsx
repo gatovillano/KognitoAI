@@ -1522,7 +1522,7 @@ const SettingsPage: React.FC = () => {
 
   useEffect(() => {
     getSettings();
-  }, []);
+  }, [getSettings]);
 
   useEffect(() => {
     setLocalSettings(settings);
@@ -1661,6 +1661,7 @@ const SettingsPage: React.FC = () => {
     if (activeTab === 'ai-profile') {
       fetchProfile();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
   const fetchProfile = async () => {

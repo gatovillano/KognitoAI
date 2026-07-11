@@ -102,40 +102,16 @@ async def get_provider_models(
         
         # Proveedores específicos: llamadas directas a sus APIs
         if provider == "openrouter":
-            async with httpx.AsyncClient() as client:
-                headers = {}
-                if user_api_key:
-                    headers["Authorization"] = f"Bearer {user_api_key}"
-                elif settings.openrouter_api_key:
-                    headers["Authorization"] = f"Bearer {settings.openrouter_api_key}"
-                
-                response = await client.get(
-                    "https://openrouter.ai/api/v1/models", 
-                    headers=headers, 
-                    timeout=15.0
-                )
-                response.raise_for_status()
-                data = response.json()
-                raw_models = data.get("data", [])
-                
-                for m in raw_models:
-                    raw_id = m.get("id", "")
-                    models.append({
-                        "id": f"openrouter/{raw_id}" if raw_id else raw_id,
-                        "name": m.get("name") or raw_id,
-                        "description": m.get("description", ""),
-                        "context_length": m.get("context_length"),
-                        "pricing": m.get("pricing", {})
-                    })
-                logger.info(f"Obtenidos {len(models)} modelos de OpenRouter")
-
-        elif provider == "openai":
-            api_key = user_api_key or settings.openai_api_key
-            if api_key:
+            try:
                 async with httpx.AsyncClient() as client:
-                    headers = {"Authorization": f"Bearer {api_key}"}
+                    headers = {}
+                    if user_api_key:
+                        headers["Authorization"] = f"Bearer {user_api_key}"
+                    elif settings.openrouter_api_key:
+                        headers["Authorization"] = f"Bearer {settings.openrouter_api_key}"
+                    
                     response = await client.get(
-                        "https://api.openai.com/v1/models", 
+                        "https://openrouter.ai/api/v1/models", 
                         headers=headers, 
                         timeout=15.0
                     )
@@ -144,15 +120,61 @@ async def get_provider_models(
                     raw_models = data.get("data", [])
                     
                     for m in raw_models:
-                        model_id = m.get("id")
-                        if any(x in model_id.lower() for x in ["gpt", "chat"]):
-                            models.append({
-                                "id": f"openai/{model_id}", 
-                                "name": model_id,
-                                "context_length": m.get("context_length"),
-                                "pricing": m.get("pricing", {})
-                            })
-                    logger.info(f"Obtenidos {len(models)} modelos de OpenAI")
+                        raw_id = m.get("id", "")
+                        models.append({
+                            "id": f"openrouter/{raw_id}" if raw_id else raw_id,
+                            "name": m.get("name") or raw_id,
+                            "description": m.get("description", ""),
+                            "context_length": m.get("context_length"),
+                            "pricing": m.get("pricing", {})
+                        })
+            except Exception as e:
+                logger.warning(f"Error al obtener modelos de OpenRouter: {e}")
+            
+            if not models:
+                models = [
+                    {"id": "openrouter/meta-llama/llama-3.3-70b-instruct:free", "name": "Llama 3.3 70B Instruct (Free)"},
+                    {"id": "openrouter/google/gemini-2.5-flash:free", "name": "Gemini 2.5 Flash (Free)"},
+                    {"id": "openrouter/deepseek/deepseek-chat", "name": "DeepSeek V3"},
+                    {"id": "openrouter/anthropic/claude-3.5-sonnet", "name": "Claude 3.5 Sonnet"},
+                ]
+            logger.info(f"Obtenidos {len(models)} modelos de OpenRouter")
+
+        elif provider == "openai":
+            api_key = user_api_key or settings.openai_api_key
+            if api_key:
+                try:
+                    async with httpx.AsyncClient() as client:
+                        headers = {"Authorization": f"Bearer {api_key}"}
+                        response = await client.get(
+                            "https://api.openai.com/v1/models", 
+                            headers=headers, 
+                            timeout=15.0
+                        )
+                        response.raise_for_status()
+                        data = response.json()
+                        raw_models = data.get("data", [])
+                        
+                        for m in raw_models:
+                            model_id = m.get("id")
+                            if any(x in model_id.lower() for x in ["gpt", "chat"]):
+                                models.append({
+                                    "id": f"openai/{model_id}", 
+                                    "name": model_id,
+                                    "context_length": m.get("context_length"),
+                                    "pricing": m.get("pricing", {})
+                                })
+                except Exception as e:
+                    logger.warning(f"Error al obtener modelos de OpenAI: {e}")
+            
+            if not models:
+                models = [
+                    {"id": "openai/gpt-4o", "name": "gpt-4o"},
+                    {"id": "openai/gpt-4o-mini", "name": "gpt-4o-mini"},
+                    {"id": "openai/o1-mini", "name": "o1-mini"},
+                    {"id": "openai/gpt-4-turbo", "name": "gpt-4-turbo"},
+                ]
+            logger.info(f"Obtenidos {len(models)} modelos de OpenAI")
 
         elif provider == "anthropic":
             api_key = user_api_key
@@ -496,7 +518,7 @@ async def get_provider_models(
 
         elif provider == "kilocode":
             # Kilocode Gateway - API unificada de IA
-            api_key = (user_api_key or os.getenv("KILOCODE_API_KEY") or "").strip()
+            api_key = (user_api_key or settings.kilocode_api_key or os.getenv("KILOCODE_API_KEY") or "").strip()
             if api_key and not api_key.isascii():
                 logger.warning("KILOCODE_API_KEY contains non-ASCII characters. Stripping them.")
                 api_key = api_key.encode('ascii', 'ignore').decode('ascii')

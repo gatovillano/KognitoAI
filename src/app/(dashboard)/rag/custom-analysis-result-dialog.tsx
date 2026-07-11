@@ -205,7 +205,7 @@ export function CustomAnalysisResultDialog({
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
                   <div>
                     <span className="font-medium text-gray-700">Documento analizado:</span>
-                    <div className="text-gray-600 mt-1">{metadata.file_name || 'No especificado'}</div>
+                    <div className="text-gray-600 mt-1">{metadata.title || metadata.file_name || 'No especificado'}</div>
                   </div>
                   <div>
                     <span className="font-medium text-gray-700">Campos incluidos:</span>
