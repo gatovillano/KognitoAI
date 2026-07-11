@@ -182,10 +182,18 @@ class Account(Base):
     local_base_path = Column(String(512), nullable=True, comment="Directorio raíz al que se restringe el acceso SSH.")
     cloud_storage_path = Column(String(512), nullable=True, comment="Ruta local elegida por el usuario para guardar archivos de la nube (fotos y documentos).")
 
+    # Configuración de Correo IMAP/SMTP por usuario
+    email_provider = Column(String(50), nullable=True, comment="Proveedor de correo preconfigurado (disroot, gmail, outlook, yahoo, generic).")
+    email_imap_host = Column(String(255), nullable=True, comment="Host IMAP del proveedor de correo.")
+    email_imap_port = Column(String(10), nullable=True, default="993", comment="Puerto IMAP.")
+    email_smtp_host = Column(String(255), nullable=True, comment="Host SMTP del proveedor de correo.")
+    email_smtp_port = Column(String(10), nullable=True, default="465", comment="Puerto SMTP.")
+    email_use_ssl = Column(Boolean, default=True, nullable=False, comment="Si es True, usa SSL/TLS para IMAP y SMTP.")
+    email_username = Column(String(255), nullable=True, comment="Usuario/correo para IMAP/SMTP.")
+
     # Campos para MFA
     mfa_enabled = Column(Boolean, default=False, nullable=False, comment="Indica si el usuario tiene MFA habilitado.")
     mfa_secret = Column(String(255), nullable=True, comment="Secreto TOTP para MFA.")
-
     created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
 
     # --- Relaciones con otros modelos ---

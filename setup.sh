@@ -41,9 +41,10 @@ elif [ -d "${BASE_TARGET_DIR}" ]; then
 
     case "${CLONE_CHOICE}" in
         1)
-            PROJECT_DIR="${BASE_TARGET_DIR}"
-            echo -e "${YELLOW}🔄 Actualizando repositorio existente...${NC}"
-            git -C "${PROJECT_DIR}" pull
+             PROJECT_DIR="${BASE_TARGET_DIR}"
+             echo -e "${YELLOW}🔄 Actualizando repositorio existente...${NC}"
+             git -C "${PROJECT_DIR}" checkout -- package-lock.json 2>/dev/null || true
+             git -C "${PROJECT_DIR}" pull
             ;;
         2)
             COUNT=1
@@ -163,7 +164,12 @@ EOF
 run_update() {
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${BOLD}🔄 Actualizando Kognito AI desde GitHub...${NC}"
-    git pull
+    git checkout -- package-lock.json 2>/dev/null || true
+    if ! git pull; then
+        echo -e "${RED}❌ El 'git pull' falló por cambios locales no resueltos.${NC}"
+        echo -e "${YELLOW}   Guarda tus cambios (git stash) o descarta el archivo en conflicto y reintenta.${NC}"
+        return 1
+    fi
     "${PROJECT_DIR}/venv_host/bin/pip" install -r requirements.txt --quiet 2>/dev/null || true
     npm install --silent
     echo -e "${YELLOW}🏗️  Reconstruyendo Frontend (npm run build)...${NC}"
@@ -209,6 +215,7 @@ run_install() {
             1)
                 INSTALL_TARGET="${BASE_DIR}"
                 echo -e "${YELLOW}🔄 Actualizando repositorio existente...${NC}"
+                git -C "${INSTALL_TARGET}" checkout -- package-lock.json 2>/dev/null || true
                 git -C "${INSTALL_TARGET}" pull
                 ;;
             2)
