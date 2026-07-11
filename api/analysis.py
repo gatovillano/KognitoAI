@@ -2130,43 +2130,42 @@ class GetAllAnalysisRequest(BaseModel):
 
 async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: str, analysis_type: str = 'all'):
     """Función pesada que se ejecuta en segundo plano para análisis de código."""
-    async with DBSession(SessionLocal) as db_session: # type: ignore
-        try:
-            # 1. Actualizar tarea a 'processing' con información de progreso inicial
-            progress_info = {
-                "status": "processing",
-                "current_step": "Iniciando análisis de código...",
-                "progress_percentage": 5,
-                "details": [
-                    {"step": "Obteniendo documentos de GitHub", "status": "pending", "timestamp": datetime.now().isoformat()},
-                    {"step": "Dividiendo código en chunks", "status": "pending", "timestamp": datetime.now().isoformat()},
-                    {"step": "Analizando chunks de código", "status": "pending", "timestamp": datetime.now().isoformat()},
-                    {"step": "Generando resumen ejecutivo", "status": "pending", "timestamp": datetime.now().isoformat()},
-                    {"step": "Completando análisis", "status": "pending", "timestamp": datetime.now().isoformat()}
-                ],
-                "estimated_time_remaining": "3-8 minutos"
-            }
-            
+    try:
+        # 1. Actualizar tarea a 'processing' con información de progreso inicial
+        progress_info = {
+            "status": "processing",
+            "current_step": "Iniciando análisis de código...",
+            "progress_percentage": 5,
+            "details": [
+                {"step": "Obteniendo documentos de GitHub", "status": "pending", "timestamp": datetime.now().isoformat()},
+                {"step": "Dividiendo código en chunks", "status": "pending", "timestamp": datetime.now().isoformat()},
+                {"step": "Analizando chunks de código", "status": "pending", "timestamp": datetime.now().isoformat()},
+                {"step": "Generando resumen ejecutivo", "status": "pending", "timestamp": datetime.now().isoformat()},
+                {"step": "Completando análisis", "status": "pending", "timestamp": datetime.now().isoformat()}
+            ],
+            "estimated_time_remaining": "3-8 minutos"
+        }
+        
+        async with DBSession(SessionLocal) as db_session: # type: ignore
             stmt_processing = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
                 status="processing",
                 result_payload=progress_info
             )
             await db_session.execute(stmt_processing)
-            await db_session.commit()
-            
-            logger.info(f"Iniciando análisis de código para tarea {task_id}...")
-            
-            # 2. Obtener los documentos específicos de GitHub del repositorio
-            progress_info["current_step"] = "Obteniendo documentos de GitHub..."
-            progress_info["progress_percentage"] = 10
-            progress_info["details"][0]["status"] = "processing"
-            progress_info["details"][0]["timestamp"] = datetime.now().isoformat()
-            
+        
+        logger.info(f"Iniciando análisis de código para tarea {task_id}...")
+        
+        # 2. Obtener los documentos específicos de GitHub del repositorio
+        progress_info["current_step"] = "Obteniendo documentos de GitHub..."
+        progress_info["progress_percentage"] = 10
+        progress_info["details"][0]["status"] = "processing"
+        progress_info["details"][0]["timestamp"] = datetime.now().isoformat()
+        
+        async with DBSession(SessionLocal) as db_session: # type: ignore
             stmt_update = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
                 result_payload=progress_info
             )
             await db_session.execute(stmt_update)
-            await db_session.commit()
             
             query = select(GitHubDocument).where(
                 GitHubDocument.account_id == account_id,
@@ -2175,282 +2174,285 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
             result = await db_session.execute(query)
             github_docs = result.scalars().all()
             
-            logger.info(f"Encontrados {len(github_docs)} documentos de GitHub para el repositorio {repo_name}")
-            
-            if not github_docs:
-                raise ValueError("No se encontraron documentos de GitHub para el repositorio.")
-            
-            # Actualizar progreso: documentos obtenidos
-            progress_info["current_step"] = f"Documentos obtenidos: {len(github_docs)} archivos"
-            progress_info["progress_percentage"] = 20
-            progress_info["details"][0]["status"] = "completed"
-            progress_info["details"][1]["status"] = "processing"
-            progress_info["details"][1]["timestamp"] = datetime.now().isoformat()
-            
+            # Eager extraction to prevent DetachedInstanceError when accessing outside session
+            docs_data = [{"file_path": doc.file_path, "content": doc.content} for doc in github_docs]
+        
+        logger.info(f"Encontrados {len(docs_data)} documentos de GitHub para el repositorio {repo_name}")
+        
+        if not docs_data:
+            raise ValueError("No se encontraron documentos de GitHub para el repositorio.")
+        
+        # Actualizar progreso: documentos obtenidos
+        progress_info["current_step"] = f"Documentos obtenidos: {len(docs_data)} archivos"
+        progress_info["progress_percentage"] = 20
+        progress_info["details"][0]["status"] = "completed"
+        progress_info["details"][1]["status"] = "processing"
+        progress_info["details"][1]["timestamp"] = datetime.now().isoformat()
+        
+        async with DBSession(SessionLocal) as db_session: # type: ignore
             stmt_update = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
                 result_payload=progress_info
             )
             await db_session.execute(stmt_update)
-            await db_session.commit()
 
-            # 3. Dividir código en chunks
-            progress_info["current_step"] = "Dividiendo código en chunks..."
-            progress_info["progress_percentage"] = 25
-            progress_info["estimated_time_remaining"] = "2-6 minutos"
-            
+        # 3. Dividir código en chunks
+        progress_info["current_step"] = "Dividiendo código en chunks..."
+        progress_info["progress_percentage"] = 25
+        progress_info["estimated_time_remaining"] = "2-6 minutos"
+        
+        async with DBSession(SessionLocal) as db_session: # type: ignore
             stmt_update = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
                 result_payload=progress_info
             )
             await db_session.execute(stmt_update)
-            await db_session.commit()
 
-            from utils.advanced_code_analyzer import analyze_code_content
-            
-            chunk_size = 150000  # ~150k caracteres por chunk (~200k tokens aprox)
-            chunks = []
-            current_chunk = ""
-            current_chunk_files = []
-            
-            for doc in github_docs:
-                if doc.content:
-                    file_content = f"Archivo: {doc.file_path}\n{doc.content}\n\n"
-                    
-                    # Si agregar este archivo excede el chunk_size, crear un nuevo chunk
-                    if len(current_chunk) + len(file_content) > chunk_size and current_chunk:
-                        chunks.append({
-                            "content": current_chunk,
-                            "files": current_chunk_files.copy()
-                        })
-                        current_chunk = file_content
-                        current_chunk_files = [doc.file_path]
-                    else:
-                        current_chunk += file_content
-                        current_chunk_files.append(doc.file_path)
-            
-            # Agregar el último chunk si tiene contenido
-            if current_chunk:
-                chunks.append({
-                    "content": current_chunk,
-                    "files": current_chunk_files.copy()
-                })
-            
-            logger.info(f"Código dividido en {len(chunks)} chunks para análisis")
-            
-            # Actualizar progreso: chunks creados
-            progress_info["current_step"] = f"Código dividido: {len(chunks)} chunks"
-            progress_info["progress_percentage"] = 35
-            progress_info["details"][1]["status"] = "completed"
-            progress_info["details"][2]["status"] = "processing"
-            progress_info["details"][2]["timestamp"] = datetime.now().isoformat()
-            
-            stmt_update = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
-                result_payload=progress_info
-            )
-            await db_session.execute(stmt_update)
-            await db_session.commit()
-
-            # 4. Analizar cada chunk
-            progress_info["current_step"] = "Analizando chunks de código..."
-            progress_info["progress_percentage"] = 40
-            progress_info["estimated_time_remaining"] = "1-5 minutos"
-            
-            stmt_update = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
-                result_payload=progress_info
-            )
-            await db_session.execute(stmt_update)
-            await db_session.commit()
-            
-            all_chunk_results = []
-            combined_categories = {
-                "code_structure": [],
-                "design_patterns": [],
-                "dependencies": [],
-                "security_analysis": [],
-                "performance_analysis": [],
-                "refactoring_opportunities": [],
-                "documentation_health": [],
-                "potential_issues": [],
-                "recommendations": []
-            }
-            
-            # 4. Analizar cada chunk (MODO PARALELO para máxima velocidad)
-            logger.info(f"Analizando {len(chunks)} chunks en paralelo para optimizar tiempo...")
-            
-            async def analyze_single_chunk(index, chunk_data):
-                try:
-                    logger.info(f"Iniciando análisis de chunk {index+1}/{len(chunks)}...")
-                    res = await analyze_code_content(chunk_data["content"], account_id=account_id, analysis_type=analysis_type)
-                    return index, res
-                except Exception as e:
-                    logger.error(f"Error analizando chunk {index+1}: {e}")
-                    return index, None
-
-            analysis_tasks = [analyze_single_chunk(i, chunk) for i, chunk in enumerate(chunks)]
-            chunk_results_with_indices = await asyncio.gather(*analysis_tasks)
-            chunk_results_with_indices.sort(key=lambda x: x[0])
-            
-            for i, chunk_result in chunk_results_with_indices:
-                if chunk_result is None: continue
+        from utils.advanced_code_analyzer import analyze_code_content
+        
+        chunk_size = 150000  # ~150k caracteres por chunk (~200k tokens aprox)
+        chunks = []
+        current_chunk = ""
+        current_chunk_files = []
+        
+        for doc in docs_data:
+            if doc["content"]:
+                file_content = f"Archivo: {doc['file_path']}\n{doc['content']}\n\n"
                 
-                all_chunk_results.append({
-                    "chunk_index": i+1,
-                    "files": chunks[i]["files"],
-                    "result": chunk_result
-                })
-
-                
-                # Manejar tanto objetos Pydantic como diccionarios
-                if hasattr(chunk_result, 'code_structure'):
-                    # Es un objeto Pydantic
-                    combined_categories["code_structure"].extend(chunk_result.code_structure)
-                    combined_categories["design_patterns"].extend(chunk_result.design_patterns)
-                    combined_categories["dependencies"].extend(chunk_result.dependencies)
-                    combined_categories["security_analysis"].extend(chunk_result.security_analysis)
-                    combined_categories["performance_analysis"].extend(chunk_result.performance_analysis)
-                    combined_categories["refactoring_opportunities"].extend(chunk_result.refactoring_opportunities)
-                    combined_categories["documentation_health"].extend(chunk_result.documentation_health)
-                    combined_categories["potential_issues"].extend(chunk_result.potential_issues)
-                    combined_categories["recommendations"].extend(chunk_result.recommendations)
-                elif isinstance(chunk_result, dict):
-                    # Es un diccionario
-                    combined_categories["code_structure"].extend(chunk_result.get("code_structure", []))
-                    combined_categories["design_patterns"].extend(chunk_result.get("design_patterns", []))
-                    combined_categories["dependencies"].extend(chunk_result.get("dependencies", []))
-                    combined_categories["security_analysis"].extend(chunk_result.get("security_analysis", []))
-                    combined_categories["performance_analysis"].extend(chunk_result.get("performance_analysis", []))
-                    combined_categories["refactoring_opportunities"].extend(chunk_result.get("refactoring_opportunities", []))
-                    combined_categories["documentation_health"].extend(chunk_result.get("documentation_health", []))
-                    combined_categories["potential_issues"].extend(chunk_result.get("potential_issues", []))
-                    combined_categories["recommendations"].extend(chunk_result.get("recommendations", []))
+                # Si agregar este archivo excede el chunk_size, crear un nuevo chunk
+                if len(current_chunk) + len(file_content) > chunk_size and current_chunk:
+                    chunks.append({
+                        "content": current_chunk,
+                        "files": current_chunk_files.copy()
+                    })
+                    current_chunk = file_content
+                    current_chunk_files = [doc["file_path"]]
                 else:
-                    logger.warning(f"Resultado inesperado del análisis de chunk {i+1}: {type(chunk_result)}")
-            
-            # Actualizar progreso final de chunks
-            progress_info["current_step"] = "Todos los chunks analizados exitosamente."
-            progress_info["progress_percentage"] = 80
-
-            
-            # Actualizar progreso: chunks analizados
-            progress_info["current_step"] = "Chunks analizados, generando resumen..."
-            progress_info["progress_percentage"] = 85
-            progress_info["details"][2]["status"] = "completed"
-            progress_info["details"][3]["status"] = "processing"
-            progress_info["details"][3]["timestamp"] = datetime.now().isoformat()
-            
+                    current_chunk += file_content
+                    current_chunk_files.append(doc["file_path"])
+        
+        # Agregar el último chunk si tiene contenido
+        if current_chunk:
+            chunks.append({
+                "content": current_chunk,
+                "files": current_chunk_files.copy()
+            })
+        
+        logger.info(f"Código dividido en {len(chunks)} chunks para análisis")
+        
+        # Actualizar progreso: chunks creados
+        progress_info["current_step"] = f"Código dividido: {len(chunks)} chunks"
+        progress_info["progress_percentage"] = 35
+        progress_info["details"][1]["status"] = "completed"
+        progress_info["details"][2]["status"] = "processing"
+        progress_info["details"][2]["timestamp"] = datetime.now().isoformat()
+        
+        async with DBSession(SessionLocal) as db_session: # type: ignore
             stmt_update = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
                 result_payload=progress_info
             )
             await db_session.execute(stmt_update)
-            await db_session.commit()
 
-            # 5. Generar resumen ejecutivo consolidado
-            from skills.analysis_and_insights_skill.scripts.analyze_code_for_insights_tool import AnalyzeCodeForInsightsTool
-            
-            # Crear un resumen de todos los chunks para el formatted_result
-            summary_parts = []
-            for res in all_chunk_results:
-                summary = "Análisis no disponible o fallido para este chunk."
-                result = res.get('result')
-                if result:
-                    if hasattr(result, 'executive_summary') and result.executive_summary:
-                        summary = result.executive_summary
-                    elif isinstance(result, dict):
-                        summary = result.get('executive_summary', 'Sin resumen disponible o chunk vacío.')
-
-                summary_parts.append(
-                    f"**Análisis Parte {res['chunk_index']}** (Archivos: {', '.join(res['files'][:3])}{'...' if len(res['files']) > 3 else ''})\n{summary}"
-                )
-            combined_summary = "\n\n".join(summary_parts)
-            
-            # Generar análisis consolidado final
-            tool = AnalyzeCodeForInsightsTool(account_id=account_id)
-            final_summary = f"**Análisis Completo del Repositorio {repo_name}**\n\n"
-            final_summary += f"Se analizaron {len(chunks)} partes del código con un total de {len(github_docs)} archivos.\n\n"
-            final_summary += f"**Resumen por Partes:**\n{combined_summary}\n\n"
-            
-            # Generar formatted_result consolidado usando la herramienta
+        # 4. Analizar cada chunk
+        progress_info["current_step"] = "Analizando chunks de código..."
+        progress_info["progress_percentage"] = 40
+        progress_info["estimated_time_remaining"] = "1-5 minutos"
+        
+        async with DBSession(SessionLocal) as db_session: # type: ignore
+            stmt_update = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                result_payload=progress_info
+            )
+            await db_session.execute(stmt_update)
+        
+        all_chunk_results = []
+        combined_categories = {
+            "code_structure": [],
+            "design_patterns": [],
+            "dependencies": [],
+            "security_analysis": [],
+            "performance_analysis": [],
+            "refactoring_opportunities": [],
+            "documentation_health": [],
+            "potential_issues": [],
+            "recommendations": []
+        }
+        
+        # 4. Analizar cada chunk (MODO PARALELO para máxima velocidad)
+        logger.info(f"Analizando {len(chunks)} chunks en paralelo para optimizar tiempo...")
+        
+        async def analyze_single_chunk(index, chunk_data):
             try:
-                # Usar solo una muestra representativa para el formato final
-                sample_content = chunks[0]["content"][:100000] if chunks else ""
-                formatted_result = await tool._arun(
-                    code_content=sample_content + f"\n\nNOTA: Este es un análisis de {len(chunks)} partes del repositorio {repo_name}",
-                    account_id=account_id,
-                    file_name=f"Análisis de Repositorio: {repo_name}",
-                    save_to_database=False,  # No guardar este análisis parcial
-                    analysis_type=analysis_type
-                )
+                logger.info(f"Iniciando análisis de chunk {index+1}/{len(chunks)}...")
+                res = await analyze_code_content(chunk_data["content"], account_id=account_id, analysis_type=analysis_type)
+                return index, res
             except Exception as e:
-                logger.warning(f"Error generando resultado formateado: {e}")
-                formatted_result = final_summary
+                logger.error(f"Error analizando chunk {index+1}: {e}")
+                return index, None
 
-            # Actualizar progreso: resumen generado
-            progress_info["current_step"] = "Resumen ejecutivo generado"
-            progress_info["progress_percentage"] = 95
-            progress_info["details"][3]["status"] = "completed"
-            progress_info["details"][4]["status"] = "processing"
-            progress_info["details"][4]["timestamp"] = datetime.now().isoformat()
+        analysis_tasks = [analyze_single_chunk(i, chunk) for i, chunk in enumerate(chunks)]
+        chunk_results_with_indices = await asyncio.gather(*analysis_tasks)
+        chunk_results_with_indices.sort(key=lambda x: x[0])
+        
+        for i, chunk_result in chunk_results_with_indices:
+            if chunk_result is None: continue
             
+            all_chunk_results.append({
+                "chunk_index": i+1,
+                "files": chunks[i]["files"],
+                "result": chunk_result
+            })
+
+            
+            # Manejar tanto objetos Pydantic como diccionarios
+            if hasattr(chunk_result, 'code_structure'):
+                # Es un objeto Pydantic
+                combined_categories["code_structure"].extend(chunk_result.code_structure)
+                combined_categories["design_patterns"].extend(chunk_result.design_patterns)
+                combined_categories["dependencies"].extend(chunk_result.dependencies)
+                combined_categories["security_analysis"].extend(chunk_result.security_analysis)
+                combined_categories["performance_analysis"].extend(chunk_result.performance_analysis)
+                combined_categories["refactoring_opportunities"].extend(chunk_result.refactoring_opportunities)
+                combined_categories["documentation_health"].extend(chunk_result.documentation_health)
+                combined_categories["potential_issues"].extend(chunk_result.potential_issues)
+                combined_categories["recommendations"].extend(chunk_result.recommendations)
+            elif isinstance(chunk_result, dict):
+                # Es un diccionario
+                combined_categories["code_structure"].extend(chunk_result.get("code_structure", []))
+                combined_categories["design_patterns"].extend(chunk_result.get("design_patterns", []))
+                combined_categories["dependencies"].extend(chunk_result.get("dependencies", []))
+                combined_categories["security_analysis"].extend(chunk_result.get("security_analysis", []))
+                combined_categories["performance_analysis"].extend(chunk_result.get("performance_analysis", []))
+                combined_categories["refactoring_opportunities"].extend(chunk_result.get("refactoring_opportunities", []))
+                combined_categories["documentation_health"].extend(chunk_result.get("documentation_health", []))
+                combined_categories["potential_issues"].extend(chunk_result.get("potential_issues", []))
+                combined_categories["recommendations"].extend(chunk_result.get("recommendations", []))
+            else:
+                logger.warning(f"Resultado inesperado del análisis de chunk {i+1}: {type(chunk_result)}")
+        
+        # Actualizar progreso final de chunks
+        progress_info["current_step"] = "Todos los chunks analizados exitosamente."
+        progress_info["progress_percentage"] = 80
+
+        
+        # Actualizar progreso: chunks analizados
+        progress_info["current_step"] = "Chunks analizados, generando resumen..."
+        progress_info["progress_percentage"] = 85
+        progress_info["details"][2]["status"] = "completed"
+        progress_info["details"][3]["status"] = "processing"
+        progress_info["details"][3]["timestamp"] = datetime.now().isoformat()
+        
+        async with DBSession(SessionLocal) as db_session: # type: ignore
             stmt_update = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
                 result_payload=progress_info
             )
             await db_session.execute(stmt_update)
-            await db_session.commit()
-            
-            # 6. Estructura final del resultado
-            analysis_result = {
-                "formatted_result": formatted_result,
-                "executive_summary": f"Análisis completo de {len(github_docs)} archivos en {len(chunks)} partes del repositorio {repo_name}",
-                "code_structure": combined_categories["code_structure"],
-                "design_patterns": combined_categories["design_patterns"],
-                "dependencies": combined_categories["dependencies"],
-                "security_analysis": combined_categories.get("security_analysis", []),
-                "performance_analysis": combined_categories.get("performance_analysis", []),
-                "refactoring_opportunities": combined_categories.get("refactoring_opportunities", []),
-                "documentation_health": combined_categories.get("documentation_health", []),
-                "potential_issues": combined_categories["potential_issues"],
-                "recommendations": combined_categories["recommendations"],
-                "progress_info": progress_info,
-                "tool_used": "advanced_code_analyzer.py",
-                "analysis_metadata": {
-                    "tool_used": "advanced_code_analyzer.py",
-                    "analysis_type": f"code_{analysis_type}" if analysis_type != 'all' else "code",
-                    "total_files": len(github_docs),
-                    "total_chunks": len(chunks),
-                    "repo_name": repo_name,
-                    "created_at": datetime.now().isoformat()
-                }
-            }
 
-            # 7. Guardar el resultado y marcar como 'completed'
-            progress_info["current_step"] = "Análisis de código completado"
-            progress_info["progress_percentage"] = 100
-            progress_info["status"] = "completed"
-            progress_info["estimated_time_remaining"] = None
-            progress_info["details"][4]["status"] = "completed"
-            progress_info["details"][4]["timestamp"] = datetime.now().isoformat()
-            
+        # 5. Generar resumen ejecutivo consolidado
+        from skills.analysis_and_insights_skill.scripts.analyze_code_for_insights_tool import AnalyzeCodeForInsightsTool
+        
+        # Crear un resumen de todos los chunks para el formatted_result
+        summary_parts = []
+        for res in all_chunk_results:
+            summary = "Análisis no disponible o fallido para este chunk."
+            result = res.get('result')
+            if result:
+                if hasattr(result, 'executive_summary') and result.executive_summary:
+                    summary = result.executive_summary
+                elif isinstance(result, dict):
+                    summary = result.get('executive_summary', 'Sin resumen disponible o chunk vacío.')
+
+            summary_parts.append(
+                f"**Análisis Parte {res['chunk_index']}** (Archivos: {', '.join(res['files'][:3])}{'...' if len(res['files']) > 3 else ''})\n{summary}"
+            )
+        combined_summary = "\n\n".join(summary_parts)
+        
+        # Generar análisis consolidado final
+        tool = AnalyzeCodeForInsightsTool(account_id=account_id)
+        final_summary = f"**Análisis Completo del Repositorio {repo_name}**\n\n"
+        final_summary += f"Se analizaron {len(chunks)} partes del código con un total de {len(docs_data)} archivos.\n\n"
+        final_summary += f"**Resumen por Partes:**\n{combined_summary}\n\n"
+        
+        # Generar formatted_result consolidado usando la herramienta
+        try:
+            # Usar solo una muestra representativa para el formato final
+            sample_content = chunks[0]["content"][:100000] if chunks else ""
+            formatted_result = await tool._arun(
+                code_content=sample_content + f"\n\nNOTA: Este es un análisis de {len(chunks)} partes del repositorio {repo_name}",
+                account_id=account_id,
+                file_name=f"Análisis de Repositorio: {repo_name}",
+                save_to_database=False,  # No guardar este análisis parcial
+                analysis_type=analysis_type
+            )
+        except Exception as e:
+            logger.warning(f"Error generando resultado formateado: {e}")
+            formatted_result = final_summary
+
+        # Actualizar progreso: resumen generado
+        progress_info["current_step"] = "Resumen ejecutivo generado"
+        progress_info["progress_percentage"] = 95
+        progress_info["details"][3]["status"] = "completed"
+        progress_info["details"][4]["status"] = "processing"
+        progress_info["details"][4]["timestamp"] = datetime.now().isoformat()
+        
+        async with DBSession(SessionLocal) as db_session: # type: ignore
+            stmt_update = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
+                result_payload=progress_info
+            )
+            await db_session.execute(stmt_update)
+        
+        # 6. Estructura final del resultado
+        analysis_result = {
+            "formatted_result": formatted_result,
+            "executive_summary": formatted_result,
+            "code_structure": combined_categories["code_structure"],
+            "design_patterns": combined_categories["design_patterns"],
+            "dependencies": combined_categories["dependencies"],
+            "security_analysis": combined_categories.get("security_analysis", []),
+            "performance_analysis": combined_categories.get("performance_analysis", []),
+            "refactoring_opportunities": combined_categories.get("refactoring_opportunities", []),
+            "documentation_health": combined_categories.get("documentation_health", []),
+            "potential_issues": combined_categories["potential_issues"],
+            "recommendations": combined_categories["recommendations"],
+            "progress_info": progress_info,
+            "tool_used": "advanced_code_analyzer.py",
+            "analysis_metadata": {
+                "tool_used": "advanced_code_analyzer.py",
+                "analysis_type": f"code_{analysis_type}" if analysis_type != 'all' else "code",
+                "total_files": len(docs_data),
+                "total_chunks": len(chunks),
+                "repo_name": repo_name,
+                "created_at": datetime.now().isoformat()
+            }
+        }
+
+        # 7. Guardar el resultado y marcar como 'completed'
+        progress_info["current_step"] = "Análisis de código completado"
+        progress_info["progress_percentage"] = 100
+        progress_info["status"] = "completed"
+        progress_info["estimated_time_remaining"] = None
+        progress_info["details"][4]["status"] = "completed"
+        progress_info["details"][4]["timestamp"] = datetime.now().isoformat()
+        
+        async with DBSession(SessionLocal) as db_session: # type: ignore
             stmt_completed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
                 status="completed", result_payload=analysis_result)
             await db_session.execute(stmt_completed)
-            await db_session.commit()
-            logger.info(f"Análisis de código para tarea {task_id} completado con {len(chunks)} chunks.")
+        logger.info(f"Análisis de código para tarea {task_id} completado con {len(chunks)} chunks.")
 
-        except Exception as e:
-            logger.error(f"Fallo en tarea de análisis de código {task_id}: {e}", exc_info=True)
-            progress_info["current_step"] = f"Error durante el análisis: {str(e)}"
-            progress_info["status"] = "failed"
-            progress_info["details"] = [
-                {"step": step_info["step"], "status": "failed" if i == 3 else "completed", "timestamp": step_info.get("timestamp", datetime.now().isoformat())}
-                for i, step_info in enumerate(progress_info.get("details", []))
-            ]
-            progress_info["details"][-1]["status"] = "failed"
-            
+    except Exception as e:
+        logger.error(f"Fallo en tarea de análisis de código {task_id}: {e}", exc_info=True)
+        progress_info["current_step"] = f"Error durante el análisis: {str(e)}"
+        progress_info["status"] = "failed"
+        progress_info["details"] = [
+            {"step": step_info["step"], "status": "failed" if i == 3 else "completed", "timestamp": step_info.get("timestamp", datetime.now().isoformat())}
+            for i, step_info in enumerate(progress_info.get("details", []))
+        ]
+        progress_info["details"][-1]["status"] = "failed"
+        
+        async with DBSession(SessionLocal) as db_session: # type: ignore
             stmt_failed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
                 status="failed",
                 result_payload=progress_info,
                 error_message=str(e))
             await db_session.execute(stmt_failed)
-            await db_session.commit()
 
 @router.post("/start-code-analysis", status_code=202)
 async def start_code_analysis_endpoint(
