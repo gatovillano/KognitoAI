@@ -99,7 +99,7 @@ export const useTextToSpeech = () => {
       console.error('Error en TTS:', error);
       stopPlayback();
     }
-  }, [activeText, isPlaying, isPaused, stopPlayback]);
+  }, [activeText, isPlaying, isPaused, stopPlayback, settings]);
 
   useEffect(() => {
     // Limpieza al desmontar el componente

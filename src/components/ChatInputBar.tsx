@@ -206,7 +206,7 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
         console.error('Autocomplete fetch error', err);
       }
     }
-  }, [activeRepositoryContext]);
+  }, [activeRepositoryContext, token]);
 
   const scheduleAutocompleteUpdate = useCallback((trigger: '#' | '@', query: string) => {
     if (autocompleteTimerRef.current) {
@@ -349,7 +349,7 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
       }
     }
     onKeyDown(e);
-  }, [autocomplete, newMessage, currentContext.length, uploadedImagePreviews, onKeyDown]);
+  }, [autocomplete, newMessage, currentContext.length, uploadedImagePreviews, onKeyDown, setNewMessage]);
 
   const handleRemoveContextItem = useCallback((item: SelectedContextItem) => {
     onRemoveContextItem(item);

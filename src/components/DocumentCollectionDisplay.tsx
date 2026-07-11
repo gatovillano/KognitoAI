@@ -946,6 +946,7 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
                 // Determinar el tipo de análisis
                 let analysisType: AnalysisType = 'document';
                 const fileName = analysis.file_name || '';
+                const displayName = analysis.result_payload?.analysis_metadata?.title || analysis.result_payload?.title || analysis.title || fileName;
                 let icon = <FileText className="h-5 w-5 text-blue-500" />;
                 let badgeColor = 'bg-blue-100 text-blue-800 border-blue-200';
                 let typeLabel = 'Documento';
@@ -1022,7 +1023,7 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
                       const newAnalysis: Analysis = {
                         id: analysis.id,
                         type: analysis.analysis_type || analysisType,
-                        title: isDocSummary ? `Resumen de: ${fileName}` : fileName,
+                        title: isDocSummary ? `Resumen de: ${displayName}` : displayName,
                         created_at: analysis.created_at,
                         result: payload,
                         result_payload: payload,
@@ -1045,7 +1046,7 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
                         </div>
                       </div>
                       <CardTitle className="text-lg font-bold line-clamp-2 group-hover:text-primary transition-colors leading-tight tracking-tight">
-                        {fileName}
+                        {displayName}
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="flex-grow relative z-10">

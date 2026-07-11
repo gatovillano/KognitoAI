@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { useParams } from 'next/navigation';
 import { Loader2, Lock, Copy, Check, AlertTriangle, ScrollText, Network, Zap, Target, Brain, FileText, LibraryBig, ExternalLink, Lightbulb } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -234,9 +234,18 @@ const DeepResearchContent: React.FC<DeepResearchContentProps> = ({ resultPayload
     
      const finalReport = reportData?.final_report || reportData?.summary || '';
     const summary = reportData?.summary || finalReport.slice(0, 1000) + "...";
-    const findings = reportData?.findings || (fullData?.findings || (propSummary ? [propSummary] : [finalReport]));
-    const sources = reportData?.sources || [];
-    const recommendations = reportData?.recommendations || [];
+    
+    const findings = useMemo(() => {
+        return reportData?.findings || (fullData?.findings || (propSummary ? [propSummary] : [finalReport]));
+    }, [reportData, fullData, propSummary, finalReport]);
+
+    const sources = useMemo(() => {
+        return reportData?.sources || [];
+    }, [reportData]);
+
+    const recommendations = useMemo(() => {
+        return reportData?.recommendations || [];
+    }, [reportData]);
 
     // Process sources using the same utility as DeepResearchDetailDialog
     const { citationSources, additionalSources } = useMemo(() => {
@@ -484,7 +493,7 @@ export default function SharedAnalysisPage() {
     const [selectedThemeForQuotes, setSelectedThemeForQuotes] = useState<ThemeReferenceExtended | null>(null);
     const [isThemeQuotesDialogOpen, setIsThemeQuotesDialogOpen] = useState(false);
 
-    const fetchAnalysis = async (submitPassword?: string) => {
+    const fetchAnalysis = useCallback(async (submitPassword?: string) => {
         setLoading(true);
         setError(null);
         setPasswordRequired(false);
@@ -512,11 +521,11 @@ export default function SharedAnalysisPage() {
         } finally {
             setLoading(false);
         }
-    };
+    }, [token]);
 
     useEffect(() => {
         if (token) fetchAnalysis();
-    }, [token]);
+    }, [token, fetchAnalysis]);
 
     const handlePasswordSubmit = (e: React.FormEvent) => {
         e.preventDefault();

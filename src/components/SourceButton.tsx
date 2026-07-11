@@ -117,6 +117,7 @@ export const SourceButton: React.FC<{
       <div className={`p-4 border-b border-border/10 ${color.split(' ')[0]}`}>
         <div className="flex items-center gap-3">
           {source.type === 'web' ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
             <img
               src={`https://www.google.com/s2/favicons?sz=32&domain=${source.url}`}
               alt=""
@@ -231,6 +232,7 @@ export const SourceButton: React.FC<{
           >
             <span className={badgeClasses}>
               {source.type === 'web' ? (
+                /* eslint-disable-next-line @next/next/no-img-element */
                 <img
                   src={`https://www.google.com/s2/favicons?sz=16&domain=${source.url}`}
                   alt=""
@@ -262,6 +264,7 @@ export const SourceButton: React.FC<{
             className={commonClasses}
             title={`Fuente Web: ${source.title}`}
           >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={`https://www.google.com/s2/favicons?sz=16&domain=${source.url}`}
               alt=""

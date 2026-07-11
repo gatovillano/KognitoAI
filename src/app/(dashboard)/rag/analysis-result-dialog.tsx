@@ -60,7 +60,7 @@ export function AnalysisResultDialog({ document, analysis, isOpen, onOpenChange 
         <DialogHeader>
           <DialogTitle>Resultados del Análisis</DialogTitle>
           <DialogDescription className="truncate">
-            Para el documento: {document?.file_name || 'Nombre no disponible'}
+            Para el documento: {document?.title || document?.file_name || 'Nombre no disponible'}
           </DialogDescription>
         </DialogHeader>
         <ScrollArea className="max-h-[60vh] pr-4">

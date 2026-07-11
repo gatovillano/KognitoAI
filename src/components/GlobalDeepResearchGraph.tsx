@@ -124,9 +124,10 @@ export function GlobalDeepResearchGraph() {
   }, [registerMessageHandler, clearHideTimeout, pushResearchNode, scheduleHide]);
 
   useEffect(() => {
+    const currentProcessedMessages = processedMessages.current;
     return () => {
       clearHideTimeout();
-      processedMessages.current.clear();
+      currentProcessedMessages.clear();
       activeTaskIdRef.current = null;
     };
   }, [clearHideTimeout]);

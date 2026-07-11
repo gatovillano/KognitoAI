@@ -910,12 +910,32 @@ async def run_document_analysis_and_save(task_id: str, account_id: str, file_nam
                 analysis_type="document",
             )
 
+            # Intentar obtener el título real del documento de base de datos
+            document_title = file_name
+            try:
+                title_query = text("""
+                    SELECT cmetadata->>'title' AS title 
+                    FROM langchain_pg_embedding 
+                    WHERE account_id = CAST(:account_id AS UUID) 
+                      AND cmetadata->>'file_name' = :file_name 
+                      AND cmetadata->>'type' = 'document_chunk' 
+                    LIMIT 1
+                """)
+                title_res = await db_session.execute(title_query, {"account_id": account_id, "file_name": file_name})
+                title_row = title_res.mappings().first()
+                if title_row and title_row.get("title"):
+                    document_title = title_row["title"]
+                    logger.info(f"Título recuperado para metadata del análisis de {file_name}: {document_title}")
+            except Exception as title_err:
+                logger.error(f"Error al recuperar título para {file_name}: {title_err}")
+
             # Agregar metadata de herramienta utilizada
             result_payload["tool_used"] = "advanced_text_analyzer.py"
             result_payload["analysis_metadata"] = {
                 "tool_used": "advanced_text_analyzer.py",
                 "analysis_type": "document",
                 "file_name": file_name,
+                "title": document_title,
                 "created_at": datetime.now().isoformat()
             }
 

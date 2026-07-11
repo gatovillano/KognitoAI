@@ -36,7 +36,25 @@ const MermaidViewer: React.FC<MermaidViewerProps> = ({ mermaidCode }) => {
           startOnLoad: false,
           theme: 'dark',
           securityLevel: 'loose',
-          fontFamily: 'Inter, system-ui, sans-serif',
+          fontFamily: 'inherit',
+          themeVariables: {
+            fontFamily: 'inherit',
+          },
+          flowchart: {
+            htmlLabels: true,
+            useMaxWidth: true,
+            padding: 18,
+          },
+          themeCSS: `
+            g.edgeLabel foreignObject,
+            g.edgeLabel foreignobject,
+            g.label foreignObject,
+            g.label foreignobject,
+            div.label,
+            .nodeLabel {
+              overflow: visible !important;
+            }
+          `
         });
         
         // Renderizar usando el contenedor para evitar errores en Portales/Dialogs

@@ -1,5 +1,5 @@
 "use client";
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import apiClient from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -56,7 +56,7 @@ export const UserSettingsProvider = ({ children }: { children: ReactNode }) => {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  const getSettings = async () => {
+  const getSettings = useCallback(async () => {
     if (!isAuthenticated || !user) {
       setSettings(null);
       setLoading(false);
@@ -74,11 +74,11 @@ export const UserSettingsProvider = ({ children }: { children: ReactNode }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [isAuthenticated, user]);
 
   useEffect(() => {
     getSettings();
-  }, [isAuthenticated, user]);
+  }, [getSettings]);
 
   const updateSettings = async (updates: Partial<UserSettings>) => {
     if (!settings) return;
