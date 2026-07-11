@@ -18,8 +18,8 @@ async def run_document_summary_and_save(task_id: str, account_id: str, file_name
     Función de utilidad pesada que se ejecuta en segundo plano para generar un resumen
     estructurado y completo del documento.
     """
-    async with DBSession(SessionLocal) as db_session: # type: ignore
-        try:
+    try:
+        async with DBSession(SessionLocal) as db_session: # type: ignore
             await persist_analysis_progress(
                 db_session,
                 task_id,
@@ -30,17 +30,18 @@ async def run_document_summary_and_save(task_id: str, account_id: str, file_name
                 analysis_type="document_summary",
                 file_name=file_name,
             )
-            await send_analysis_progress(
-                account_id,
-                task_id,
-                phase="initializing",
-                message=f'Preparando resumen de "{file_name}"...',
-                progress_percent=5,
-                file_name=file_name,
-                analysis_type="document_summary",
-            )
+        await send_analysis_progress(
+            account_id,
+            task_id,
+            phase="initializing",
+            message=f'Preparando resumen de "{file_name}"...',
+            progress_percent=5,
+            file_name=file_name,
+            analysis_type="document_summary",
+        )
 
-            logger.info(f"Iniciando resumen de documento para tarea {task_id}...")
+        logger.info(f"Iniciando resumen de documento para tarea {task_id}...")
+        async with DBSession(SessionLocal) as db_session: # type: ignore
             await persist_analysis_progress(
                 db_session,
                 task_id,
@@ -50,20 +51,21 @@ async def run_document_summary_and_save(task_id: str, account_id: str, file_name
                 analysis_type="document_summary",
                 file_name=file_name,
             )
-            await send_analysis_progress(
-                account_id,
-                task_id,
-                phase="reconstructing_content",
-                message="Cargando contenido del documento para resumir...",
-                progress_percent=18,
-                file_name=file_name,
-                analysis_type="document_summary",
-            )
-            text_content = await get_full_document_content(account_id, file_name)
-            if not text_content: 
-                raise ValueError("Contenido del documento no encontrado.")
-            
-            # 2. Generar el resumen estructurado específico
+        await send_analysis_progress(
+            account_id,
+            task_id,
+            phase="reconstructing_content",
+            message="Cargando contenido del documento para resumir...",
+            progress_percent=18,
+            file_name=file_name,
+            analysis_type="document_summary",
+        )
+        text_content = await get_full_document_content(account_id, file_name)
+        if not text_content: 
+            raise ValueError("Contenido del documento no encontrado.")
+        
+        # 2. Generar el resumen estructurado específico
+        async with DBSession(SessionLocal) as db_session: # type: ignore
             await persist_analysis_progress(
                 db_session,
                 task_id,
@@ -73,34 +75,35 @@ async def run_document_summary_and_save(task_id: str, account_id: str, file_name
                 analysis_type="document_summary",
                 file_name=file_name,
             )
-            await send_analysis_progress(
-                account_id,
-                task_id,
-                phase="summarizing",
-                message="Generando resumen estructurado con IA...",
-                progress_percent=35,
-                file_name=file_name,
-                analysis_type="document_summary",
-            )
+        await send_analysis_progress(
+            account_id,
+            task_id,
+            phase="summarizing",
+            message="Generando resumen estructurado con IA...",
+            progress_percent=35,
+            file_name=file_name,
+            analysis_type="document_summary",
+        )
 
-            _llm_done = asyncio.Event()
+        _llm_done = asyncio.Event()
 
-            async def _progress_ticker():
-                steps = [
-                    (46, "Extrayendo estructura principal..."),
-                    (58, "Sintetizando ideas centrales..."),
-                    (70, "Refinando resumen ejecutivo..."),
-                    (82, "Construyendo síntesis final..."),
-                    (88, "Revisando claridad del resumen..."),
-                ]
-                for pct, msg in steps:
-                    try:
-                        await asyncio.wait_for(_llm_done.wait(), timeout=6.0)
-                        break
-                    except asyncio.TimeoutError:
-                        pass
-                    if _llm_done.is_set():
-                        break
+        async def _progress_ticker():
+            steps = [
+                (46, "Extrayendo estructura principal..."),
+                (58, "Sintetizando ideas centrales..."),
+                (70, "Refinando resumen ejecutivo..."),
+                (82, "Construyendo síntesis final..."),
+                (88, "Revisando claridad del resumen..."),
+            ]
+            for pct, msg in steps:
+                try:
+                    await asyncio.wait_for(_llm_done.wait(), timeout=6.0)
+                    break
+                except asyncio.TimeoutError:
+                    pass
+                if _llm_done.is_set():
+                    break
+                async with DBSession(SessionLocal) as db_session: # type: ignore
                     await persist_analysis_progress(
                         db_session,
                         task_id,
@@ -110,31 +113,32 @@ async def run_document_summary_and_save(task_id: str, account_id: str, file_name
                         analysis_type="document_summary",
                         file_name=file_name,
                     )
-                    await send_analysis_progress(
-                        account_id,
-                        task_id,
-                        phase="summarizing",
-                        message=msg,
-                        progress_percent=pct,
-                        file_name=file_name,
-                        analysis_type="document_summary",
-                    )
-
-            async def _run_llm():
-                result = await text_analyzer.summarize_document(
-                    text_content,
-                    document_title=file_name,
-                    account_id=str(account_id),
+                await send_analysis_progress(
+                    account_id,
+                    task_id,
+                    phase="summarizing",
+                    message=msg,
+                    progress_percent=pct,
+                    file_name=file_name,
+                    analysis_type="document_summary",
                 )
-                _llm_done.set()
-                return result
 
-            analysis_result, _ = await asyncio.gather(_run_llm(), _progress_ticker())
+        async def _run_llm():
+            result = await text_analyzer.summarize_document(
+                text_content,
+                document_title=file_name,
+                account_id=str(account_id),
+            )
+            _llm_done.set()
+            return result
 
-            # 3. Guardar el resultado y marcar como 'completed'
-            # Asegurarse de que el resultado sea un diccionario
-            result_payload = analysis_result if isinstance(analysis_result, dict) else analysis_result.dict()
+        analysis_result, _ = await asyncio.gather(_run_llm(), _progress_ticker())
 
+        # 3. Guardar el resultado y marcar como 'completed'
+        # Asegurarse de que el resultado sea un diccionario
+        result_payload = analysis_result if isinstance(analysis_result, dict) else analysis_result.dict()
+
+        async with DBSession(SessionLocal) as db_session: # type: ignore
             await persist_analysis_progress(
                 db_session,
                 task_id,
@@ -144,48 +148,48 @@ async def run_document_summary_and_save(task_id: str, account_id: str, file_name
                 analysis_type="document_summary",
                 file_name=file_name,
             )
-            await send_analysis_progress(
-                account_id,
-                task_id,
-                phase="saving_to_neo4j",
-                message="Guardando resumen generado...",
-                progress_percent=94,
-                file_name=file_name,
-                analysis_type="document_summary",
-            )
+        await send_analysis_progress(
+            account_id,
+            task_id,
+            phase="saving_to_neo4j",
+            message="Guardando resumen generado...",
+            progress_percent=94,
+            file_name=file_name,
+            analysis_type="document_summary",
+        )
 
-            # Agregar metadata de herramienta utilizada
-            result_payload["tool_used"] = "advanced_text_analyzer.py"
-            result_payload["analysis_metadata"] = {
-                "tool_used": "advanced_text_analyzer.py",
-                "analysis_type": "document_summary",
-                "file_name": file_name,
-                "workspace_id": workspace_id,
-                "created_at": datetime.now().isoformat()
-            }
+        # Agregar metadata de herramienta utilizada
+        result_payload["tool_used"] = "advanced_text_analyzer.py"
+        result_payload["analysis_metadata"] = {
+            "tool_used": "advanced_text_analyzer.py",
+            "analysis_type": "document_summary",
+            "file_name": file_name,
+            "workspace_id": workspace_id,
+            "created_at": datetime.now().isoformat()
+        }
 
+        async with DBSession(SessionLocal) as db_session: # type: ignore
             stmt_completed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
                 status="completed", result_payload=result_payload)
             await db_session.execute(stmt_completed)
-            await db_session.commit()
-            logger.info(f"Resumen de documento para tarea {task_id} completado.")
-            await send_analysis_progress(
-                account_id,
-                task_id,
-                phase="completed",
-                message="¡Resumen del documento completado!",
-                progress_percent=100,
-                file_name=file_name,
-                analysis_type="document_summary",
-                is_complete=True,
-            )
+        logger.info(f"Resumen de documento para tarea {task_id} completado.")
+        await send_analysis_progress(
+            account_id,
+            task_id,
+            phase="completed",
+            message="¡Resumen del documento completado!",
+            progress_percent=100,
+            file_name=file_name,
+            analysis_type="document_summary",
+            is_complete=True,
+        )
 
-        except Exception as e:
-            logger.error(f"Fallo en tarea de resumen de documento {task_id}: {e}", exc_info=True)
+    except Exception as e:
+        logger.error(f"Fallo en tarea de resumen de documento {task_id}: {e}", exc_info=True)
+        async with DBSession(SessionLocal) as db_session: # type: ignore
             stmt_failed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
                 status="failed", error_message=str(e))
             await db_session.execute(stmt_failed)
-            await db_session.commit()
             await persist_analysis_progress(
                 db_session,
                 task_id,
@@ -198,14 +202,14 @@ async def run_document_summary_and_save(task_id: str, account_id: str, file_name
                 has_error=True,
                 error=str(e),
             )
-            await send_analysis_progress(
-                account_id,
-                task_id,
-                phase="error",
-                message="El resumen del documento falló.",
-                progress_percent=100,
-                file_name=file_name,
-                analysis_type="document_summary",
-                has_error=True,
-                error=str(e),
-            )
+        await send_analysis_progress(
+            account_id,
+            task_id,
+            phase="error",
+            message="El resumen del documento falló.",
+            progress_percent=100,
+            file_name=file_name,
+            analysis_type="document_summary",
+            has_error=True,
+            error=str(e),
+        )

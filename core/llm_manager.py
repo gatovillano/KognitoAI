@@ -731,8 +731,9 @@ async def get_llm_for_user(
                 # Paso 2: Añadir prefijo openrouter/ para LiteLLM
                 llm_kwargs["model_name"] = f"openrouter/{actual_id}"
 
-                # Usar provider openai ya que OpenRouter es compatible con OpenAI
-                llm_kwargs["provider"] = "openai"
+                # No forzar provider=openai para que LiteLLM reconozca openrouter/ y elimine el prefijo al enviar
+                if "provider" in llm_kwargs:
+                    del llm_kwargs["provider"]
 
                 # Aplicar lógica de adaptador universal según el modelo
                 apply_openrouter_model_specific_logic(actual_id, llm_kwargs)
@@ -937,6 +938,8 @@ async def get_llm_for_user(
             llm_instance = ChatLiteLLM(**llm_kwargs)
             if "custom_llm_provider" in llm_kwargs:
                 llm_instance.custom_llm_provider = llm_kwargs["custom_llm_provider"]
+            elif provider_target.lower() == "openrouter":
+                llm_instance.custom_llm_provider = "openrouter"
             # Cache the instance for future calls
             _llm_cache[cache_key] = (llm_instance, time.time())
             return llm_instance
@@ -1218,8 +1221,9 @@ async def initialize_llms():
             # Configurar el nombre del modelo con el prefijo openrouter/ necesario para LiteLLM
             llm_kwargs["model_name"] = f"openrouter/{actual_id}"
 
-            # Usar provider openai ya que OpenRouter es compatible con OpenAI
-            llm_kwargs["provider"] = "openai"
+            # No forzar provider=openai para que LiteLLM reconozca openrouter/ y elimine el prefijo al enviar
+            if "provider" in llm_kwargs:
+                del llm_kwargs["provider"]
 
             # Aplicar lógica de adaptador universal según el modelo
             apply_openrouter_model_specific_logic(actual_id, llm_kwargs)
@@ -1295,6 +1299,8 @@ async def initialize_llms():
             "custom_llm_provider"
         ):
             main_llm.custom_llm_provider = llm_kwargs["custom_llm_provider"]
+        elif "openrouter" in model_lower:
+            main_llm.custom_llm_provider = "openrouter"
         _main_agent_llm_instance = main_llm
         logger.info("Modelo LLM Principal listo.")
 
@@ -1331,7 +1337,8 @@ async def initialize_llms():
             fast_llm_kwargs["api_base"] = "https://openrouter.ai/api/v1"
             actual_id = normalize_openrouter_model_name(eff_fast_llm_model)
             fast_llm_kwargs["model_name"] = f"openrouter/{actual_id}"
-            fast_llm_kwargs["provider"] = "openai"
+            if "provider" in fast_llm_kwargs:
+                del fast_llm_kwargs["provider"]
             apply_openrouter_model_specific_logic(actual_id, fast_llm_kwargs)
         elif "anthropic" in fast_model_lower:
             logger.info("🔧 Applying Anthropic specific config for fast LLM.")
@@ -1390,6 +1397,8 @@ async def initialize_llms():
             "custom_llm_provider"
         ):
             fast_llm.custom_llm_provider = fast_llm_kwargs["custom_llm_provider"]
+        elif "openrouter" in fast_model_lower:
+            fast_llm.custom_llm_provider = "openrouter"
         _fast_task_llm_instance = fast_llm
         logger.info("Modelo LLM Rápido listo.")
     except Exception as e:
@@ -1424,7 +1433,8 @@ async def initialize_llms():
             vision_llm_kwargs["api_base"] = "https://openrouter.ai/api/v1"
             actual_id = normalize_openrouter_model_name(eff_vision_llm_model)
             vision_llm_kwargs["model_name"] = f"openrouter/{actual_id}"
-            vision_llm_kwargs["provider"] = "openai"
+            if "provider" in vision_llm_kwargs:
+                del vision_llm_kwargs["provider"]
             apply_openrouter_model_specific_logic(actual_id, vision_llm_kwargs)
         elif "anthropic" in vision_model_lower:
             logger.info("🔧 Applying Anthropic specific config for vision LLM.")
@@ -1477,6 +1487,8 @@ async def initialize_llms():
             "custom_llm_provider"
         ):
             vision_llm.custom_llm_provider = vision_llm_kwargs["custom_llm_provider"]
+        elif "openrouter" in vision_model_lower:
+            vision_llm.custom_llm_provider = "openrouter"
         _vision_llm_instance = vision_llm
         logger.info("Modelo LLM Visión listo.")
     except Exception as e:

@@ -93,6 +93,10 @@ class TelegramWebSocketClient:
                     logger.error(f"Error de estado WebSocket: {e}")
                 self.websocket = None
                 await asyncio.sleep(5)
+            except (TimeoutError, asyncio.TimeoutError) as e:
+                logger.warning(f"Timeout durante la apertura de la conexión WebSocket (handshake): {e}. Reintentando en 5 segundos...")
+                self.websocket = None
+                await asyncio.sleep(5)
             except Exception as e:
                 logger.error(f"Error inesperado en el cliente WebSocket: {e}", exc_info=True)
                 await asyncio.sleep(5)  # Evitar bucle rápido en caso de error inesperado
