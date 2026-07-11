@@ -6,8 +6,6 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { Code, FileText, Settings, AlertTriangle, Lightbulb, GitBranch } from 'lucide-react';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
@@ -53,7 +51,6 @@ export function CodeAnalysisResultDialog({ repoName, analysis, isOpen, onOpenCha
   const potentialIssues = ensureCodeArray(analysis.potential_issues);
   const recommendations = ensureCodeArray(analysis.recommendations);
   const executiveSummary = analysis.executive_summary || 'No se proporcionó un resumen ejecutivo.';
-  const formattedResult = analysis.formatted_result || '';
   const metadata = analysis.analysis_metadata || {};
 
   return (
@@ -95,19 +92,6 @@ export function CodeAnalysisResultDialog({ repoName, analysis, isOpen, onOpenCha
                   <p className="text-sm whitespace-pre-wrap">{executiveSummary}</p>
                 </CardContent>
               </Card>
-              
-              {formattedResult && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Análisis Detallado</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="prose prose-sm max-w-none dark:prose-invert break-words overflow-hidden">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{formattedResult}</ReactMarkdown>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
             </TabsContent>
 
             <TabsContent value="structure" className="space-y-4">
@@ -124,12 +108,15 @@ export function CodeAnalysisResultDialog({ repoName, analysis, isOpen, onOpenCha
                 <CardContent>
                   {codeStructure.length > 0 ? (
                     <div className="space-y-3">
-                      {codeStructure.map((item, i) => (
-                        <div key={i} className="border-l-4 border-blue-500 pl-4">
-                          <h4 className="font-medium">{item.component}</h4>
-                          <p className="text-sm text-muted-foreground">{item.description}</p>
-                        </div>
-                      ))}
+                      {codeStructure.map((item, i) => {
+                        const title = item.component || item.name || 'Sin título';
+                        return (
+                          <div key={i} className="border-l-4 border-blue-500 pl-4">
+                            <h4 className="font-medium">{title}</h4>
+                            <p className="text-sm text-muted-foreground">{item.description}</p>
+                          </div>
+                        );
+                      })}
                     </div>
                   ) : (
                     <p className="text-sm text-muted-foreground">No se encontraron componentes de estructura.</p>
@@ -155,7 +142,7 @@ export function CodeAnalysisResultDialog({ repoName, analysis, isOpen, onOpenCha
                       {designPatterns.map((item, i) => (
                         <div key={i} className="border-l-4 border-green-500 pl-4">
                           <h4 className="font-medium">{item.pattern}</h4>
-                          <p className="text-sm text-muted-foreground">{item.description}</p>
+                          <p className="text-sm text-muted-foreground">{item.description || item.context || ''}</p>
                         </div>
                       ))}
                     </div>
