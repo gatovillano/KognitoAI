@@ -2208,7 +2208,7 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
 
         from utils.advanced_code_analyzer import analyze_code_content
         
-        chunk_size = 150000  # ~150k caracteres por chunk (~200k tokens aprox)
+        chunk_size = 50000  # ~50k caracteres por chunk (~12k tokens aprox) para evitar Payload Too Large (413)
         chunks = []
         current_chunk = ""
         current_chunk_files = []
@@ -2373,7 +2373,7 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
         # Generar formatted_result consolidado usando la herramienta
         try:
             # Usar solo una muestra representativa para el formato final
-            sample_content = chunks[0]["content"][:100000] if chunks else ""
+            sample_content = chunks[0]["content"][:30000] if chunks else ""
             formatted_result = await tool._arun(
                 code_content=sample_content + f"\n\nNOTA: Este es un análisis de {len(chunks)} partes del repositorio {repo_name}",
                 account_id=account_id,
