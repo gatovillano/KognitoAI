@@ -2153,6 +2153,16 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
             )
             await db_session.execute(stmt_processing)
         
+        await send_analysis_progress(
+            account_id,
+            task_id,
+            phase="initializing",
+            message="Iniciando análisis de código...",
+            progress_percent=5,
+            file_name=repo_name,
+            analysis_type="code",
+        )
+        
         logger.info(f"Iniciando análisis de código para tarea {task_id}...")
         
         # 2. Obtener los documentos específicos de GitHub del repositorio
@@ -2166,6 +2176,16 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
                 result_payload=progress_info
             )
             await db_session.execute(stmt_update)
+            
+        await send_analysis_progress(
+            account_id,
+            task_id,
+            phase="fetching_github",
+            message="Obteniendo documentos de GitHub...",
+            progress_percent=10,
+            file_name=repo_name,
+            analysis_type="code",
+        )
             
             query = select(GitHubDocument).where(
                 GitHubDocument.account_id == account_id,
@@ -2194,6 +2214,16 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
                 result_payload=progress_info
             )
             await db_session.execute(stmt_update)
+
+        await send_analysis_progress(
+            account_id,
+            task_id,
+            phase="splitting_code",
+            message=f"Documentos obtenidos: {len(docs_data)} archivos. Dividiendo en chunks...",
+            progress_percent=20,
+            file_name=repo_name,
+            analysis_type="code",
+        )
 
         # 3. Dividir código en chunks
         progress_info["current_step"] = "Dividiendo código en chunks..."
@@ -2250,6 +2280,16 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
                 result_payload=progress_info
             )
             await db_session.execute(stmt_update)
+
+        await send_analysis_progress(
+            account_id,
+            task_id,
+            phase="analyzing_chunks",
+            message=f"Código dividido: {len(chunks)} chunks. Analizando...",
+            progress_percent=35,
+            file_name=repo_name,
+            analysis_type="code",
+        )
 
         # 4. Analizar cada chunk
         progress_info["current_step"] = "Analizando chunks de código..."
@@ -2345,6 +2385,16 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
             )
             await db_session.execute(stmt_update)
 
+        await send_analysis_progress(
+            account_id,
+            task_id,
+            phase="generating_summary",
+            message="Chunks analizados, generando resumen consolidado...",
+            progress_percent=85,
+            file_name=repo_name,
+            analysis_type="code",
+        )
+
         # 5. Generar resumen ejecutivo consolidado
         from skills.analysis_and_insights_skill.scripts.analyze_code_for_insights_tool import AnalyzeCodeForInsightsTool
         
@@ -2397,6 +2447,16 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
                 result_payload=progress_info
             )
             await db_session.execute(stmt_update)
+
+        await send_analysis_progress(
+            account_id,
+            task_id,
+            phase="finalizing",
+            message="Resumen ejecutivo consolidado generado...",
+            progress_percent=95,
+            file_name=repo_name,
+            analysis_type="code",
+        )
         
         # 6. Estructura final del resultado
         analysis_result = {
@@ -2435,6 +2495,18 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
             stmt_completed = update(AnalysisTask).where(AnalysisTask.id == uuid.UUID(task_id)).values(
                 status="completed", result_payload=analysis_result)
             await db_session.execute(stmt_completed)
+
+        await send_analysis_progress(
+            account_id,
+            task_id,
+            phase="completed",
+            message="Análisis de código completado",
+            progress_percent=100,
+            is_complete=True,
+            file_name=repo_name,
+            analysis_type="code",
+        )
+
         logger.info(f"Análisis de código para tarea {task_id} completado con {len(chunks)} chunks.")
 
     except Exception as e:
@@ -2453,6 +2525,18 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
                 result_payload=progress_info,
                 error_message=str(e))
             await db_session.execute(stmt_failed)
+
+        await send_analysis_progress(
+            account_id,
+            task_id,
+            phase="error",
+            message=f"Error durante el análisis: {str(e)}",
+            progress_percent=100,
+            has_error=True,
+            error=str(e),
+            file_name=repo_name,
+            analysis_type="code",
+        )
 
 @router.post("/start-code-analysis", status_code=202)
 async def start_code_analysis_endpoint(
