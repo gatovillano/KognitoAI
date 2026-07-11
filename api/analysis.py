@@ -2238,7 +2238,7 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
 
         from utils.advanced_code_analyzer import analyze_code_content
         
-        chunk_size = 50000  # ~50k caracteres por chunk (~12k tokens aprox) para evitar Payload Too Large (413)
+        chunk_size = 15000  # ~15k caracteres por chunk (~3-4k tokens aprox) para evitar superar el límite de ~262k tokens
         chunks = []
         current_chunk = ""
         current_chunk_files = []
