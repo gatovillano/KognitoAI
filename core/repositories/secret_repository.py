@@ -3,6 +3,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.database import UserSecret
 from core.config import settings
 import uuid
+import logging
+
+logger = logging.getLogger(__name__)
 
 class SecretRepository:
     def __init__(self, session: AsyncSession):
@@ -54,22 +57,33 @@ class SecretRepository:
         """
         Retrieves and decrypts a secret.
         """
-        encryption_key = settings.db_encryption_key
-        
-        # Expression to decrypt: pgp_sym_decrypt(dearmor(encrypted_value), key)
-        
-        stmt = select(
-            func.pgp_sym_decrypt(
-                func.dearmor(UserSecret.encrypted_value), 
-                encryption_key
+        try:
+            encryption_key = settings.db_encryption_key
+            
+            # Expression to decrypt: pgp_sym_decrypt(dearmor(encrypted_value), key)
+            
+            stmt = select(
+                func.pgp_sym_decrypt(
+                    func.dearmor(UserSecret.encrypted_value), 
+                    encryption_key
+                )
+            ).where(
+                UserSecret.account_id == account_id,
+                UserSecret.key_name == key_name
             )
-        ).where(
-            UserSecret.account_id == account_id,
-            UserSecret.key_name == key_name
-        )
-        
-        result = await self.session.execute(stmt)
-        return result.scalar()
+            
+            result = await self.session.execute(stmt)
+            return result.scalar()
+        except Exception as e:
+            logger.warning(
+                f"No se pudo desencriptar el secreto '{key_name}' para el usuario {account_id}. "
+                f"Esto puede deberse a que el secreto fue encriptado con una clave anterior o corrupta. Error: {e}"
+            )
+            try:
+                await self.session.rollback()
+            except Exception as rb_err:
+                logger.error(f"Error al realizar rollback tras fallo de desencriptación: {rb_err}")
+            return None
 
     async def get_secret_entry(self, account_id: uuid.UUID, key_name: str) -> UserSecret | None:
         stmt = select(UserSecret).where(
