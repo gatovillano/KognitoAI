@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Depends, status, Query, Body
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select, update
 
-from core.database import SessionLocal, Account, PlatformIdentity, delete_accounts_by_ids
+from core.database import SessionLocal, Account, PlatformIdentity, delete_accounts_by_ids, EmailAccount
 from utils.security import get_current_account_id
 from sqlalchemy.ext.asyncio import AsyncSession
 from core.dependencies import get_db_session # Importar dependencia centralizada
@@ -171,6 +171,27 @@ async def get_user_settings(current_account_id: str = Depends(get_current_accoun
     if not account:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuario no encontrado")
     
+    # Obtener cuenta de correo principal por defecto
+    stmt = (
+        select(EmailAccount)
+        .where(EmailAccount.account_id == account.id)
+        .order_by(EmailAccount.is_default.desc(), EmailAccount.created_at.asc())
+    )
+    result = await db.execute(stmt)
+    email_account = result.scalars().first()
+    
+    # Obtener contraseña de correo desde SecretRepository
+    email_password_secret = None
+    try:
+        repo = SecretRepository(db)
+        secret = await repo.get_secret(
+            account_id=uuid.UUID(current_account_id),
+            key_name="email_password"
+        )
+        email_password_secret = secret.value if secret else None
+    except Exception as e:
+        logger.warning(f"No se pudo obtener el secreto email_password: {e}")
+
     return UserSettingsResponse(
         name=account.name,
         email=account.email,
@@ -212,13 +233,14 @@ async def get_user_settings(current_account_id: str = Depends(get_current_accoun
         ssh_user=account.ssh_user,
         local_base_path=account.local_base_path,
         cloud_storage_path=account.cloud_storage_path,
-        email_provider=account.email_provider,
-        email_imap_host=account.email_imap_host,
-        email_imap_port=account.email_imap_port,
-        email_smtp_host=account.email_smtp_host,
-        email_smtp_port=account.email_smtp_port,
-        email_use_ssl=account.email_use_ssl,
-        email_username=account.email_username,
+        email_provider=email_account.provider if email_account else None,
+        email_imap_host=email_account.imap_host if email_account else None,
+        email_imap_port=str(email_account.imap_port) if email_account and email_account.imap_port is not None else "993",
+        email_smtp_host=email_account.smtp_host if email_account else None,
+        email_smtp_port=str(email_account.smtp_port) if email_account and email_account.smtp_port is not None else "465",
+        email_use_ssl=email_account.imap_use_ssl if email_account else True,
+        email_username=email_account.username if email_account else None,
+        email_password_secret=email_password_secret,
         custom_heartbeat_instructions=account.custom_heartbeat_instructions,
         custom_heartbeat_interval_minutes=account.custom_heartbeat_interval_minutes,
         custom_heartbeat_allowed_tools=account.custom_heartbeat_allowed_tools
@@ -240,13 +262,66 @@ async def update_user_settings(
     update_data = settings_update.dict(exclude_unset=True)
     email_password_secret = update_data.pop("email_password_secret", None)
 
-    # Aplicar actualizaciones
+    # Extraer campos de correo electrónico para manejarlos por separado
+    email_fields_map = {
+        "email_provider": "provider",
+        "email_imap_host": "imap_host",
+        "email_imap_port": "imap_port",
+        "email_smtp_host": "smtp_host",
+        "email_smtp_port": "smtp_port",
+        "email_use_ssl": "imap_use_ssl",
+        "email_username": "username"
+    }
+    
+    email_updates = {}
+    for req_field, db_field in email_fields_map.items():
+        if req_field in update_data:
+            email_updates[db_field] = update_data.pop(req_field)
+
+    # Aplicar actualizaciones a la cuenta de usuario
     for field, value in update_data.items():
         if field in ['name', 'bio'] and isinstance(value, str):
             value = sanitize_text(value)
         setattr(account, field, value)
 
-    # Si se actualizó la contraseña de correo, guardarla como secreto
+    # Obtener o crear cuenta de correo si hay actualizaciones de correo
+    stmt = (
+        select(EmailAccount)
+        .where(EmailAccount.account_id == account.id)
+        .order_by(EmailAccount.is_default.desc(), EmailAccount.created_at.asc())
+    )
+    result = await db.execute(stmt)
+    email_account = result.scalars().first()
+    
+    if email_updates or email_password_secret is not None:
+        if not email_account:
+            # Crear cuenta de correo principal por defecto
+            email_address = email_updates.get("username") or account.email or "user@example.com"
+            email_account = EmailAccount(
+                account_id=account.id,
+                name="Correo Principal",
+                email_address=email_address,
+                is_default=True,
+                is_active=True
+            )
+            db.add(email_account)
+            
+        # Aplicar actualizaciones
+        for db_field, val in email_updates.items():
+            if db_field in ["imap_port", "smtp_port"] and val is not None:
+                try:
+                    val = int(val)
+                except ValueError:
+                    pass
+            setattr(email_account, db_field, val)
+            
+        # Si se actualizó la contraseña de correo, cifrarla y guardarla en el modelo
+        if email_password_secret is not None:
+            from utils.email_security import EmailSecurity
+            security = EmailSecurity()
+            email_account.encrypted_password = security.encrypt(email_password_secret)
+
+    # Si se actualizó la contraseña de correo, guardarla también en SecretRepository por compatibilidad
     if email_password_secret is not None:
         repo = SecretRepository(db)
         await repo.set_secret(
@@ -259,6 +334,8 @@ async def update_user_settings(
     
     await db.commit()
     await db.refresh(account)
+    if email_account:
+        await db.refresh(email_account)
 
     # Si se actualizaron campos de heartbeat, reprogramar el job
     heartbeat_fields = ['custom_heartbeat_instructions', 'custom_heartbeat_interval_minutes', 'custom_heartbeat_allowed_tools']
@@ -315,17 +392,20 @@ async def update_user_settings(
         ssh_user=account.ssh_user,
         local_base_path=account.local_base_path,
         cloud_storage_path=account.cloud_storage_path,
-        email_provider=account.email_provider,
-        email_imap_host=account.email_imap_host,
-        email_imap_port=account.email_imap_port,
-        email_smtp_host=account.email_smtp_host,
-        email_smtp_port=account.email_smtp_port,
-        email_use_ssl=account.email_use_ssl,
-        email_username=account.email_username,
+        email_provider=email_account.provider if email_account else None,
+        email_imap_host=email_account.imap_host if email_account else None,
+        email_imap_port=str(email_account.imap_port) if email_account and email_account.imap_port is not None else "993",
+        email_smtp_host=email_account.smtp_host if email_account else None,
+        email_smtp_port=str(email_account.smtp_port) if email_account and email_account.smtp_port is not None else "465",
+        email_use_ssl=email_account.imap_use_ssl if email_account else True,
+        email_password_secret=email_password_secret,
         custom_heartbeat_instructions=account.custom_heartbeat_instructions,
         custom_heartbeat_interval_minutes=account.custom_heartbeat_interval_minutes,
+
         custom_heartbeat_allowed_tools=account.custom_heartbeat_allowed_tools
     )
+
+
 @router.put("/users/me/password", summary="Actualizar contraseña del usuario")
 async def update_user_password(
     password_update: UserPasswordUpdateRequest,

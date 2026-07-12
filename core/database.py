@@ -229,9 +229,11 @@ class Account(Base):
     gap_development_analysis = relationship("GapDevelopmentAnalysis", back_populates="account", cascade="all, delete-orphan")
     custom_heartbeats = relationship("CustomHeartbeat", back_populates="account", cascade="all, delete-orphan")
     mcp_servers = relationship("MCPServer", back_populates="account", cascade="all, delete-orphan")
+    api_keys = relationship("ApiKey", back_populates="account", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Account(id={self.id}, name='{self.name}')>"
+
 
 
 class PlatformIdentity(Base):
