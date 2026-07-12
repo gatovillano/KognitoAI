@@ -33,8 +33,8 @@ BACKEND_PID=$!
 
 echo -e "${BLUE}Iniciando el servidor Frontend (Next.js)...${NC}"
 echo -e "${BLUE}  → Logs: ./logs/frontend.log${NC}"
-PORT=3002 npm run build >> logs/frontend.log 2>&1 && PORT=3002 npm run start >> logs/frontend.log 2>&1 &FRONTEND_PID=$!
-
+PORT=3002 npm run build >> logs/frontend.log 2>&1 && PORT=3002 npm run start >> logs/frontend.log 2>&1 &
+FRONTEND_PID=$!
 echo -e "${YELLOW}Iniciando Telegram Gateway (ultraligero)...${NC}"
 echo -e "${YELLOW}  → Logs: ./logs/telegram_gateway.log${NC}"
 ./venv_host/bin/python run_telegram_gateway.py >> logs/telegram_gateway.log 2>&1 &

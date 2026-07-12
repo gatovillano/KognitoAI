@@ -111,7 +111,7 @@ export function CodeAnalysisResultDialog({ repoName, analysis, isOpen, onOpenCha
                   {codeStructure.length > 0 ? (
                     <div className="space-y-3">
                       {codeStructure.map((item, i) => {
-                        const title = item.component || (item as any).name || 'Sin título';
+                        const title = item.component || item.name || 'Sin título';
                         return (
                           <div key={i} className="border-l-4 border-blue-500 pl-4">
                             <h4 className="font-medium">{title}</h4>
