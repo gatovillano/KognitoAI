@@ -9,12 +9,12 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { useEffect, useState, useCallback } from 'react';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
-import { FileText, Calendar, User, Loader2 } from 'lucide-react';
+import { FileText, Calendar, User, Loader2, CheckSquare } from 'lucide-react';
 
 export interface TaggedObject {
   id: string | number;
   title: string;
-  type: 'note' | 'event' | 'profile';
+  type: 'note' | 'event' | 'profile' | 'task';
 }
 
 interface ObjectTagSelectorDialogProps {
@@ -35,6 +35,7 @@ export function ObjectTagSelectorDialog({
   const [availableNotes, setAvailableNotes] = useState<TaggedObject[]>([]);
   const [availableEvents, setAvailableEvents] = useState<TaggedObject[]>([]);
   const [availableProfiles, setAvailableProfiles] = useState<TaggedObject[]>([]);
+  const [availableTasks, setAvailableTasks] = useState<TaggedObject[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -67,6 +68,15 @@ export function ObjectTagSelectorDialog({
         type: 'profile' as const,
       }));
       setAvailableProfiles(profilesData);
+
+      // 4. Fetch Tasks
+      const tasksResponse = await apiClient.get('/api/tasks');
+      const tasksData: TaggedObject[] = (tasksResponse.data || []).map((task: any) => ({
+        id: task.id,
+        title: task.description || 'Tarea sin descripción',
+        type: 'task' as const,
+      }));
+      setAvailableTasks(tasksData);
     } catch (error) {
       toast.error('Error al cargar los objetos disponibles.');
       console.error('Error fetching available objects:', error);
@@ -83,15 +93,16 @@ export function ObjectTagSelectorDialog({
       setAvailableNotes([]);
       setAvailableEvents([]);
       setAvailableProfiles([]);
+      setAvailableTasks([]);
       setSearchTerm('');
     }
   }, [isOpen, initialSelected, fetchAvailableObjects]);
 
-  const isSelected = (id: string | number, type: 'note' | 'event' | 'profile') => {
+  const isSelected = (id: string | number, type: 'note' | 'event' | 'profile' | 'task') => {
     return selected.some(item => item.id === id && item.type === type);
   };
 
-  const handleToggle = (id: string | number, title: string, type: 'note' | 'event' | 'profile') => {
+  const handleToggle = (id: string | number, title: string, type: 'note' | 'event' | 'profile' | 'task') => {
     setSelected(prev => {
       if (isSelected(id, type)) {
         return prev.filter(item => !(item.id === id && item.type === type));
@@ -166,7 +177,7 @@ export function ObjectTagSelectorDialog({
           />
 
           <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full flex-1 flex flex-col">
-            <TabsList className="grid w-full grid-cols-3">
+            <TabsList className="grid w-full grid-cols-4">
               <TabsTrigger value="profiles" className="gap-2">
                 <User className="h-4 w-4" /> Perfiles
               </TabsTrigger>
@@ -175,6 +186,9 @@ export function ObjectTagSelectorDialog({
               </TabsTrigger>
               <TabsTrigger value="events" className="gap-2">
                 <Calendar className="h-4 w-4" /> Eventos
+              </TabsTrigger>
+              <TabsTrigger value="tasks" className="gap-2">
+                <CheckSquare className="h-4 w-4" /> Tareas
               </TabsTrigger>
             </TabsList>
             
@@ -187,6 +201,9 @@ export function ObjectTagSelectorDialog({
               </TabsContent>
               <TabsContent value="events" className="m-0">
                 {renderItemList(availableEvents, <Calendar className="h-4 w-4 text-emerald-500" />)}
+              </TabsContent>
+              <TabsContent value="tasks" className="m-0">
+                {renderItemList(availableTasks, <CheckSquare className="h-4 w-4 text-orange-500" />)}
               </TabsContent>
             </div>
           </Tabs>

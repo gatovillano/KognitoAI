@@ -5,7 +5,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Plus, Trash2, Save, X, Loader2, FileText, Calendar, User } from 'lucide-react';
+import { Plus, Trash2, Save, X, Loader2, FileText, Calendar, User, CheckSquare } from 'lucide-react';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
@@ -218,10 +218,11 @@ export function EditableDataGrid({ tableId, columns, onDataChange }: EditableDat
                                                         <div className="flex flex-wrap gap-1 max-w-[300px] overflow-hidden">
                                                             {Array.isArray(row.data[col.name]) && row.data[col.name].length > 0 ? (
                                                                 row.data[col.name].map((item: any, idx: number) => {
-                                                                    const Icon = item.type === 'note' ? FileText : item.type === 'event' ? Calendar : User;
+                                                                    const Icon = item.type === 'note' ? FileText : item.type === 'event' ? Calendar : item.type === 'task' ? CheckSquare : User;
                                                                     let colorClass = "bg-blue-500/10 text-blue-500 border-blue-500/20";
                                                                     if (item.type === 'event') colorClass = "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
                                                                     if (item.type === 'profile') colorClass = "bg-purple-500/10 text-purple-500 border-purple-500/20";
+                                                                    if (item.type === 'task') colorClass = "bg-orange-500/10 text-orange-500 border-orange-500/20";
                                                                     return (
                                                                         <Badge key={idx} variant="outline" className={cn("text-[10px] py-0 px-1.5 flex items-center gap-1", colorClass)}>
                                                                             <Icon className="h-2.5 w-2.5" />
