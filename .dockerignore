@@ -112,3 +112,26 @@ build/
 *.bak
 *.backup
 *.old
+
+# Heavy/unnecessary folders for build context
+kokoro_service/
+monitoring/
+backups/
+storage/
+.skills-cache/
+data-gym-cache/
+venv_host/
+torchinductor_gato/
+.kognito_tmp/
+kogniterm*.cast
+*.cast
+*.html
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.pdf
+*.zip
+*.tar.gz
+*.tgz
+

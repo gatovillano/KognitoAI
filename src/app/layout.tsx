@@ -5,8 +5,8 @@ import "./globals.css";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { UserSettingsProvider } from "@/contexts/UserSettingsContext";
 import { ThemeProvider } from "@/components/ThemeProvider";
-import { Toaster } from "@/components/ui/sonner"; // Importar Toaster de sonner
 import AnalyticsTracker from "@/components/AnalyticsTracker";
+import ToasterWrapper from "@/components/ToasterWrapper";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -80,7 +80,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
               {children}
             </ThemeProvider>
           </UserSettingsProvider>
-          <Toaster richColors position="top-right" /> {/* Configurar Toaster de sonner */}
+          <ToasterWrapper richColors position="top-right" /> {/* Configurar Toaster de sonner */}
         </AuthProvider>
       </body>
     </html>
