@@ -52,6 +52,9 @@ except ImportError:
 from pgvector.sqlalchemy import Vector
 from core.config import settings
 from utils.db_session import DBSession
+from utils.sanitization import remove_null_bytes
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
 
 import json
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
@@ -60,6 +63,32 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 
 # --- Configuración del Logger e Instancias de SQLAlchemy ---
 logger = logging.getLogger(__name__)
+
+# Serializador JSON seguro que elimina bytes nulos para evitar errores en PostgreSQL
+def safe_json_serializer(obj):
+    cleaned = remove_null_bytes(obj)
+    return json.dumps(cleaned, ensure_ascii=False)
+
+# Escucha global de consultas para limpiar bytes nulos de parámetros de texto
+@event.listens_for(Engine, "before_cursor_execute", retval=True)
+def receive_before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+    if parameters is None:
+        return statement, parameters
+
+    def clean_param(value):
+        if isinstance(value, str):
+            return value.replace('\x00', '')
+        return value
+
+    if isinstance(parameters, dict):
+        parameters = {k: clean_param(v) for k, v in parameters.items()}
+    elif isinstance(parameters, (list, tuple)):
+        if executemany and isinstance(parameters[0], dict):
+            parameters = [{k: clean_param(v) for k, v in p.items()} for p in parameters]
+        else:
+            parameters = tuple(clean_param(p) for p in parameters)
+
+    return statement, parameters
 
 # Motor de base de datos asíncrono
 database_url = settings.database_url
@@ -73,7 +102,7 @@ engine = create_async_engine(
     pool_size=30,       # Aumentar el número de conexiones persistentes
     max_overflow=60,    # Aumentar el número de conexiones adicionales
     pool_timeout=120,    # Aumentar el tiempo de espera para adquirir una conexión
-    json_serializer=lambda obj: json.dumps(obj, ensure_ascii=False),
+    json_serializer=safe_json_serializer,
     json_deserializer=json.loads
 )
 

@@ -25,9 +25,11 @@ interface TaskDialogProps {
   task?: TaskResponse | null;
   workspaceId?: string;
   initialStatus?: KanbanStatus;
+  initialStartDate?: Date;
+  initialEndDate?: Date;
 }
 
-export function TaskDialog({ isOpen, onOpenChange, onSaveSuccess, task, workspaceId, initialStatus }: TaskDialogProps) {
+export function TaskDialog({ isOpen, onOpenChange, onSaveSuccess, task, workspaceId, initialStatus, initialStartDate, initialEndDate }: TaskDialogProps) {
   const [description, setDescription] = useState(task?.description || '');
   const [startDate, setStartDate] = useState<Date | undefined>(task?.start_date ? new Date(task.start_date) : undefined);
   const [endDate, setEndDate] = useState<Date | undefined>(task?.end_date ? new Date(task.end_date) : undefined);
@@ -54,14 +56,14 @@ export function TaskDialog({ isOpen, onOpenChange, onSaveSuccess, task, workspac
       setSelectedWorkspaceId(task.workspace_id || '');
     } else {
       setDescription('');
-      setStartDate(undefined);
-      setEndDate(undefined);
-      setStartTime("09:00");
-      setEndTime("18:00");
+      setStartDate(initialStartDate);
+      setEndDate(initialEndDate);
+      setStartTime(initialStartDate ? format(initialStartDate, "HH:mm") : "09:00");
+      setEndTime(initialEndDate ? format(initialEndDate, "HH:mm") : "18:00");
       setStatus(initialStatus || 'Pendiente');
       setSelectedWorkspaceId(workspaceId || '');
     }
-  }, [task, isOpen, workspaceId, initialStatus]);
+  }, [task, isOpen, workspaceId, initialStatus, initialStartDate, initialEndDate]);
 
   useEffect(() => {
     const fetchWorkspaces = async () => {
