@@ -11,6 +11,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ImportTableDialog } from './import-table-dialog';
 import { TableDetailDialog } from './table-detail-dialog';
 import { CreateTableDialog } from './create-table-dialog';
+import { TableAnalysisDialog } from './table-analysis-dialog';
 
 interface UserTable {
     id: string;
@@ -27,6 +28,7 @@ export function TablesView() {
     const [isCreateOpen, setIsCreateOpen] = useState(false);
     const [selectedTable, setSelectedTable] = useState<UserTable | null>(null);
     const [isDetailOpen, setIsDetailOpen] = useState(false);
+    const [isAnalysisOpen, setIsAnalysisOpen] = useState(false);
 
     const fetchTables = useCallback(async () => {
         setIsLoading(true);
@@ -144,7 +146,15 @@ export function TablesView() {
                                             <ExternalLink className="h-3 w-3" />
                                             Ver Datos
                                         </Button>
-                                        <Button variant="secondary" size="sm" className="w-full gap-2" onClick={() => toast.info('Análisis en desarrollo')}>
+                                        <Button 
+                                            variant="secondary" 
+                                            size="sm" 
+                                            className="w-full gap-2" 
+                                            onClick={() => {
+                                                setSelectedTable(table);
+                                                setIsAnalysisOpen(true);
+                                            }}
+                                        >
                                             <BarChart3 className="h-3 w-3" />
                                             Analizar
                                         </Button>
@@ -175,6 +185,13 @@ export function TablesView() {
             <TableDetailDialog
                 isOpen={isDetailOpen}
                 onOpenChange={setIsDetailOpen}
+                tableId={selectedTable?.id || null}
+                tableName={selectedTable?.name || ''}
+            />
+
+            <TableAnalysisDialog
+                isOpen={isAnalysisOpen}
+                onOpenChange={setIsAnalysisOpen}
                 tableId={selectedTable?.id || null}
                 tableName={selectedTable?.name || ''}
             />
