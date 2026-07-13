@@ -16,9 +16,13 @@ interface DroppableDayColumnProps {
   hours: number[];
   HOUR_HEIGHT: number;
   children: React.ReactNode;
+  onTimeSlotSelect?: (startDate: Date, endDate: Date) => void;
 }
-const DroppableDayColumn: React.FC<DroppableDayColumnProps> = ({ day, onMoveEvent, onMoveTask, hours, HOUR_HEIGHT, children }) => {
+const DroppableDayColumn: React.FC<DroppableDayColumnProps> = ({ day, onMoveEvent, onMoveTask, hours, HOUR_HEIGHT, children, onTimeSlotSelect }) => {
   const ref = React.useRef<HTMLDivElement>(null);
+  const [selection, setSelection] = React.useState<{ startY: number; endY: number } | null>(null);
+  const [isSelecting, setIsSelecting] = React.useState(false);
+
   const [{ isOver }, drop] = useDrop(() => ({
     accept: ['event', 'task'],
     drop: (item: any, monitor) => {
@@ -45,11 +49,105 @@ const DroppableDayColumn: React.FC<DroppableDayColumnProps> = ({ day, onMoveEven
   }), [day, onMoveEvent, onMoveTask, HOUR_HEIGHT]);
   drop(ref);
 
+  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    if (e.target !== ref.current) return;
+
+    const rect = ref.current.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    setIsSelecting(true);
+    setSelection({ startY: y, endY: y });
+  };
+
+  const yToDate = React.useCallback((yVal: number) => {
+    let totalMinutes = (yVal / HOUR_HEIGHT) * 60;
+    let snappedMinutes = Math.round(totalMinutes / 15) * 15;
+    let hour = Math.floor(snappedMinutes / 60);
+    let mins = snappedMinutes % 60;
+    if (hour >= 24) {
+      hour = 23;
+      mins = 45;
+    }
+    const d = new Date(day);
+    d.setHours(hour, mins, 0, 0);
+    return d;
+  }, [day, HOUR_HEIGHT]);
+
+  React.useEffect(() => {
+    if (!isSelecting || !ref.current) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!ref.current) return;
+      const rect = ref.current.getBoundingClientRect();
+      let y = e.clientY - rect.top;
+      
+      const maxHeight = 24 * HOUR_HEIGHT;
+      if (y < 0) y = 0;
+      if (y > maxHeight) y = maxHeight;
+
+      setSelection(prev => prev ? { ...prev, endY: y } : null);
+    };
+
+    const handleMouseUp = (e: MouseEvent) => {
+      setIsSelecting(false);
+      if (selection && ref.current) {
+        const rect = ref.current.getBoundingClientRect();
+        let finalY = e.clientY - rect.top;
+        const maxHeight = 24 * HOUR_HEIGHT;
+        if (finalY < 0) finalY = 0;
+        if (finalY > maxHeight) finalY = maxHeight;
+
+        const startY = selection.startY;
+        const endY = finalY;
+
+        const minRawY = Math.min(startY, endY);
+        const maxRawY = Math.max(startY, endY);
+
+        const startDate = yToDate(minRawY);
+        let endDate = yToDate(maxRawY);
+
+        if (endDate.getTime() - startDate.getTime() < 15 * 60 * 1000) {
+          endDate = new Date(startDate.getTime() + 60 * 60 * 1000);
+        }
+
+        if (onTimeSlotSelect) {
+          onTimeSlotSelect(startDate, endDate);
+        }
+      }
+      setSelection(null);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isSelecting, selection, yToDate, onTimeSlotSelect, HOUR_HEIGHT]);
+
   return (
-    <div ref={ref} className={`relative border-r border-border/10 last:border-r-0 h-full group ${isOver ? 'bg-primary/5' : ''}`}>
+    <div
+      ref={ref}
+      onMouseDown={handleMouseDown}
+      className={`relative border-r border-border/10 last:border-r-0 h-full group ${isOver ? 'bg-primary/5' : ''} cursor-crosshair select-none`}
+    >
       {hours.map(hour => (
         <div key={`line-${hour}`} className="border-b border-border/10 absolute w-full pointer-events-none" style={{ top: `${hour * HOUR_HEIGHT}px`, height: `${HOUR_HEIGHT}px` }} />
       ))}
+      {selection && (
+        <div
+          className="absolute left-1 right-1 rounded-lg bg-primary/20 border border-primary/40 pointer-events-none z-50 flex items-center justify-center"
+          style={{
+            top: `${Math.min(selection.startY, selection.endY)}px`,
+            height: `${Math.max(4, Math.abs(selection.startY - selection.endY))}px`,
+          }}
+        >
+          <span className="text-[10px] font-black uppercase text-primary bg-background/80 dark:bg-card/90 px-2 py-0.5 rounded-md shadow-sm border border-primary/20">
+            {format(yToDate(Math.min(selection.startY, selection.endY)), 'HH:mm')} - {format(yToDate(Math.max(selection.startY, selection.endY)), 'HH:mm')}
+          </span>
+        </div>
+      )}
       {children}
     </div>
   );
@@ -173,6 +271,7 @@ interface WeeklyScheduleViewProps {
   onToggleTaskCompleted: (task: TaskResponse) => void;
   onMoveEvent?: (eventId: string, newDate: Date) => void;
   onMoveTask?: (taskId: string, newDate: Date) => void;
+  onTimeSlotSelect?: (startDate: Date, endDate: Date) => void;
 }
 
 export function WeeklyScheduleView({
@@ -187,6 +286,7 @@ export function WeeklyScheduleView({
   onToggleTaskCompleted,
   onMoveEvent,
   onMoveTask,
+  onTimeSlotSelect,
 }: WeeklyScheduleViewProps) {
   const startOfCurrentWeek = startOfWeek(currentDate, { weekStartsOn: 1 });
   const endOfCurrentWeek = endOfWeek(currentDate, { weekStartsOn: 1 });
@@ -303,6 +403,7 @@ export function WeeklyScheduleView({
                 HOUR_HEIGHT={HOUR_HEIGHT}
                 onMoveEvent={onMoveEvent}
                 onMoveTask={onMoveTask}
+                onTimeSlotSelect={onTimeSlotSelect}
               >
                 {/* Eventos / Tareas */}
                 {allItems.map(item => {

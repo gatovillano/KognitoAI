@@ -39,10 +39,11 @@ interface EventDialogProps {
   workspaceId?: string;
   event?: AgendaEvent | null;
   initialDate?: Date;
+  initialEndDate?: Date;
   initialStatus?: 'Pendiente' | 'En Progreso' | 'Hecho';
 }
 
-export function EventDialog({ isOpen, onOpenChange, onSaveSuccess, workspaceId, event, initialDate, initialStatus }: EventDialogProps) {
+export function EventDialog({ isOpen, onOpenChange, onSaveSuccess, workspaceId, event, initialDate, initialEndDate, initialStatus }: EventDialogProps) {
   const [workspaces, setWorkspaces] = useState<any[]>([]);
   const [loadingWorkspaces, setLoadingWorkspaces] = useState(false);
 
@@ -110,9 +111,9 @@ export function EventDialog({ isOpen, onOpenChange, onSaveSuccess, workspaceId, 
           description: '',
           location: '',
           date: initialDate ? initialDate.toLocaleDateString('en-CA') : new Date().toLocaleDateString('en-CA'),
-          time: new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', hour12: false }),
-          end_date: '',
-          end_time: '',
+          time: initialDate ? initialDate.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', hour12: false }) : new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', hour12: false }),
+          end_date: initialEndDate ? initialEndDate.toLocaleDateString('en-CA') : '',
+          end_time: initialEndDate ? initialEndDate.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', hour12: false }) : '',
           attendee_ids: [],
           external_attendees: [],
           workspace_id: workspaceId || 'none',
@@ -120,7 +121,7 @@ export function EventDialog({ isOpen, onOpenChange, onSaveSuccess, workspaceId, 
         });
       }
     }
-  }, [isOpen, event, initialDate, workspaceId, initialStatus, form]);
+  }, [isOpen, event, initialDate, initialEndDate, workspaceId, initialStatus, form]);
 
   async function onSubmit(values: z.infer<typeof formSchema>) {
     const toastId = toast.loading(event ? 'Actualizando evento...' : 'Agendando evento...');

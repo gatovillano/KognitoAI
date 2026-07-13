@@ -55,7 +55,8 @@ from core.database import (
     GitHubDocument,
     Document,
     ContactProfile, # <--- NUEVA IMPORTACIÓN
-    Nota # <--- AÑADIDO PARA LA BÚSQUEDA DE NOTAS
+    Nota, # <--- AÑADIDO PARA LA BÚSQUEDA DE NOTAS
+    safe_json_serializer
 )
 from utils.db_session import DBSession
 from utils.embeddings import get_embedding_model
@@ -73,7 +74,10 @@ GLOBAL_COLLECTION_NAME = settings.global_collection_name
 USER_MEMORIES_PREFIX = "user_memories_"
 USER_DOCUMENTS_PREFIX = "user_documents_"
 
-PGVECTOR_SYNC_ENGINE = create_engine(settings.database_url or "postgresql://postgres:postgres@localhost:5432/postgres")
+PGVECTOR_SYNC_ENGINE = create_engine(
+    settings.database_url or "postgresql://postgres:postgres@localhost:5432/postgres",
+    json_serializer=safe_json_serializer
+)
 
 
 def _normalize_document_id_value(value: Any) -> Optional[str]:
