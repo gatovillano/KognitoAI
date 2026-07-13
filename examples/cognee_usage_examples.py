@@ -89,9 +89,7 @@ async def example_1_process_research_documents():
     
     print("📊 Resultado del procesamiento:")
     print(result)
-    print("
-" + "=" * 60)
-
+    print("\n" + "=" * 60)
 async def example_2_search_knowledge_graph():
     """Ejemplo 2: Buscar información específica en el grafo."""
     
@@ -109,8 +107,7 @@ async def example_2_search_knowledge_graph():
     ]
     
     for query in queries:
-        print(f"
-🔍 Consulta: {query}")
+        print(f"🔍 Consulta: {query}")
         print("-" * 40)
         
         result = await tool._arun(
@@ -119,8 +116,7 @@ async def example_2_search_knowledge_graph():
         
         print(result)
     
-    print("
-" + "=" * 60)
+    print("" + "=" * 60)
 
 async def example_3_get_insights():
     """Ejemplo 3: Obtener insights y patrones del grafo."""
@@ -139,8 +135,7 @@ async def example_3_get_insights():
     ]
     
     for query in insight_queries:
-        print(f"
-💡 Insights sobre: {query}")
+        print(f"💡 Insights sobre: {query}")
         print("-" * 40)
         
         result = await tool._arun(
@@ -150,8 +145,7 @@ async def example_3_get_insights():
         
         print(result)
     
-    print("
-" + "=" * 60)
+    print("" + "=" * 60)
 
 async def example_4_business_documents():
     """Ejemplo 4: Procesar documentos empresariales."""
@@ -209,15 +203,13 @@ async def example_4_business_documents():
     print(result)
     
     # Buscar información específica
-    print(f"
-🔍 Buscando estrategias de IA...")
+    print(f"🔍 Buscando estrategias de IA...")
     search_result = await search_tool._arun(
         natural_language_query="estrategias de inteligencia artificial"
     )
     
     print(search_result)
-    print("
-" + "=" * 60)
+    print("" + "=" * 60)
 
 async def run_all_examples():
     """Ejecuta todos los ejemplos en secuencia."""
@@ -236,18 +228,15 @@ async def run_all_examples():
         await example_4_business_documents()
         
         print("✅ Todos los ejemplos completados exitosamente!")
-        print("
-💡 Próximos pasos:")
+        print("💡 Próximos pasos:")
         print("1. Accede a Neo4j Browser (http://localhost:7474) para visualizar el grafo")
         print("2. Experimenta con tus propios documentos")
         print("3. Integra las herramientas de grafo de conocimiento en tu flujo de trabajo")
         
     except Exception as e:
         logger.error(f"❌ Error ejecutando ejemplos: {e}")
-        print(f"
-❌ Error: {e}")
-        print("
-🔧 Soluciones posibles:")
+        print(f"❌ Error: {e}")
+        print("🔧 Soluciones posibles:")
         print("1. Verifica que Neo4j esté corriendo: docker-compose up -d neo4j")
         print("2. Revisa tu configuración en .env (NEO4J_*, OPENAI_API_KEY, etc)")
         print("3. Asegúrate de que el servicio core esté activo")
