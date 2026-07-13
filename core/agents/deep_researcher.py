@@ -31,7 +31,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.pregel import Pregel
 from langchain_core.language_models import BaseChatModel # Import BaseChatModel
 
-from core.llm_manager import get_main_llm, initialize_llms, get_fast_llm, get_fallback_llm # Import initialize_llms and get_fast_llm
+from core.llm_manager import get_main_llm, initialize_llms, get_fast_llm, get_fallback_llm, get_configured_fallback_llm # Import initialize_llms and get_fast_llm
 from core.utils.llm_utils import safe_bind_tools, is_openrouter_model  # OpenRouter compatibility
 from core.utils.date_utils import get_today_str
 from core.agents.deep_researcher_config import Configuration
@@ -171,7 +171,10 @@ async def clarify_with_user(state: AgentState, config: RunnableConfig) -> dict:
     # If still None and error was context length related, try fallback LLM
     if response is None and 'e' in locals() and is_token_limit_exceeded(e):
         logger.warning("⚠️ [DeepResearcher] clarify_with_user - Context length exceeded. Trying fallback LLM.")
-        fallback_llm = get_fallback_llm()
+        if account_id:
+            fallback_llm = await get_configured_fallback_llm(account_id, failed_purpose="fast")
+        else:
+            fallback_llm = get_fallback_llm()
         if fallback_llm:
             try:
                 clarification_model_fallback = cast(Runnable[Sequence[BaseMessage], ClarifyWithUser],
@@ -1059,72 +1062,7 @@ async def researcher_tools(state: ResearcherState, config: RunnableConfig) -> di
     logger.info("✅ [Researcher Tools] All tools executed.")
 
     # --- REAL-TIME FINDINGS REPORTING ---
-    if progress_callback:
-        found_sources = []
-        for obs in observations:
-            try:
-                # 1. Check for structured ToolOutputWithSources format
-                if hasattr(obs, 'sources') or (isinstance(obs, dict) and "sources" in obs):
-                    obs_sources = obs.sources if hasattr(obs, 'sources') else obs["sources"]
-                    if isinstance(obs_sources, list):
-                        for s in obs_sources:
-                            s_dict = s.model_dump() if hasattr(s, 'model_dump') else (s if isinstance(s, dict) else {})
-                            if s_dict.get("url"):
-                                found_sources.append({
-                                    "title": s_dict.get("title", s_dict.get("url")),
-                                    "url": s_dict.get("url"),
-                                    "snippet": str(s_dict.get("snippet", "")),
-                                    "type": s_dict.get("type", "web")
-                                })
-                # 2. Extract from raw content via Regex if no structured sources found
-                else:
-                    content_str = str(obs)
-                    # Pattern: Markdown style [Title](URL)
-                    md_matches = list(re.finditer(r"\[([^\]]+)\]\((https?://[^\s\)]+)\)", content_str))
-                    for match in md_matches:
-                        found_sources.append({
-                            "title": match.group(1).strip(),
-                            "url": match.group(2).strip(),
-                            "snippet": "",
-                            "type": "web"
-                        })
-            except Exception as e:
-                logger.error(f"⚠️ [Researcher Tools] Error extracting real-time sources: {e}")
-
-        if found_sources:
-            # Deduplicate by URL
-            unique_found = []
-            seen_urls = set()
-            for s in found_sources:
-                if s["url"] not in seen_urls:
-                    unique_found.append(s)
-                    seen_urls.add(s["url"])
-            
-            logger.info(f"📡 [Researcher Tools] Reporting {len(unique_found)} real-time findings for topic: {state['research_topic']}")
-            
-            # Formatear hallazgos como Markdown para el stream de chat
-            findings_md = f"\n\n#### ✨ Descubrimientos para: {state['research_topic']}\n"
-            for s in unique_found:
-                title = s.get("title", s.get("url", "Fuente")).strip()
-                url = s.get("url")
-                snippet = s.get("snippet", "").strip()
-                
-                # Crear link Markdown con snippet opcional
-                findings_md += f"- **[{title}]({url})**"
-                if snippet:
-                    # Limpiar snippet de saltos de línea excesivos y truncarlo si es muy largo
-                    clean_snippet = " ".join(snippet.split())
-                    if len(clean_snippet) > 200:
-                        clean_snippet = clean_snippet[:197] + "..."
-                    findings_md += f": _{clean_snippet}_"
-                findings_md += "\n"
-            
-            await progress_callback(
-                int(progress_at_end_of_tools), 
-                f"Hallazgos para: {state['research_topic']}", 
-                data={"stream_chunk": findings_md}
-            )
-    # --- END REAL-TIME FINDINGS REPORTING ---
+    # Real-time findings streaming disabled to satisfy user request.
 
     if progress_callback:
         logger.info(f"Calling progress_callback in researcher_tools: {int(progress_at_end_of_tools)}% for topic {state['research_topic']}")
@@ -1728,64 +1666,7 @@ async def expert_agent_tools(state: ExpertAgentState, config: RunnableConfig) ->
     observations = await asyncio.gather(*tool_execution_tasks)
     logger.info(f"✅ [Expert Agent Tools '{state['expert_name']}'] All tools executed.")
 
-    if progress_callback:
-        found_sources = []
-        for obs in observations:
-            try:
-                if hasattr(obs, 'sources') or (isinstance(obs, dict) and "sources" in obs):
-                    obs_sources = obs.sources if hasattr(obs, 'sources') else obs["sources"]
-                    if isinstance(obs_sources, list):
-                        for s in obs_sources:
-                            s_dict = s.model_dump() if hasattr(s, 'model_dump') else (s if isinstance(s, dict) else {})
-                            if s_dict.get("url"):
-                                found_sources.append({
-                                    "title": s_dict.get("title", s_dict.get("url")),
-                                    "url": s_dict.get("url"),
-                                    "snippet": str(s_dict.get("snippet", "")),
-                                    "type": s_dict.get("type", "web")
-                                })
-                else:
-                    content_str = str(obs)
-                    md_matches = list(re.finditer(r"\[([^\]]+)\]\((https?://[^\s\)]+)\)", content_str))
-                    for match in md_matches:
-                        found_sources.append({
-                            "title": match.group(1).strip(),
-                            "url": match.group(2).strip(),
-                            "snippet": "",
-                            "type": "web"
-                        })
-            except Exception as e:
-                logger.error(f"⚠️ [Expert Agent Tools] Error extracting real-time sources: {e}")
-
-        if found_sources:
-            unique_found = []
-            seen_urls = set()
-            for s in found_sources:
-                if s["url"] not in seen_urls:
-                    unique_found.append(s)
-                    seen_urls.add(s["url"])
-            
-            logger.info(f"📡 [Expert Agent Tools '{state['expert_name']}'] Reporting {len(unique_found)} real-time findings.")
-            
-            findings_md = f"\n\n#### ✨ Hallazgos del Experto: {state['expert_name']}\n"
-            for s in unique_found:
-                title = s.get("title", s.get("url", "Fuente")).strip()
-                url = s.get("url")
-                snippet = s.get("snippet", "").strip()
-                
-                findings_md += f"- **[{title}]({url})**"
-                if snippet:
-                    clean_snippet = " ".join(snippet.split())
-                    if len(clean_snippet) > 200:
-                        clean_snippet = clean_snippet[:197] + "..."
-                    findings_md += f": _{clean_snippet}_"
-                findings_md += "\n"
-            
-            await progress_callback(
-                int(progress_at_end_of_tools), 
-                f"Hallazgos del experto: {state['expert_name']}", 
-                data={"stream_chunk": findings_md}
-            )
+    # Real-time findings streaming disabled to satisfy user request.
 
     if progress_callback:
         logger.info(f"Calling progress_callback in expert_agent_tools END: {int(progress_at_end_of_tools)}% for {state['expert_name']}")
