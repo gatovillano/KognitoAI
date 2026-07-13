@@ -3,12 +3,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Loader2, MessageSquare, Download, Settings2 } from 'lucide-react';
+import { Loader2, MessageSquare, Download, Settings2, BarChart3 } from 'lucide-react';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
 import { ContextualChat } from '@/components/ContextualChat';
 import { EditableDataGrid } from './editable-data-grid';
 import { ColumnManagerDialog } from './column-manager-dialog';
+import { TableAnalysisDialog } from './table-analysis-dialog';
 
 interface TableDetailDialogProps {
     isOpen: boolean;
@@ -22,6 +23,7 @@ export function TableDetailDialog({ isOpen, onOpenChange, tableId, tableName }: 
     const [isLoading, setIsLoading] = useState(false);
     const [isChatOpen, setIsChatOpen] = useState(false);
     const [isColumnManagerOpen, setIsColumnManagerOpen] = useState(false);
+    const [isAnalysisOpen, setIsAnalysisOpen] = useState(false);
 
     const fetchTableDetails = useCallback(async () => {
         if (!tableId) return;
@@ -58,6 +60,10 @@ export function TableDetailDialog({ isOpen, onOpenChange, tableId, tableName }: 
                         <Button variant="outline" size="sm" className="gap-2">
                             <Download className="h-4 w-4" />
                             Exportar
+                        </Button>
+                        <Button variant="outline" size="sm" className="gap-2" onClick={() => setIsAnalysisOpen(true)}>
+                            <BarChart3 className="h-4 w-4" />
+                            Analizar
                         </Button>
                         <Button size="sm" className="gap-2" onClick={() => setIsChatOpen(true)}>
                             <MessageSquare className="h-4 w-4" />
@@ -105,6 +111,15 @@ export function TableDetailDialog({ isOpen, onOpenChange, tableId, tableName }: 
                         tableId={table.id}
                         initialColumns={table.columns}
                         onSuccess={(updatedColumns) => setTable({ ...table, columns: updatedColumns })}
+                    />
+                )}
+
+                {table && (
+                    <TableAnalysisDialog
+                        isOpen={isAnalysisOpen}
+                        onOpenChange={setIsAnalysisOpen}
+                        tableId={table.id}
+                        tableName={table.name}
                     />
                 )}
             </DialogContent>

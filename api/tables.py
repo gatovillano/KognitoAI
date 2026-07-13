@@ -2,6 +2,7 @@
 
 import logging
 import uuid
+import json
 from typing import List, Optional, Any, Dict
 from datetime import datetime, timezone
 import pandas as pd
@@ -536,3 +537,91 @@ async def get_table_prediction(
     except Exception as e:
         logger.error(f"Error en análisis predictivo: {e}")
         raise HTTPException(status_code=500, detail="Error al calcular la regresión.")
+
+
+# --- Análisis de IA ---
+
+class TableAIAnalysisRequest(BaseModel):
+    prompt: Optional[str] = None
+
+@router.post("/{table_id}/analysis/ai")
+async def analyze_table_with_ai(
+    table_id: uuid.UUID,
+    request_data: TableAIAnalysisRequest = Body(...),
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """Genera un análisis e insights de la tabla utilizando un LLM."""
+    # 1. Verificar propiedad de la tabla
+    stmt = select(UserTable).where(
+        UserTable.id == table_id,
+        UserTable.account_id == uuid.UUID(current_account_id)
+    )
+    result = await db.execute(stmt)
+    table = result.scalar_one_or_none()
+    if not table:
+        raise HTTPException(status_code=404, detail="Tabla no encontrada.")
+
+    # 2. Obtener todas las filas de la tabla (límite razonable para evitar token limit)
+    rows_stmt = select(UserTableRow).where(UserTableRow.table_id == table_id).limit(200)
+    rows_result = await db.execute(rows_stmt)
+    rows = rows_result.scalars().all()
+
+    if not rows:
+        return {"analysis": "No hay datos en la tabla para analizar."}
+
+    # Convertir a DataFrame
+    df = pd.DataFrame([row.data for row in rows])
+
+    # 3. Calcular estadísticas descriptivas básicas para inyectar al prompt
+    stats_summary = ""
+    numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+    if numeric_cols:
+        stats_desc = df[numeric_cols].describe().to_string()
+        stats_summary = f"\nEstadísticas descriptivas de las columnas numéricas:\n{stats_desc}\n"
+
+    # Obtener primeras 30 filas como muestra en formato markdown o CSV
+    data_sample = df.head(30).to_markdown(index=False)
+
+    # 4. Formular el system prompt y human prompt
+    system_prompt = (
+        "Eres un analista de datos experto y asistente científico de IA. Tu tarea es analizar "
+        "la tabla de datos proporcionada por el usuario, interpretar sus estadísticas y "
+        "entregar un análisis descriptivo detallado, identificar patrones de interés, "
+        "correlaciones implícitas, anomalías y dar recomendaciones prácticas.\n"
+        "Presenta tu análisis con un formato Markdown profesional y limpio, usando títulos, "
+        "negritas, listas y si es útil, tablas de resumen. Responde en español."
+    )
+
+    user_prompt = f"""Aquí tienes los detalles de la tabla de datos:
+Nombre de la tabla: {table.name}
+Descripción: {table.description or 'Sin descripción'}
+Columnas configuradas: {json.dumps(table.columns, ensure_ascii=False)}
+
+Muestra de los primeros 30 registros (formato tabla):
+{data_sample}
+{stats_summary}
+Filas totales cargadas para análisis: {len(rows)} (mostrando hasta 200 en este contexto).
+
+Objetivo/Instrucción específica del usuario:
+{request_data.prompt or "Realiza un análisis general de los datos, resume los hallazgos principales, patrones interesantes y recomendaciones."}
+"""
+
+    try:
+        from core.llm_manager import get_llm_for_user
+        from langchain_core.messages import SystemMessage, HumanMessage
+
+        llm = await get_llm_for_user(current_account_id)
+        if not llm:
+            raise HTTPException(status_code=500, detail="No se pudo inicializar el modelo de lenguaje.")
+
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_prompt)
+        ]
+
+        response = await llm.ainvoke(messages)
+        return {"analysis": response.content}
+    except Exception as e:
+        logger.error(f"Error al analizar tabla con AI: {e}")
+        raise HTTPException(status_code=500, detail=f"Error en el análisis de IA: {str(e)}")
