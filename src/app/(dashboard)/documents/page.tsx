@@ -862,6 +862,16 @@ export default function DocumentsPage() {
     }
   }, [initEditor]);
 
+  const handleOpenItem = useCallback((doc: OnlyOfficeDoc) => {
+    const ext = doc.extension.toLowerCase();
+    const ONLYOFFICE_EXTENSIONS = ['docx', 'xlsx', 'pptx', 'doc', 'xls', 'ppt', 'txt', 'csv', 'md', 'pdf'];
+    if (ONLYOFFICE_EXTENSIONS.includes(ext)) {
+      openEditor(doc);
+    } else {
+      setPreviewDoc(doc);
+    }
+  }, [openEditor]);
+
   useEffect(() => {
     if (!hasMounted) return;
     const openId = searchParams?.get('open');
@@ -994,16 +1004,6 @@ export default function DocumentsPage() {
       toast.error("Error al descargar el archivo", { id: toastId });
     }
   }, []);
-
-  const handleOpenItem = useCallback((doc: OnlyOfficeDoc) => {
-    const ext = doc.extension.toLowerCase();
-    const ONLYOFFICE_EXTENSIONS = ['docx', 'xlsx', 'pptx', 'doc', 'xls', 'ppt', 'txt', 'csv', 'md', 'pdf'];
-    if (ONLYOFFICE_EXTENSIONS.includes(ext)) {
-      openEditor(doc);
-    } else {
-      setPreviewDoc(doc);
-    }
-  }, [openEditor]);
 
   if (!hasMounted) return null;
 
