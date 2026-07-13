@@ -1873,3 +1873,8 @@ class EmailAttachment(Base):
         return f"<EmailAttachment(id={self.id}, filename={self.filename}, size={self.size_bytes})>"
 
 
+# Import models defined in separate files at the bottom to ensure they are registered with SQLAlchemy
+from core.api_key_model import ApiKey
+
+
+
