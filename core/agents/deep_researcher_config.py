@@ -38,13 +38,13 @@ class Configuration(BaseModel):
     # General Configuration
     max_structured_output_retries: int = Field(default=3)
     allow_clarification: bool = Field(default=True)
-    max_concurrent_research_units: int = Field(default=3)
+    max_concurrent_research_units: int = Field(default=5)
     max_clarification_attempts: int = Field(default=3) # Added this line
 
     # Research Configuration
     search_api: SearchAPI = Field(default=SearchAPI.TAVILY)
-    max_researcher_iterations: int = Field(default=5)
-    max_react_tool_calls: int = Field(default=8)
+    max_researcher_iterations: int = Field(default=3)
+    max_react_tool_calls: int = Field(default=5)
     max_sources_for_report: int = Field(default=30) # Límite configurable de fuentes para el reporte
 
     # Model Configuration
@@ -64,7 +64,7 @@ class Configuration(BaseModel):
     max_content_length: int = Field(default=10000)
 
     # Context window management
-    max_input_tokens: int = Field(default=150000) # More conservative limit to prevent context overflow
+    max_input_tokens: int = Field(default=100000) # More conservative limit to prevent context overflow
 
     # MCP server configuration
     mcp_config: Optional[MCPConfig] = Field(default=None)
