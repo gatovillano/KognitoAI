@@ -142,10 +142,8 @@ async def upload_document(
     filename = file.filename
     extension = filename.split('.')[-1].lower() if '.' in filename else ""
     
-    # Validar extensiones soportadas por OnlyOffice (básico)
-    supported = ['docx', 'xlsx', 'pptx', 'doc', 'xls', 'ppt', 'txt', 'csv', 'md', 'pdf']
-    if extension not in supported:
-        raise HTTPException(status_code=400, detail=f"Extensión .{extension} no soportada.")
+    # Para actuar como una nube, no restringimos las extensiones en la subida.
+
 
     # Guardar archivo físicamente
     unique_filename = f"{uuid.uuid4()}.{extension}"
