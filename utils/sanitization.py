@@ -1,6 +1,7 @@
 import bleach
 from bleach.css_sanitizer import CSSSanitizer
 import logging
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -50,3 +51,19 @@ def sanitize_text(text: str) -> str:
         return text
     
     return bleach.clean(text, tags=[], attributes={}, strip=True)
+
+def remove_null_bytes(val: Any) -> Any:
+    """
+    Recursivamente elimina caracteres nulos (\x00) de cadenas, listas, diccionarios y tuplas.
+    Evita excepciones psycopg.errors.UntranslatableCharacter en PostgreSQL.
+    """
+    if isinstance(val, str):
+        return val.replace('\x00', '')
+    elif isinstance(val, dict):
+        return {k: remove_null_bytes(v) for k, v in val.items()}
+    elif isinstance(val, list):
+        return [remove_null_bytes(item) for item in val]
+    elif isinstance(val, tuple):
+        return tuple(remove_null_bytes(item) for item in val)
+    return val
+

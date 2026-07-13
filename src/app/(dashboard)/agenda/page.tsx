@@ -23,6 +23,7 @@ import { EventDetailsDialog } from './EventDetailsDialog';
 import { EventEditDialog } from './EventEditDialog'; // Importar EventEditDialog
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'; // Importar Sheet
+import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { TaskDialog } from './task-dialog'; // Importar TaskDialog
 import { Checkbox } from '@/components/ui/checkbox'; // Importar Checkbox para las tareas
 import { WeeklyScheduleView } from './WeeklyScheduleView'; // Importar WeeklyScheduleView
@@ -68,6 +69,13 @@ export default function AgendaPage() {
   const [isInfoSheetOpen, setIsInfoSheetOpen] = useState(false); // Nuevo estado para controlar la visibilidad del Sheet
   const [isCalendarInfoOpen, setIsCalendarInfoOpen] = useState(false); // Nuevo estado para controlar la visibilidad del Sheet de Calendario
   const [kanbanInitialStatus, setKanbanInitialStatus] = useState<'Pendiente' | 'En Progreso' | 'Hecho' | undefined>(undefined);
+
+  // Click-and-drag range selection states
+  const [selectionRange, setSelectionRange] = useState<{ start: Date; end: Date } | null>(null);
+  const [isChoiceDialogOpen, setIsChoiceDialogOpen] = useState(false);
+  const [initialEventEndDate, setInitialEventEndDate] = useState<Date | undefined>(undefined);
+  const [initialTaskStartDate, setInitialTaskStartDate] = useState<Date | undefined>(undefined);
+  const [initialTaskEndDate, setInitialTaskEndDate] = useState<Date | undefined>(undefined);
 
   // Detectar workspace_id desde la URL
   useEffect(() => {
@@ -191,8 +199,14 @@ export default function AgendaPage() {
     });
     setInitialEventDate(date); // Establecer la fecha inicial para el diálogo
     setInitialEventDate(date); // Establecer la fecha inicial para el diálogo
+    setInitialEventEndDate(undefined);
     setKanbanInitialStatus(undefined);
     setIsEventDialogOpen(true);
+  };
+
+  const handleTimeSlotSelect = (startDate: Date, endDate: Date) => {
+    setSelectionRange({ start: startDate, end: endDate });
+    setIsChoiceDialogOpen(true);
   };
 
   const handleCreateEventFromKanban = (status: 'Pendiente' | 'En Progreso' | 'Hecho') => {
@@ -428,10 +442,10 @@ export default function AgendaPage() {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-56 bg-card/95 backdrop-blur-xl border-border/40 rounded-2xl p-2">
-                  <DropdownMenuItem onClick={() => setIsEventDialogOpen(true)} className="rounded-xl focus:bg-primary/10 focus:text-primary cursor-pointer py-2.5 gap-3">
+                  <DropdownMenuItem onClick={() => { setSelectedEvent(null); setInitialEventDate(undefined); setInitialEventEndDate(undefined); setIsEventDialogOpen(true); }} className="rounded-xl focus:bg-primary/10 focus:text-primary cursor-pointer py-2.5 gap-3">
                     <PlusCircle className="h-4 w-4" /> Agendar Evento
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => { setSelectedTask(null); setIsTaskDialogOpen(true); }} className="rounded-xl focus:bg-primary/10 focus:text-primary cursor-pointer py-2.5 gap-3">
+                  <DropdownMenuItem onClick={() => { setSelectedTask(null); setInitialTaskStartDate(undefined); setInitialTaskEndDate(undefined); setIsTaskDialogOpen(true); }} className="rounded-xl focus:bg-primary/10 focus:text-primary cursor-pointer py-2.5 gap-3">
                     <CheckCircle2 className="h-4 w-4" /> Añadir Tarea
                   </DropdownMenuItem>
                 </DropdownMenuContent>
@@ -513,6 +527,7 @@ export default function AgendaPage() {
                     onToggleTaskCompleted={handleToggleTaskCompleted}
                     onMoveEvent={handleMoveEvent}
                     onMoveTask={handleMoveTask}
+                    onTimeSlotSelect={handleTimeSlotSelect}
                   />
                 ) : viewType === 'month' ? (
                   <MonthlyScheduleView
@@ -676,16 +691,88 @@ export default function AgendaPage() {
         onOpenChange={setIsEventDialogOpen}
         onSaveSuccess={handleSaveSuccess}
         initialDate={initialEventDate} // Pasar la fecha inicial
+        initialEndDate={initialEventEndDate} // Pasar la fecha final
         workspaceId={workspaceId || undefined} // Pasar el workspaceId
         initialStatus={kanbanInitialStatus}
-      />        <TaskDialog
+      />
+      <TaskDialog
         isOpen={isTaskDialogOpen}
         onOpenChange={setIsTaskDialogOpen}
         onSaveSuccess={handleTaskSaveSuccess}
         task={selectedTask} // Pasar la tarea seleccionada para edición
         workspaceId={workspaceId || undefined} // Pasar el workspaceId
         initialStatus={kanbanInitialStatus}
+        initialStartDate={initialTaskStartDate}
+        initialEndDate={initialTaskEndDate}
       />
+
+      <Dialog open={isChoiceDialogOpen} onOpenChange={setIsChoiceDialogOpen}>
+        <DialogContent className="sm:max-w-[400px] bg-white/80 dark:bg-card/40 backdrop-blur-2xl border-white/20 dark:border-border/40 rounded-[2rem] shadow-2xl overflow-hidden p-6 text-center">
+          <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-transparent pointer-events-none" />
+          
+          <div className="relative z-10 flex flex-col items-center gap-4">
+            <div className="p-3.5 rounded-2xl bg-primary/10 text-primary shadow-inner">
+              <CalendarIcon className="h-8 w-8" />
+            </div>
+            
+            <div className="space-y-2 w-full">
+              <h2 className="text-2xl font-black tracking-tighter bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent">
+                ¿Qué deseas crear?
+              </h2>
+              {selectionRange && (
+                <div className="text-sm font-semibold text-muted-foreground bg-primary/5 border border-primary/10 rounded-xl py-2 px-3 inline-block">
+                  <span className="capitalize">{format(selectionRange.start, "EEEE, d 'de' MMMM", { locale: es })}</span>
+                  <br />
+                  <span>{format(selectionRange.start, 'HH:mm')} - {format(selectionRange.end, 'HH:mm')}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 w-full mt-4">
+              <Button
+                onClick={() => {
+                  if (selectionRange) {
+                    setSelectedEvent(null);
+                    setInitialEventDate(selectionRange.start);
+                    setInitialEventEndDate(selectionRange.end);
+                    setIsChoiceDialogOpen(false);
+                    setIsEventDialogOpen(true);
+                  }
+                }}
+                className="h-12 rounded-xl bg-primary hover:bg-primary/90 transition-all font-black uppercase tracking-widest text-xs gap-2"
+              >
+                <CalendarIcon className="h-4 w-4" />
+                Evento
+              </Button>
+              
+              <Button
+                onClick={() => {
+                  if (selectionRange) {
+                    setSelectedTask(null);
+                    setInitialTaskStartDate(selectionRange.start);
+                    setInitialTaskEndDate(selectionRange.end);
+                    setIsChoiceDialogOpen(false);
+                    setIsTaskDialogOpen(true);
+                  }
+                }}
+                variant="outline"
+                className="h-12 rounded-xl border-border/40 hover:bg-muted transition-all font-black uppercase tracking-widest text-xs gap-2"
+              >
+                <CheckCircle2 className="h-4 w-4" />
+                Tarea
+              </Button>
+            </div>
+            
+            <Button
+              variant="ghost"
+              onClick={() => setIsChoiceDialogOpen(false)}
+              className="mt-2 text-xs font-bold text-muted-foreground hover:text-foreground"
+            >
+              Cancelar
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
       {selectedEvent && (
         <EventDetailsDialog
           isOpen={isDetailsDialogOpen}
