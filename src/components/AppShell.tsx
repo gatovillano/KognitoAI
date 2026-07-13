@@ -18,7 +18,7 @@ import { useWebSocketContext } from '@/contexts/WebSocketContext';
 import { Badge } from '@/components/ui/badge';
 import { Wifi, WifiOff, AlertTriangle } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
-import { GlobalDeepResearchGraph } from './GlobalDeepResearchGraph';
+// import { GlobalDeepResearchGraph } from './GlobalDeepResearchGraph';
 import { useTaskContext } from '@/contexts/TaskContext';
 import UploadProgressIndicator from './UploadProgressIndicator';
 import GraphProgressIndicator from './GraphProgressIndicator';
@@ -296,7 +296,7 @@ export function AppShell({ children }: AppShellProps) {
           </div>
         )}
 
-        <GlobalDeepResearchGraph />
+        {/* <GlobalDeepResearchGraph /> */}
       </SearchProvider>
     </LoadingProvider>
   );

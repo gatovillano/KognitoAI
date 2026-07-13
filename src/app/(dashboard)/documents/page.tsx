@@ -37,7 +37,16 @@ import {
   MessageSquare,
   Link2,
   UserPlus,
-  FolderOutput
+  FolderOutput,
+  Eye,
+  FileImage,
+  FileSpreadsheet,
+  Presentation,
+  FileArchive,
+  FileAudio,
+  FileVideo,
+  FileCode,
+  File
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
@@ -133,6 +142,7 @@ export default function DocumentsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [editingDoc, setEditingDoc] = useState<OnlyOfficeDoc | null>(null);
+  const [previewDoc, setPreviewDoc] = useState<OnlyOfficeDoc | null>(null);
   const [isOpeningEditor, setIsOpeningEditor] = useState(false);
   
   const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false);
@@ -858,12 +868,12 @@ export default function DocumentsPage() {
     if (openId && documents.length > 0) {
       const doc = documents.find(d => d.id === openId);
       if (doc) {
-        openEditor(doc);
+        handleOpenItem(doc);
         const newUrl = window.location.pathname;
         router.replace(newUrl);
       }
     }
-  }, [searchParams, documents, hasMounted, openEditor, router]);
+  }, [searchParams, documents, hasMounted, handleOpenItem, router]);
 
   const closeEditor = () => {
     if (editorRef.current) {
@@ -919,13 +929,81 @@ export default function DocumentsPage() {
 
   const getIconColor = (ext: string) => {
     switch (ext.toLowerCase()) {
-      case 'docx': case 'doc': case 'txt': return 'text-blue-500 bg-blue-500/10';
+      case 'docx': case 'doc': case 'txt': case 'md': return 'text-blue-500 bg-blue-500/10';
       case 'xlsx': case 'xls': case 'csv': return 'text-emerald-500 bg-emerald-500/10';
       case 'pptx': case 'ppt': return 'text-orange-500 bg-orange-500/10';
       case 'pdf': return 'text-rose-500 bg-rose-500/10';
+      case 'png': case 'jpg': case 'jpeg': case 'gif': case 'svg': case 'webp': return 'text-purple-500 bg-purple-500/10';
+      case 'zip': case 'rar': case '7z': case 'tar': case 'gz': return 'text-amber-500 bg-amber-500/10';
+      case 'mp3': case 'wav': case 'ogg': case 'm4a': return 'text-cyan-500 bg-cyan-500/10';
+      case 'mp4': case 'webm': case 'avi': case 'mov': case 'mkv': return 'text-indigo-500 bg-indigo-500/10';
+      case 'js': case 'ts': case 'tsx': case 'jsx': case 'json': case 'html': case 'css': case 'py': return 'text-violet-500 bg-violet-500/10';
       default: return 'text-slate-500 bg-slate-500/10';
     }
   };
+
+  const getFileIcon = (ext: string) => {
+    switch (ext.toLowerCase()) {
+      case 'docx': case 'doc': case 'txt': case 'md':
+        return FileText;
+      case 'xlsx': case 'xls': case 'csv':
+        return FileSpreadsheet;
+      case 'pptx': case 'ppt':
+        return Presentation;
+      case 'pdf':
+        return FileText;
+      case 'png': case 'jpg': case 'jpeg': case 'gif': case 'svg': case 'webp':
+        return FileImage;
+      case 'zip': case 'rar': case '7z': case 'tar': case 'gz':
+        return FileArchive;
+      case 'mp3': case 'wav': case 'ogg': case 'm4a':
+        return FileAudio;
+      case 'mp4': case 'webm': case 'avi': case 'mov': case 'mkv':
+        return FileVideo;
+      case 'js': case 'ts': case 'tsx': case 'jsx': case 'json': case 'html': case 'css': case 'py':
+        return FileCode;
+      default:
+        return File;
+    }
+  };
+
+  const getFileUrl = useCallback((docId: string) => {
+    const token = localStorage.getItem('authToken');
+    const baseUrl = apiClient.defaults.baseURL || '';
+    const cleanBaseUrl = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
+    return `${cleanBaseUrl}/api/onlyoffice/download/${docId}?token=${token}`;
+  }, []);
+
+  const handleDownloadFile = useCallback(async (doc: OnlyOfficeDoc) => {
+    const toastId = toast.loading(`Descargando ${doc.filename}...`);
+    try {
+      const response = await apiClient.get(`/api/onlyoffice/download/${doc.id}`, {
+        responseType: 'blob',
+      });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', doc.filename);
+      document.body.appendChild(link);
+      link.click();
+      link.parentNode?.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      toast.success('Descargado con éxito', { id: toastId });
+    } catch (error) {
+      console.error("Error downloading file:", error);
+      toast.error("Error al descargar el archivo", { id: toastId });
+    }
+  }, []);
+
+  const handleOpenItem = useCallback((doc: OnlyOfficeDoc) => {
+    const ext = doc.extension.toLowerCase();
+    const ONLYOFFICE_EXTENSIONS = ['docx', 'xlsx', 'pptx', 'doc', 'xls', 'ppt', 'txt', 'csv', 'md', 'pdf'];
+    if (ONLYOFFICE_EXTENSIONS.includes(ext)) {
+      openEditor(doc);
+    } else {
+      setPreviewDoc(doc);
+    }
+  }, [openEditor]);
 
   if (!hasMounted) return null;
 
@@ -1134,7 +1212,7 @@ export default function DocumentsPage() {
             id="file-upload"
             className="hidden"
             onChange={handleUpload}
-            accept=".docx,.xlsx,.pptx,.doc,.xls,.ppt,.txt,.csv,.pdf"
+            accept="*"
           />
         </div>
       </div>
@@ -1486,7 +1564,7 @@ export default function DocumentsPage() {
                            if (selectedDocs.length > 0 || selectedFolders.length > 0 || isMod) {
                              toggleDocSelection(doc.id, e as any);
                            } else {
-                             openEditor(doc);
+                             handleOpenItem(doc);
                            }
                         }}
                       >
@@ -1507,10 +1585,17 @@ export default function DocumentsPage() {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" className="w-48 rounded-xl border-border/40 shadow-xl">
-                              <DropdownMenuItem onClick={() => openEditor(doc)} className="gap-2 cursor-pointer py-2 px-3">
-                                <Edit3 className="h-4 w-4 text-primary" />
-                                <span className="font-medium">Editar Ahora</span>
-                              </DropdownMenuItem>
+                              {['docx', 'xlsx', 'pptx', 'doc', 'xls', 'ppt', 'txt', 'csv', 'md', 'pdf'].includes(doc.extension.toLowerCase()) ? (
+                                <DropdownMenuItem onClick={() => openEditor(doc)} className="gap-2 cursor-pointer py-2 px-3">
+                                  <Edit3 className="h-4 w-4 text-primary" />
+                                  <span className="font-medium">Editar Ahora</span>
+                                </DropdownMenuItem>
+                              ) : (
+                                <DropdownMenuItem onClick={() => setPreviewDoc(doc)} className="gap-2 cursor-pointer py-2 px-3">
+                                  <Eye className="h-4 w-4 text-primary" />
+                                  <span className="font-medium">Previsualizar</span>
+                                </DropdownMenuItem>
+                              )}
                               <DropdownMenuItem 
                                 onClick={() => {
                                   setItemToRename({id: doc.id, name: doc.filename, type: 'doc'});
@@ -1522,7 +1607,13 @@ export default function DocumentsPage() {
                                 <Edit3 className="h-4 w-4" />
                                 <span className="font-medium">Renombrar</span>
                               </DropdownMenuItem>
-                              <DropdownMenuItem className="gap-2 cursor-pointer py-2 px-3">
+                              <DropdownMenuItem 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDownloadFile(doc);
+                                }} 
+                                className="gap-2 cursor-pointer py-2 px-3"
+                              >
                                 <Download className="h-4 w-4" />
                                 <span className="font-medium">Descargar</span>
                               </DropdownMenuItem>
@@ -1577,16 +1668,26 @@ export default function DocumentsPage() {
                         </div>
 
                         {/* File Preview Area (Mock) */}
-                        <div className="flex-1 bg-muted/30 flex items-center justify-center p-6 border-b border-border/40">
-                          <div className={`p-4 rounded-3xl bg-background shadow-sm ${getIconColor(doc.extension)} transition-transform group-hover:scale-110 duration-500`}>
-                            <FileText className="h-14 w-14" />
-                          </div>
+                        <div className="flex-1 bg-muted/30 flex items-center justify-center border-b border-border/40 relative overflow-hidden">
+                          {['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp'].includes(doc.extension.toLowerCase()) ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img 
+                              src={getFileUrl(doc.id)} 
+                              alt={doc.filename} 
+                              className="object-cover w-full h-full transition-transform group-hover:scale-105 duration-500"
+                              loading="lazy"
+                            />
+                          ) : (
+                            <div className={`p-4 rounded-3xl bg-background shadow-sm ${getIconColor(doc.extension)} transition-transform group-hover:scale-110 duration-500`}>
+                              {React.createElement(getFileIcon(doc.extension), { className: "h-14 w-14" })}
+                            </div>
+                          )}
                         </div>
 
                         {/* File Info Area */}
                         <div className="p-4 bg-card h-24 flex flex-col justify-center">
                           <div className="flex items-center gap-2 mb-1">
-                            <FileText className={`h-4 w-4 shrink-0 ${getIconColor(doc.extension).split(' ')[0]}`} />
+                            {React.createElement(getFileIcon(doc.extension), { className: `h-4 w-4 shrink-0 ${getIconColor(doc.extension).split(' ')[0]}` })}
                             <h3 className="font-medium text-sm leading-tight truncate text-foreground" title={doc.filename}>
                               {doc.filename}
                             </h3>
@@ -1767,7 +1868,7 @@ export default function DocumentsPage() {
                      if (selectedDocs.length > 0 || selectedFolders.length > 0 || isMod) {
                        toggleDocSelection(doc.id, e as any);
                      } else {
-                       openEditor(doc);
+                       handleOpenItem(doc);
                      }
                   }}
                 >
@@ -1778,7 +1879,7 @@ export default function DocumentsPage() {
                       onClick={(e) => e.stopPropagation()}
                     />
                     <div className={`p-2 rounded-lg shadow-sm ${getIconColor(doc.extension)}`}>
-                      <FileText className="h-5 w-5" />
+                      {React.createElement(getFileIcon(doc.extension), { className: "h-5 w-5" })}
                     </div>
                     <span className="font-bold truncate group-hover:text-primary transition-colors" title={doc.filename}>{doc.filename}</span>
                   </div>
@@ -1801,10 +1902,17 @@ export default function DocumentsPage() {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" className="w-48 rounded-xl border-border/40 shadow-xl">
-                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); openEditor(doc); }} className="gap-2 cursor-pointer py-2 px-3">
-                            <Edit3 className="h-4 w-4 text-primary" />
-                            <span className="font-medium">Editar Ahora</span>
-                          </DropdownMenuItem>
+                          {['docx', 'xlsx', 'pptx', 'doc', 'xls', 'ppt', 'txt', 'csv', 'md', 'pdf'].includes(doc.extension.toLowerCase()) ? (
+                            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); openEditor(doc); }} className="gap-2 cursor-pointer py-2 px-3">
+                              <Edit3 className="h-4 w-4 text-primary" />
+                              <span className="font-medium">Editar Ahora</span>
+                            </DropdownMenuItem>
+                          ) : (
+                            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); setPreviewDoc(doc); }} className="gap-2 cursor-pointer py-2 px-3">
+                              <Eye className="h-4 w-4 text-primary" />
+                              <span className="font-medium">Previsualizar</span>
+                            </DropdownMenuItem>
+                          )}
                           <DropdownMenuItem 
                             onClick={(e) => {
                               e.stopPropagation();
@@ -1817,7 +1925,13 @@ export default function DocumentsPage() {
                             <Edit3 className="h-4 w-4" />
                             <span className="font-medium">Renombrar</span>
                           </DropdownMenuItem>
-                          <DropdownMenuItem onClick={(e) => e.stopPropagation()} className="gap-2 cursor-pointer py-2 px-3">
+                          <DropdownMenuItem 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDownloadFile(doc);
+                            }} 
+                            className="gap-2 cursor-pointer py-2 px-3"
+                          >
                             <Download className="h-4 w-4" />
                             <span className="font-medium">Descargar</span>
                           </DropdownMenuItem>
@@ -2328,6 +2442,103 @@ export default function DocumentsPage() {
             >
               Sí, eliminar
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* File Preview Dialog */}
+      <Dialog open={!!previewDoc} onOpenChange={(open) => !open && setPreviewDoc(null)}>
+        <DialogContent className="sm:max-w-xl rounded-[2rem] border-primary/10 shadow-2xl p-6 overflow-hidden flex flex-col max-h-[85vh]">
+          <DialogHeader className="pb-4 border-b border-border/40">
+            <DialogTitle className="text-xl font-bold truncate flex items-center gap-3 pr-6" title={previewDoc?.filename}>
+              {previewDoc && (
+                <div className={`p-2 rounded-xl shrink-0 ${getIconColor(previewDoc.extension)}`}>
+                  {React.createElement(getFileIcon(previewDoc.extension), { className: "h-5 w-5" })}
+                </div>
+              )}
+              <span className="truncate">{previewDoc?.filename}</span>
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto my-6 flex flex-col items-center justify-center min-h-[250px] bg-muted/20 rounded-2xl p-4 border border-border/40 relative">
+            {previewDoc && (() => {
+              const ext = previewDoc.extension.toLowerCase();
+              const fileUrl = getFileUrl(previewDoc.id);
+
+              if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp'].includes(ext)) {
+                return (
+                  <div className="relative max-w-full max-h-[50vh] flex items-center justify-center overflow-hidden rounded-xl shadow-inner">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img 
+                      src={fileUrl} 
+                      alt={previewDoc.filename} 
+                      className="object-contain max-w-full max-h-[45vh] rounded-lg transition-transform hover:scale-105 duration-300"
+                    />
+                  </div>
+                );
+              }
+
+              if (['mp3', 'wav', 'ogg', 'm4a'].includes(ext)) {
+                return (
+                  <div className="w-full max-w-md flex flex-col items-center gap-4 py-8 px-6 bg-background rounded-2xl shadow-sm border border-border/30">
+                    <div className={`p-5 rounded-full ${getIconColor(ext)} animate-pulse`}>
+                      {React.createElement(getFileIcon(ext), { className: "h-10 w-10" })}
+                    </div>
+                    <span className="text-xs text-muted-foreground font-medium uppercase tracking-wider">{previewDoc.extension} Audio</span>
+                    <audio 
+                      src={fileUrl} 
+                      controls 
+                      className="w-full mt-2"
+                    />
+                  </div>
+                );
+              }
+
+              if (['mp4', 'webm', 'mov'].includes(ext)) {
+                return (
+                  <div className="w-full max-w-lg aspect-video flex items-center justify-center bg-black rounded-2xl overflow-hidden shadow-lg border border-border/20">
+                    <video 
+                      src={fileUrl} 
+                      controls 
+                      className="w-full h-full object-contain"
+                    />
+                  </div>
+                );
+              }
+
+              return (
+                <div className="flex flex-col items-center text-center max-w-sm gap-4 py-10 px-6">
+                  <div className={`p-6 rounded-3xl bg-background shadow-md ${getIconColor(ext)}`}>
+                    {React.createElement(getFileIcon(ext), { className: "h-14 w-14" })}
+                  </div>
+                  <div className="space-y-1">
+                    <p className="font-semibold text-foreground text-lg">Archivo .{previewDoc.extension.toUpperCase()}</p>
+                    <p className="text-sm text-muted-foreground">Este tipo de archivo no se puede previsualizar en el navegador.</p>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0 pt-4 border-t border-border/40">
+            <Button 
+              variant="outline" 
+              onClick={() => setPreviewDoc(null)}
+              className="rounded-xl h-11 px-5 border-border/60 hover:bg-muted"
+            >
+              Cerrar
+            </Button>
+            {previewDoc && (
+              <Button 
+                onClick={() => {
+                  handleDownloadFile(previewDoc);
+                }}
+                className="rounded-xl h-11 px-5 gap-2 shadow-md hover:shadow-lg transition-all"
+              >
+                <Download className="h-4 w-4" />
+                Descargar Archivo
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

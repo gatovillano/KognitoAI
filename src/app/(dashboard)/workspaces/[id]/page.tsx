@@ -1392,9 +1392,9 @@ export default function WorkspaceDashboard({ params }: PageProps) {
               <div>
                 <h2 className="text-xl sm:text-2xl font-semibold flex items-center">
                   <FileText className="mr-2 sm:mr-3 h-5 w-5 sm:h-6 sm:w-6 text-primary" />
-                  Documentos del Workspace
+                  Archivos del Workspace
                 </h2>
-                <p className="text-xs sm:text-sm text-muted-foreground mt-1">Archivos editables e indexables en OnlyOffice</p>
+                <p className="text-xs sm:text-sm text-muted-foreground mt-1">Documentos editables y otros archivos almacenados</p>
               </div>
               <div className="flex items-center gap-2">
                 <input
@@ -1402,12 +1402,12 @@ export default function WorkspaceDashboard({ params }: PageProps) {
                   id="workspace-onlyoffice-upload-tab"
                   className="hidden"
                   onChange={handleOnlyOfficeUpload}
-                  accept=".docx,.xlsx,.pptx,.doc,.xls,.ppt,.txt,.csv"
+                  accept="*"
                 />
                 <Button asChild size="sm" className="text-xs cursor-pointer">
                   <label htmlFor="workspace-onlyoffice-upload-tab" className="flex items-center gap-1.5 cursor-pointer">
                     <Plus className="h-3.5 w-3.5" />
-                    Subir Documento
+                    Subir Archivo
                   </label>
                 </Button>
               </div>
