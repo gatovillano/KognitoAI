@@ -247,7 +247,7 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
           <Button
             variant={pathname === `/chat/${thread.id}` ? "secondary" : "ghost"}
             className={cn(
-              "w-full font-normal items-start text-left transition-all duration-200 hover:bg-muted rounded-xl overflow-hidden",
+              "w-full font-normal items-start text-left transition-all duration-200 hover:bg-muted rounded-xl overflow-hidden whitespace-normal",
               isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-auto py-1.5 px-2",
               pathname === `/chat/${thread.id}` && "bg-primary/10 text-primary border border-primary/20"
             )}

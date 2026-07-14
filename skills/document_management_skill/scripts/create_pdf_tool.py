@@ -50,6 +50,7 @@ class CreatePDFTool(BaseTool):
     """
     A LangChain tool that converts HTML or Markdown text into a styled PDF document.
     """
+    name: str = "create_pdf_tool"
     description: str = (
         "Genera documentos PDF de CALIDAD PROFESIONAL y diseño avanzado. "
         "EL TAMAÑO DE PÁGINA ES ESTRICTAMENTE A4 (210mm x 297mm / 21cm x 29.7cm). "

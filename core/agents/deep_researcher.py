@@ -329,8 +329,17 @@ async def final_report_generation(state: AgentState, config: RunnableConfig) -> 
     )
 
     # Retrieve findings from the state
-    findings = "\n\n".join(state.get("notes", []))
-    logger.info(f"🔍 [DeepResearcher Diagnostics] Total notes: {len(state.get('notes', []))}, Findings length: {len(findings)} chars. Preview: {findings[:200]}")
+    notes = state.get("notes", [])
+    findings = "\n\n".join(notes)
+    logger.info(f"🔍 [DeepResearcher Diagnostics] Total notes: {len(notes)}, Findings length: {len(findings)} chars. Preview: {findings[:200]}")
+    
+    # If notes are empty, try to fallback to raw_notes (which might be populated by supervisor_tools)
+    if not findings:
+        raw_notes = state.get("raw_notes", [])
+        if raw_notes:
+            logger.info(f"⚠️ [DeepResearcher] 'notes' empty, falling back to 'raw_notes'. Count: {len(raw_notes)}")
+            findings = "\n\n".join(raw_notes)
+    
     
     # LIMITAR FUENTES CONFIGURABLE
     sources = state.get("sources", [])
