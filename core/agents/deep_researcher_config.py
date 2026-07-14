@@ -36,16 +36,16 @@ class Configuration(BaseModel):
     """Main configuration class for the Deep Research agent."""
     
     # General Configuration
-    max_structured_output_retries: int = Field(default=3)
-    allow_clarification: bool = Field(default=True)
-    max_concurrent_research_units: int = Field(default=5)
+    max_structured_output_retries: int = Field(default=5)
+    allow_clarification: bool = Field(default=False)
+    max_concurrent_research_units: int = Field(default=8)
     max_clarification_attempts: int = Field(default=3) # Added this line
 
     # Research Configuration
     search_api: SearchAPI = Field(default=SearchAPI.TAVILY)
-    max_researcher_iterations: int = Field(default=3)
-    max_react_tool_calls: int = Field(default=5)
-    max_sources_for_report: int = Field(default=30) # Límite configurable de fuentes para el reporte
+    max_researcher_iterations: int = Field(default=5)
+    max_react_tool_calls: int = Field(default=8)
+    max_sources_for_report: int = Field(default=150) # Límite configurable de fuentes para el reporte
 
     # Model Configuration
     # We can define different models for different tasks
