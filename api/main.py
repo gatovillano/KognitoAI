@@ -96,7 +96,7 @@ app.add_middleware(SlowAPIMiddleware)
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     # Loguear siempre el error completo en el servidor para debugging
-    logger.error(f"Request validation error for {request.method} {request.url}: {json.dumps(exc.errors(), indent=2)}")
+    logger.error(f"Request validation error for {request.method} {request.url}: {json.dumps(jsonable_encoder(exc.errors()), indent=2)}")
     
     # En producción (DEBUG_MODE=False), ocultar los detalles exactos de la falla
     detail = exc.errors() if settings.debug_mode else "Error de validación en la solicitud. Verifique los campos enviados."
