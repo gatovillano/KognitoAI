@@ -3,6 +3,7 @@
 import logging
 import uuid
 import json
+import math
 from typing import List, Optional, Any, Dict
 from datetime import datetime, timezone
 import pandas as pd
@@ -14,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from core.database import UserTable, UserTableRow, get_db_session
 from utils.security import get_current_account_id
+from utils.helpers import clean_nan_values
 
 logger = logging.getLogger(__name__)
 
@@ -480,8 +482,8 @@ async def get_table_stats(
         correlations = df[numeric_cols].corr().to_dict()
     
     return {
-        "statistics": stats,
-        "correlations": correlations,
+        "statistics": clean_nan_values(stats),
+        "correlations": clean_nan_values(correlations),
         "numeric_columns": numeric_cols
     }
 
@@ -526,14 +528,14 @@ async def get_table_prediction(
         from scipy import stats as scipy_stats
         slope, intercept, r_value, p_value, std_err = scipy_stats.linregress(df_clean[x_col], df_clean[y_col])
         
-        return {
+        return clean_nan_values({
             "slope": slope,
             "intercept": intercept,
-            "r_squared": r_value**2,
+            "r_squared": r_value**2 if not (math.isnan(r_value) if isinstance(r_value, float) or hasattr(r_value, 'dtype') else False) else None,
             "p_value": p_value,
             "std_err": std_err,
             "equation": f"y = {slope:.4f}x + {intercept:.4f}"
-        }
+        })
     except Exception as e:
         logger.error(f"Error en análisis predictivo: {e}")
         raise HTTPException(status_code=500, detail="Error al calcular la regresión.")

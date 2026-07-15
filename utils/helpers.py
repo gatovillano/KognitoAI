@@ -118,3 +118,25 @@ def markdown_to_telegram_html(text: str) -> str:
 #     import string
 #     alphabet = string.ascii_lowercase + string.digits
 #     return ''.join(secrets.choice(alphabet) for _ in range(length))
+
+
+import math
+from typing import Any
+
+def clean_nan_values(val: Any) -> Any:
+    """
+    Recursivamente convierte valores flotantes no válidos (NaN, Inf, -Inf) en None,
+    lo que los hace compatibles con la serialización JSON.
+    """
+    if isinstance(val, float):
+        if math.isnan(val) or math.isinf(val):
+            return None
+        return val
+    elif isinstance(val, dict):
+        return {k: clean_nan_values(v) for k, v in val.items()}
+    elif isinstance(val, list):
+        return [clean_nan_values(v) for v in val]
+    elif isinstance(val, tuple):
+        return tuple(clean_nan_values(v) for v in val)
+    return val
+
