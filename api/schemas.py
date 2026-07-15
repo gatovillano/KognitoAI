@@ -15,6 +15,8 @@ class UserSettingsResponse(BaseModel):
     profiles_enabled: bool
     galleries_enabled: bool
     forms_enabled: bool
+    skills_enabled: bool
+    heartbeat_enabled: bool
     theme: str
     notifications_email: bool
     notifications_push: bool
@@ -79,6 +81,8 @@ class UserSettingsUpdateRequest(BaseModel):
     profiles_enabled: Optional[bool] = None
     galleries_enabled: Optional[bool] = None
     forms_enabled: Optional[bool] = None
+    skills_enabled: Optional[bool] = None
+    heartbeat_enabled: Optional[bool] = None
     theme: Optional[str] = None
     notifications_email: Optional[bool] = None
     notifications_push: Optional[bool] = None
