@@ -37,6 +37,7 @@ export const SettingsNav: React.FC<SettingsNavProps> = ({ activeTab, setActiveTa
     if (!settings) return true;
     if (item.id === 'skills' && !settings.skills_enabled) return false;
     if (item.id === 'heartbeat' && !settings.heartbeat_enabled) return false;
+    if (item.id === 'ai-profile' && !settings.profiles_enabled) return false;
     return true;
   });
 
