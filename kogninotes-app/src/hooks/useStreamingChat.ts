@@ -14,18 +14,28 @@ interface StreamChatRequest {
   account_id: string;
   user_message: string;
   mode?: string;
+  workspace_id?: string;
 }
 
 export const useStreamingChat = (options: StreamingChatOptions = {}) => {
   const [isLoading, setIsLoading] = useState(false);
   const [currentResponse, setCurrentResponse] = useState('');
-  const [currentReasoning, setCurrentReasoning] = useState(''); // Estado para pensamiento
+  const [currentReasoning, setCurrentReasoning] = useState('');
+  
+  // Nuevos estados para alineación con web
+  const [toolName, setToolName] = useState<string | undefined>(undefined);
+  const [reactState, setReactState] = useState<string | undefined>(undefined);
+  const [isDeepResearchActive, setIsDeepResearchActive] = useState(false);
+  const [researchProgress, setResearchProgress] = useState(0);
+  const [researchStatus, setResearchStatus] = useState('Iniciando investigación...');
+  const [isThinking, setIsThinking] = useState(false);
+  const [researchCompletedEvent, setResearchCompletedEvent] = useState(false);
+
   const wsRef = useRef<WebSocket | null>(null);
   const responseBuffer = useRef('');
-  const reasoningBuffer = useRef(''); // Buffer para pensamiento
+  const reasoningBuffer = useRef('');
   const currentTaskId = useRef<string | null>(null);
 
-  // Limpiar WebSocket al desmontar
   useEffect(() => {
     return () => {
       if (wsRef.current) wsRef.current.close();
@@ -37,10 +47,8 @@ export const useStreamingChat = (options: StreamingChatOptions = {}) => {
       return wsRef.current;
     }
 
-    // Construir URL del WebSocket correctamente a partir del origen del API
-    // API_URL: 'https://apibase.cuerpolibre.cl/api' -> WS: 'wss://apibase.cuerpolibre.cl'
     const httpBase = API_URL.endsWith('/api')
-      ? API_URL.slice(0, -4)  // quita el '/api' final
+      ? API_URL.slice(0, -4)
       : API_URL;
     const wsBase = httpBase.replace(/^http/, 'ws');
     const wsUrl = `${wsBase}/ws/${accountId}?token=${token}`;
@@ -58,25 +66,72 @@ export const useStreamingChat = (options: StreamingChatOptions = {}) => {
         try {
           const data = JSON.parse(e.data);
           
-          // Solo procesar si es el taskId actual o si no hay taskId (broadcast)
           if (currentTaskId.current && data.taskId && data.taskId !== currentTaskId.current) return;
 
-          if (data.type === 'stream_chunk') {
-            responseBuffer.current += data.chunk;
-            setCurrentResponse(responseBuffer.current);
-            options.onChunk?.(data.chunk);
-          } else if (data.type === 'reasoning_chunk') {
-            reasoningBuffer.current += data.chunk;
-            setCurrentReasoning(reasoningBuffer.current);
-            options.onChunk?.(data.chunk);
-          } else if (data.type === 'stream_end') {
-            const final = responseBuffer.current;
-            options.onComplete?.(final);
-            setIsLoading(false);
-            currentTaskId.current = null;
-          } else if (data.type === 'error') {
-            options.onError?.(data.message);
-            setIsLoading(false);
+          switch (data.type) {
+            case 'stream_start':
+              setIsLoading(true);
+              setIsThinking(true);
+              break;
+            case 'reasoning_chunk':
+              setIsThinking(false);
+              reasoningBuffer.current += data.chunk;
+              setCurrentReasoning(reasoningBuffer.current);
+              options.onChunk?.(data.chunk);
+              break;
+            case 'stream_chunk':
+              setIsThinking(false);
+              responseBuffer.current += data.chunk;
+              setCurrentResponse(responseBuffer.current);
+              options.onChunk?.(data.chunk);
+              break;
+            case 'tool_start':
+              setToolName(data.tool_name);
+              setReactState('ejecutando');
+              setIsThinking(true);
+              if (data.tool_name === 'deep_research') {
+                setIsDeepResearchActive(true);
+              }
+              break;
+            case 'tool_end':
+            case 'tool_error':
+              if (data.tool_name === 'deep_research') {
+                const isBackground = data.background_completion === true;
+                if (isBackground || data.type === 'tool_error') {
+                  setIsDeepResearchActive(false);
+                  if (data.type === 'tool_end') {
+                    setResearchCompletedEvent(true);
+                  }
+                }
+              }
+              setToolName(undefined);
+              setReactState(undefined);
+              setIsThinking(false);
+              break;
+            case 'progress':
+              if (data.progress !== undefined) {
+                setResearchProgress(data.progress);
+              }
+              if (data.message) {
+                setResearchStatus(data.message);
+              }
+              break;
+            case 'stream_end':
+              const final = responseBuffer.current;
+              options.onComplete?.(final);
+              setIsLoading(false);
+              setIsThinking(false);
+              setToolName(undefined);
+              setReactState(undefined);
+              currentTaskId.current = null;
+              break;
+            case 'error':
+              options.onError?.(data.message || 'Error en la respuesta.');
+              setIsLoading(false);
+              setIsThinking(false);
+              setToolName(undefined);
+              setReactState(undefined);
+              break;
           }
         } catch (err) {
           console.debug('WS Non-JSON message:', e.data);
@@ -99,8 +154,13 @@ export const useStreamingChat = (options: StreamingChatOptions = {}) => {
 
   const sendMessage = useCallback(async (request: StreamChatRequest) => {
     setIsLoading(true);
+    setIsThinking(true);
     setCurrentResponse('');
     setCurrentReasoning('');
+    setToolName(undefined);
+    setReactState(undefined);
+    setResearchProgress(0);
+    setResearchStatus('Iniciando investigación...');
     responseBuffer.current = '';
     reasoningBuffer.current = '';
 
@@ -108,10 +168,8 @@ export const useStreamingChat = (options: StreamingChatOptions = {}) => {
       const token = await SecureStore.getItemAsync('userToken');
       if (!token) throw new Error('No auth token found');
 
-      // 1. Asegurar conexión WebSocket
       await connectWebSocket(request.account_id, token);
 
-      // 2. Enviar petición inicial via HTTP
       const response = await fetch(`${API_URL}/chat`, {
         method: 'POST',
         headers: {
@@ -132,16 +190,17 @@ export const useStreamingChat = (options: StreamingChatOptions = {}) => {
       console.error('Streaming error:', error);
       options.onError?.(error instanceof Error ? error.message : 'Unknown error');
       setIsLoading(false);
+      setIsThinking(false);
     }
   }, [connectWebSocket, options]);
 
   const cancelStream = useCallback(() => {
     if (wsRef.current) {
-        // Enviar cancelación si el backend lo soporta, o simplemente cerrar
         wsRef.current.close();
         wsRef.current = null;
     }
     setIsLoading(false);
+    setIsThinking(false);
   }, []);
 
   return {
@@ -150,6 +209,13 @@ export const useStreamingChat = (options: StreamingChatOptions = {}) => {
     isLoading,
     currentResponse,
     currentReasoning,
+    toolName,
+    reactState,
+    isDeepResearchActive,
+    researchProgress,
+    researchStatus,
+    isThinking,
+    researchCompletedEvent,
+    setResearchCompletedEvent,
   };
 };
-
