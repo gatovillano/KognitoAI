@@ -1392,10 +1392,17 @@ async def get_db_session() -> AsyncIterator[AsyncSession]:
     Dependencia de FastAPI para obtener una sesión de base de datos asíncrona.
     Este es el patrón estándar para la inyección de dependencias de sesiones en FastAPI.
     """
+    from fastapi.exceptions import RequestValidationError
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+    from fastapi import WebSocketDisconnect
+
     session = SessionLocal()
     try:
         yield session
         await session.commit()
+    except (RequestValidationError, StarletteHTTPException, WebSocketDisconnect):
+        await session.rollback()
+        raise
     except Exception as e:
         logger.error(f"Error en la sesión de la base de datos: {e}", exc_info=True)
         await session.rollback()
