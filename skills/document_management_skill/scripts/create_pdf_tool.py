@@ -188,50 +188,102 @@ class CreatePDFTool(BaseTool):
 
 
 
-    def _get_modern_css(self) -> str:
+    def _format_css_string(self, text: str) -> str:
+        """Format string replacing placeholders with CSS counters."""
+        escaped = text.replace('"', '\\"')
+        # Split by [page] and [pages] to insert them outside the CSS quotes
+        parts = re.split(r'(\[page\]|\[pages\])', escaped)
+        formatted_parts = []
+        for part in parts:
+            if part == '[page]':
+                formatted_parts.append('counter(page)')
+            elif part == '[pages]':
+                formatted_parts.append('counter(pages)')
+            elif part:
+                formatted_parts.append(f'"{part}"')
+        return " ".join(formatted_parts)
+
+    def _get_modern_css(
+        self,
+        orientation: str = "portrait",
+        margin: str = "2cm",
+        theme: str = "modern",
+        header_text: Optional[str] = None,
+        footer_text: Optional[str] = None
+    ) -> str:
         """Returns a high-end professional CSS string for the PDF styling."""
-        return """
-        @page {
-            size: A4;
-            /* Márgenes definidos en CSS - configurables según necesidad */
-            margin: 2cm;
-            @top-right {
-                content: "Página " counter(page) " de " counter(pages);
+        # Theme mapping
+        if theme == "emerald":
+            primary = "#10b981"
+            primary_light = "#ecfdf5"
+            primary_dark = "#047857"
+            secondary = "#64748b"
+        elif theme == "amber":
+            primary = "#f59e0b"
+            primary_light = "#fffbeb"
+            primary_dark = "#b45309"
+            secondary = "#78716c"
+        elif theme == "minimalist":
+            primary = "#0f172a"
+            primary_light = "#f8fafc"
+            primary_dark = "#000000"
+            secondary = "#475569"
+        else:  # modern (default)
+            primary = "#2563eb"
+            primary_light = "#eff6ff"
+            primary_dark = "#1e40af"
+            secondary = "#64748b"
+
+        # Headers and footers
+        header_val = header_text if header_text is not None else "Página [page] de [pages]"
+        footer_val = footer_text if footer_text is not None else "Generado por KAI AI System"
+
+        css_header = self._format_css_string(header_val)
+        css_footer = self._format_css_string(footer_val)
+
+        return f"""
+        @page {{
+            size: A4 {orientation};
+            margin: {margin};
+            @top-right {{
+                content: {css_header};
                 font-family: 'Inter', sans-serif;
                 font-size: 8pt;
                 color: #a0aec0;
-            }
-            @bottom-left {
-                content: "Generado por KAI AI System";
+            }}
+            @bottom-left {{
+                content: {css_footer};
                 font-family: 'Inter', sans-serif;
                 font-size: 8pt;
                 color: #a0aec0;
-            }
-        }
+            }}
+        }}
 
         /* Página sin márgenes para fondos completos */
-        @page :first {
+        @page :first {{
             margin: 0;
-            @top-right { content: none; }
-            @bottom-left { content: none; }
-        }
+            @top-right {{ content: none; }}
+            @bottom-left {{ content: none; }}
+        }}
         
-        :root {
-            --primary: #2563eb;
-            --secondary: #64748b;
+        :root {{
+            --primary: {primary};
+            --primary-light: {primary_light};
+            --primary-dark: {primary_dark};
+            --secondary: {secondary};
             --dark: #1e293b;
             --light: #f8fafc;
             --border: #e2e8f0;
             --success: #10b981;
             --warning: #f59e0b;
             --error: #ef4444;
-        }
+        }}
 
-        body {
+        body {{
             font-family: 'Inter', 'Segoe UI', Roboto, sans-serif;
             line-height: 1.6;
             color: var(--dark);
-        /* Cover Page */        .cover {
+        /* Cover Page */        .cover {{
             width: 21cm;
             height: 29.7cm;
             margin: 0;
@@ -245,125 +297,125 @@ class CreatePDFTool(BaseTool):
             box-sizing: border-box;
             page-break-after: always;
             position: relative;
-        }
-        .cover * {
+        }}
+        .cover * {{
             color: #ffffff;
-        }
-        .cover h1 {
+        }}
+        .cover h1 {{
             font-size: 32pt;
             margin-bottom: 0.3em;
             border: none;
             line-height: 1.2;
-        }
-        .cover .subtitle {
+        }}
+        .cover .subtitle {{
             font-size: 14pt;
             color: #c8d6e5;
             max-width: 17cm;
             margin: 0 auto;
             line-height: 1.4;
-        }
-        .cover .meta {
+        }}
+        .cover .meta {{
             font-size: 9pt;
             color: #8899bb;
             margin-top: 2em;
-        }            box-sizing: border-box;
+        }}            box-sizing: border-box;
             page-break-after: always;
-        }
-        .cover * {
+        }}
+        .cover * {{
             color: #ffffff;
-        }
-        .cover h1 {
+        }}
+        .cover h1 {{
             font-size: 32pt;
             margin-bottom: 0.3em;
             border: none;
             line-height: 1.2;
-        }
-        .cover .subtitle {
+        }}
+        .cover .subtitle {{
             font-size: 14pt;
             color: #c8d6e5;
             max-width: 12cm;
             margin: 0 auto;
             line-height: 1.4;
-        }
-        .cover .meta {
+        }}
+        .cover .meta {{
             font-size: 9pt;
             color: #8899bb;
             margin-top: 2em;
-        }
+        }}
 
-        .content {
+        .content {{
             max-width: 17cm;
-        }
+        }}
 
-        h1 {
+        h1 {{
             color: var(--dark);
             border-bottom: 3px solid var(--primary);
             padding-bottom: 0.3em;
             margin-top: 1.5em;
             font-size: 22pt;
             font-weight: 800;
-        }
+        }}
 
-        h2 {
+        h2 {{
             color: var(--primary);
             margin-top: 1.8em;
             font-size: 16pt;
             font-weight: 700;
             border-bottom: 1px solid var(--border);
             padding-bottom: 0.2em;
-        }
+        }}
 
-        h3 {
+        h3 {{
             color: var(--secondary);
             margin-top: 1.5em;
             font-size: 12pt;
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.05em;
-        }
+        }}
 
-        p { margin-bottom: 1em; text-align: justify; }
+        p {{ margin-bottom: 1em; text-align: justify; }}
 
         /* Component: Card */
-        .card {
+        .card {{
             background: var(--light);
             border: 1px solid var(--border);
             border-radius: 12px;
             padding: 1.5em;
             margin: 1.5em 0;
             page-break-inside: avoid;
-        }
+        }}
 
         /* Component: Boxes */
-        .info-box, .warning-box, .error-box {
+        .info-box, .warning-box, .error-box {{
             padding: 1em 1.5em;
             border-radius: 8px;
             margin: 1.5em 0;
             border-left: 5px solid;
             page-break-inside: avoid;
-        }
-        .info-box { background: #eff6ff; border-color: var(--primary); color: #1e40af; }
-        .warning-box { background: #fffbeb; border-color: var(--warning); color: #92400e; }
-        .error-box { background: #fef2f2; border-color: var(--error); color: #991b1b; }
+        }}
+        .info-box {{ background: #eff6ff; border-color: var(--primary); color: #1e40af; }}
+        .warning-box {{ background: #fffbeb; border-color: var(--warning); color: #92400e; }}
+        .error-box {{ background: #fef2f2; border-color: var(--error); color: #991b1b; }}
 
         /* Grid Layout */
-        .grid-2 {
+        .grid-2 {{
             display: flex;
             gap: 20px;
             margin: 1.5em 0;
-        }
-        .grid-2 > div { flex: 1; }
+        }}
+        .grid-2 > div {{ flex: 1; }}
 
-        code {
+        code {{
             background-color: #f1f5f9;
             padding: 0.2em 0.4em;
             border-radius: 4px;
             font-family: 'Fira Code', 'DejaVu Sans Mono', monospace;
             font-size: 0.9em;
             color: #be185d;
-        }
+        }}
 
-        pre {
+        pre {{
             background-color: #0f172a;
             color: #f8fafc;
             padding: 1.2em;
@@ -372,33 +424,33 @@ class CreatePDFTool(BaseTool):
             margin-bottom: 1.5em;
             border-left: 5px solid var(--primary);
             white-space: pre-wrap;
-        }
+        }}
 
-        table {
+        table {{
             width: 100%;
             border-collapse: collapse;
             margin: 2em 0;
             font-size: 9.5pt;
-        }
-        th {
+        }}
+        th {{
             background-color: #f1f5f9;
             color: var(--dark);
             font-weight: 700;
             text-align: left;
             padding: 12px;
             border-bottom: 2px solid var(--border);
-        }
-        td {
+        }}
+        td {{
             padding: 10px 12px;
             border-bottom: 1px solid var(--border);
-        }
-        tr:nth-child(even) { background-color: #f8fafc; }
+        }}
+        tr:nth-child(even) {{ background-color: #f8fafc; }}
 
-        .mermaid-diagram {
+        .mermaid-diagram {{
             background: #fff !important;
             border: 1px solid var(--border) !important;
             box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
-        }
+        }}
         """
 
     def _repair_markdown(self, content: str) -> str:
@@ -554,18 +606,30 @@ class CreatePDFTool(BaseTool):
                 logger.info("Content contains HTML tags. Treating as HTML.")
                 is_html = True
 
+            # Generate the dynamic base CSS block
+            modern_css = self._get_modern_css(
+                orientation=orientation,
+                margin=margin,
+                theme=theme,
+                header_text=header_text,
+                footer_text=footer_text
+            )
+            
+            custom_css_style = f"\n<style>\n{custom_css}\n</style>\n" if custom_css else ""
+
             if is_html:
-                # 3a. Process Mermaid blocks even in HTML (they might be inside pre/code or just blocks)
                 content = self._process_mermaid_blocks(content)
-                
-                # Check if it's a full document or just a fragment
                 is_full_doc = re.search(r'<(html|body|head)', content, re.IGNORECASE)
                 if is_full_doc:
-                    # It's a full document, use it as is
-                    full_html = content
+                    # Inject CSS into full HTML head
+                    css_to_inject = f"\n<style>\n{modern_css}\n</style>\n" + custom_css_style
+                    if re.search(r'</head>', content, re.IGNORECASE):
+                        full_html = re.sub(r'(</head>)', f"{css_to_inject}\\1", content, flags=re.IGNORECASE, count=1)
+                    elif re.search(r'<body>', content, re.IGNORECASE):
+                        full_html = re.sub(r'(<body>)', f"\\1{css_to_inject}", content, flags=re.IGNORECASE, count=1)
+                    else:
+                        full_html = css_to_inject + content
                 else:
-                    # It's a fragment, wrap it in our modern boilerplate
-                    final_html_body = content
                     full_html = f"""
                     <!DOCTYPE html>
                     <html lang="es">
@@ -573,35 +637,28 @@ class CreatePDFTool(BaseTool):
                         <meta charset="UTF-8">
                         <title>{title}</title>
                         <style>
-                            {self._get_modern_css()}
+                            {modern_css}
                             .content ul, .content ol {{ margin-left: 20px; padding-left: 10px; }}
                             .content li {{ margin-bottom: 5px; }}
                             .content table {{ border: 1px solid #ccc; margin: 20px 0; }}
                         </style>
+                        {custom_css_style}
                     </head>
                     <body>
                         <div class="footer">Generado por KAI - {datetime.now().strftime('%d/%m/%Y %H:%M')}</div>
                         <div class="content">
-                            {final_html_body}
+                            {content}
                         </div>
                     </body>
                     </html>
                     """
             else:
-                # Repair structure (fix missing newlines)
                 repaired_content = self._repair_markdown(content)
-                
-                # Process Mermaid blocks before markdown conversion
                 processed_content = self._process_mermaid_blocks(repaired_content)
-                
-                # Convert Markdown to HTML using 'extra' for full feature support
                 final_html_body = markdown.markdown(
                     processed_content, 
                     extensions=['extra', 'toc', 'nl2br', 'sane_lists']
                 )
-
-                
-                # Wrap fragment in boilerplate
                 full_html = f"""
                 <!DOCTYPE html>
                 <html lang="es">
@@ -609,11 +666,12 @@ class CreatePDFTool(BaseTool):
                     <meta charset="UTF-8">
                     <title>{title}</title>
                     <style>
-                        {self._get_modern_css()}
+                        {modern_css}
                         .content ul, .content ol {{ margin-left: 20px; padding-left: 10px; }}
                         .content li {{ margin-bottom: 5px; }}
                         .content table {{ border: 1px solid #ccc; margin: 20px 0; }}
                     </style>
+                    {custom_css_style}
                 </head>
                 <body>
                     <div class="footer">Generado por KAI - {datetime.now().strftime('%d/%m/%Y %H:%M')}</div>
@@ -627,10 +685,11 @@ class CreatePDFTool(BaseTool):
             # 5. Generate PDF using WeasyPrint
             import asyncio
             loop = asyncio.get_event_loop()
+            workspace_dir = os.getcwd()
             
             await loop.run_in_executor(
                 None,
-                lambda: HTML(string=full_html).write_pdf(file_path)
+                lambda: HTML(string=full_html, base_url=workspace_dir).write_pdf(file_path)
             )
             
             logger.info(f"✅ PDF successfully generated at: {file_path}")
