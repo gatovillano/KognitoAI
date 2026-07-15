@@ -14,8 +14,8 @@ export interface PaginatedWorkspacesResponse {
 }
 
 export const workspaceService = {
-    listWorkspaces: async (): Promise<PaginatedWorkspacesResponse> => {
-        const response = await api.get('/workspaces');
+    listWorkspaces: async (limit: number = 100): Promise<PaginatedWorkspacesResponse> => {
+        const response = await api.get('/workspaces', { params: { limit } });
         // El backend devuelve { total: X, workspaces: [...] }
         return response.data;
     }
