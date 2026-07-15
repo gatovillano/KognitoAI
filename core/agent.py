@@ -967,6 +967,22 @@ async def call_model_node(state: AgentState):
     # 1. Construir el prompt del sistema dinámicamente y cargar metadatos en paralelo
     user_message = extract_text_content(state["messages"][-1].content)
 
+    # Construir un query context-aware combinando el último mensaje y los últimos mensajes humanos
+    # Esto evita que las herramientas desaparezcan en turnos de confirmación (ej: "sí, hazlo")
+    tool_query_parts = []
+    if state.get("messages"):
+        last_msg_text = extract_text_content(state["messages"][-1].content)
+        if last_msg_text.strip():
+            tool_query_parts.append(last_msg_text)
+    
+    human_messages = [msg for msg in state.get("messages", []) if isinstance(msg, HumanMessage)]
+    for hm in human_messages[-3:]:
+        hm_text = extract_text_content(hm.content)
+        if hm_text.strip() and hm_text not in tool_query_parts:
+            tool_query_parts.append(hm_text)
+            
+    tool_query = " ".join(tool_query_parts)
+
     logger.info(
         f"🚀 Cargando metadatos del agente en paralelo para cuenta {state['account_id']}..."
     )
@@ -978,14 +994,14 @@ async def call_model_node(state: AgentState):
         telegram_id=state.get("telegram_id"),
         thread_id=state["thread_id"],
         workspace_id=state.get("workspace_id"),
-        query=user_message,
+        query=tool_query,
     )
     llm_preview_task = get_llm_for_user(state["account_id"], purpose="main")
 
     # Semantic skill search (async)
     skill_manager = get_skill_manager()
     semantic_skills_task = skill_manager.search_skills_semantic(
-        user_message,
+        tool_query,
         top_k=4,
         account_id=state["account_id"],
         workspace_name=workspace_name,
