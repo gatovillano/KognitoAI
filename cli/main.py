@@ -1,277 +1,219 @@
-"""
-cli/main.py
-Punto de entrada principal del CLI de KognitoAI.
-Uso: python -m cli [COMMAND] o kognito [COMMAND]
-"""
-from __future__ import annotations
-
-import asyncio
 import os
+import json
+import threading
 import sys
-from pathlib import Path
+import time
+from PIL import Image, ImageDraw
+import customtkinter as ctk
+import pystray
+from pystray import MenuItem as item
 
-import click
-from rich.console import Console
-from rich.panel import Panel
-from rich.table import Table
-from rich.theme import Theme
+# Set appearance mode
+ctk.set_appearance_mode("Dark")
+ctk.set_default_color_theme("blue")
 
-# Asegurar que el root del proyecto esté en el path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Import the SyncManager
+from sync_logic import KognitoSyncManager
 
-from cli.core.config import CLIConfig
+CONFIG_PATH = os.path.expanduser("~/.config/kognito-sync/config.json")
 
-console = Console(theme=Theme({
-    "info": "bold #6C63FF",
-    "success": "bold #10b981",
-    "warning": "bold #f59e0b",
-    "error": "bold #f87171",
-    "muted": "#475569",
-}))
+def create_default_icon():
+    image = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+    dc = ImageDraw.Draw(image)
+    dc.ellipse([8, 8, 56, 56], fill=(30, 41, 59))
+    dc.ellipse([16, 16, 48, 48], fill=(59, 130, 246))
+    dc.ellipse([24, 24, 40, 40], fill=(255, 255, 255))
+    return image
 
-LOGO = """
-[bold #6C63FF]
- ██╗  ██╗ ██████╗  ██████╗ ███╗  ██╗██╗████████╗ ██████╗
- ██║ ██╔╝██╔═══██╗██╔════╝ ████╗ ██║██║╚══██╔══╝██╔═══██╗
- █████╔╝ ██║   ██║██║  ███╗██╔██╗██║██║   ██║   ██║   ██║
- ██╔═██╗ ██║   ██║██║   ██║██║╚████║██║   ██║   ██║   ██║
- ██║  ██╗╚██████╔╝╚██████╔╝██║ ╚███║██║   ██║   ╚██████╔╝
- ╚═╝  ╚═╝ ╚═════╝  ╚═════╝ ╚═╝  ╚══╝╚═╝   ╚═╝    ╚═════╝
-[/bold #6C63FF]
-[muted]   Tu asistente corporativo de IA — CLI v1.0.0[/muted]
-"""
+class SyncApp(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+        self.title("Kognito AI Sync")
+        self.geometry("550x550")
+        self.resizable(False, False)
+        
+        self.sync_manager = None
+        self.sync_thread = None
+        self.tray_icon = None
+        self.tray_thread = None
 
+        self.create_widgets()
+        self.load_config()
 
-@click.group(invoke_without_command=True)
-@click.pass_context
-def cli(ctx: click.Context):
-    """KognitoAI CLI — Tu asistente corporativo de IA en la terminal."""
-    if ctx.invoked_subcommand is None:
-        # Lanzar TUI directamente si no se da subcomando
-        _launch_tui()
+        self.protocol("WM_DELETE_WINDOW", self.minimize_to_tray)
 
+    def create_widgets(self):
+        self.header_label = ctk.CTkLabel(self, text="Kognito AI - Sincronizador de Documentos", font=("Helvetica", 18, "bold"))
+        self.header_label.pack(pady=20)
 
-# ── TUI command ───────────────────────────────────────────────────────────────
+        # Server URL Frame
+        self.server_frame = ctk.CTkFrame(self)
+        self.server_frame.pack(fill="x", padx=30, pady=5)
+        self.url_label = ctk.CTkLabel(self.server_frame, text="URL del Servidor:", width=120, anchor="w")
+        self.url_label.pack(side="left", padx=10, pady=10)
+        self.url_entry = ctk.CTkEntry(self.server_frame, width=280, placeholder_text="http://localhost:8000")
+        self.url_entry.pack(side="left", padx=10, pady=10)
 
-@cli.command("tui")
-def cmd_tui():
-    """Abrir la interfaz TUI interactiva completa."""
-    _launch_tui()
+        # Username Frame
+        self.user_frame = ctk.CTkFrame(self)
+        self.user_frame.pack(fill="x", padx=30, pady=5)
+        self.user_label = ctk.CTkLabel(self.user_frame, text="Usuario / Email:", width=120, anchor="w")
+        self.user_label.pack(side="left", padx=10, pady=10)
+        self.user_entry = ctk.CTkEntry(self.user_frame, width=280)
+        self.user_entry.pack(side="left", padx=10, pady=10)
 
+        # Password Frame
+        self.pass_frame = ctk.CTkFrame(self)
+        self.pass_frame.pack(fill="x", padx=30, pady=5)
+        self.pass_label = ctk.CTkLabel(self.pass_frame, text="Contraseña:", width=120, anchor="w")
+        self.pass_label.pack(side="left", padx=10, pady=10)
+        self.pass_entry = ctk.CTkEntry(self.pass_frame, width=280, show="*")
+        self.pass_entry.pack(side="left", padx=10, pady=10)
 
-def _launch_tui():
-    """Lanza la aplicación Textual TUI."""
-    try:
-        from cli.ui.tui_app import KognitoTUI
-        app = KognitoTUI()
-        app.run()
-    except ImportError as e:
-        console.print(f"[error]Error importando TUI: {e}[/error]")
-        console.print("[muted]Asegúrate de instalar: pip install textual[/muted]")
-        sys.exit(1)
+        # Folder Selector Frame
+        self.folder_frame = ctk.CTkFrame(self)
+        self.folder_frame.pack(fill="x", padx=30, pady=5)
+        self.folder_label = ctk.CTkLabel(self.folder_frame, text="Carpeta de Sync:", width=120, anchor="w")
+        self.folder_label.pack(side="left", padx=10, pady=10)
+        self.folder_entry = ctk.CTkEntry(self.folder_frame, width=200)
+        self.folder_entry.pack(side="left", padx=10, pady=10)
+        self.browse_button = ctk.CTkButton(self.folder_frame, text="Buscar...", width=70, command=self.browse_folder)
+        self.browse_button.pack(side="left", padx=10, pady=10)
 
+        # Status Label
+        self.status_label = ctk.CTkLabel(self, text="Estado: No Sincronizado", font=("Helvetica", 13, "bold"), text_color="gray")
+        self.status_label.pack(pady=15)
 
-# ── Login command ─────────────────────────────────────────────────────────────
+        # Control Buttons
+        self.buttons_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.buttons_frame.pack(pady=10)
+        
+        self.start_button = ctk.CTkButton(self.buttons_frame, text="Conectar y Sincronizar", command=self.start_sync, width=180)
+        self.start_button.pack(side="left", padx=10)
 
-@cli.command("login")
-@click.option("--url", default=None, help="URL del servidor KognitoAI")
-@click.option("--email", prompt=True, help="Email del usuario")
-@click.option("--password", prompt=True, hide_input=True, help="Contraseña")
-def cmd_login(url: str | None, email: str, password: str):
-    """Autenticarse con el servidor KognitoAI."""
-    config = CLIConfig.load()
-    target_url = url or config.api_url
+        self.stop_button = ctk.CTkButton(self.buttons_frame, text="Detener", command=self.stop_sync, state="disabled", width=120)
+        self.stop_button.pack(side="left", padx=10)
 
-    async def _login():
-        from cli.core.api_client import KognitoAPIClient
-        console.print(f"[info]Conectando a {target_url}…[/info]")
+        # Activity logs
+        self.log_textbox = ctk.CTkTextbox(self, width=490, height=120)
+        self.log_textbox.pack(pady=20, padx=30)
+        self.log_textbox.insert("0.0", "Cliente Kognito Sync iniciado.\n")
+        self.log_textbox.configure(state="disabled")
+
+    def log(self, message):
+        self.log_textbox.configure(state="normal")
+        self.log_textbox.insert("end", f"{message}\n")
+        self.log_textbox.see("end")
+        self.log_textbox.configure(state="disabled")
+
+    def browse_folder(self):
+        folder = ctk.filedialog.askdirectory()
+        if folder:
+            self.folder_entry.delete(0, "end")
+            self.folder_entry.insert(0, folder)
+
+    def load_config(self):
+        if os.path.exists(CONFIG_PATH):
+            try:
+                with open(CONFIG_PATH, 'r') as f:
+                    config = json.load(f)
+                    self.url_entry.insert(0, config.get("server_url", ""))
+                    self.user_entry.insert(0, config.get("username", ""))
+                    self.pass_entry.insert(0, config.get("password", ""))
+                    self.folder_entry.insert(0, config.get("sync_dir", ""))
+            except Exception as e:
+                self.log(f"Error al cargar config: {e}")
+
+    def save_config(self):
+        os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+        config = {
+            "server_url": self.url_entry.get(),
+            "username": self.user_entry.get(),
+            "password": self.pass_entry.get(),
+            "sync_dir": self.folder_entry.get()
+        }
         try:
-            client = await KognitoAPIClient.login(target_url, email, password)
-            me = await client.get_me()
-            config.api_url = target_url
-            config.token = client.token
-            config.account_id = me.get("id") or me.get("account_id", "")
-            config.email = email
-            config.name = me.get("name", "")
-            config.save()
-            console.print(Panel(
-                f"[success]✅ Sesión iniciada como[/success]\n"
-                f"[bold white]{me.get('name', email)}[/bold white]\n"
-                f"[muted]{email}[/muted]",
-                border_style="#6C63FF",
-            ))
+            with open(CONFIG_PATH, 'w') as f:
+                json.dump(config, f, indent=4)
         except Exception as e:
-            console.print(f"[error]❌ Login fallido: {e}[/error]")
-            sys.exit(1)
+            self.log(f"Error al guardar config: {e}")
 
-    asyncio.run(_login())
+    def start_sync(self):
+        server_url = self.url_entry.get()
+        username = self.user_entry.get()
+        password = self.pass_entry.get()
+        sync_dir = self.folder_entry.get()
+        
+        if not server_url or not username or not password or not sync_dir:
+            self.log("Error: Por favor completa todos los campos.")
+            return
 
+        self.save_config()
 
-# ── Status command ────────────────────────────────────────────────────────────
+        db_path = os.path.expanduser("~/.local/share/kognito-sync/metadata.db")
+        self.sync_manager = KognitoSyncManager(server_url, username, password, sync_dir, db_path)
 
-@cli.command("status")
-def cmd_status():
-    """Mostrar estado de la configuración y conexión."""
-    config = CLIConfig.load()
-    table = Table(title="Estado de KognitoAI CLI", border_style="#6C63FF", show_header=False)
-    table.add_column("Campo", style="bold #6C63FF", width=20)
-    table.add_column("Valor", style="white")
-    table.add_row("Servidor", config.api_url)
-    table.add_row("Autenticado", "✅ Sí" if config.is_authenticated else "❌ No")
-    table.add_row("Email", config.email or "—")
-    table.add_row("Nombre", config.name or "—")
-    table.add_row("Workspace", config.workspace_id or "Global")
-    table.add_row("Último chat", config.last_thread_id or "—")
-    console.print(table)
+        self.log("Conectando con el servidor...")
+        self.start_button.configure(state="disabled")
+        
+        def conn_thread():
+            if self.sync_manager.login():
+                self.log("Inicio de sesión correcto.")
+                self.status_label.configure(text="Estado: Sincronizando", text_color="green")
+                self.stop_button.configure(state="normal")
+                
+                # Start loop
+                self.sync_thread = threading.Thread(target=self.sync_manager.run_sync_loop, daemon=True)
+                self.sync_thread.start()
+            else:
+                self.log("Error: No se pudo conectar o iniciar sesión.")
+                self.start_button.configure(state="normal")
+                self.status_label.configure(text="Estado: Error de Conexión", text_color="red")
+        
+        threading.Thread(target=conn_thread, daemon=True).start()
 
+    def stop_sync(self):
+        if self.sync_manager:
+            self.sync_manager.stop()
+            self.log("Sincronización detenida.")
+            self.status_label.configure(text="Estado: Detenido", text_color="orange")
+            self.start_button.configure(state="normal")
+            self.stop_button.configure(state="disabled")
 
-# ── Chat command (headless) ────────────────────────────────────────────────────
+    def minimize_to_tray(self):
+        self.withdraw()
+        if not self.tray_icon:
+            self.setup_tray()
 
-@cli.command("chat")
-@click.argument("message")
-@click.option("--thread", "-t", default=None, help="ID del hilo de chat")
-def cmd_chat(message: str, thread: str | None):
-    """Enviar un mensaje al agente (modo headless, sin TUI)."""
-    config = CLIConfig.load()
-    from cli.core.auth import require_auth
-    try:
-        require_auth(config)
-    except RuntimeError as e:
-        console.print(f"[error]{e}[/error]")
-        sys.exit(1)
+    def setup_tray(self):
+        image = create_default_icon()
+        menu = (
+            item('Abrir Configuración', self.restore_from_tray),
+            item('Sincronizar ahora', self.sync_now_action),
+            item('Salir', self.quit_app)
+        )
+        self.tray_icon = pystray.Icon("KognitoSync", image, "Kognito Sync", menu)
+        self.tray_thread = threading.Thread(target=self.tray_icon.run, daemon=True)
+        self.tray_thread.start()
 
-    async def _send():
-        from cli.core.api_client import KognitoAPIClient
-        client = KognitoAPIClient(config.api_url, config.token)
-        thread_id = thread or config.last_thread_id
-        if not thread_id:
-            console.print("[info]Creando nuevo hilo…[/info]")
-            data = await client.create_thread()
-            thread_id = data["id"]
-            config.last_thread_id = thread_id
-            config.save()
+    def sync_now_action(self):
+        if self.sync_manager:
+            self.log("Ejecutando forzado de sync...")
+            threading.Thread(target=self.sync_manager.sync_pass, daemon=True).start()
 
-        console.print(f"\n[bold white]Tú:[/bold white] {message}\n")
-        console.print("[bold #10b981]KognitoAI:[/bold #10b981] ", end="")
-        full = ""
-        async for chunk in client.send_message_stream(
-            thread_id, config.account_id, message, config.workspace_id
-        ):
-            console.print(chunk, end="", highlight=False)
-            full += chunk
-        console.print("\n")
+    def restore_from_tray(self):
+        if self.tray_icon:
+            self.tray_icon.stop()
+            self.tray_icon = None
+        self.deiconify()
 
-    asyncio.run(_send())
-
-
-# ── Doc commands ──────────────────────────────────────────────────────────────
-
-@cli.group("doc")
-def cmd_doc():
-    """Comandos para creación y exportación de documentos."""
-    pass
-
-
-@cmd_doc.command("export")
-@click.argument("input_file", type=click.Path(exists=True))
-@click.option("--format", "-f", type=click.Choice(["word", "pdf"]), default="pdf")
-@click.option("--output", "-o", default=None, help="Ruta de salida")
-@click.option("--title", "-t", default="Documento", help="Título del documento")
-def cmd_doc_export(input_file: str, format: str, output: str | None, title: str):
-    """Exportar un archivo Markdown a Word o PDF corporativo."""
-    from cli.core.security import validate_output_path
-    content = Path(input_file).read_text(encoding="utf-8")
-    ext = ".docx" if format == "word" else ".pdf"
-    
-    raw_out = output or str(Path(input_file).with_suffix(ext))
-    try:
-        out = str(validate_output_path(raw_out))
-    except ValueError as e:
-        console.print(f"[error]{e}[/error]")
-        sys.exit(1)
-
-    try:
-        from cli.modules.doc_editor import export_to_word, export_to_pdf
-        console.print(f"[info]Exportando a {format.upper()}…[/info]")
-        if format == "word":
-            export_to_word(content, out, title=title)
-        else:
-            export_to_pdf(content, out, title=title)
-        console.print(f"[success]✅ Guardado en: {out}[/success]")
-    except Exception as e:
-        console.print(f"[error]Error: {e}[/error]")
-        sys.exit(1)
-
-
-@cmd_doc.command("new")
-@click.option("--title", "-t", prompt="Título del documento", help="Título")
-@click.option("--ai", is_flag=True, help="Generar contenido inicial con IA")
-@click.option("--message", "-m", default=None, help="Instrucción para la IA")
-def cmd_doc_new(title: str, ai: bool, message: str | None):
-    """Crear un nuevo documento. Con --ai genera contenido automáticamente."""
-    from cli.core.security import sanitize_filename
-    config = CLIConfig.load()
-    filename = sanitize_filename(title.lower().replace(" ", "_")) + ".md"
-    filepath = Path.cwd() / filename
-
-    if ai:
-        from cli.core.auth import require_auth
-        try:
-            require_auth(config)
-        except RuntimeError as e:
-            console.print(f"[error]{e}[/error]")
-            sys.exit(1)
-
-        async def _gen():
-            from cli.core.api_client import KognitoAPIClient
-            client = KognitoAPIClient(config.api_url, config.token)
-            prompt = message or f"Crea el contenido inicial para un documento corporativo titulado '{title}'. Usa formato Markdown con secciones bien estructuradas."
-            if not config.last_thread_id:
-                data = await client.create_thread(title=f"Doc: {title}")
-                config.last_thread_id = data["id"]
-                config.save()
-
-            console.print(f"[info]Generando contenido con IA para '{title}'…[/info]")
-            content = await client.send_message(
-                config.last_thread_id, config.account_id, prompt
-            )
-            filepath.write_text(f"# {title}\n\n{content}", encoding="utf-8")
-            console.print(f"[success]✅ Documento creado: {filepath}[/success]")
-
-        asyncio.run(_gen())
-    else:
-        filepath.write_text(f"# {title}\n\n", encoding="utf-8")
-        console.print(f"[success]✅ Documento creado: {filepath}[/success]")
-        console.print("[muted]Edítalo con tu editor favorito o usa: kognito tui[/muted]")
-
-
-# ── Config command ────────────────────────────────────────────────────────────
-
-@cli.command("config")
-@click.option("--workspace", "-w", default=None, help="Workspace ID a usar")
-@click.option("--api-url", default=None, help="URL del servidor")
-@click.option("--reset", is_flag=True, help="Resetear configuración")
-def cmd_config(workspace: str | None, api_url: str | None, reset: bool):
-    """Configurar el CLI de KognitoAI."""
-    config = CLIConfig.load()
-    if reset:
-        CLIConfig().save()
-        console.print("[success]✅ Configuración reseteada[/success]")
-        return
-    if workspace:
-        config.workspace_id = workspace
-        console.print(f"[success]✅ Workspace configurado: {workspace}[/success]")
-    if api_url:
-        config.api_url = api_url
-        console.print(f"[success]✅ URL configurada: {api_url}[/success]")
-    config.save()
-
-
-# ── Entry point ───────────────────────────────────────────────────────────────
-
-def main():
-    cli()
-
+    def quit_app(self):
+        self.stop_sync()
+        if self.tray_icon:
+            self.tray_icon.stop()
+        self.destroy()
+        sys.exit(0)
 
 if __name__ == "__main__":
-    main()
+    app = SyncApp()
+    app.mainloop()
