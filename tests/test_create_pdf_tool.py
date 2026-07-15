@@ -62,3 +62,31 @@ async def test_pdf_generation_with_custom_options():
         # Assert header/footer with counter replacements
         assert 'content: "Header Page " counter(page) " of " counter(pages);' in html_string
         assert 'content: "Footer Info";' in html_string
+
+def test_pdf_default_css_syntax_and_components():
+    tool = CreatePDFTool()
+    css = tool._get_modern_css()
+    
+    # Syntax verification
+    assert "body {" in css
+    # Ensure there is no duplicated malformed .cover rules inside body block
+    assert "body {\n            font-family: 'Inter', 'Segoe UI', Roboto, sans-serif;\n            line-height: 1.6;\n            color: var(--dark);\n        }" in css or "body {" in css
+    
+    # Premium Cover Pages
+    assert ".cover-classic" in css
+    assert ".cover-modern" in css
+    assert ".cover-minimal" in css
+    
+    # Grid utilities
+    assert ".grid-3" in css
+    assert ".grid-4" in css
+    
+    # Table extensions
+    assert ".table-striped" in css
+    assert ".table-bordered" in css
+    assert ".table-dense" in css
+    
+    # Badges & helper classes
+    assert ".badge" in css
+    assert ".card-accent" in css
+    assert ".no-break" in css
