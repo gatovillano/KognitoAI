@@ -391,7 +391,8 @@ from api.deep_research import router as deep_research_router
 from api.gap_development import router as gap_development_router
 from api.mfa import router as mfa_router # Importar el router de MFA
 from api.onlyoffice import router as onlyoffice_router # IMPORTAR ONLYOFFICE
-from api.openai import router as openai_router # IMPORTAR OPENAI COMPATIVEL
+from api.openai import router as openai_router # IMPORTAR OPENAI COMPATIVEL (legacy)
+from api.public_api import router as public_api_router # IMPORTAR API PÚBLICA NUEVA
 from skills.media_and_generation_skill.scripts.html_generator_tool import HTMLGeneratorTool # Importar la herramienta HTMLGeneratorTool desde skills
 from utils.security import get_current_account_id # Importar get_current_account_id
 
@@ -402,7 +403,8 @@ app.include_router(onlyoffice_router, prefix="/api/onlyoffice", tags=["onlyoffic
 app.include_router(deep_research_router, prefix="/api", tags=["deep-research"])
 app.include_router(gap_development_router, prefix="/api", tags=["gap-development"])
 app.include_router(mfa_router, prefix="/api", tags=["mfa"])
-app.include_router(openai_router, prefix="", tags=["openai-compatible"])
+# Incluir API pública nueva (reemplaza openai_router)
+app.include_router(public_api_router, prefix="", tags=["openai-compatible"])
 
 class GenerateHTMLRequest(BaseModel):
     content: str = Field(..., description="El contenido en formato Markdown o texto plano.")
