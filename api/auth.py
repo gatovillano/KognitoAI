@@ -184,14 +184,78 @@ async def register_user(request: Request, register_data: RegisterRequest, db: As
     access_token = create_access_token(data={"sub": str(new_account.id)})
     return RegisterResponse(access_token=access_token, message="¡Registro exitoso! Ya puedes iniciar sesión.")
 
-@router.post("/auth/login", response_model=TokenResponse, summary="Iniciar sesión con email/pass")
+@router.post(
+    "/auth/login",
+    response_model=TokenResponse,
+    summary="Iniciar sesión con email/pass",
+    openapi_extra={
+        "requestBody": {
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "properties": {
+                            "email": {"type": "string", "format": "email"},
+                            "username": {"type": "string"},
+                            "password": {"type": "string"}
+                        },
+                        "required": ["password"]
+                    }
+                },
+                "application/x-www-form-urlencoded": {
+                    "schema": {
+                        "properties": {
+                            "email": {"type": "string"},
+                            "username": {"type": "string"},
+                            "password": {"type": "string"}
+                        },
+                        "required": ["password"]
+                    }
+                }
+            }
+        }
+    }
+)
 @limiter.limit("10/minute")
-async def login_for_access_token(request: Request, login_data: LoginRequest, db: AsyncSession = Depends(get_db_session)):
-    """Inicia sesión con email y contraseña y devuelve un token de acceso JWT."""
-    account_result = await db.execute(select(Account).where(Account.email == login_data.email))
+async def login_for_access_token(request: Request, db: AsyncSession = Depends(get_db_session)):
+    """Inicia sesión con email/username y contraseña, soportando JSON y Form data."""
+    content_type = request.headers.get("content-type", "")
+    email = None
+    username = None
+    password = None
+
+    if "application/x-www-form-urlencoded" in content_type:
+        form_data = await request.form()
+        email = form_data.get("email")
+        username = form_data.get("username")
+        password = form_data.get("password")
+    else:
+        try:
+            body = await request.json()
+            if isinstance(body, dict):
+                email = body.get("email")
+                username = body.get("username")
+                password = body.get("password")
+        except Exception:
+            pass
+
+    login_identifier = email or username
+
+    if not login_identifier or not password:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Se requiere correo electrónico (o nombre de usuario) y contraseña."
+        )
+
+    # Buscar por email o username
+    account_result = await db.execute(
+        select(Account).where(
+            (Account.email == login_identifier) | (Account.username == login_identifier)
+        )
+    )
     account = account_result.scalars().first()
-    if not account or not account.hashed_password or not verify_password(login_data.password, account.hashed_password):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Email o contraseña incorrectos.")
+    
+    if not account or not account.hashed_password or not verify_password(password, account.hashed_password):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Email/username o contraseña incorrectos.")
 
     access_token = create_access_token(data={"sub": str(account.id)})
     return TokenResponse(access_token=access_token)
