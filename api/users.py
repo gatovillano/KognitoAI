@@ -361,6 +361,8 @@ async def update_user_settings(
         profiles_enabled=account.profiles_enabled,
         galleries_enabled=account.galleries_enabled,
         forms_enabled=account.forms_enabled,
+        skills_enabled=account.skills_enabled,
+        heartbeat_enabled=account.heartbeat_enabled,
         theme=account.theme,
         notifications_email=account.notifications_email,
         notifications_push=account.notifications_push,
@@ -400,10 +402,10 @@ async def update_user_settings(
         email_smtp_host=email_account.smtp_host if email_account else None,
         email_smtp_port=str(email_account.smtp_port) if email_account and email_account.smtp_port is not None else "465",
         email_use_ssl=email_account.imap_use_ssl if email_account else True,
+        email_username=email_account.username if email_account else None,
         email_password_secret=email_password_secret,
         custom_heartbeat_instructions=account.custom_heartbeat_instructions,
         custom_heartbeat_interval_minutes=account.custom_heartbeat_interval_minutes,
-
         custom_heartbeat_allowed_tools=account.custom_heartbeat_allowed_tools
     )
 

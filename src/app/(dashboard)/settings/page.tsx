@@ -1536,6 +1536,9 @@ const SettingsPage: React.FC = () => {
       if (activeTab === 'heartbeat' && !localSettings.heartbeat_enabled) {
         setActiveTab('personal-data');
       }
+      if (activeTab === 'ai-profile' && !localSettings.profiles_enabled) {
+        setActiveTab('personal-data');
+      }
     }
   }, [activeTab, localSettings]);
 
@@ -1846,6 +1849,7 @@ const SettingsPage: React.FC = () => {
   const visibleSettingsMenu = SETTINGS_MENU.filter(item => {
     if (item.id === 'skills' && !localSettings.skills_enabled) return false;
     if (item.id === 'heartbeat' && !localSettings.heartbeat_enabled) return false;
+    if (item.id === 'ai-profile' && !localSettings.profiles_enabled) return false;
     return true;
   });
 
