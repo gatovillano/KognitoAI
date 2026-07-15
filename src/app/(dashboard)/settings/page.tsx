@@ -1834,15 +1834,15 @@ const SettingsPage: React.FC = () => {
 
   return (
     <div className="flex h-full min-h-screen bg-background">
-      {/* ── SIDEBAR DESKTOP (lg+) ── */}
-      <aside className="hidden lg:flex flex-col w-64 shrink-0 border-r border-border/40 bg-card/30 backdrop-blur-sm sticky top-0 h-screen overflow-y-auto">
+      {/* ── SIDEBAR RESPONSIVO (md+) ── */}
+      <aside className="hidden md:flex flex-col w-16 lg:w-64 shrink-0 border-r border-border/40 bg-card/30 backdrop-blur-sm sticky top-0 h-screen overflow-y-auto transition-all duration-300">
         {/* Sidebar Header */}
-        <div className="px-5 py-6 border-b border-border/30">
+        <div className="px-3 lg:px-5 py-6 border-b border-border/30 flex justify-center lg:justify-start">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-xl bg-primary/10 text-primary">
               <Wrench className="h-5 w-5" />
             </div>
-            <div>
+            <div className="hidden lg:block">
               <h1 className="text-sm font-bold text-foreground tracking-tight">Configuración</h1>
               <p className="text-[10px] text-muted-foreground uppercase tracking-widest">Panel de ajustes</p>
             </div>
@@ -1850,7 +1850,7 @@ const SettingsPage: React.FC = () => {
         </div>
 
         {/* Nav Items */}
-        <nav className="flex-1 px-3 py-4 space-y-0.5">
+        <nav className="flex-1 px-2 lg:px-3 py-4 space-y-1">
           {SETTINGS_MENU.map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
@@ -1858,39 +1858,43 @@ const SettingsPage: React.FC = () => {
               <button
                 key={item.id}
                 onClick={() => setActiveTab(item.id)}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm font-medium transition-all duration-200 group relative ${
+                className={`w-full flex items-center justify-center lg:justify-start gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 group relative ${
                   isActive
                     ? 'bg-primary/10 text-primary'
                     : 'text-muted-foreground hover:text-foreground hover:bg-accent/60'
                 }`}
+                title={item.label}
               >
                 {isActive && (
                   <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-primary rounded-full" />
                 )}
-                <Icon className={`h-4 w-4 shrink-0 transition-colors ${isActive ? 'text-primary' : 'text-muted-foreground group-hover:text-foreground'}`} />
-                <span className="truncate">{item.label}</span>
+                <Icon className={`h-5 w-5 lg:h-4 lg:w-4 shrink-0 transition-colors ${isActive ? 'text-primary' : 'text-muted-foreground group-hover:text-foreground'}`} />
+                <span className="truncate hidden lg:block">{item.label}</span>
               </button>
             );
           })}
         </nav>
 
         {/* Sidebar Footer */}
-        <div className="px-4 py-4 border-t border-border/30">
-          <p className="text-[10px] text-muted-foreground/60 text-center">KognitoAI · Ajustes</p>
+        <div className="px-2 py-4 border-t border-border/30 flex justify-center lg:block">
+          <p className="text-[10px] text-muted-foreground/60 text-center truncate">
+            <span className="hidden lg:inline">KognitoAI · Ajustes</span>
+            <span className="lg:hidden">KAI</span>
+          </p>
         </div>
       </aside>
 
       {/* ── MOBILE MENU OVERLAY ── */}
       {isMobileMenuOpen && (
         <div
-          className="fixed inset-0 z-40 bg-background/80 backdrop-blur-sm lg:hidden"
+          className="fixed inset-0 z-40 bg-background/80 backdrop-blur-sm md:hidden"
           onClick={() => setIsMobileMenuOpen(false)}
         />
       )}
 
       {/* ── MOBILE DRAWER ── */}
       <div
-        className={`fixed inset-y-0 left-0 z-50 w-72 bg-card border-r border-border/40 shadow-2xl flex flex-col transition-transform duration-300 ease-in-out lg:hidden ${
+        className={`fixed inset-y-0 left-0 z-50 w-72 bg-card border-r border-border/40 shadow-2xl flex flex-col transition-transform duration-300 ease-in-out md:hidden ${
           isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
@@ -1940,7 +1944,7 @@ const SettingsPage: React.FC = () => {
       {/* ── MAIN CONTENT ── */}
       <div className="flex-1 flex flex-col min-w-0 overflow-auto">
         {/* Mobile Top Bar */}
-        <div className="lg:hidden sticky top-0 z-30 flex items-center gap-3 px-4 py-3 bg-background/80 backdrop-blur-sm border-b border-border/30">
+        <div className="md:hidden sticky top-0 z-30 flex items-center gap-3 px-4 py-3 bg-background/80 backdrop-blur-sm border-b border-border/30">
           <button
             onClick={() => setIsMobileMenuOpen(true)}
             className="p-2 rounded-lg hover:bg-accent transition-colors text-muted-foreground"
@@ -1957,7 +1961,7 @@ const SettingsPage: React.FC = () => {
         </div>
 
         {/* Desktop Page Header */}
-        <div className="hidden lg:block px-8 pt-8 pb-2">
+        <div className="hidden md:block px-8 pt-8 pb-2">
           <div className="flex items-center gap-3 mb-1">
             {activeMenuItem && (
               <div className="p-1.5 rounded-lg bg-primary/10 text-primary">
@@ -1970,7 +1974,7 @@ const SettingsPage: React.FC = () => {
         </div>
 
         {/* Content Area */}
-        <main className="flex-1 px-4 py-4 lg:px-8 lg:py-6">
+        <main className="flex-1 px-4 py-4 md:px-8 md:py-6">
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="mb-4 sr-only">
           <TabsTrigger value="personal-data">Datos Personales</TabsTrigger>
@@ -2922,6 +2926,57 @@ const SettingsPage: React.FC = () => {
                     </ul>
                   </li>
                   <li>¡Tus eventos y tareas se sincronizarán automáticamente!</li>
+                </ol>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="mt-6 border border-primary/20 bg-primary/5">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Badge variant="outline" className="bg-primary/10 text-primary border-primary/20">Cliente Linux</Badge>
+                Sincronizador de Documentos (Kognito Sync)
+              </CardTitle>
+              <CardDescription>
+                Sincroniza tus documentos de OnlyOffice y base de conocimiento localmente en tu computadora Linux con nuestro cliente de escritorio oficial en segundo plano.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="flex flex-col md:flex-row items-start md:items-center justify-between p-4 rounded-xl bg-card border border-border/40 gap-4">
+                <div className="space-y-1">
+                  <h4 className="font-bold text-sm">Cliente de Escritorio (Linux x64)</h4>
+                  <p className="text-xs text-muted-foreground">
+                    Incluye bandeja del sistema (System Tray), base de datos SQLite y sincronización bidireccional instantánea.
+                  </p>
+                </div>
+                <Button asChild className="font-bold px-6 py-2">
+                  <a href="/kognito-sync-linux.zip" download="kognito-sync-linux.zip">
+                    Descargar Cliente (.zip)
+                  </a>
+                </Button>
+              </div>
+
+              <div className="space-y-2">
+                <h3 className="font-semibold text-sm">Guía de Instalación</h3>
+                <ol className="list-decimal list-inside text-xs text-muted-foreground space-y-2 leading-relaxed">
+                  <li>
+                    Descomprime el archivo descargado <code className="bg-muted px-1.5 py-0.5 rounded text-primary">kognito-sync-linux.zip</code> en tu computadora.
+                  </li>
+                  <li>
+                    Abre una terminal en la carpeta descomprimida y ejecuta el instalador automático:
+                    <pre className="bg-muted/80 p-3 rounded-lg font-mono text-[11px] text-foreground mt-1.5 overflow-x-auto">
+                      bash install_client.sh
+                    </pre>
+                    <span className="text-[10px] text-muted-foreground/75 italic mt-1 block">
+                      Nota: El script instalará las dependencias necesarias de Python y Tkinter (solicitando privilegios si es necesario) y creará el entorno virtual.
+                    </span>
+                  </li>
+                  <li>
+                    Busca <strong className="text-foreground">Kognito Sync</strong> en el menú de tus aplicaciones Linux e inícialo.
+                  </li>
+                  <li>
+                    Configura la URL de esta plataforma (<code className="bg-muted px-1.5 py-0.5 rounded">{typeof window !== "undefined" ? window.location.origin : "http://localhost:8000"}</code>), tu usuario/contraseña, selecciona una carpeta de tu disco para sincronizar y haz clic en <strong className="text-strong">Conectar y Sincronizar</strong>.
+                  </li>
                 </ol>
               </div>
             </CardContent>
