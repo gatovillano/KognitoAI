@@ -2,27 +2,38 @@
 
 Herramienta para generar PDFs de calidad profesional.
 
+## Parámetros de Diseño Dinámico
+
+Al usar `create_pdf_tool`, puedes configurar la apariencia de la página usando los siguientes parámetros opcionales:
+
+* `orientation`: `"portrait"` (vertical, por defecto) o `"landscape"` (horizontal).
+* `margin`: Margen exterior de la página, por defecto `"2cm"`.
+* `theme`: Tema estético integrado (`"modern"`, `"emerald"`, `"amber"`, `"minimalist"`).
+* `custom_css`: Hoja de estilos CSS opcional inyectada al final.
+* `header_text` / `footer_text`: Personalizan el encabezado superior derecho y el pie de página inferior izquierdo. Puedes usar los placeholders `[page]` y `[pages]` (ej. `"Reporte - Pág. [page] de [pages]"`).
+
 ## Reglas de diseño A4 (obligatorias)
 
-- Tamaño de página: **A4** (210mm x 297mm / 21cm x 29.7cm)
-- Márgenes: **2cm** en todos los bordes
-- Ancho útil máximo: **17cm** (21cm - 2cm izquierda - 2cm derecha)
-- Alto útil máximo por página: **25.7cm** (29.7cm - 2cm superior - 2cm inferior)
+* Tamaño de página: **A4** (210mm x 297mm / 21cm x 29.7cm)
+* El ancho útil máximo en orientación Vertical es **17cm** (21cm - 2cm izquierda - 2cm derecha).
+* Envolventes: El contenido principal del cuerpo del documento debe ir en `<div class="content">`.
+* Recursos locales: Se pueden utilizar imágenes y fuentes del espacio de trabajo mediante rutas relativas directamente en el HTML (ej. `<img src="media/logo.png">`).
 
-## Uso del `create_pdf_tool`
+## Componentes CSS Premium Disponibles
 
-- Enviar SIEMPRE `is_html=True`
-- Envolver el contenido principal en `<div class="content">`
-- Usar `<div class="cover">` solo para la portada de la primera página
-- No usar anchos/altos fijos mayores a 17cm x 25cm
-- Las imágenes y tablas deben usar `max-width: 100%`
-
-## Componentes CSS disponibles
-
-| Clase | Uso |
-|-------|-----|
-| `.cover` | Portada (ocupa exactamente la primera página A4) |
-| `.content` | Contenedor principal del cuerpo del documento |
-| `.card` | Sección resaltada |
-| `.info-box` / `.warning-box` / `.error-box` | Notas y advertencias |
-| `.grid-2` | Diseño de dos columnas |
+| Clase | Descripción |
+|---|---|
+| `.cover-classic` | Portada clásica centrada, fondo azul oscuro de página completa sin márgenes. |
+| `.cover-modern` | Portada moderna con degradado oscuro de fondo y un pie de metadatos delimitado. |
+| `.cover-minimal` | Portada elegante de fondo claro con tipografía masiva asimétrica. |
+| `.content` | Contenedor principal para el cuerpo del texto. |
+| `.card` | Tarjeta con fondo claro y bordes suaves. |
+| `.card-accent` | Tarjeta con borde izquierdo destacado del color del tema activo. |
+| `.info-box` / `.success-box` / `.warning-box` / `.error-box` / `.note-box` | Cajas de notas y estados. |
+| `.grid-2` / `.grid-3` / `.grid-4` | Diseños de columnas flexibles adaptativos con protección de saltos de página. |
+| `.badge` | Etiquetas pequeñas. Subclases: `.badge-primary`, `.badge-success`, `.badge-warning`, `.badge-error`. |
+| `.table-striped` | Filas alternas con sombreado zebra. |
+| `.table-bordered` | Bordes completos y definidos en celdas de tabla. |
+| `.table-dense` | Espaciado interno compacto para tablas extensas. |
+| `.page-break` | Fuerza un salto de página inmediato antes del elemento. |
+| `.no-break` | Evita que WeasyPrint corte la página en medio del elemento. |
