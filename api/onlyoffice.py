@@ -34,6 +34,8 @@ from core.onlyoffice_storage import (
     get_onlyoffice_docs_root,
     resolve_onlyoffice_file_path,
 )
+from utils.document_parser import extract_text_and_metadata_from_document
+from core.memory_manager import delete_document_chunks, process_document_for_rag
 
 def check_office_libs():
     """Verifica dinámicamente qué librerías de oficina están instaladas."""
@@ -1337,4 +1339,108 @@ async def vectorize_document(
         "message": "Documento vectorizado e indexado correctamente",
         "chunks_processed": chunks_processed,
         "topic": topic
+    }
+
+
+@router.put("/{document_id}")
+async def update_document_content(
+    document_id: uuid.UUID,
+    file: UploadFile = File(...),
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """Sobrescribe el contenido de un documento existente y actualiza RAG."""
+    doc = await db.get(Document, document_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Documento no encontrado")
+        
+    # Verificar acceso usando la misma lógica que otros endpoints
+    if not await _can_access_document(doc, current_account_id, db):
+        raise HTTPException(status_code=403, detail="No tienes acceso a este documento")
+
+    try:
+        file_full_path = resolve_onlyoffice_file_path(doc.file_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail="Ruta física del documento inválida")
+        
+    content = await file.read()
+    
+    # Crear backup del archivo actual
+    if file_full_path.exists():
+        backups_dir = file_full_path.parent / '.backups'
+        os.makedirs(backups_dir, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_filename = f"{file_full_path.name}.{timestamp}.bak"
+        backup_full_path = backups_dir / backup_filename
+        import shutil
+        try:
+            shutil.copy2(file_full_path, backup_full_path)
+            logger.info(f"Backup creado exitosamente para {doc.filename} en {backup_full_path}")
+        except Exception as e:
+            logger.error(f"Error al crear backup para {doc.filename}: {e}")
+
+    # Escribir el nuevo archivo físico
+    try:
+        with open(file_full_path, "wb") as f:
+            f.write(content)
+        logger.info(f"Archivo físico {doc.filename} sobrescrito.")
+    except Exception as e:
+        logger.error(f"Error al escribir archivo {doc.filename}: {e}")
+        raise HTTPException(status_code=500, detail="Error al sobrescribir el archivo en el servidor")
+
+    # Actualizar la fecha en DB
+    doc.updated_at = datetime.now()
+    await db.commit()
+
+    # Re-vectorizar RAG
+    try:
+        extracted_text, parser_metadata = await extract_text_and_metadata_from_document(doc.filename, content)
+    except Exception as e:
+        logger.error(f"Error al extraer texto en actualización de {doc.filename}: {e}")
+        raise HTTPException(status_code=500, detail="Error al extraer texto del documento")
+
+    if not extracted_text or not extracted_text.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="El documento actualizado no contiene texto extraíble."
+        )
+
+    # Eliminar chunks antiguos
+    await delete_document_chunks(
+        account_id=current_account_id,
+        file_name=doc.filename,
+        workspace_id=str(doc.workspace_id) if doc.workspace_id else None
+    )
+
+    # Re-indexar
+    metadata = {
+        "document_id": str(doc.id),
+        "workspace_id": str(doc.workspace_id) if doc.workspace_id else None,
+        "folder_id": str(doc.folder_id) if doc.folder_id else None,
+        "extension": doc.extension,
+        "created_at": doc.created_at.isoformat() if doc.created_at else None,
+        "file_name": doc.filename,
+    }
+    if parser_metadata:
+        metadata.update(parser_metadata)
+
+    topic = "general_documents"
+    if doc.folder_id:
+        folder = await db.get(DocumentFolder, doc.folder_id)
+        if folder and folder.name:
+            topic = folder.name
+
+    await process_document_for_rag(
+        file_name=doc.filename,
+        extracted_text=extracted_text,
+        topic=topic,
+        account_id=current_account_id,
+        metadata=metadata,
+        workspace_id=str(doc.workspace_id) if doc.workspace_id else None
+    )
+
+    return {
+        "message": "Documento actualizado con éxito",
+        "document_id": str(doc.id),
+        "updated_at": doc.updated_at.isoformat()
     }
