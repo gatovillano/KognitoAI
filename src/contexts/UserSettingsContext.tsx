@@ -8,6 +8,8 @@ interface UserSettings {
   profiles_enabled: boolean;
   galleries_enabled: boolean;
   forms_enabled: boolean;
+  skills_enabled: boolean;
+  heartbeat_enabled: boolean;
   theme: string;
   notifications_email: boolean;
   notifications_push: boolean;
