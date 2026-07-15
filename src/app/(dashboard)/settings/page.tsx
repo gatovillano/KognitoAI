@@ -1528,6 +1528,17 @@ const SettingsPage: React.FC = () => {
     setLocalSettings(settings);
   }, [settings]);
 
+  useEffect(() => {
+    if (localSettings) {
+      if (activeTab === 'skills' && !localSettings.skills_enabled) {
+        setActiveTab('personal-data');
+      }
+      if (activeTab === 'heartbeat' && !localSettings.heartbeat_enabled) {
+        setActiveTab('personal-data');
+      }
+    }
+  }, [activeTab, localSettings]);
+
   // Fetch functions for custom heartbeats
   const fetchCustomHeartbeats = async () => {
     setHeartbeatsLoading(true);
@@ -1810,6 +1821,8 @@ const SettingsPage: React.FC = () => {
         profiles_enabled: localSettings.profiles_enabled,
         galleries_enabled: localSettings.galleries_enabled,
         forms_enabled: localSettings.forms_enabled,
+        skills_enabled: localSettings.skills_enabled,
+        heartbeat_enabled: localSettings.heartbeat_enabled,
         theme: localSettings.theme,
         notifications_email: localSettings.notifications_email,
         notifications_push: localSettings.notifications_push,
@@ -1830,7 +1843,13 @@ const SettingsPage: React.FC = () => {
     return <div>No se pudo cargar la configuración.</div>;
   }
 
-  const activeMenuItem = SETTINGS_MENU.find(item => item.id === activeTab);
+  const visibleSettingsMenu = SETTINGS_MENU.filter(item => {
+    if (item.id === 'skills' && !localSettings.skills_enabled) return false;
+    if (item.id === 'heartbeat' && !localSettings.heartbeat_enabled) return false;
+    return true;
+  });
+
+  const activeMenuItem = visibleSettingsMenu.find(item => item.id === activeTab);
 
   return (
     <div className="flex h-full min-h-screen bg-background">
@@ -1851,7 +1870,7 @@ const SettingsPage: React.FC = () => {
 
         {/* Nav Items */}
         <nav className="flex-1 px-2 lg:px-3 py-4 space-y-1">
-          {SETTINGS_MENU.map((item) => {
+          {visibleSettingsMenu.map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
             return (
@@ -1916,7 +1935,7 @@ const SettingsPage: React.FC = () => {
 
         {/* Drawer Nav */}
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-0.5">
-          {SETTINGS_MENU.map((item) => {
+          {visibleSettingsMenu.map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
             return (
@@ -2182,6 +2201,24 @@ const SettingsPage: React.FC = () => {
                   disabled={loading}
                 />
                 <Label htmlFor="forms_enabled">Módulo de Formularios</Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <Switch
+                  id="skills_enabled"
+                  checked={localSettings.skills_enabled}
+                  onCheckedChange={(checked) => handleSwitchChange('skills_enabled', checked)}
+                  disabled={loading}
+                />
+                <Label htmlFor="skills_enabled">Módulo de Skills (Habilidades)</Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <Switch
+                  id="heartbeat_enabled"
+                  checked={localSettings.heartbeat_enabled}
+                  onCheckedChange={(checked) => handleSwitchChange('heartbeat_enabled', checked)}
+                  disabled={loading}
+                />
+                <Label htmlFor="heartbeat_enabled">Módulo de Heartbeat Autónomo</Label>
               </div>
             </div>
 
