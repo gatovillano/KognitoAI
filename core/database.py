@@ -161,6 +161,8 @@ class Account(Base):
     profiles_enabled = Column(Boolean, default=False, nullable=False, comment="Indica si el módulo de perfiles está habilitado para la cuenta.")
     galleries_enabled = Column(Boolean, default=False, nullable=False, comment="Indica si el módulo de galerías está habilitado para la cuenta.")
     forms_enabled = Column(Boolean, default=False, nullable=False, comment="Indica si el módulo de formularios está habilitado para la cuenta.")
+    skills_enabled = Column(Boolean, default=True, nullable=False, comment="Indica si el módulo de skills está habilitado para la cuenta.")
+    heartbeat_enabled = Column(Boolean, default=True, nullable=False, comment="Indica si el módulo de heartbeat está habilitado para la cuenta.")
 
     # Configuraciones adicionales
     theme = Column(String(50), nullable=False, default="system", comment="Tema de la interfaz de usuario (e.g., 'light', 'dark', 'system').")
