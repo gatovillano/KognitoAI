@@ -90,3 +90,54 @@ def test_pdf_default_css_syntax_and_components():
     assert ".badge" in css
     assert ".card-accent" in css
     assert ".no-break" in css
+
+@pytest.mark.asyncio
+async def test_create_pdf_e2e():
+    tool = CreatePDFTool()
+    
+    # Create a complex document with new CSS classes and cover
+    html_content = """
+    <div class="cover-modern">
+        <h1>Reporte de Integración Avanzado</h1>
+        <p class="subtitle">Documento de prueba E2E de capacidades HTML/CSS</p>
+        <div class="meta">Fecha: 14 Julio 2026 | Sistema: KAI</div>
+    </div>
+    <div class="content">
+        <p class="lead">Este documento valida que todos los componentes premium se compilen correctamente.</p>
+        <div class="grid-3">
+            <div class="card-accent"><h4>Columna 1</h4><p>Info 1</p></div>
+            <div class="card-accent"><h4>Columna 2</h4><p>Info 2</p></div>
+            <div class="card-accent"><h4>Columna 3</h4><p>Info 3</p></div>
+        </div>
+        <table class="table-striped table-bordered table-dense">
+            <thead><tr><th>Param</th><th>Valor</th></tr></thead>
+            <tbody>
+                <tr><td>Tema</td><td>Emerald <span class="badge badge-success">Activo</span></td></tr>
+                <tr><td>Orientación</td><td>Vertical</td></tr>
+            </tbody>
+        </table>
+    </div>
+    """
+    
+    filename = "test_e2e_output.pdf"
+    result = await tool._arun(
+        content=html_content,
+        is_html=True,
+        filename=filename,
+        title="Test E2E",
+        theme="emerald"
+    )
+    
+    assert "pdf generado exitosamente" in result["context_for_llm"].lower() or "pdf generado con éxito" in result["context_for_llm"].lower() or "generado exitosamente" in result["context_for_llm"].lower()
+    assert len(result["sources"]) > 0
+    
+    file_path = result["sources"][0]["metadata"]["file_path"]
+    assert os.path.exists(file_path)
+    assert os.path.getsize(file_path) > 1000  # Verify the PDF is not empty
+    
+    # Clean up test output file
+    if os.path.exists(file_path):
+        try:
+            os.remove(file_path)
+        except OSError:
+            pass
