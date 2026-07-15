@@ -20,7 +20,7 @@ import { useAuth } from '../context/AuthContext';
 import { chatService, ChatMessage, ChatThread } from '../api/chatService';
 import { workspaceService, Workspace } from '../api/workspaceService';
 import { colors, lightColors, spacing, borderRadius } from '../theme/colors';
-import { Send, Menu, List, Plus, ChevronDown, Briefcase, Sparkles, MessageSquare, History, X, Layout, FileText, Calendar, Inbox } from 'lucide-react-native';
+import { Send, Menu, List, Plus, ChevronDown, Briefcase, Sparkles, MessageSquare, History, X, Layout, FileText, Calendar, Inbox, ArrowDown } from 'lucide-react-native';
 import Markdown from 'react-native-markdown-display';
 import { useStreamingChat } from '../hooks/useStreamingChat';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -29,6 +29,9 @@ import { collectSourcesFromMessage } from '../utils/chatUtils';
 import { MixedContentRenderer } from '../components/chat/MixedContentRenderer';
 import { ReasoningBlock } from '../components/chat/ReasoningBlock';
 import { SafeAreaView as RNSafeAreaView } from 'react-native-safe-area-context';
+import { LoadingIndicator } from '../components/chat/LoadingIndicator';
+import { DeepResearchVisualizer } from '../components/chat/DeepResearchVisualizer';
+
 
 
 // Reasoning is now handled by ReasoningBlock.tsx inside MixedContentRenderer
@@ -56,11 +59,63 @@ export const ChatScreen = ({ navigation }: any) => {
   const flatListRef = useRef<FlatList>(null);
 
   // Streaming
-  const { sendMessage, currentResponse, currentReasoning, isLoading: isStreaming } = useStreamingChat({
+  const {
+    sendMessage,
+    currentResponse,
+    currentReasoning,
+    isLoading: isStreaming,
+    toolName,
+    reactState,
+    isDeepResearchActive,
+    researchProgress,
+    researchStatus,
+    isThinking,
+    researchCompletedEvent,
+    setResearchCompletedEvent,
+  } = useStreamingChat({
     onChunk: () => flatListRef.current?.scrollToEnd({ animated: true }),
     onComplete: () => { if (activeThreadId) loadMessages(activeThreadId); },
     onError: (err) => console.error('Streaming error:', err),
   });
+
+  const [showScrollBottomButton, setShowScrollBottomButton] = useState(false);
+
+  const handleScroll = (event: any) => {
+    const { contentOffset, layoutMeasurement, contentSize } = event.nativeEvent;
+    const isAtBottom = contentSize.height - contentOffset.y - layoutMeasurement.height < 100;
+    setShowScrollBottomButton(!isAtBottom);
+  };
+
+  const scrollToBottom = () => {
+    flatListRef.current?.scrollToEnd({ animated: true });
+  };
+
+  // Effect to automatically send a message when deep research completes
+  useEffect(() => {
+    if (researchCompletedEvent && activeThreadId && user?.id) {
+      setResearchCompletedEvent(false);
+      // Auto-enviar la solicitud de resumen
+      const requestSummary = async () => {
+        setInputMessage('');
+        const tempUserMsg: ChatMessage = {
+          text: '*(Sistema)*: La investigación profunda ha concluido en segundo plano. Por favor, notifícame un breve resumen de los hallazgos principales.',
+          sender: 'user',
+          created_at: new Date().toISOString(),
+        };
+        setMessages(prev => [...prev, tempUserMsg]);
+        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+
+        await sendMessage({
+          thread_id: activeThreadId,
+          account_id: user.id,
+          user_message: '*(Sistema)*: La investigación profunda ha concluido en segundo plano. Por favor, notifícame un breve resumen de los hallazgos principales.',
+          ...(selectedWorkspace ? { workspace_id: selectedWorkspace.id } : {}),
+        } as any);
+      };
+      requestSummary();
+    }
+  }, [researchCompletedEvent, activeThreadId, user, selectedWorkspace, sendMessage]);
+
 
   // Load workspaces once
   useEffect(() => {
@@ -369,6 +424,8 @@ export const ChatScreen = ({ navigation }: any) => {
             renderItem={renderMessage}
             contentContainerStyle={styles.messageList}
             showsVerticalScrollIndicator={false}
+            onScroll={handleScroll}
+            scrollEventThrottle={16}
             ListEmptyComponent={
               !loadingMessages && !isStreaming ? (
                 <View style={styles.emptyChat}>
@@ -385,42 +442,63 @@ export const ChatScreen = ({ navigation }: any) => {
               ) : null
             }
             ListFooterComponent={
-              isStreaming ? (
+              isStreaming || isThinking || isDeepResearchActive ? (
                 <View style={[styles.messageWrapper, { flexDirection: 'column', paddingHorizontal: 10 }]}>
-                   <View style={[styles.avatarCircle, { backgroundColor: theme.primary + '15', marginBottom: 6, marginLeft: 2 }]}>
-                      <Sparkles size={14} color={theme.primary} />
-                   </View>
+                   {!isDeepResearchActive && (
+                     <View style={[styles.avatarCircle, { backgroundColor: theme.primary + '15', marginBottom: 6, marginLeft: 2 }]}>
+                        <Sparkles size={14} color={theme.primary} />
+                     </View>
+                   )}
                     <View style={styles.aiContent}>
-                       <View style={styles.aiHeader}>
-                         <View style={[styles.brandBadge, { backgroundColor: theme.primary + '15', borderColor: theme.primary + '30' }]}>
-                           <Text style={[styles.brandText, { color: theme.primary }]}>KAI Intelligence</Text>
+                       {!isDeepResearchActive && (
+                         <View style={styles.aiHeader}>
+                           <View style={[styles.brandBadge, { backgroundColor: theme.primary + '15', borderColor: theme.primary + '30' }]}>
+                             <Text style={[styles.brandText, { color: theme.primary }]}>KAI Intelligence</Text>
+                           </View>
+                           <Text style={[styles.modelText, { color: theme.textMuted }]}>Assistant</Text>
                          </View>
-                         <Text style={[styles.modelText, { color: theme.textMuted }]}>Assistant</Text>
-                       </View>
+                       )}
                        
-                       {currentReasoning ? (
-                          <ReasoningBlock 
-                            content={currentReasoning} 
-                            isDarkMode={isDarkMode} 
-                            theme={theme} 
-                            markdownStyles={markdownStyles} 
+                       {isDeepResearchActive ? (
+                          <DeepResearchVisualizer
+                            progress={researchProgress}
+                            statusText={researchStatus}
+                            theme={theme}
+                            isDarkMode={isDarkMode}
                           />
-                       ) : null}
-                      
-                      <View style={styles.markdownContainer}>
-                        <Text style={[styles.thinkingText, { color: theme.textMuted }]}>
-                           {currentResponse || currentReasoning ? '' : 'Pensando...'}
-                        </Text>
-                        {currentResponse ? (
-                          <MixedContentRenderer 
-                            content={currentResponse} 
-                            isDarkMode={isDarkMode} 
-                            theme={theme} 
-                            markdownStyles={markdownStyles} 
-                          />
-                        ) : null}
-                      </View>
-                   </View>
+                       ) : (
+                          <>
+                            {currentReasoning ? (
+                               <ReasoningBlock 
+                                 content={currentReasoning} 
+                                 isDarkMode={isDarkMode} 
+                                 theme={theme} 
+                                 markdownStyles={markdownStyles} 
+                               />
+                            ) : null}
+                            
+                            {isThinking || (isStreaming && !currentResponse && !currentReasoning) ? (
+                              <LoadingIndicator
+                                toolName={toolName}
+                                reactState={reactState}
+                                theme={theme}
+                                isDeepResearchActive={isDeepResearchActive}
+                              />
+                            ) : (
+                              <View style={styles.markdownContainer}>
+                                {currentResponse ? (
+                                  <MixedContentRenderer 
+                                    content={currentResponse} 
+                                    isDarkMode={isDarkMode} 
+                                    theme={theme} 
+                                    markdownStyles={markdownStyles} 
+                                  />
+                                ) : null}
+                              </View>
+                            )}
+                          </>
+                       )}
+                    </View>
                 </View>
               ) : null
             }
@@ -457,6 +535,22 @@ export const ChatScreen = ({ navigation }: any) => {
            </View>
         </View>
       </KeyboardAvoidingView>
+
+      {/* Botón flotante Ir al final */}
+      {showScrollBottomButton && (
+        <TouchableOpacity
+          onPress={scrollToBottom}
+          style={[styles.floatingScrollBtn, { backgroundColor: theme.primary }]}
+          activeOpacity={0.8}
+        >
+          <View style={styles.scrollBtnInner}>
+            <ArrowDown color="#fff" size={20} />
+            {isStreaming && (
+              <View style={[styles.scrollBadge, { backgroundColor: '#10b981' }]} />
+            )}
+          </View>
+        </TouchableOpacity>
+      )}
 
       {/* Workspace Picker Modal */}
       <Modal
@@ -861,6 +955,39 @@ const styles = StyleSheet.create({
      borderRadius: 10,
      justifyContent: 'center',
      alignItems: 'center',
+  },
+  floatingScrollBtn: {
+    position: 'absolute',
+    bottom: 90,
+    right: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 5,
+    elevation: 5,
+    zIndex: 999,
+  },
+  scrollBtnInner: {
+    position: 'relative',
+    width: 44,
+    height: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  scrollBadge: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    borderWidth: 1.5,
+    borderColor: '#fff',
   }
 });
 
