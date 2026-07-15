@@ -8,6 +8,7 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useUserSettings } from '@/contexts/UserSettingsContext';
 
 export const SETTINGS_MENU = [
   { id: 'personal-data', label: 'Datos Personales', icon: User },
@@ -30,12 +31,21 @@ interface SettingsNavProps {
 }
 
 export const SettingsNav: React.FC<SettingsNavProps> = ({ activeTab, setActiveTab, isMobile }) => {
+  const { settings } = useUserSettings();
+
+  const visibleSettingsMenu = SETTINGS_MENU.filter(item => {
+    if (!settings) return true;
+    if (item.id === 'skills' && !settings.skills_enabled) return false;
+    if (item.id === 'heartbeat' && !settings.heartbeat_enabled) return false;
+    return true;
+  });
+
   return (
     <div className={cn(
       "flex flex-col gap-1 p-2",
       isMobile && "w-full"
     )}>
-      {SETTINGS_MENU.map((item) => {
+      {visibleSettingsMenu.map((item) => {
         const Icon = item.icon;
         const isActive = activeTab === item.id;
 
