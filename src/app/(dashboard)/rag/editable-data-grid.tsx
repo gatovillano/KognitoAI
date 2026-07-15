@@ -12,6 +12,14 @@ import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { ObjectTagSelectorDialog, TaggedObject } from './object-tag-selector-dialog';
 
+// Import detail and edit dialogs
+import { ProfileDetailDialog } from '@/app/(dashboard)/profiles/profile-detail-dialog';
+import { ProfileDialog } from '@/app/(dashboard)/profiles/profile-dialog';
+import { ViewNoteDialog } from '@/app/(dashboard)/notes/view-note-dialog';
+import { EventDetailsDialog } from '@/app/(dashboard)/agenda/EventDetailsDialog';
+import { EventEditDialog } from '@/app/(dashboard)/agenda/EventEditDialog';
+import { TaskDialog } from '@/app/(dashboard)/agenda/task-dialog';
+
 interface EditableDataGridProps {
     tableId: string;
     columns: any[];
@@ -26,6 +34,53 @@ export function EditableDataGrid({ tableId, columns, onDataChange }: EditableDat
     const [isSaving, setIsSaving] = useState(false);
     const [isObjectSelectorOpen, setIsObjectSelectorOpen] = useState(false);
     const [activeObjectCell, setActiveObjectCell] = useState<{ rowId: string, colName: string } | null>(null);
+
+    // States for viewing detailed item modals/dialogs
+    const [activeNote, setActiveNote] = useState<any | null>(null);
+    const [isNoteViewOpen, setIsNoteViewOpen] = useState(false);
+
+    const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
+    const [isProfileViewOpen, setIsProfileViewOpen] = useState(false);
+    const [editingProfile, setEditingProfile] = useState<any | null>(null);
+    const [isProfileDialogOpen, setIsProfileDialogOpen] = useState(false);
+
+    const [activeEvent, setActiveEvent] = useState<any | null>(null);
+    const [isEventViewOpen, setIsEventViewOpen] = useState(false);
+    const [isEventEditOpen, setIsEventEditOpen] = useState(false);
+
+    const [activeTask, setActiveTask] = useState<any | null>(null);
+    const [isTaskViewOpen, setIsTaskViewOpen] = useState(false);
+
+    const handleBadgeClick = async (item: TaggedObject) => {
+        const toastId = toast.loading('Cargando detalles...');
+        try {
+            if (item.type === 'profile') {
+                // Profiles detail dialog fetches details internally
+                setActiveProfileId(String(item.id));
+                setIsProfileViewOpen(true);
+                toast.dismiss(toastId);
+            } else if (item.type === 'note') {
+                const response = await apiClient.get(`/api/notes/${item.id}`);
+                setActiveNote(response.data);
+                setIsNoteViewOpen(true);
+                toast.dismiss(toastId);
+            } else if (item.type === 'event') {
+                const response = await apiClient.get(`/api/agenda/events/${item.id}`);
+                setActiveEvent(response.data);
+                setIsEventViewOpen(true);
+                toast.dismiss(toastId);
+            } else if (item.type === 'task') {
+                const response = await apiClient.get(`/api/tasks/${item.id}`);
+                setActiveTask(response.data);
+                setIsTaskViewOpen(true);
+                toast.dismiss(toastId);
+            }
+        } catch (error) {
+            console.error('Error fetching details for badge:', error);
+            toast.error('No se pudieron cargar los detalles.');
+            toast.dismiss(toastId);
+        }
+    };
 
     const fetchRows = useCallback(async () => {
         setIsLoading(true);
@@ -224,7 +279,15 @@ export function EditableDataGrid({ tableId, columns, onDataChange }: EditableDat
                                                                     if (item.type === 'profile') colorClass = "bg-purple-500/10 text-purple-500 border-purple-500/20";
                                                                     if (item.type === 'task') colorClass = "bg-orange-500/10 text-orange-500 border-orange-500/20";
                                                                     return (
-                                                                        <Badge key={idx} variant="outline" className={cn("text-[10px] py-0 px-1.5 flex items-center gap-1", colorClass)}>
+                                                                        <Badge
+                                                                            key={idx}
+                                                                            variant="outline"
+                                                                            className={cn("text-[10px] py-0 px-1.5 flex items-center gap-1 cursor-pointer hover:opacity-80 transition-opacity", colorClass)}
+                                                                            onClick={(e) => {
+                                                                                e.stopPropagation();
+                                                                                handleBadgeClick(item);
+                                                                            }}
+                                                                        >
                                                                             <Icon className="h-2.5 w-2.5" />
                                                                             <span className="truncate max-w-[80px]">{item.title}</span>
                                                                         </Badge>
@@ -264,6 +327,97 @@ export function EditableDataGrid({ tableId, columns, onDataChange }: EditableDat
                 onOpenChange={setIsObjectSelectorOpen}
                 initialSelected={editValue as TaggedObject[]}
                 onSave={handleSaveObjectTags}
+            />
+
+            {/* View Note Dialog */}
+            {activeNote && (
+                <ViewNoteDialog
+                    note={activeNote}
+                    isOpen={isNoteViewOpen}
+                    onOpenChange={setIsNoteViewOpen}
+                    onNoteUpdated={() => {
+                        fetchRows();
+                        apiClient.get(`/api/notes/${activeNote.id}`).then((res) => {
+                            setActiveNote(res.data);
+                        });
+                    }}
+                />
+            )}
+
+            {/* Profile Detail and Edit Dialogs */}
+            {activeProfileId && (
+                <ProfileDetailDialog
+                    isOpen={isProfileViewOpen}
+                    onOpenChange={setIsProfileViewOpen}
+                    profileId={activeProfileId}
+                    onEdit={(profileToEdit) => {
+                        setEditingProfile(profileToEdit);
+                        setIsProfileViewOpen(false);
+                        setIsProfileDialogOpen(true);
+                    }}
+                />
+            )}
+            <ProfileDialog
+                isOpen={isProfileDialogOpen}
+                onOpenChange={setIsProfileDialogOpen}
+                profile={editingProfile}
+                onSaveSuccess={() => {
+                    fetchRows();
+                    setIsProfileDialogOpen(false);
+                }}
+            />
+
+            {/* Event Detail and Edit Dialogs */}
+            {activeEvent && (
+                <EventDetailsDialog
+                    isOpen={isEventViewOpen}
+                    onOpenChange={setIsEventViewOpen}
+                    onEditClick={(eventToEdit) => {
+                        setActiveEvent(eventToEdit);
+                        setIsEventViewOpen(false);
+                        setIsEventEditOpen(true);
+                    }}
+                    onDeleteClick={async (eventToDelete) => {
+                        if (window.confirm('¿Eliminar este evento?')) {
+                            try {
+                                await apiClient.delete(`/api/agenda/events/${eventToDelete.id}`);
+                                toast.success('Evento eliminado.');
+                                setIsEventViewOpen(false);
+                                fetchRows();
+                            } catch (error) {
+                                toast.error('Error al eliminar el evento.');
+                            }
+                        }
+                    }}
+                    event={activeEvent}
+                />
+            )}
+            {activeEvent && (
+                <EventEditDialog
+                    isOpen={isEventEditOpen}
+                    onOpenChange={setIsEventEditOpen}
+                    onSaveSuccess={(updatedEvent) => {
+                        toast.success('Evento guardado.');
+                        fetchRows();
+                        setActiveEvent(updatedEvent);
+                        setIsEventEditOpen(false);
+                        setIsEventViewOpen(true);
+                    }}
+                    onCloseDetails={() => setIsEventViewOpen(false)}
+                    event={activeEvent}
+                />
+            )}
+
+            {/* Task Dialog */}
+            <TaskDialog
+                isOpen={isTaskViewOpen}
+                onOpenChange={setIsTaskViewOpen}
+                task={activeTask}
+                onSaveSuccess={(updatedTask) => {
+                    toast.success('Tarea guardada.');
+                    fetchRows();
+                    setIsTaskViewOpen(false);
+                }}
             />
         </div>
     );

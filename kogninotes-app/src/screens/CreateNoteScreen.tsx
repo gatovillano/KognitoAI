@@ -40,7 +40,7 @@ export const CreateNoteScreen = ({ navigation }: any) => {
         try {
             const data = await workspaceService.listWorkspaces();
             // BLINDAJE: Aseguramos que data sea un array
-            const workspacesArray = Array.isArray(data) ? data : [];
+            const workspacesArray = data && Array.isArray(data.workspaces) ? data.workspaces : [];
             setWorkspaces(workspacesArray);
             if (workspacesArray.length > 0) {
                 setSelectedWorkspace(workspacesArray[0].id);
