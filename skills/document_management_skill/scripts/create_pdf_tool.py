@@ -45,6 +45,31 @@ class CreatePDFInput(BaseModel):
         "Documento Generado",
         description="The title of the document, used in the header."
     )
+    custom_css: Optional[str] = Field(
+        None,
+        description="CSS adicional que se inyectará al final para personalizar o sobrescribir el estilo."
+    )
+    orientation: Optional[str] = Field(
+        "portrait",
+        description="Orientación de la página: 'portrait' (vertical) o 'landscape' (horizontal)."
+    )
+    margin: Optional[str] = Field(
+        "2cm",
+        description="Margen exterior de las páginas (ej. '2cm', '1.5in', '20mm')."
+    )
+    theme: Optional[str] = Field(
+        "modern",
+        description="Tema de color predefinido: 'modern', 'emerald', 'amber', 'minimalist'."
+    )
+    header_text: Optional[str] = Field(
+        None,
+        description="Texto opcional para la cabecera superior derecha. Soporta placeholders [page] y [pages]."
+    )
+    footer_text: Optional[str] = Field(
+        None,
+        description="Texto opcional para el pie de página inferior izquierdo. Soporta placeholders [page] y [pages]."
+    )
+
 
 class CreatePDFTool(BaseTool):
     """
@@ -397,7 +422,20 @@ class CreatePDFTool(BaseTool):
         
         return content
 
-    async def _arun(self, content: str, is_html: bool = False, filename: Optional[str] = None, title: str = "Documento Generado", **kwargs: Any) -> Any:
+    async def _arun(
+        self, 
+        content: str, 
+        is_html: bool = False, 
+        filename: Optional[str] = None, 
+        title: str = "Documento Generado",
+        custom_css: Optional[str] = None,
+        orientation: str = "portrait",
+        margin: str = "2cm",
+        theme: str = "modern",
+        header_text: Optional[str] = None,
+        footer_text: Optional[str] = None,
+        **kwargs: Any
+    ) -> Any:
         """
         Executes the tool logic asynchronously.
         """
