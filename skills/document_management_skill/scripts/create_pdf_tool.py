@@ -259,7 +259,7 @@ class CreatePDFTool(BaseTool):
             }}
         }}
 
-        /* Página sin márgenes para fondos completos */
+        /* Página sin márgenes para portadas completas */
         @page :first {{
             margin: 0;
             @top-right {{ content: none; }}
@@ -283,70 +283,115 @@ class CreatePDFTool(BaseTool):
             font-family: 'Inter', 'Segoe UI', Roboto, sans-serif;
             line-height: 1.6;
             color: var(--dark);
-        /* Cover Page */        .cover {{
-            width: 21cm;
+        }}
+
+        .content {{
+            max-width: 17cm;
+            margin: 0 auto;
+        }}
+
+        /* === PORTADAS (COVERS) === */
+        .cover-classic {{
+            width: 100%;
             height: 29.7cm;
-            margin: 0;
-            padding: 0;
             display: flex;
             flex-direction: column;
             justify-content: center;
             align-items: center;
             text-align: center;
-            background-color: #0a0e27;
+            background-color: var(--primary-dark);
+            color: #ffffff;
+            padding: 2cm;
             box-sizing: border-box;
             page-break-after: always;
-            position: relative;
         }}
-        .cover * {{
-            color: #ffffff;
-        }}
-        .cover h1 {{
+        .cover-classic h1 {{
             font-size: 32pt;
             margin-bottom: 0.3em;
+            color: #ffffff;
             border: none;
             line-height: 1.2;
         }}
-        .cover .subtitle {{
+        .cover-classic .subtitle {{
             font-size: 14pt;
-            color: #c8d6e5;
-            max-width: 17cm;
+            color: var(--primary-light);
+            max-width: 14cm;
             margin: 0 auto;
-            line-height: 1.4;
         }}
-        .cover .meta {{
-            font-size: 9pt;
-            color: #8899bb;
-            margin-top: 2em;
-        }}            box-sizing: border-box;
+        .cover-classic .meta {{
+            font-size: 10pt;
+            color: #e2e8f0;
+            margin-top: 3em;
+        }}
+
+        .cover-modern {{
+            width: 100%;
+            height: 29.7cm;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            background: linear-gradient(135deg, var(--primary-dark) 0%, #0f172a 100%);
+            color: #ffffff;
+            padding: 3cm 2cm;
+            box-sizing: border-box;
             page-break-after: always;
         }}
-        .cover * {{
+        .cover-modern h1 {{
+            font-size: 36pt;
+            font-weight: 800;
             color: #ffffff;
-        }}
-        .cover h1 {{
-            font-size: 32pt;
-            margin-bottom: 0.3em;
             border: none;
-            line-height: 1.2;
+            margin-top: 2cm;
+            line-height: 1.1;
         }}
-        .cover .subtitle {{
-            font-size: 14pt;
-            color: #c8d6e5;
-            max-width: 12cm;
-            margin: 0 auto;
-            line-height: 1.4;
+        .cover-modern .subtitle {{
+            font-size: 16pt;
+            color: var(--primary-light);
+            margin-top: 0.5em;
         }}
-        .cover .meta {{
-            font-size: 9pt;
-            color: #8899bb;
-            margin-top: 2em;
-        }}
-
-        .content {{
-            max-width: 17cm;
+        .cover-modern .meta {{
+            border-top: 2px solid var(--primary);
+            padding-top: 1.5em;
+            font-size: 10pt;
+            color: #94a3b8;
         }}
 
+        .cover-minimal {{
+            width: 100%;
+            height: 29.7cm;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            background-color: var(--light);
+            color: var(--dark);
+            padding: 3cm;
+            box-sizing: border-box;
+            page-break-after: always;
+        }}
+        .cover-minimal h1 {{
+            font-size: 40pt;
+            font-weight: 900;
+            color: var(--primary-dark);
+            border: none;
+            text-align: left;
+            line-height: 1.05;
+            margin-bottom: 0.5em;
+        }}
+        .cover-minimal .subtitle {{
+            font-size: 16pt;
+            color: var(--secondary);
+            text-align: left;
+            margin-bottom: 2em;
+        }}
+        .cover-minimal .meta {{
+            font-size: 10pt;
+            color: var(--secondary);
+            border-top: 1px solid var(--border);
+            padding-top: 1em;
+            margin-top: 2cm;
+        }}
+
+        /* === TIPOGRAFÍA === */
         h1 {{
             color: var(--dark);
             border-bottom: 3px solid var(--primary);
@@ -355,7 +400,6 @@ class CreatePDFTool(BaseTool):
             font-size: 22pt;
             font-weight: 800;
         }}
-
         h2 {{
             color: var(--primary);
             margin-top: 1.8em;
@@ -364,7 +408,6 @@ class CreatePDFTool(BaseTool):
             border-bottom: 1px solid var(--border);
             padding-bottom: 0.2em;
         }}
-
         h3 {{
             color: var(--secondary);
             margin-top: 1.5em;
@@ -373,10 +416,21 @@ class CreatePDFTool(BaseTool):
             text-transform: uppercase;
             letter-spacing: 0.05em;
         }}
-
         p {{ margin-bottom: 1em; text-align: justify; }}
+        .lead {{
+            font-size: 1.2em;
+            font-weight: 500;
+            color: var(--secondary);
+            line-height: 1.6;
+        }}
+        .divider {{
+            margin: 2em 0;
+            border: 0;
+            height: 1px;
+            background: var(--border);
+        }}
 
-        /* Component: Card */
+        /* === COMPONENTES === */
         .card {{
             background: var(--light);
             border: 1px solid var(--border);
@@ -385,9 +439,17 @@ class CreatePDFTool(BaseTool):
             margin: 1.5em 0;
             page-break-inside: avoid;
         }}
+        .card-accent {{
+            background: var(--light);
+            border: 1px solid var(--border);
+            border-left: 5px solid var(--primary);
+            border-radius: 4px 12px 12px 4px;
+            padding: 1.5em;
+            margin: 1.5em 0;
+            page-break-inside: avoid;
+        }}
 
-        /* Component: Boxes */
-        .info-box, .warning-box, .error-box {{
+        .info-box, .warning-box, .error-box, .success-box, .note-box {{
             padding: 1em 1.5em;
             border-radius: 8px;
             margin: 1.5em 0;
@@ -397,43 +459,47 @@ class CreatePDFTool(BaseTool):
         .info-box {{ background: #eff6ff; border-color: var(--primary); color: #1e40af; }}
         .warning-box {{ background: #fffbeb; border-color: var(--warning); color: #92400e; }}
         .error-box {{ background: #fef2f2; border-color: var(--error); color: #991b1b; }}
+        .success-box {{ background: #ecfdf5; border-color: var(--success); color: #065f46; }}
+        .note-box {{ background: var(--light); border-color: var(--secondary); color: var(--dark); }}
 
-        /* Grid Layout */
-        .grid-2 {{
+        /* === GRID LAYOUT === */
+        .grid-2, .grid-3, .grid-4 {{
             display: flex;
             gap: 20px;
             margin: 1.5em 0;
+            page-break-inside: avoid;
         }}
         .grid-2 > div {{ flex: 1; }}
+        .grid-3 > div {{ flex: 1; }}
+        .grid-4 > div {{ flex: 1; }}
 
-        code {{
-            background-color: #f1f5f9;
-            padding: 0.2em 0.4em;
-            border-radius: 4px;
-            font-family: 'Fira Code', 'DejaVu Sans Mono', monospace;
-            font-size: 0.9em;
-            color: #be185d;
+        /* === BADGES / ETIQUETAS === */
+        .badge {{
+            display: inline-block;
+            padding: 0.25em 0.6em;
+            font-size: 75%;
+            font-weight: 700;
+            line-height: 1;
+            text-align: center;
+            white-space: nowrap;
+            vertical-align: baseline;
+            border-radius: 10rem;
         }}
+        .badge-primary {{ background-color: var(--primary-light); color: var(--primary-dark); }}
+        .badge-success {{ background-color: #d1fae5; color: #065f46; }}
+        .badge-warning {{ background-color: #fef3c7; color: #92400e; }}
+        .badge-error {{ background-color: #fee2e2; color: #991b1b; }}
 
-        pre {{
-            background-color: #0f172a;
-            color: #f8fafc;
-            padding: 1.2em;
-            border-radius: 10px;
-            font-size: 9pt;
-            margin-bottom: 1.5em;
-            border-left: 5px solid var(--primary);
-            white-space: pre-wrap;
-        }}
-
+        /* === TABLAS === */
         table {{
             width: 100%;
             border-collapse: collapse;
             margin: 2em 0;
             font-size: 9.5pt;
+            page-break-inside: avoid;
         }}
         th {{
-            background-color: #f1f5f9;
+            background-color: var(--light);
             color: var(--dark);
             font-weight: 700;
             text-align: left;
@@ -444,13 +510,36 @@ class CreatePDFTool(BaseTool):
             padding: 10px 12px;
             border-bottom: 1px solid var(--border);
         }}
-        tr:nth-child(even) {{ background-color: #f8fafc; }}
+        .table-striped tr:nth-child(even) {{ background-color: var(--light); }}
+        .table-bordered td, .table-bordered th {{ border: 1px solid var(--border); }}
+        .table-dense td, .table-dense th {{ padding: 6px 8px; }}
 
-        .mermaid-diagram {{
-            background: #fff !important;
-            border: 1px solid var(--border) !important;
-            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+        /* === UTILIDADES === */
+        code {{
+            background-color: var(--light);
+            padding: 0.2em 0.4em;
+            border-radius: 4px;
+            font-family: 'Fira Code', 'DejaVu Sans Mono', monospace;
+            font-size: 0.9em;
+            color: #be185d;
         }}
+        pre {{
+            background-color: #0f172a;
+            color: #f8fafc;
+            padding: 1.2em;
+            border-radius: 10px;
+            font-size: 9pt;
+            margin-bottom: 1.5em;
+            border-left: 5px solid var(--primary);
+            white-space: pre-wrap;
+            page-break-inside: avoid;
+        }}
+        .page-break {{ page-break-before: always; }}
+        .no-break {{ page-break-inside: avoid; }}
+        .text-center {{ text-align: center; }}
+        .text-left {{ text-align: left; }}
+        .text-right {{ text-align: right; }}
+        .text-justify {{ text-align: justify; }}
         """
 
     def _repair_markdown(self, content: str) -> str:
