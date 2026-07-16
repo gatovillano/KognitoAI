@@ -3,7 +3,7 @@
 import logging
 import asyncio
 from typing import List, Dict, Any, Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from langchain_core.language_models import LLM
 from langchain_core.output_parsers import JsonOutputParser
 from langchain_core.prompts import ChatPromptTemplate
@@ -37,18 +37,60 @@ def _normalize_executive_summary(summary: str) -> str:
     return "" if _is_meta_executive_summary(summary) else summary.strip()
 
 # Modelos de datos para los resultados del análisis
+class CodeStructureItem(BaseModel):
+    component: str = Field(description="Nombre del componente o módulo analizado.")
+    description: str = Field(description="Descripción de las responsabilidades y funciones del componente.")
+
+class DesignPatternItem(BaseModel):
+    pattern: str = Field(description="Nombre del patrón de diseño identificado (ej. Singleton, Factory, Repository, etc.).")
+    description: str = Field(description="Cómo se aplica este patrón en el código y en qué archivos/clases.")
+
+class DependencyItem(BaseModel):
+    library: str = Field(description="Nombre de la biblioteca, package o dependencia externa.")
+    description: str = Field(description="Propósito e integración de esta dependencia en el proyecto.")
+
+class SecurityAnalysisItem(BaseModel):
+    vulnerability: str = Field(description="Descripción breve de la vulnerabilidad o riesgo de seguridad.")
+    description: str = Field(description="Detalles del riesgo, archivos afectados y posible impacto.")
+    severity: str = Field(description="Nivel de severidad: 'Critical', 'High', 'Medium', 'Low'.")
+
+class PerformanceAnalysisItem(BaseModel):
+    area: str = Field(description="Área de rendimiento afectada (ej. Database, CPU, Memoria, Red).")
+    issue: str = Field(description="Descripción del problema de rendimiento u cuello de botella.")
+    suggestion: str = Field(description="Recomendación técnica específica para optimizar el rendimiento.")
+
+class RefactoringOpportunityItem(BaseModel):
+    concept: str = Field(description="Concepto o parte del código a refactorizar.")
+    description: str = Field(description="Descripción detallada de la oportunidad de refactorización y qué cambiar.")
+    benefit: str = Field(description="Beneficio esperado (ej. Reducción de complejidad, SoC, testeabilidad).")
+
+class DocumentationHealthItem(BaseModel):
+    item: str = Field(description="Aspecto de documentación evaluado (ej. Docstrings, README, API Docs).")
+    status: str = Field(description="Estado de salud: 'Good', 'Needs Improvement', 'Missing'.")
+    recommendation: str = Field(description="Sugerencia específica para mejorar la documentación de este aspecto.")
+
+class PotentialIssueItem(BaseModel):
+    issue: str = Field(description="Descripción corta del problema potencial de arquitectura o bugs latentes.")
+    description: str = Field(description="Detalles del problema, causas raíz y consecuencias si no se corrige.")
+
+class RecommendationItem(BaseModel):
+    recommendation: str = Field(description="Recomendación técnica general para mejorar el código.")
+    rationale: str = Field(description="Justificación técnica de por qué se debe implementar esta recomendación.")
+    application: str = Field(description="Dónde o cómo se debe aplicar en el proyecto.")
+    implementation: str = Field(description="Ejemplo breve o guía de implementación (puede ser un fragmento de código).")
+
 class CodeAnalysisResult(BaseModel):
     """Modelo de datos para el resultado del análisis de un fragmento de código."""
     executive_summary: str = ""
-    code_structure: List[Dict[str, Any]] = []
-    design_patterns: List[Dict[str, Any]] = []
-    dependencies: List[Dict[str, Any]] = []
-    security_analysis: List[Dict[str, Any]] = []
-    performance_analysis: List[Dict[str, Any]] = []
-    refactoring_opportunities: List[Dict[str, Any]] = []
-    documentation_health: List[Dict[str, Any]] = []
-    potential_issues: List[Dict[str, Any]] = []
-    recommendations: List[Dict[str, Any]] = []
+    code_structure: List[CodeStructureItem] = []
+    design_patterns: List[DesignPatternItem] = []
+    dependencies: List[DependencyItem] = []
+    security_analysis: List[SecurityAnalysisItem] = []
+    performance_analysis: List[PerformanceAnalysisItem] = []
+    refactoring_opportunities: List[RefactoringOpportunityItem] = []
+    documentation_health: List[DocumentationHealthItem] = []
+    potential_issues: List[PotentialIssueItem] = []
+    recommendations: List[RecommendationItem] = []
 
 async def analyze_code_content(
     code_content: str, 
