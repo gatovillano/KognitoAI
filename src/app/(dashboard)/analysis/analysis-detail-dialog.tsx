@@ -1378,9 +1378,11 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
                 </Button>
               </div>
               <DialogDescription className="mt-2 text-md text-muted-foreground" asChild>
-                <div className="break-words">
+                <div className="break-words max-h-[100px] overflow-y-auto">
                   {currentAnalysis.type === 'gap_development' ? (
                     <span>{currentAnalysis.title}</span>
+                  ) : currentAnalysis.type === 'code' || currentAnalysis.type.startsWith('code_') ? (
+                    <span>Análisis técnico detallado de la estructura, dependencias y calidad del repositorio.</span>
                   ) : (
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
                       {currentAnalysis.summary || "Detalles del análisis."}

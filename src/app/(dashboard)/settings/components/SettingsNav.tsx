@@ -31,22 +31,12 @@ interface SettingsNavProps {
 }
 
 export const SettingsNav: React.FC<SettingsNavProps> = ({ activeTab, setActiveTab, isMobile }) => {
-  const { settings } = useUserSettings();
-
-  const visibleSettingsMenu = SETTINGS_MENU.filter(item => {
-    if (!settings) return true;
-    if (item.id === 'skills' && !settings.skills_enabled) return false;
-    if (item.id === 'heartbeat' && !settings.heartbeat_enabled) return false;
-    if (item.id === 'ai-profile' && !settings.profiles_enabled) return false;
-    return true;
-  });
-
   return (
     <div className={cn(
       "flex flex-col gap-1 p-2",
       isMobile && "w-full"
     )}>
-      {visibleSettingsMenu.map((item) => {
+      {SETTINGS_MENU.map((item) => {
         const Icon = item.icon;
         const isActive = activeTab === item.id;
 
