@@ -3,6 +3,7 @@
 import logging
 import json
 import os
+import sys
 import asyncio
 from datetime import datetime
 from pathlib import Path
@@ -42,7 +43,7 @@ async def execute_pipeline_task():
     try:
         logger.info(f"Starting real KAI measurement pipeline: {PIPELINE_SCRIPT}")
         process = await asyncio.create_subprocess_exec(
-            "python3", str(PIPELINE_SCRIPT),
+            sys.executable, str(PIPELINE_SCRIPT),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=env,

@@ -87,6 +87,12 @@ class AnalyzeCodeForInsightsTool(BaseTool):
             
             formatted_items = []
             for item in items:
+                # Convertir Pydantic model a dict si es necesario
+                if not isinstance(item, dict) and hasattr(item, 'model_dump'):
+                    item = item.model_dump()
+                elif not isinstance(item, dict) and hasattr(item, 'dict'):
+                    item = item.dict()
+                
                 if isinstance(item, dict):
                     if 'component' in item and 'description' in item:
                         formatted_items.append(f"- **{item['component']}**: {item['description']}")

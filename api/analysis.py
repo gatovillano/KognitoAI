@@ -2364,15 +2364,15 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
             # Manejar tanto objetos Pydantic como diccionarios
             if hasattr(chunk_result, 'code_structure'):
                 # Es un objeto Pydantic
-                combined_categories["code_structure"].extend(chunk_result.code_structure)
-                combined_categories["design_patterns"].extend(chunk_result.design_patterns)
-                combined_categories["dependencies"].extend(chunk_result.dependencies)
-                combined_categories["security_analysis"].extend(chunk_result.security_analysis)
-                combined_categories["performance_analysis"].extend(chunk_result.performance_analysis)
-                combined_categories["refactoring_opportunities"].extend(chunk_result.refactoring_opportunities)
-                combined_categories["documentation_health"].extend(chunk_result.documentation_health)
-                combined_categories["potential_issues"].extend(chunk_result.potential_issues)
-                combined_categories["recommendations"].extend(chunk_result.recommendations)
+                combined_categories["code_structure"].extend([item.model_dump() if hasattr(item, 'model_dump') else (item.dict() if hasattr(item, 'dict') else item) for item in chunk_result.code_structure])
+                combined_categories["design_patterns"].extend([item.model_dump() if hasattr(item, 'model_dump') else (item.dict() if hasattr(item, 'dict') else item) for item in chunk_result.design_patterns])
+                combined_categories["dependencies"].extend([item.model_dump() if hasattr(item, 'model_dump') else (item.dict() if hasattr(item, 'dict') else item) for item in chunk_result.dependencies])
+                combined_categories["security_analysis"].extend([item.model_dump() if hasattr(item, 'model_dump') else (item.dict() if hasattr(item, 'dict') else item) for item in chunk_result.security_analysis])
+                combined_categories["performance_analysis"].extend([item.model_dump() if hasattr(item, 'model_dump') else (item.dict() if hasattr(item, 'dict') else item) for item in chunk_result.performance_analysis])
+                combined_categories["refactoring_opportunities"].extend([item.model_dump() if hasattr(item, 'model_dump') else (item.dict() if hasattr(item, 'dict') else item) for item in chunk_result.refactoring_opportunities])
+                combined_categories["documentation_health"].extend([item.model_dump() if hasattr(item, 'model_dump') else (item.dict() if hasattr(item, 'dict') else item) for item in chunk_result.documentation_health])
+                combined_categories["potential_issues"].extend([item.model_dump() if hasattr(item, 'model_dump') else (item.dict() if hasattr(item, 'dict') else item) for item in chunk_result.potential_issues])
+                combined_categories["recommendations"].extend([item.model_dump() if hasattr(item, 'model_dump') else (item.dict() if hasattr(item, 'dict') else item) for item in chunk_result.recommendations])
             elif isinstance(chunk_result, dict):
                 # Es un diccionario
                 combined_categories["code_structure"].extend(chunk_result.get("code_structure", []))
@@ -2440,20 +2440,21 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
         final_summary += f"Se analizaron {len(chunks)} partes del código con un total de {len(docs_data)} archivos.\n\n"
         final_summary += f"**Resumen por Partes:**\n{combined_summary}\n\n"
         
-        # Generar formatted_result consolidado usando la herramienta
+        # Generar formatted_result consolidado usando el analizador y la herramienta
         try:
             # Usar solo una muestra representativa para el formato final
             sample_content = chunks[0]["content"][:30000] if chunks else ""
-            formatted_result = await tool._arun(
+            final_code_analysis = await analyze_code_content(
                 code_content=sample_content + f"\n\nNOTA: Este es un análisis de {len(chunks)} partes del repositorio {repo_name}",
                 account_id=account_id,
-                file_name=f"Análisis de Repositorio: {repo_name}",
-                save_to_database=False,  # No guardar este análisis parcial
                 analysis_type=analysis_type
             )
+            formatted_result = tool._format_result(final_code_analysis, analysis_type)
+            consolidated_executive_summary = final_code_analysis.executive_summary
         except Exception as e:
             logger.warning(f"Error generando resultado formateado: {e}")
             formatted_result = final_summary
+            consolidated_executive_summary = f"Análisis completo de {len(chunks)} partes del repositorio {repo_name}."
 
         # Actualizar progreso: resumen generado
         progress_info["current_step"] = "Resumen ejecutivo generado"
@@ -2481,7 +2482,7 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
         # 6. Estructura final del resultado
         analysis_result = {
             "formatted_result": formatted_result,
-            "executive_summary": formatted_result,
+            "executive_summary": consolidated_executive_summary or f"Análisis completo de {len(chunks)} partes del repositorio {repo_name}.",
             "code_structure": combined_categories["code_structure"],
             "design_patterns": combined_categories["design_patterns"],
             "dependencies": combined_categories["dependencies"],
