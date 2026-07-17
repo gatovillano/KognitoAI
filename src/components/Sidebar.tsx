@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Plus, MessageSquare, Brain, Notebook, Calendar, LogOut, Bot, ChevronDown, ChevronRight, Pin, Users, Sparkles, MoreVertical, FolderKanban, Settings, BarChart3, Smartphone, User, Image as ImageIcon, ClipboardList, FileText, Inbox } from 'lucide-react';
+import { Plus, MessageSquare, Brain, Notebook, Calendar, LogOut, Bot, ChevronDown, ChevronRight, Pin, Users, Sparkles, MoreVertical, FolderKanban, Settings, BarChart3, Smartphone, User, Image as ImageIcon, ClipboardList, FileText, Inbox, Globe } from 'lucide-react';
 import Image from 'next/image';
 import apiClient from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
@@ -479,6 +479,20 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
               >
                 <Bot className={cn("h-4 w-4 transition-transform group-hover:scale-110", showToolText && "mr-2")} />
                 {showToolText && <span className="text-sm font-medium">Workspaces</span>}
+              </Button>
+            </Link>
+
+            <Link href="/fediverso" passHref onClick={onLinkClick} title="Fediverso" className="w-full block">
+              <Button
+                variant={pathname?.startsWith('/fediverso') ? 'secondary' : 'ghost'}
+                className={cn(
+                  "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
+                  isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-9 px-2",
+                  pathname?.startsWith('/fediverso') && "bg-primary/10 text-primary border border-primary/20"
+                )}
+              >
+                <Globe className={cn("h-4 w-4 transition-transform group-hover:scale-110", showToolText && "mr-2")} />
+                {showToolText && <span className="text-sm font-medium">Fediverso</span>}
               </Button>
             </Link>
           </nav>
