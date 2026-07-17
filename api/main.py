@@ -406,6 +406,13 @@ app.include_router(mfa_router, prefix="/api", tags=["mfa"])
 # Incluir API pública nueva (reemplaza openai_router)
 app.include_router(public_api_router, prefix="", tags=["openai-compatible"])
 
+# Extensiones
+try:
+    from extensions.fediverso.backend.router import router as fediverso_router
+    app.include_router(fediverso_router)
+except ImportError:
+    pass
+
 class GenerateHTMLRequest(BaseModel):
     content: str = Field(..., description="El contenido en formato Markdown o texto plano.")
     title: Optional[str] = Field("Documento Generado", description="El título del documento HTML.")
