@@ -26,7 +26,6 @@ import { SelectedContextItem } from '@/types/context';
 
 const INITIAL_RENDERED_MESSAGES = 40;
 const RENDER_BATCH_SIZE = 30;
-const STREAM_SCROLL_THROTTLE_MS = 120;
 
 // ... (interfaces remain the same) ...
 interface ToolStatusMessage {
@@ -359,7 +358,6 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
   const [researchStatus, setResearchStatus] = useState('Iniciando investigación...');
   const [selectedAnalysis, setSelectedAnalysis] = useState<Analysis | null>(null);
   const [showScrollBottomButton, setShowScrollBottomButton] = useState(false);
-  const [isAutoScrollEnabled, setIsAutoScrollEnabled] = useState(true);
   const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
   const [threadTitle, setThreadTitle] = useState<string>('');
   const [renderedMessageCount, setRenderedMessageCount] = useState(INITIAL_RENDERED_MESSAGES);
@@ -388,8 +386,6 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const topSentinelRef = useRef<HTMLDivElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const autoScrollRafRef = useRef<number | null>(null);
-  const lastStreamScrollRef = useRef<number>(0);
   const currentTaskIdRef = useRef<string | null>(null);
   useEffect(() => { currentTaskIdRef.current = currentTaskId; }, [currentTaskId]);
 
@@ -401,7 +397,6 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
     // Un umbral de 100px para determinar si estamos en el fondo
     const isAtBottom = scrollHeight - scrollTop - clientHeight < 100;
 
-    setIsAutoScrollEnabled(isAtBottom);
     setShowScrollBottomButton(!isAtBottom);
   }, []);
 
@@ -413,9 +408,9 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
     return () => container.removeEventListener('scroll', handleScroll);
   }, [handleScroll]);
 
-  const scrollToBottom = useCallback((behavior: 'smooth' | 'auto' = 'auto', force: boolean = false) => {
+  const scrollToBottom = useCallback((behavior: 'smooth' | 'auto' = 'auto') => {
     const container = scrollAreaRef.current;
-    if (!container || (!isAutoScrollEnabled && !force)) return;
+    if (!container) return;
 
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({
@@ -428,36 +423,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         behavior: behavior,
       });
     }
-  }, [isAutoScrollEnabled]);
-
-  const scheduleStreamScroll = useCallback((force: boolean = false) => {
-    if (autoScrollRafRef.current !== null) return;
-
-    autoScrollRafRef.current = requestAnimationFrame(() => {
-      autoScrollRafRef.current = null;
-      const now = performance.now();
-      if (now - lastStreamScrollRef.current < STREAM_SCROLL_THROTTLE_MS) return;
-
-      lastStreamScrollRef.current = now;
-      scrollToBottom('auto', force);
-    });
-  }, [scrollToBottom]);
-
-  useEffect(() => {
-    return () => {
-      if (autoScrollRafRef.current !== null) {
-        cancelAnimationFrame(autoScrollRafRef.current);
-      }
-    };
   }, []);
-
-  // Force scroll to bottom when loading indicators appear
-  useEffect(() => {
-    if (isResponding || toolName || isDeepResearchActive || backgroundTasks.length > 0) {
-      // Use a small timeout to ensure the DOM has updated with the new indicator
-      setTimeout(() => scrollToBottom('smooth', true), 100);
-    }
-  }, [isResponding, toolName, isDeepResearchActive, backgroundTasks.length, scrollToBottom]);
 
   const { registerMessageHandler } = useWebSocketContext();
 
@@ -656,7 +622,6 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                 content_parts: newParts,
               };
             }
-            scheduleStreamScroll();
             break;
           }
 
@@ -703,7 +668,6 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                 content_parts: newParts,
               };
             }
-            scheduleStreamScroll();
             break;
           }
 
@@ -840,7 +804,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
     const unregister = registerMessageHandler(handleMessage);
     return unregister; // Cleanup on component unmount
 
-  }, [registerMessageHandler, scheduleStreamScroll, settings?.llm_model]);
+  }, [registerMessageHandler, settings?.llm_model]);
 
   const handleSendMessage = useCallback(
     async (e?: React.FormEvent, messageTextFromInput?: string) => {
@@ -886,15 +850,54 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
           }
         } catch (error) {
           console.error('Error creando nuevo hilo de chat o enviando mensaje inicial:', error);
-          toast.error('No se pudo iniciar una nueva conversación.');
-          setIsResponding(false);
+          console.error('Error creating chat thread:', error);
+          toast.error('Error al crear la conversación');
+          return;
         }
-        setNewMessage('');
-        if (uploadedImages.length > 0) {
-          uploadedImages.forEach(img => URL.revokeObjectURL(img.preview));
-          setUploadedImages([]);
-        }
+      }
+
+      if (isResponding) {
         return;
+      }
+
+      if (!threadId) {
+        console.error("No threadId available to send message");
+        toast.error("Error: No hay una conversación activa.");
+        return;
+      }
+
+      // Reiniciar estado de investigación cuando el usuario envía un nuevo mensaje explícito
+      setIsDeepResearchActive(false);
+      if (threadIdRef.current) {
+        localStorage.removeItem('deep_research_active_' + threadIdRef.current);
+      }
+
+      if (uploadedImages.length === 0) {
+        setIsResponding(true);
+        setIsThinking(true);
+      } else {
+        setIsResponding(true);
+      }
+
+      if (selectedContext.length > 0) {
+        setIsKnowledgeAnalysisActive(true);
+      }
+
+      if (messageToProcess.startsWith('/research ') || messageToProcess.startsWith('/investigar ')) {
+        setIsDeepResearchActive(true);
+        if (threadIdRef.current) {
+          localStorage.setItem('deep_research_active_' + threadIdRef.current, 'true');
+        }
+        setResearchProgress(5);
+        setResearchStatus('Iniciando investigación profunda...');
+      }
+
+      if (messageToProcess.startsWith('/analyze ') || messageToProcess.startsWith('/analizar ')) {
+        setIsComprehensiveAnalysisActive(true);
+      }
+
+      if (messageToProcess.startsWith('/web ') || messageToProcess.startsWith('/buscar ')) {
+        setIsWebSearchActive(true);
       }
 
       const userMessage: ChatMessageType = {
@@ -905,13 +908,11 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         images_base64: uploadedImages.map(img => img.base64),
       };
       setMessages((prev) => [...prev, userMessage]);
-      scheduleStreamScroll(true);
       setNewMessage('');
       if (uploadedImages.length > 0) {
         uploadedImages.forEach(img => URL.revokeObjectURL(img.preview));
         setUploadedImages([]);
       }
-      setIsResponding(true);
 
       try {
         const formData = new FormData();
@@ -942,10 +943,10 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         setIsResponding(false);
       }
     },
-    [user, threadId, selectedContext, router, uploadedImages, scheduleStreamScroll, serializeSelectedContext, workspaceId]
+    [user, threadId, selectedContext, router, uploadedImages, serializeSelectedContext, workspaceId]
   );
 
-  const handleImageUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement> | { target: { files: FileList | File[] | null } }) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
@@ -1447,13 +1448,6 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
     sendInitialMessage();
   }, [initialMessage, initialRagContext, isLoading, messages.length, handleSendMessage]);
 
-  // Effect to scroll to bottom when initial loading finishes
-  useEffect(() => {
-    if (!isLoading) {
-      // Use a small timeout to ensure the DOM has updated with the messages
-      setTimeout(() => scrollToBottom('smooth'), 150);
-    }
-  }, [isLoading, scrollToBottom]);
 
   // Effect to automatically send a message when deep research completes
   useEffect(() => {
@@ -1817,7 +1811,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                 initial={{ opacity: 0, y: 10, scale: 0.8 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 10, scale: 0.8 }}
-                onClick={() => scrollToBottom('smooth', true)}
+                onClick={() => scrollToBottom('smooth')}
                 className="absolute bottom-4 right-4 z-50 p-3 rounded-full bg-[#3B82F6] text-white shadow-xl hover:bg-blue-600 transition-all hover:scale-110 flex items-center justify-center group"
                 aria-label="Ir al final"
               >
