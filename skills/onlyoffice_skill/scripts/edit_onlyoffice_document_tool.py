@@ -474,17 +474,29 @@ SUPPORTED_ACTIONS = [
     "set_page_layout",   # Configurar márgenes y orientación de página
     "add_header_footer", # Añadir encabezados y pies de página
     "apply_cell_style",  # Aplicar estilo a celdas de tabla
-    # XLSX new actions
-    "xlsx_create_table", # Crear tabla con diseño premium y fórmulas en Excel
-    "xlsx_write_cell",   # Escribir en una celda específica de una hoja Excel
-    "xlsx_append_row",   # Añadir una fila al final de una hoja Excel
-    "xlsx_write_range",  # Escribir en un rango de celdas
-    "xlsx_format_cells", # Formatear celdas con estilos
-    "xlsx_insert_row",   # Insertar fila en posición específica
-    "xlsx_insert_column",# Insertar columna en posición específica
-    "xlsx_delete_row",   # Eliminar fila
-    "xlsx_delete_column",# Eliminar columna
-    "xlsx_merge_cells",  # Fusionar celdas
+    # XLSX - Gestión de pestañas/hojas
+    "xlsx_create_sheet",      # Crear una nueva pestaña/hoja en Excel
+    "xlsx_rename_sheet",      # Renombrar una pestaña/hoja en Excel
+    "xlsx_delete_sheet",      # Eliminar una pestaña/hoja en Excel
+    "xlsx_list_sheets",       # Listar las pestañas/hojas disponibles en Excel
+    "xlsx_copy_sheet",        # Copiar una pestaña/hoja con nuevo nombre
+    "xlsx_move_sheet",        # Mover/reordenar una pestaña a una posición
+    "xlsx_clear_sheet",       # Borrar todo el contenido de una hoja sin eliminarla
+    "xlsx_get_sheet_info",    # Obtener info de una hoja (dimensiones, rango, datos)
+    "xlsx_freeze_panes",      # Congelar filas/columnas superiores/izquierdas
+    "xlsx_protect_sheet",     # Proteger hoja con contraseña (solo lectura)
+    "xlsx_set_sheet_tab_color", # Cambiar color de pestaña de hoja existente
+    # XLSX - Edición de contenido
+    "xlsx_create_table",      # Crear tabla con diseño premium y fórmulas en Excel
+    "xlsx_write_cell",        # Escribir en una celda específica de una hoja Excel
+    "xlsx_append_row",        # Añadir una fila al final de una hoja Excel
+    "xlsx_write_range",       # Escribir en un rango de celdas
+    "xlsx_format_cells",      # Formatear celdas con estilos
+    "xlsx_insert_row",        # Insertar fila en posición específica
+    "xlsx_insert_column",     # Insertar columna en posición específica
+    "xlsx_delete_row",        # Eliminar fila
+    "xlsx_delete_column",     # Eliminar columna
+    "xlsx_merge_cells",       # Fusionar celdas
     "xlsx_set_column_width",  # Establecer ancho de columna
     "xlsx_set_row_height",    # Establecer altura de fila
 ]
@@ -496,6 +508,7 @@ class EditOnlyOfficeInput(BaseModel):
         ...,
         description=(
             "Acción a realizar. Opciones disponibles: "
+            # --- DOCX ---
             "'append' (añadir texto/Markdown formateado al final), "
             "'append_heading' (añadir título - requiere heading_level 1/2/3), "
             "'append_list' (añadir lista de viñetas - requiere list_items), "
@@ -510,8 +523,21 @@ class EditOnlyOfficeInput(BaseModel):
             "'set_page_layout' (configurar márgenes/orientación - requiere page_margins y/o page_orientation), "
             "'add_header_footer' (añadir encabezado/pie - requiere header_footer_type y content), "
             "'apply_cell_style' (aplicar estilo a celda - requiere cell_style y cell_coords), "
+            # --- XLSX - Gestión de pestañas ---
+            "'xlsx_create_sheet' (crear nueva pestaña en Excel - requiere sheet_name, opcional tab_color, sheet_index), "
+            "'xlsx_rename_sheet' (renombrar pestaña en Excel - requiere sheet_name (nuevo nombre) y opcionalmente search_text como nombre anterior), "
+            "'xlsx_delete_sheet' (eliminar pestaña en Excel - requiere sheet_name), "
+            "'xlsx_list_sheets' (listar todas las pestañas del archivo Excel - devuelve nombre, color y estadísticas), "
+            "'xlsx_copy_sheet' (copiar una pestaña a un nuevo nombre - requiere sheet_name como origen y text como nuevo nombre, opcional sheet_index), "
+            "'xlsx_move_sheet' (mover/reordenar pestaña a posición 0-based - requiere sheet_name y sheet_index), "
+            "'xlsx_clear_sheet' (borrar TODO el contenido de una hoja sin eliminarla - requiere sheet_name), "
+            "'xlsx_get_sheet_info' (obtener estadísticas de una hoja: dimensiones, rango usado, muestra de datos - requiere sheet_name), "
+            "'xlsx_freeze_panes' (congelar filas/columnas: cell='B2' congela fila 1 y columna A - requiere cell y sheet_name), "
+            "'xlsx_protect_sheet' (proteger hoja con contraseña para evitar edición manual - requiere sheet_name, opcional text como contraseña), "
+            "'xlsx_set_sheet_tab_color' (cambiar color de pestaña de hoja existente - requiere sheet_name y tab_color hex), "
+            # --- XLSX - Edición de contenido ---
             "'xlsx_create_table' (crear tabla premium con fórmulas en Excel - requiere table_data), "
-            "'xlsx_write_cell' (escribir en celda Excel - requiere cell, sheet_name), "
+            "'xlsx_write_cell' (escribir valor o fórmula en celda Excel - requiere cell y text; si text empieza con '=' se guarda como fórmula), "
             "'xlsx_append_row' (añadir fila a Excel - requiere row_data), "
             "'xlsx_write_range' (escribir en rango - requiere range_address y range_data), "
             "'xlsx_format_cells' (formatear celdas - requiere range_address y format_options), "
@@ -525,7 +551,7 @@ class EditOnlyOfficeInput(BaseModel):
         ),
     )
     text: Optional[str] = Field(None, description="Texto principal a insertar (soporta Markdown enriquecido) o nuevo texto en 'replace'. Para Excel, si empieza con '=' se tratará como fórmula (ej. '=SUM(A1:A10)').")
-    search_text: Optional[str] = Field(None, description="Texto a buscar (para 'replace', 'replace_section', 'apply_bold').")
+    search_text: Optional[str] = Field(None, description="Texto a buscar (para 'replace', 'replace_section', 'apply_bold', o nombre de pestaña anterior en 'xlsx_rename_sheet').")
     heading_level: Optional[int] = Field(None, description="Nivel del título: 1 (H1), 2 (H2), 3 (H3). Usar con 'append_heading'.")
     list_items: Optional[List[str]] = Field(None, description="Lista de cadenas para crear una lista de viñetas. Usar con 'append_list'.")
     table_data: Optional[List[List[str]]] = Field(None, description="Matriz de filas/columnas para crear una tabla. La primera fila es el encabezado. Usar con 'insert_table', 'insert_styled_table', 'xlsx_create_table'.")
@@ -540,7 +566,9 @@ class EditOnlyOfficeInput(BaseModel):
     auto_fit_columns: Optional[bool] = Field(True, description="Ajustar automáticamente el ancho de columnas en Excel.")
     start_cell: Optional[str] = Field("A1", description="Celda de inicio en Excel para crear tabla (ej: 'A1'). Usar con 'xlsx_create_table'.")
     # Para Excel
-    sheet_name: Optional[str] = Field(None, description="Nombre de la hoja de Excel. Si no se indica, se usa la primera hoja.")
+    sheet_name: Optional[str] = Field(None, description="Nombre de la hoja/pestaña de Excel. Si la pestaña indicada no existe, se creará automáticamente.")
+    tab_color: Optional[str] = Field(None, description="Color hexadecimal para la pestaña de Excel (ej: '1E3A8A'). Usar con 'xlsx_create_sheet' o 'xlsx_rename_sheet'.")
+    sheet_index: Optional[int] = Field(None, description="Posición 0-based de la pestaña en el libro Excel. Usar con 'xlsx_create_sheet'.")
     cell: Optional[str] = Field(None, description="Coordenada de celda Excel (ej: 'A1', 'B3'). Usar con 'xlsx_write_cell'.")
     row_data: Optional[List[str]] = Field(None, description="Lista de valores para añadir como fila. Para fórmulas, iniciar con '='. Usar con 'xlsx_append_row'.")
     # Nuevos campos DOCX
@@ -598,7 +626,8 @@ class EditOnlyOfficeDocumentTool(BaseTool):
         "Soporta añadir texto/Markdown completo con formatos complejos (negrita, cursiva, "
         "bloques de código, listas numeradas/viñetas, tablas estructuradas con diseño premium y fórmulas, títulos) "
         "que se traducen automáticamente a estilos nativos premium sin dejar caracteres crudos de Markdown. "
-        "Permite buscar/reemplazar texto, poner texto en negrita, reescribir secciones o modificar celdas de Excel. "
+        "Permite gestionar múltiples pestañas en Excel (crear, renombrar, eliminar, cambiar color de pestaña), "
+        "buscar/reemplazar texto, poner texto en negrita, reescribir secciones o modificar celdas de Excel. "
         "Los cambios se guardan directamente en el servidor con respaldo automático. "
         "El usuario verá los cambios al recargar el editor. "
         "Usa esta herramienta cuando el usuario pida redactar, corregir o dar formato a su documento."
@@ -627,6 +656,8 @@ class EditOnlyOfficeDocumentTool(BaseTool):
         auto_fit_columns: Optional[bool] = True,
         start_cell: Optional[str] = "A1",
         sheet_name: Optional[str] = None,
+        tab_color: Optional[str] = None,
+        sheet_index: Optional[int] = None,
         cell: Optional[str] = None,
         row_data: Optional[List[str]] = None,
         # Nuevos parámetros DOCX
@@ -690,7 +721,8 @@ class EditOnlyOfficeDocumentTool(BaseTool):
                 elif ext in ("xlsx", "xls"):
                     msg = await self._edit_xlsx(
                         file_path, action, text, cell,
-                        sheet_name, row_data, table_data, theme,
+                        sheet_name, tab_color, sheet_index, search_text,
+                        row_data, table_data, theme,
                         has_total_row, total_formulas, column_formats,
                         auto_fit_columns, start_cell, range_address, range_data,
                         format_options, row_index, column_index, width, height,
@@ -1248,6 +1280,9 @@ class EditOnlyOfficeDocumentTool(BaseTool):
         text: Optional[str],
         cell: Optional[str],
         sheet_name: Optional[str],
+        tab_color: Optional[str],
+        sheet_index: Optional[int],
+        search_text: Optional[str],
         row_data: Optional[List[str]],
         table_data: Optional[List[List[str]]],
         theme: Optional[str],
@@ -1271,9 +1306,62 @@ class EditOnlyOfficeDocumentTool(BaseTool):
         try:
             wb = openpyxl.load_workbook(file_path)
 
-            # Seleccionar hoja
-            if sheet_name and sheet_name in wb.sheetnames:
-                ws = wb[sheet_name]
+            if action == "xlsx_list_sheets":
+                sheets_str = ", ".join(f"'{s}'" for s in wb.sheetnames)
+                return f"📋 Pestañas (hojas) disponibles en '{filename}': {sheets_str}"
+
+            if action == "xlsx_create_sheet":
+                if not sheet_name:
+                    return "❌ La acción 'xlsx_create_sheet' requiere 'sheet_name'."
+                if sheet_name in wb.sheetnames:
+                    ws = wb[sheet_name]
+                    msg = f"⚠️ La pestaña '{sheet_name}' ya existe en '{filename}'."
+                else:
+                    idx = sheet_index if (sheet_index is not None and 0 <= sheet_index <= len(wb.sheetnames)) else len(wb.sheetnames)
+                    ws = wb.create_sheet(title=sheet_name, index=idx)
+                    msg = f"✅ Pestaña '{sheet_name}' creada con éxito en '{filename}'."
+                if tab_color:
+                    clean_color = tab_color.lstrip('#').upper()
+                    ws.sheet_properties.tabColor = clean_color
+                    msg += f" (Color: #{clean_color})"
+                self._backup_file(file_path)
+                wb.save(file_path)
+                return msg
+
+            elif action == "xlsx_rename_sheet":
+                if not sheet_name:
+                    return "❌ La acción 'xlsx_rename_sheet' requiere 'sheet_name' (nuevo nombre)."
+                target_sheet = search_text if (search_text and search_text in wb.sheetnames) else (sheet_name if sheet_name in wb.sheetnames else wb.active.title)
+                if target_sheet not in wb.sheetnames:
+                    return f"❌ La pestaña a renombrar '{target_sheet}' no se encuentra en el documento."
+                wb[target_sheet].title = sheet_name
+                if tab_color:
+                    wb[sheet_name].sheet_properties.tabColor = tab_color.lstrip('#').upper()
+                msg = f"✅ Pestaña '{target_sheet}' renombrada a '{sheet_name}' en '{filename}'."
+                self._backup_file(file_path)
+                wb.save(file_path)
+                return msg
+
+            elif action == "xlsx_delete_sheet":
+                target_del = sheet_name or search_text
+                if not target_del or target_del not in wb.sheetnames:
+                    return f"❌ La pestaña '{target_del}' no existe en el documento."
+                if len(wb.sheetnames) <= 1:
+                    return "❌ No se puede eliminar la única pestaña del documento Excel."
+                wb.remove(wb[target_del])
+                msg = f"✅ Pestaña '{target_del}' eliminada de '{filename}'."
+                self._backup_file(file_path)
+                wb.save(file_path)
+                return msg
+
+            # Seleccionar o auto-crear hoja para el resto de acciones
+            if sheet_name:
+                if sheet_name in wb.sheetnames:
+                    ws = wb[sheet_name]
+                else:
+                    ws = wb.create_sheet(title=sheet_name)
+                    if tab_color:
+                        ws.sheet_properties.tabColor = tab_color.lstrip('#').upper()
             else:
                 ws = wb.active
                 sheet_name = ws.title
@@ -1289,7 +1377,20 @@ class EditOnlyOfficeDocumentTool(BaseTool):
                     return "❌ La acción 'xlsx_write_cell' requiere el campo 'cell' (ej: 'A1')."
                 if text is None:
                     return "❌ La acción 'xlsx_write_cell' requiere 'text' con el valor a escribir."
-                ws[cell.upper()] = text
+                cell_ref = ws[cell.upper()]
+                str_text = str(text).strip()
+                if str_text.startswith("="):
+                    # Guardar como fórmula evaluable
+                    cell_ref.value = str_text
+                else:
+                    # Intentar parsear como número si aplica
+                    try:
+                        if "." in str_text:
+                            cell_ref.value = float(str_text)
+                        else:
+                            cell_ref.value = int(str_text)
+                    except ValueError:
+                        cell_ref.value = text
                 msg = f"✅ Celda '{cell.upper()}' de la hoja '{sheet_name}' en '{filename}' actualizada con: {text}"
 
             elif action == "xlsx_append_row":
@@ -1356,6 +1457,52 @@ class EditOnlyOfficeDocumentTool(BaseTool):
                 if row_index is None or height is None:
                     return "❌ La acción 'xlsx_set_row_height' requiere 'row_index' y 'height'."
                 msg = self._xlsx_set_row_height(ws, row_index, height, filename, sheet_name)
+
+            elif action == "xlsx_copy_sheet":
+                if not sheet_name:
+                    return "❌ La acción 'xlsx_copy_sheet' requiere 'sheet_name' (nombre de la hoja origen)."
+                if not text:
+                    return "❌ La acción 'xlsx_copy_sheet' requiere 'text' con el nuevo nombre para la copia."
+                msg = self._xlsx_copy_sheet(wb, sheet_name, text, sheet_index, filename)
+
+            elif action == "xlsx_move_sheet":
+                if not sheet_name:
+                    return "❌ La acción 'xlsx_move_sheet' requiere 'sheet_name'."
+                if sheet_index is None:
+                    return "❌ La acción 'xlsx_move_sheet' requiere 'sheet_index' (posición 0-based destino)."
+                msg = self._xlsx_move_sheet(wb, sheet_name, sheet_index, filename)
+
+            elif action == "xlsx_clear_sheet":
+                target_clear = sheet_name or (wb.active.title if wb.active else None)
+                if not target_clear or target_clear not in wb.sheetnames:
+                    return f"❌ La hoja '{target_clear}' no existe en el documento."
+                ws_clear = wb[target_clear]
+                msg = self._xlsx_clear_sheet(ws_clear, target_clear, filename)
+
+            elif action == "xlsx_get_sheet_info":
+                target_info = sheet_name or (wb.active.title if wb.active else None)
+                if not target_info or target_info not in wb.sheetnames:
+                    return f"❌ La hoja '{target_info}' no existe en el documento."
+                ws_info = wb[target_info]
+                return self._xlsx_get_sheet_info(ws_info, target_info, filename)
+
+            elif action == "xlsx_freeze_panes":
+                if not cell:
+                    return "❌ La acción 'xlsx_freeze_panes' requiere 'cell' (ej: 'B2' para congelar fila 1 y columna A)."
+                msg = self._xlsx_freeze_panes(ws, cell, filename, sheet_name)
+
+            elif action == "xlsx_protect_sheet":
+                if not sheet_name:
+                    return "❌ La acción 'xlsx_protect_sheet' requiere 'sheet_name'."
+                password = text  # text se usa como contraseña (opcional)
+                msg = self._xlsx_protect_sheet(ws, password, filename, sheet_name)
+
+            elif action == "xlsx_set_sheet_tab_color":
+                if not sheet_name:
+                    return "❌ La acción 'xlsx_set_sheet_tab_color' requiere 'sheet_name'."
+                if not tab_color:
+                    return "❌ La acción 'xlsx_set_sheet_tab_color' requiere 'tab_color' (código hex, ej: 'FF0000')."
+                msg = self._xlsx_set_sheet_tab_color(ws, tab_color, filename, sheet_name)
 
             else:
                 return (
@@ -1655,6 +1802,161 @@ class EditOnlyOfficeDocumentTool(BaseTool):
         except Exception as e:
             logger.error(f"Error estableciendo altura de fila: {e}")
             return f"❌ Error al establecer altura de fila: {str(e)}"
+
+    def _xlsx_copy_sheet(self, wb, source_name: str, new_name: str, target_index: Optional[int], filename: str) -> str:
+        """Copia una hoja del libro a un nuevo nombre."""
+        try:
+            if source_name not in wb.sheetnames:
+                return f"❌ La hoja origen '{source_name}' no existe en '{filename}'."
+            if new_name in wb.sheetnames:
+                return f"❌ Ya existe una hoja con el nombre '{new_name}' en '{filename}'."
+            ws_copy = wb.copy_worksheet(wb[source_name])
+            ws_copy.title = new_name
+            # Mover a posición si se especificó
+            if target_index is not None:
+                total = len(wb.sheetnames)
+                idx = max(0, min(target_index, total - 1))
+                wb.move_sheet(new_name, offset=idx - wb.sheetnames.index(new_name))
+            return f"✅ Hoja '{source_name}' copiada como '{new_name}' en '{filename}'."
+        except Exception as e:
+            logger.error(f"Error copiando hoja: {e}")
+            return f"❌ Error al copiar la hoja: {str(e)}"
+
+    def _xlsx_move_sheet(self, wb, sheet_name: str, target_index: int, filename: str) -> str:
+        """Mueve una hoja a la posición indicada (0-based)."""
+        try:
+            if sheet_name not in wb.sheetnames:
+                return f"❌ La hoja '{sheet_name}' no existe en '{filename}'."
+            total = len(wb.sheetnames)
+            idx = max(0, min(target_index, total - 1))
+            current_idx = wb.sheetnames.index(sheet_name)
+            offset = idx - current_idx
+            if offset != 0:
+                wb.move_sheet(sheet_name, offset=offset)
+            return f"✅ Hoja '{sheet_name}' movida a posición {idx} en '{filename}'."
+        except Exception as e:
+            logger.error(f"Error moviendo hoja: {e}")
+            return f"❌ Error al mover la hoja: {str(e)}"
+
+    def _xlsx_clear_sheet(self, ws, sheet_name: str, filename: str) -> str:
+        """Borra todo el contenido de una hoja (celdas, imágenes, tablas) sin eliminarla."""
+        try:
+            # Eliminar contenido de todas las celdas
+            for row in ws.iter_rows():
+                for cell in row:
+                    cell.value = None
+                    cell.font = None
+                    cell.fill = None
+                    cell.border = None
+                    cell.alignment = None
+                    cell.number_format = 'General'
+            # Eliminar merge de celdas
+            for merge_range in list(ws.merged_cells.ranges):
+                ws.unmerge_cells(str(merge_range))
+            # Reiniciar dimensiones de columnas/filas
+            ws.column_dimensions.clear()
+            ws.row_dimensions.clear()
+            # Eliminar tablas definidas en la hoja
+            for tbl in list(ws.tables.values()):
+                del ws.tables[tbl.name]
+            return f"✅ Contenido de la hoja '{sheet_name}' borrado completamente en '{filename}'."
+        except Exception as e:
+            logger.error(f"Error limpiando hoja: {e}")
+            return f"❌ Error al limpiar la hoja: {str(e)}"
+
+    def _xlsx_get_sheet_info(self, ws, sheet_name: str, filename: str) -> str:
+        """Devuelve información detallada sobre una hoja: dimensiones, rango usado, muestra de datos."""
+        try:
+            max_row = ws.max_row or 0
+            max_col = ws.max_column or 0
+            min_row = ws.min_row or 1
+            min_col = ws.min_column or 1
+
+            # Contar celdas con datos
+            cells_with_data = sum(
+                1 for row in ws.iter_rows()
+                for cell in row
+                if cell.value is not None
+            )
+
+            # Rango usado
+            used_range = f"{get_column_letter(min_col)}{min_row}:{get_column_letter(max_col)}{max_row}" if max_row and max_col else "(vacía)"
+
+            # Muestra de datos (primeras 3 filas, máx 5 columnas)
+            preview_lines = []
+            for r in ws.iter_rows(min_row=1, max_row=min(3, max_row), max_col=min(5, max_col), values_only=True):
+                row_str = " | ".join(str(v) if v is not None else "" for v in r)
+                preview_lines.append(f"  {row_str}")
+            preview = "\n".join(preview_lines) if preview_lines else "  (sin datos)"
+
+            # Pestañas del libro
+            book = ws.parent
+            sheets_list = ", ".join(f"'{s}'" for s in book.sheetnames)
+
+            result = (
+                f"📊 **Información de la hoja '{sheet_name}'** en '{filename}':\n"
+                f"  - Filas usadas: {max_row}\n"
+                f"  - Columnas usadas: {max_col}\n"
+                f"  - Rango de datos: {used_range}\n"
+                f"  - Celdas con datos: {cells_with_data}\n"
+                f"  - Celdas fusionadas: {len(list(ws.merged_cells.ranges))}\n"
+                f"  - Paneles congelados: {'Sí' if ws.freeze_panes else 'No'}\n"
+                f"  - Color de pestaña: #{ws.sheet_properties.tabColor.rgb if ws.sheet_properties.tabColor else 'N/A'}\n"
+                f"  - Todas las hojas del libro: {sheets_list}\n"
+                f"  Muestra de datos (primeras 3 filas):\n{preview}"
+            )
+            return result
+        except Exception as e:
+            logger.error(f"Error obteniendo info de hoja: {e}")
+            return f"❌ Error al obtener información de la hoja: {str(e)}"
+
+    def _xlsx_freeze_panes(self, ws, cell: str, filename: str, sheet_name: str) -> str:
+        """Congela filas/columnas. Ej: cell='B2' congela la fila 1 y la columna A."""
+        try:
+            cell_upper = cell.upper()
+            ws.freeze_panes = cell_upper
+            # Calcular qué se congeló para el mensaje
+            from openpyxl.utils import coordinate_to_tuple
+            row_num, col_num = coordinate_to_tuple(cell_upper)
+            frozen_rows = row_num - 1
+            frozen_cols = col_num - 1
+            parts = []
+            if frozen_rows > 0:
+                parts.append(f"{frozen_rows} fila(s) superior(es)")
+            if frozen_cols > 0:
+                parts.append(f"{frozen_cols} columna(s) izquierda(s)")
+            desc = " y ".join(parts) if parts else "ninguna fila/columna"
+            return f"✅ Paneles congelados en hoja '{sheet_name}': {desc} (desde celda {cell_upper})."
+        except Exception as e:
+            logger.error(f"Error congelando paneles: {e}")
+            return f"❌ Error al congelar paneles: {str(e)}"
+
+    def _xlsx_protect_sheet(self, ws, password: Optional[str], filename: str, sheet_name: str) -> str:
+        """Protege la hoja con contraseña para evitar edición manual en OnlyOffice/Excel."""
+        try:
+            ws.protection.sheet = True
+            ws.protection.enable()
+            if password:
+                ws.protection.set_password(password)
+                return f"✅ Hoja '{sheet_name}' protegida con contraseña en '{filename}'."
+            else:
+                return f"✅ Hoja '{sheet_name}' protegida (sin contraseña) en '{filename}'."
+        except Exception as e:
+            logger.error(f"Error protegiendo hoja: {e}")
+            return f"❌ Error al proteger la hoja: {str(e)}"
+
+    def _xlsx_set_sheet_tab_color(self, ws, tab_color: str, filename: str, sheet_name: str) -> str:
+        """Cambia el color de la pestaña de una hoja existente."""
+        try:
+            clean_color = tab_color.lstrip('#').upper()
+            # Validar longitud hex
+            if len(clean_color) not in (6, 8):
+                return f"❌ Color inválido '{tab_color}'. Usa formato hex de 6 dígitos (ej: 'FF0000' para rojo)."
+            ws.sheet_properties.tabColor = clean_color
+            return f"✅ Color de pestaña de '{sheet_name}' cambiado a #{clean_color} en '{filename}'."
+        except Exception as e:
+            logger.error(f"Error cambiando color de pestaña: {e}")
+            return f"❌ Error al cambiar el color de la pestaña: {str(e)}"
 
     # ------------------------------------------------------------------ #
     #  Utilidades
