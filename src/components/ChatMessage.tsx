@@ -76,14 +76,8 @@ interface ChatMessageProps {
 
 
 
-const ReasoningBlock = ({ content, isThinkingOnly, scrollToBottom }: { content: string, isThinkingOnly: boolean, scrollToBottom?: (behavior?: 'smooth' | 'auto', force?: boolean) => void }) => {
+const ReasoningBlock = ({ content, isThinkingOnly }: { content: string, isThinkingOnly: boolean }) => {
   const [isExpanded, setIsExpanded] = useState(false);
-
-  useEffect(() => {
-    if (isThinkingOnly || isExpanded) {
-      scrollToBottom?.('auto');
-    }
-  }, [content, isExpanded, isThinkingOnly, scrollToBottom]);
 
   return (    <div className="mb-4">
       <button
@@ -178,7 +172,7 @@ const stripHtml = (text: string) => {
   return text.replace(/<[^>]*>/g, '');
 };
 
-const ToolCallBlock = ({ part, scrollToBottom }: { part: MessageContentPart, scrollToBottom?: (behavior?: 'smooth' | 'auto', force?: boolean) => void }) => {
+const ToolCallBlock = ({ part }: { part: MessageContentPart }) => {
   const { user, token } = useAuth();
   const isTerminal = part.tool_name === 'terminal_executor' && !!part.pty_session;
   const [isExpanded, setIsExpanded] = useState(isTerminal || part.status === 'error');
@@ -189,12 +183,6 @@ const ToolCallBlock = ({ part, scrollToBottom }: { part: MessageContentPart, scr
       setIsExpanded(true);
     }
   }, [isTerminal, part.status]);
-
-  useEffect(() => {
-    if (isExpanded) {
-      scrollToBottom?.('auto');
-    }
-  }, [isExpanded, scrollToBottom]);
 
   const isError = part.status === 'error';
 
@@ -493,10 +481,10 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
                   msg.content_parts.map((part, idx) => {
                     if (part.type === 'reasoning') {
                       const isLastReasoning = idx === msg.content_parts!.length - 1 && !msg.text && msg.chunks !== undefined;
-                      return <ReasoningBlock key={idx} content={part.content} isThinkingOnly={isLastReasoning} scrollToBottom={scrollToBottom} />;
+                      return <ReasoningBlock key={idx} content={part.content} isThinkingOnly={isLastReasoning} />;
                     }
                     if (part.type === 'tool_call') {
-                      return <ToolCallBlock key={idx} part={part} scrollToBottom={scrollToBottom} />;
+                      return <ToolCallBlock key={idx} part={part} />;
                     }
                     if (part.type === 'text') {
                       const { contentParts: parts } = processMessageWithCitations(part.content, citationSources);
@@ -519,7 +507,6 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
                       <ReasoningBlock 
                         content={msg.reasoning || msg.reasoning_chunks?.join('') || ""} 
                         isThinkingOnly={isThinkingOnly} 
-                        scrollToBottom={scrollToBottom}
                       />
                     )}
                     <div className="mb-4">

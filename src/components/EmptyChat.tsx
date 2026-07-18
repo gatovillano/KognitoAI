@@ -37,7 +37,7 @@ interface EmptyChatProps {
   isUploadingImages: boolean;
   uploadedImagePreviews: string[];
   onRemoveImage: () => void;
-  onImageUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onImageUpload: (e: React.ChangeEvent<HTMLInputElement> | { target: { files: FileList | File[] | null } }) => void;
 }
 
 export function EmptyChat({

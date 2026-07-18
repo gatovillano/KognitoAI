@@ -56,7 +56,7 @@ interface ChatInputBarProps {
   onStartRecording?: () => void;
   onStopRecording?: () => void;
   onFileUpload?: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  onImageUpload?: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onImageUpload?: (e: React.ChangeEvent<HTMLInputElement> | { target: { files: FileList | File[] | null } }) => void;
   onRemoveImage?: (index: number) => void;
   onPaste?: (e: ClipboardEvent) => void;
   currentContext: SelectedContextItem[];
@@ -368,16 +368,51 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
     };
   }, []);
 
-  // Manejo de paste - optimizado
+  // Manejo de paste - soporta imágenes del portapapeles
   useEffect(() => {
     const textArea = textAreaRef.current;
-    if (!textArea || !onPaste) return;
+    if (!textArea) return;
 
-    textArea.addEventListener('paste', onPaste);
-    return () => {
-      textArea.removeEventListener('paste', onPaste);
+    const handlePasteInternal = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      const imageFiles: File[] = [];
+
+      if (items && items.length > 0) {
+        for (let i = 0; i < items.length; i++) {
+          const item = items[i];
+          if (item.type.startsWith('image/')) {
+            const file = item.getAsFile();
+            if (file) {
+              imageFiles.push(file);
+            }
+          }
+        }
+      } else if (e.clipboardData?.files && e.clipboardData.files.length > 0) {
+        for (let i = 0; i < e.clipboardData.files.length; i++) {
+          const file = e.clipboardData.files[i];
+          if (file.type.startsWith('image/')) {
+            imageFiles.push(file);
+          }
+        }
+      }
+
+      if (imageFiles.length > 0) {
+        e.preventDefault();
+        if (onImageUpload) {
+          onImageUpload({ target: { files: imageFiles } });
+        }
+      }
+
+      if (onPaste) {
+        onPaste(e);
+      }
     };
-  }, [onPaste]);
+
+    textArea.addEventListener('paste', handlePasteInternal);
+    return () => {
+      textArea.removeEventListener('paste', handlePasteInternal);
+    };
+  }, [onPaste, onImageUpload]);
 
   useEffect(() => {
     if (isProcessingAudio) {
