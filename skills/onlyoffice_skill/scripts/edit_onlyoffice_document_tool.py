@@ -83,6 +83,106 @@ def set_table_borders(table, hex_color: str = "CBD5E1"):
     except Exception as e:
         logger.warning(f"No se pudieron aplicar bordes de tabla: {e}")
 
+PREMIUM_THEMES = {
+    "corporate_blue": {
+        "header_bg": "1E3A8A",
+        "header_fg": "FFFFFF",
+        "zebra_bg": "F8FAFC",
+        "accent_bg": "E2E8F0",
+        "border_color": "CBD5E1",
+        "font_name": "Segoe UI",
+    },
+    "emerald_green": {
+        "header_bg": "065F46",
+        "header_fg": "FFFFFF",
+        "zebra_bg": "F0FDF4",
+        "accent_bg": "DCFCE7",
+        "border_color": "A7F3D0",
+        "font_name": "Segoe UI",
+    },
+    "dark_slate": {
+        "header_bg": "0F172A",
+        "header_fg": "FFFFFF",
+        "zebra_bg": "F1F5F9",
+        "accent_bg": "E2E8F0",
+        "border_color": "94A3B8",
+        "font_name": "Segoe UI",
+    },
+    "sunset_amber": {
+        "header_bg": "9A3412",
+        "header_fg": "FFFFFF",
+        "zebra_bg": "FFFBEB",
+        "accent_bg": "FEF3C7",
+        "border_color": "FDE68A",
+        "font_name": "Segoe UI",
+    },
+    "violet_gold": {
+        "header_bg": "581C87",
+        "header_fg": "FFFFFF",
+        "zebra_bg": "FAF5FF",
+        "accent_bg": "F3E8FF",
+        "border_color": "D8B4FE",
+        "font_name": "Segoe UI",
+    },
+    "minimalist_gray": {
+        "header_bg": "374151",
+        "header_fg": "FFFFFF",
+        "zebra_bg": "F9FAFB",
+        "accent_bg": "E5E7EB",
+        "border_color": "D1D5DB",
+        "font_name": "Segoe UI",
+    },
+}
+
+def set_cell_margins(cell, top=120, bottom=120, left=160, right=160):
+    """Establece márgenes/padding internos (en dxa: 20 dxa = 1 pt) de una celda en Word."""
+    try:
+        tcPr = cell._tc.get_or_add_tcPr()
+        tcMar = parse_xml(
+            f'<w:tcMar {nsdecls("w")}>'
+            f'  <w:top w:w="{top}" w:type="dxa"/>'
+            f'  <w:bottom w:w="{bottom}" w:type="dxa"/>'
+            f'  <w:left w:w="{left}" w:type="dxa"/>'
+            f'  <w:right w:w="{right}" w:type="dxa"/>'
+            f'</w:tcMar>'
+        )
+        tcPr.append(tcMar)
+    except Exception as e:
+        logger.warning(f"No se pudieron aplicar márgenes a celda: {e}")
+
+def set_row_header(row):
+    """Marca una fila como encabezado repetible en Word (<w:tblHeader/>)."""
+    try:
+        trPr = row._tr.get_or_add_trPr()
+        tblHeader = parse_xml(f'<w:tblHeader {nsdecls("w")}/>')
+        trPr.append(tblHeader)
+    except Exception as e:
+        logger.warning(f"No se pudo establecer tblHeader: {e}")
+
+def set_row_cant_split(row):
+    """Evita que una fila se corte entre páginas en Word (<w:cantSplit/>)."""
+    try:
+        trPr = row._tr.get_or_add_trPr()
+        cantSplit = parse_xml(f'<w:cantSplit {nsdecls("w")}/>')
+        trPr.append(cantSplit)
+    except Exception as e:
+        logger.warning(f"No se pudo establecer cantSplit: {e}")
+
+def set_total_row_borders(row, hex_color="CBD5E1"):
+    """Borde superior sencillo y borde inferior doble en fila de totales en Word."""
+    for cell in row.cells:
+        try:
+            tcPr = cell._tc.get_or_add_tcPr()
+            tcBorders = parse_xml(
+                f'<w:tcBorders {nsdecls("w")}>'
+                f'  <w:top w:val="single" w:sz="6" w:space="0" w:color="{hex_color}"/>'
+                f'  <w:bottom w:val="double" w:sz="12" w:space="0" w:color="{hex_color}"/>'
+                f'</w:tcBorders>'
+            )
+            tcPr.append(tcBorders)
+        except Exception:
+            pass
+
 def _add_inline_formatted_text(paragraph, text: str, default_font: str = "Segoe UI", default_size = Pt(10.5), default_color = RGBColor(51, 65, 85)):
     """Divide un texto por marcadores inline de Markdown y añade Runs formateados."""
     if not text:
@@ -365,6 +465,7 @@ SUPPORTED_ACTIONS = [
     "replace",           # Buscar y reemplazar texto en todo el documento
     "replace_section",   # Reemplazar la sección que empieza con cierto texto
     "insert_table",      # Insertar una tabla al final
+    "insert_styled_table", # Insertar una tabla con tema premium y totales en Word
     "apply_bold",        # Poner en negrita las ocurrencias de un texto
     "clear_and_write",   # Borrar todo el contenido y escribir nuevo
     # DOCX new actions
@@ -374,6 +475,7 @@ SUPPORTED_ACTIONS = [
     "add_header_footer", # Añadir encabezados y pies de página
     "apply_cell_style",  # Aplicar estilo a celdas de tabla
     # XLSX new actions
+    "xlsx_create_table", # Crear tabla con diseño premium y fórmulas en Excel
     "xlsx_write_cell",   # Escribir en una celda específica de una hoja Excel
     "xlsx_append_row",   # Añadir una fila al final de una hoja Excel
     "xlsx_write_range",  # Escribir en un rango de celdas
@@ -400,6 +502,7 @@ class EditOnlyOfficeInput(BaseModel):
             "'replace' (buscar y reemplazar - requiere search_text), "
             "'replace_section' (reemplaza la sección que empieza con search_text), "
             "'insert_table' (insertar tabla - requiere table_data), "
+            "'insert_styled_table' (insertar tabla premium con temas y totales en Word - requiere table_data), "
             "'apply_bold' (poner en negrita - requiere search_text), "
             "'clear_and_write' (borrar todo el contenido y escribir nuevo texto/Markdown formateado), "
             "'edit_paragraph' (editar párrafo por índice o búsqueda - requiere paragraph_index o search_text), "
@@ -407,6 +510,7 @@ class EditOnlyOfficeInput(BaseModel):
             "'set_page_layout' (configurar márgenes/orientación - requiere page_margins y/o page_orientation), "
             "'add_header_footer' (añadir encabezado/pie - requiere header_footer_type y content), "
             "'apply_cell_style' (aplicar estilo a celda - requiere cell_style y cell_coords), "
+            "'xlsx_create_table' (crear tabla premium con fórmulas en Excel - requiere table_data), "
             "'xlsx_write_cell' (escribir en celda Excel - requiere cell, sheet_name), "
             "'xlsx_append_row' (añadir fila a Excel - requiere row_data), "
             "'xlsx_write_range' (escribir en rango - requiere range_address y range_data), "
@@ -424,7 +528,17 @@ class EditOnlyOfficeInput(BaseModel):
     search_text: Optional[str] = Field(None, description="Texto a buscar (para 'replace', 'replace_section', 'apply_bold').")
     heading_level: Optional[int] = Field(None, description="Nivel del título: 1 (H1), 2 (H2), 3 (H3). Usar con 'append_heading'.")
     list_items: Optional[List[str]] = Field(None, description="Lista de cadenas para crear una lista de viñetas. Usar con 'append_list'.")
-    table_data: Optional[List[List[str]]] = Field(None, description="Matriz de filas/columnas para crear una tabla. La primera fila es el encabezado. Usar con 'insert_table'.")
+    table_data: Optional[List[List[str]]] = Field(None, description="Matriz de filas/columnas para crear una tabla. La primera fila es el encabezado. Usar con 'insert_table', 'insert_styled_table', 'xlsx_create_table'.")
+    theme: Optional[str] = Field(None, description="Tema de diseño premium para tablas ('corporate_blue', 'emerald_green', 'dark_slate', 'sunset_amber', 'violet_gold', 'minimalist_gray').")
+    has_total_row: Optional[bool] = Field(None, description="Si es True, aplica formato de totales (borde doble inferior, texto en negrita y fondo de acento) a la última fila.")
+    auto_calculate_totals: Optional[bool] = Field(None, description="Si es True, calcula automáticamente sumas de columnas numéricas en la fila de totales.")
+    col_alignments: Optional[List[str]] = Field(None, description="Lista de alineaciones por columna ('left', 'center', 'right').")
+    col_widths: Optional[List[float]] = Field(None, description="Lista de anchos de columna en cm o caracteres.")
+    cell_padding: Optional[dict] = Field(None, description="Margen/padding interno de celda en pt {'top': 6, 'bottom': 6, 'left': 8, 'right': 8}.")
+    total_formulas: Optional[Any] = Field(None, description="Fórmulas para la fila de totales en Excel (ej: {'B': 'SUM', 'C': 'AVERAGE'} o lista de fórmulas).")
+    column_formats: Optional[dict] = Field(None, description="Formatos numéricos por columna en Excel (ej: {'B': '$#,##0.00', 'C': '0.0%'}).")
+    auto_fit_columns: Optional[bool] = Field(True, description="Ajustar automáticamente el ancho de columnas en Excel.")
+    start_cell: Optional[str] = Field("A1", description="Celda de inicio en Excel para crear tabla (ej: 'A1'). Usar con 'xlsx_create_table'.")
     # Para Excel
     sheet_name: Optional[str] = Field(None, description="Nombre de la hoja de Excel. Si no se indica, se usa la primera hoja.")
     cell: Optional[str] = Field(None, description="Coordenada de celda Excel (ej: 'A1', 'B3'). Usar con 'xlsx_write_cell'.")
@@ -457,6 +571,11 @@ class EditOnlyOfficeInput(BaseModel):
         "cell_style",
         "range_data",
         "format_options",
+        "col_alignments",
+        "col_widths",
+        "cell_padding",
+        "total_formulas",
+        "column_formats",
         mode="before"
     )
     @classmethod
@@ -477,8 +596,8 @@ class EditOnlyOfficeDocumentTool(BaseTool):
     description: str = (
         "Edita documentos de OnlyOffice (Word .docx y Excel .xlsx) con operaciones avanzadas. "
         "Soporta añadir texto/Markdown completo con formatos complejos (negrita, cursiva, "
-        "bloques de código, listas numeradas/viñetas, tablas estructuradas, títulos) que se traducen "
-        "automáticamente a estilos nativos premium sin dejar caracteres crudos de Markdown. "
+        "bloques de código, listas numeradas/viñetas, tablas estructuradas con diseño premium y fórmulas, títulos) "
+        "que se traducen automáticamente a estilos nativos premium sin dejar caracteres crudos de Markdown. "
         "Permite buscar/reemplazar texto, poner texto en negrita, reescribir secciones o modificar celdas de Excel. "
         "Los cambios se guardan directamente en el servidor con respaldo automático. "
         "El usuario verá los cambios al recargar el editor. "
@@ -497,6 +616,16 @@ class EditOnlyOfficeDocumentTool(BaseTool):
         heading_level: Optional[int] = None,
         list_items: Optional[List[str]] = None,
         table_data: Optional[List[List[str]]] = None,
+        theme: Optional[str] = None,
+        has_total_row: Optional[bool] = None,
+        auto_calculate_totals: Optional[bool] = None,
+        col_alignments: Optional[List[str]] = None,
+        col_widths: Optional[List[float]] = None,
+        cell_padding: Optional[dict] = None,
+        total_formulas: Optional[Any] = None,
+        column_formats: Optional[dict] = None,
+        auto_fit_columns: Optional[bool] = True,
+        start_cell: Optional[str] = "A1",
         sheet_name: Optional[str] = None,
         cell: Optional[str] = None,
         row_data: Optional[List[str]] = None,
@@ -552,6 +681,8 @@ class EditOnlyOfficeDocumentTool(BaseTool):
                     msg = await self._edit_docx(
                         file_path, action, text, search_text,
                         heading_level, list_items, table_data,
+                        theme, has_total_row, auto_calculate_totals,
+                        col_alignments, col_widths, cell_padding,
                         paragraph_index, image_path, image_width, image_height,
                         page_margins, page_orientation, header_footer_type, header_footer_content,
                         cell_style, cell_coords, doc.filename
@@ -559,7 +690,9 @@ class EditOnlyOfficeDocumentTool(BaseTool):
                 elif ext in ("xlsx", "xls"):
                     msg = await self._edit_xlsx(
                         file_path, action, text, cell,
-                        sheet_name, row_data, range_address, range_data,
+                        sheet_name, row_data, table_data, theme,
+                        has_total_row, total_formulas, column_formats,
+                        auto_fit_columns, start_cell, range_address, range_data,
                         format_options, row_index, column_index, width, height,
                         doc.filename
                     )
@@ -593,6 +726,12 @@ class EditOnlyOfficeDocumentTool(BaseTool):
         heading_level: Optional[int],
         list_items: Optional[List[str]],
         table_data: Optional[List[List[str]]],
+        theme: Optional[str],
+        has_total_row: Optional[bool],
+        auto_calculate_totals: Optional[bool],
+        col_alignments: Optional[List[str]],
+        col_widths: Optional[List[float]],
+        cell_padding: Optional[dict],
         paragraph_index: Optional[int],
         image_path: Optional[str],
         image_width: Optional[float],
@@ -651,21 +790,11 @@ class EditOnlyOfficeDocumentTool(BaseTool):
                     return f"⚠️ No se encontró ningún párrafo que empiece con '{search_text}'."
                 msg = f"✅ Sección que comenzaba con '{search_text}' reemplazada en '{filename}'."
 
-            elif action == "insert_table":
-                if not table_data or len(table_data) < 1:
-                    return "❌ La acción 'insert_table' requiere 'table_data' con al menos una fila."
-                cols = max(len(row) for row in table_data)
-                table = doc_obj.add_table(rows=len(table_data), cols=cols)
-                table.style = "Table Grid"
-                for i, row in enumerate(table_data):
-                    for j, cell_val in enumerate(row):
-                        cell = table.cell(i, j)
-                        cell.text = str(cell_val)
-                        if i == 0:
-                            # Negrita para el encabezado
-                            for run in cell.paragraphs[0].runs:
-                                run.bold = True
-                msg = f"✅ Tabla de {len(table_data)} fila(s) × {cols} columna(s) insertada en '{filename}'."
+            elif action in ("insert_table", "insert_styled_table"):
+                msg = self._handle_insert_styled_table(
+                    doc_obj, table_data, theme, has_total_row,
+                    auto_calculate_totals, col_alignments, col_widths, cell_padding, filename
+                )
 
             elif action == "apply_bold":
                 if not search_text:
@@ -728,6 +857,142 @@ class EditOnlyOfficeDocumentTool(BaseTool):
         except Exception as e:
             logger.error(f"Error procesando DOCX: {e}")
             return f"❌ Error al procesar el archivo Word: {str(e)}"
+
+    def _handle_insert_styled_table(
+        self,
+        doc_obj: Any,
+        table_data: Optional[List[List[Any]]],
+        theme: Optional[str],
+        has_total_row: Optional[bool],
+        auto_calculate_totals: Optional[bool],
+        col_alignments: Optional[List[str]],
+        col_widths: Optional[List[float]],
+        cell_padding: Optional[dict],
+        filename: str,
+    ) -> str:
+        if not table_data or len(table_data) < 1:
+            return "❌ La acción de tabla requiere 'table_data' con al menos una fila."
+
+        theme_name = (theme or "corporate_blue").lower()
+        t_info = PREMIUM_THEMES.get(theme_name, PREMIUM_THEMES["corporate_blue"])
+
+        num_rows = len(table_data)
+        num_cols = max(len(r) for r in table_data)
+
+        # Copiar datos para no modificar la lista original
+        rows_data = [list(r) + [""] * (num_cols - len(r)) for r in table_data]
+
+        # Verificar si la última fila es de totales
+        is_total = bool(has_total_row)
+        if not is_total and len(rows_data) > 1:
+            first_val = str(rows_data[-1][0]).strip().upper()
+            if first_val in ("TOTAL", "TOTALES", "SUMA", "SUM"):
+                is_total = True
+
+        if (is_total or auto_calculate_totals) and len(rows_data) > 1:
+            last_row = rows_data[-1]
+            if not str(last_row[0]).strip():
+                last_row[0] = "TOTAL"
+            for c_idx in range(1, num_cols):
+                val_str = str(last_row[c_idx]).strip()
+                if not val_str or val_str.upper() in ("AUTO", "=SUM", "=SUM()"):
+                    col_vals = []
+                    has_currency = False
+                    curr_symbol = "$"
+                    for r_idx in range(1, len(rows_data) - 1):
+                        cell_raw = str(rows_data[r_idx][c_idx]).strip()
+                        if "$" in cell_raw:
+                            has_currency = True
+                        clean_num = re.sub(r'[^\d.-]', '', cell_raw)
+                        if clean_num:
+                            try:
+                                col_vals.append(float(clean_num))
+                            except ValueError:
+                                pass
+                    if col_vals:
+                        total_val = sum(col_vals)
+                        if has_currency:
+                            last_row[c_idx] = f"{curr_symbol}{total_val:,.2f}"
+                        elif any('.' in str(v) for v in col_vals):
+                            last_row[c_idx] = f"{total_val:,.2f}"
+                        else:
+                            last_row[c_idx] = f"{int(total_val):,}"
+
+        table = doc_obj.add_table(rows=num_rows, cols=num_cols)
+        table.alignment = 1  # Centrado
+        set_table_borders(table, t_info["border_color"])
+
+        # Padding de celda en dxa (1pt = 20 dxa)
+        pad_top = int((cell_padding.get('top', 6) if cell_padding else 6) * 20)
+        pad_bot = int((cell_padding.get('bottom', 6) if cell_padding else 6) * 20)
+        pad_left = int((cell_padding.get('left', 8) if cell_padding else 8) * 20)
+        pad_right = int((cell_padding.get('right', 8) if cell_padding else 8) * 20)
+
+        for r_idx, r_data in enumerate(rows_data):
+            row = table.rows[r_idx]
+            set_row_cant_split(row)
+
+            is_header_row = (r_idx == 0)
+            is_last_row_total = (r_idx == num_rows - 1 and is_total)
+
+            if is_header_row:
+                set_row_header(row)
+
+            if is_last_row_total:
+                set_total_row_borders(row, t_info["border_color"])
+
+            for c_idx, val in enumerate(r_data):
+                cell = row.cells[c_idx]
+                set_cell_margins(cell, pad_top, pad_bot, pad_left, pad_right)
+
+                p = cell.paragraphs[0] if cell.paragraphs else cell.add_paragraph()
+                p.paragraph_format.space_before = Pt(2)
+                p.paragraph_format.space_after = Pt(2)
+                p.paragraph_format.line_spacing = 1.0
+
+                # Alineación
+                if col_alignments and c_idx < len(col_alignments):
+                    align_str = col_alignments[c_idx].lower()
+                    if align_str == 'center':
+                        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    elif align_str == 'right':
+                        p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                    else:
+                        p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                else:
+                    str_val = str(val).strip()
+                    if is_header_row:
+                        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    elif re.match(r'^\$?[\d,]+(\.\d+)?%?$', str_val):
+                        p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                    else:
+                        p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+
+                # Fondos y texto
+                if is_header_row:
+                    set_cell_background(cell, t_info["header_bg"])
+                    _add_inline_formatted_text(p, str(val), default_font=t_info["font_name"], default_size=Pt(10), default_color=RGBColor(255, 255, 255))
+                    for r in p.runs:
+                        r.bold = True
+                elif is_last_row_total:
+                    set_cell_background(cell, t_info["accent_bg"])
+                    _add_inline_formatted_text(p, str(val), default_font=t_info["font_name"], default_size=Pt(9.5), default_color=RGBColor(15, 23, 42))
+                    for r in p.runs:
+                        r.bold = True
+                else:
+                    bg = t_info["zebra_bg"] if r_idx % 2 == 1 else "FFFFFF"
+                    set_cell_background(cell, bg)
+                    _add_inline_formatted_text(p, str(val), default_font=t_info["font_name"], default_size=Pt(9.5), default_color=RGBColor(51, 65, 85))
+
+                if col_widths and c_idx < len(col_widths):
+                    cell.width = Cm(col_widths[c_idx])
+
+        # Párrafo posterior para espaciado
+        p_after = doc_obj.add_paragraph()
+        p_after.paragraph_format.space_before = Pt(0)
+        p_after.paragraph_format.space_after = Pt(6)
+
+        return f"✅ Tabla premium de {num_rows} fila(s) × {num_cols} columna(s) (tema '{theme_name}') insertada en '{filename}'."
 
     def _replace_in_docx(self, doc_obj, search: str, replacement: str) -> int:
         """Reemplaza texto en párrafos y tablas, formateando con Markdown en el fallback."""
@@ -984,6 +1249,13 @@ class EditOnlyOfficeDocumentTool(BaseTool):
         cell: Optional[str],
         sheet_name: Optional[str],
         row_data: Optional[List[str]],
+        table_data: Optional[List[List[str]]],
+        theme: Optional[str],
+        has_total_row: Optional[bool],
+        total_formulas: Optional[Any],
+        column_formats: Optional[dict],
+        auto_fit_columns: Optional[bool],
+        start_cell: Optional[str],
         range_address: Optional[str],
         range_data: Optional[List[List[str]]],
         format_options: Optional[dict],
@@ -1006,7 +1278,13 @@ class EditOnlyOfficeDocumentTool(BaseTool):
                 ws = wb.active
                 sheet_name = ws.title
 
-            if action == "xlsx_write_cell":
+            if action == "xlsx_create_table":
+                msg = self._handle_xlsx_create_table(
+                    ws, table_data, theme, has_total_row, total_formulas,
+                    column_formats, auto_fit_columns, start_cell, filename, sheet_name
+                )
+
+            elif action == "xlsx_write_cell":
                 if not cell:
                     return "❌ La acción 'xlsx_write_cell' requiere el campo 'cell' (ej: 'A1')."
                 if text is None:
@@ -1017,7 +1295,17 @@ class EditOnlyOfficeDocumentTool(BaseTool):
             elif action == "xlsx_append_row":
                 if not row_data:
                     return "❌ La acción 'xlsx_append_row' requiere 'row_data' (lista de valores)."
-                ws.append(row_data)
+                parsed_row = []
+                for val in row_data:
+                    s_val = str(val).strip()
+                    if s_val.startswith("="):
+                        parsed_row.append(s_val)
+                    else:
+                        try:
+                            parsed_row.append(float(s_val) if "." in s_val else int(s_val))
+                        except ValueError:
+                            parsed_row.append(val)
+                ws.append(parsed_row)
                 msg = f"✅ Fila añadida a la hoja '{sheet_name}' de '{filename}': {row_data}"
 
             elif action == "xlsx_write_range":
@@ -1086,6 +1374,135 @@ class EditOnlyOfficeDocumentTool(BaseTool):
     # ------------------------------------------------------------------ #
     #  XLSX Helper Methods
     # ------------------------------------------------------------------ #
+    def _handle_xlsx_create_table(
+        self,
+        ws: Any,
+        table_data: Optional[List[List[Any]]],
+        theme: Optional[str],
+        has_total_row: Optional[bool],
+        total_formulas: Optional[Any],
+        column_formats: Optional[dict],
+        auto_fit_columns: Optional[bool],
+        start_cell: Optional[str],
+        filename: str,
+        sheet_name: str,
+    ) -> str:
+        if not table_data or len(table_data) < 1:
+            return "❌ La acción 'xlsx_create_table' requiere 'table_data' con al menos una fila."
+
+        theme_name = (theme or "corporate_blue").lower()
+        t_info = PREMIUM_THEMES.get(theme_name, PREMIUM_THEMES["corporate_blue"])
+
+        from openpyxl.utils import coordinate_to_tuple, get_column_letter
+
+        start_address = (start_cell or "A1").upper()
+        start_row, start_col = coordinate_to_tuple(start_address)
+
+        num_rows = len(table_data)
+        num_cols = max(len(r) for r in table_data)
+
+        rows_data = [list(r) + [""] * (num_cols - len(r)) for r in table_data]
+
+        is_total = bool(has_total_row)
+        if not is_total and len(rows_data) > 1:
+            first_val = str(rows_data[-1][0]).strip().upper()
+            if first_val in ("TOTAL", "TOTALES", "SUMA", "SUM"):
+                is_total = True
+
+        data_start_row = start_row + 1
+        data_end_row = start_row + num_rows - (1 if is_total else 0) - 1
+
+        header_fill = PatternFill(start_color=t_info["header_bg"], end_color=t_info["header_bg"], fill_type="solid")
+        header_font = Font(name=t_info["font_name"], size=11, bold=True, color=t_info["header_fg"])
+
+        zebra_fill = PatternFill(start_color=t_info["zebra_bg"], end_color=t_info["zebra_bg"], fill_type="solid")
+        accent_fill = PatternFill(start_color=t_info["accent_bg"], end_color=t_info["accent_bg"], fill_type="solid")
+
+        thin_side = Side(border_style="thin", color=t_info["border_color"])
+        double_side = Side(border_style="double", color=t_info["border_color"])
+
+        normal_border = Border(bottom=thin_side)
+        header_border = Border(top=thin_side, bottom=thin_side, left=thin_side, right=thin_side)
+        total_border = Border(top=thin_side, bottom=double_side)
+
+        for r_offset, r_data in enumerate(rows_data):
+            curr_row = start_row + r_offset
+            is_header = (r_offset == 0)
+            is_last_total = (r_offset == num_rows - 1 and is_total)
+
+            for c_offset, val in enumerate(r_data):
+                curr_col = start_col + c_offset
+                col_letter = get_column_letter(curr_col)
+                cell = ws.cell(row=curr_row, column=curr_col)
+
+                str_val = str(val).strip()
+
+                if is_last_total and c_offset > 0 and (not str_val or str_val.upper() in ("AUTO", "=SUM", "=SUM()")):
+                    formula_op = "SUM"
+                    if isinstance(total_formulas, dict):
+                        formula_op = total_formulas.get(col_letter, total_formulas.get(str(c_offset), "SUM"))
+                    elif isinstance(total_formulas, list) and c_offset < len(total_formulas):
+                        f_item = str(total_formulas[c_offset]).strip()
+                        if f_item:
+                            formula_op = f_item
+
+                    if str(formula_op).startswith("="):
+                        cell.value = formula_op
+                    else:
+                        cell.value = f"={formula_op}({col_letter}{data_start_row}:{col_letter}{data_end_row})"
+                elif str_val.startswith("="):
+                    cell.value = str_val
+                else:
+                    try:
+                        if "." in str_val:
+                            cell.value = float(str_val)
+                        else:
+                            cell.value = int(str_val)
+                    except ValueError:
+                        cell.value = val
+
+                if column_formats and not is_header:
+                    fmt = column_formats.get(col_letter) or column_formats.get(str(c_offset))
+                    if fmt:
+                        cell.number_format = fmt
+
+                if is_header:
+                    cell.fill = header_fill
+                    cell.font = header_font
+                    cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                    cell.border = header_border
+                elif is_last_total:
+                    cell.fill = accent_fill
+                    cell.font = Font(name=t_info["font_name"], size=10.5, bold=True, color="0F172A")
+                    cell.border = total_border
+                    if isinstance(cell.value, (int, float)) or str(cell.value or "").startswith("="):
+                        cell.alignment = Alignment(horizontal="right", vertical="center")
+                    else:
+                        cell.alignment = Alignment(horizontal="left", vertical="center")
+                else:
+                    if r_offset % 2 == 1:
+                        cell.fill = zebra_fill
+                    cell.font = Font(name=t_info["font_name"], size=10)
+                    cell.border = normal_border
+                    if isinstance(cell.value, (int, float)) or str(cell.value or "").startswith("="):
+                        cell.alignment = Alignment(horizontal="right", vertical="center")
+                    else:
+                        cell.alignment = Alignment(horizontal="left", vertical="center")
+
+        if auto_fit_columns is not False:
+            for c_offset in range(num_cols):
+                curr_col = start_col + c_offset
+                col_letter = get_column_letter(curr_col)
+                max_len = 0
+                for r_offset in range(num_rows):
+                    cell_val = ws.cell(row=start_row + r_offset, column=curr_col).value
+                    v_str = str(cell_val or '')
+                    if len(v_str) > max_len:
+                        max_len = len(v_str)
+                ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
+
+        return f"✅ Tabla Excel premium de {num_rows} fila(s) × {num_cols} columna(s) (tema '{theme_name}') creada en '{start_address}' de hoja '{sheet_name}'."
+
     def _xlsx_write_range(self, ws, range_address: str, range_data: List[List[str]], filename: str, sheet_name: str) -> str:
         """Escribe datos en un rango de celdas."""
         try:
@@ -1094,7 +1511,15 @@ class EditOnlyOfficeDocumentTool(BaseTool):
             
             for i, row in enumerate(range_data):
                 for j, value in enumerate(row):
-                    ws.cell(row=start_row + i, column=start_col + j, value=value)
+                    val_str = str(value).strip()
+                    cell = ws.cell(row=start_row + i, column=start_col + j)
+                    if val_str.startswith("="):
+                        cell.value = val_str
+                    else:
+                        try:
+                            cell.value = float(val_str) if "." in val_str else int(val_str)
+                        except ValueError:
+                            cell.value = value
             
             return f"✅ Rango '{range_address}' en hoja '{sheet_name}' actualizado."
         except Exception as e:
