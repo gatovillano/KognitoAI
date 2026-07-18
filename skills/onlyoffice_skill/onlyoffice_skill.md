@@ -87,7 +87,7 @@ Si prefieres un diseño único, puedes anular aspectos del tema seleccionado usa
 
 ---
 
-## Acciones de edición para .docx
+## Acciones de edición para .docx (Word)
 
 | Acción | Descripción | Campos requeridos | Campos opcionales |
 |---|---|---|---|
@@ -96,7 +96,8 @@ Si prefieres un diseño único, puedes anular aspectos del tema seleccionado usa
 | `append_list` | Añade una lista de viñetas | `list_items` | `style_theme`, `style_font_family`, `style_text_color` |
 | `replace` | Busca y reemplaza texto (soporta inline Markdown) | `search_text`, `text` | `style_theme`, `style_font_family`, `style_text_color` |
 | `replace_section` | Reemplaza el párrafo que empieza con `search_text` | `search_text`, `text` | `style_theme`, `style_font_family`, `style_text_color` |
-| `insert_table` | Inserta una tabla al final | `table_data` (matriz 2D) | `style_theme`, `style_font_family`, `style_primary_color`, `style_text_color` |
+| `insert_table` | Inserta una tabla al final | `table_data` (matriz 2D) | `theme`, `has_total_row`, `auto_calculate_totals`, `col_alignments`, `col_widths`, `cell_padding` |
+| `insert_styled_table` | Inserta una tabla con tema visual premium, padding y totals | `table_data` (matriz 2D) | `theme`, `has_total_row`, `auto_calculate_totals`, `col_alignments`, `col_widths`, `cell_padding` |
 | `apply_bold` | Pone en negrita las ocurrencias de un texto | `search_text` | |
 | `clear_and_write` | Borra todo el contenido y escribe nuevo texto/Markdown | `text` | `style_theme`, `style_font_family`, `style_primary_color`, `style_secondary_color`, `style_text_color` |
 | `edit_paragraph` | Edita un párrafo por índice o búsqueda de texto | `text`, `paragraph_index` o `search_text` | `style_theme`, `style_font_family`, `style_text_color` |
@@ -105,12 +106,36 @@ Si prefieres un diseño único, puedes anular aspectos del tema seleccionado usa
 | `add_header_footer` | Añade contenido a encabezados o pies de página | `header_footer_type` (`header`/`footer`), `header_footer_content` | |
 | `apply_cell_style` | Aplica estilos a celdas de tablas | `cell_coords` (ej: `A1`), `cell_style` (dict) | |
 
+---
+
 ## Acciones de edición para .xlsx (Excel)
 
-| Acción | Descripción | Campos requeridos |
-|---|---|---|
-| `xlsx_write_cell` | Escribe en una celda específica | `cell` (ej: 'B3'), `text`, (`sheet_name`) |
-| `xlsx_append_row` | Añade una fila al final de la hoja | `row_data` (lista de valores), (`sheet_name`) |
+| Acción | Descripción | Campos requeridos | Campos opcionales |
+|---|---|---|---|
+| `xlsx_create_table` | Crea una tabla estilizada con temas, formatos de columna y fórmulas de totales | `table_data` (matriz 2D) | `theme`, `has_total_row`, `total_formulas`, `column_formats`, `auto_fit_columns`, `start_cell`, `sheet_name` |
+| `xlsx_write_cell` | Escribe en una celda específica (soporta fórmulas `=SUM(...)`) | `cell` (ej: 'B3'), `text` | `sheet_name` |
+| `xlsx_append_row` | Añade una fila al final (convierte números y fórmulas) | `row_data` (lista de valores) | `sheet_name` |
+| `xlsx_write_range` | Escribe una matriz de valores/fórmulas en un rango | `range_address` (ej: 'A1:C5'), `range_data` | `sheet_name` |
+| `xlsx_format_cells` | Aplica formatos avanzados (fuente, relleno, alineación, bordes, number_format) | `range_address`, `format_options` | `sheet_name` |
+| `xlsx_insert_row` / `xlsx_delete_row` | Inserta o elimina filas | `row_index` | `sheet_name` |
+| `xlsx_insert_column` / `xlsx_delete_column` | Inserta o elimina columnas | `column_index` | `sheet_name` |
+| `xlsx_merge_cells` | Fusionar celdas en un rango | `range_address` | `sheet_name` |
+| `xlsx_set_column_width` / `xlsx_set_row_height` | Ajustar ancho de columna / alto de fila | `column_index`/`row_index`, `width`/`height` | `sheet_name` |
+
+### Temas de Diseño Premium (`theme`)
+- `corporate_blue` (Encabezado azul rey `#1E3A8A`, filas zebra slate, fila total acentuada con borde doble inferior)
+- `emerald_green` (Encabezado verde bosque `#065F46`, filas zebra esmeralda)
+- `dark_slate` (Encabezado pizarra oscuro `#0F172A`, filas zebra gris)
+- `sunset_amber` (Encabezado naranja/ámbar `#9A3412`, filas zebra ámbar)
+- `violet_gold` (Encabezado violeta `#581C87`, filas zebra purpúrea)
+- `minimalist_gray` (Encabezado gris oscuro `#374151`, filas zebra gris suave)
+
+---
+
+## Fórmulas y Totales Automáticos
+
+Tanto en Word como en Excel, las celdas que comiencen con `=` (ej: `=SUM(B2:B10)`, `=AVERAGE(C2:C10)`) se guardan como fórmulas evaluables.
+En Excel con `xlsx_create_table` o en Word con `insert_styled_table`, habilitar `has_total_row=True` genera y formatea automáticamente la fila de totales calculando sumas de las columnas numéricas.
 
 ---
 
@@ -138,3 +163,4 @@ Usa `create_onlyoffice_document_tool` con el parámetro `doc_type`:
 ---
 
 **IMPORTANTE**: Siempre lee el documento antes de editar para entender su estructura y evitar sobreescribir contenido valioso. Informa al usuario que debe recargar el editor para ver los cambios.
+
