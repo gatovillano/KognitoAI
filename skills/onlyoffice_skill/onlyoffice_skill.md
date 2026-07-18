@@ -110,10 +110,28 @@ Si prefieres un diseño único, puedes anular aspectos del tema seleccionado usa
 
 ## Acciones de edición para .xlsx (Excel)
 
+### Gestión de pestañas/hojas
+
+| Acción | Descripción | Campos requeridos | Campos opcionales |
+|---|---|---|---|
+| `xlsx_create_sheet` | Crea una nueva pestaña (hoja de trabajo) en el libro | `sheet_name` | `tab_color` (ej: '1E3A8A'), `sheet_index` |
+| `xlsx_rename_sheet` | Renombra una pestaña existente | `sheet_name` (nuevo nombre) | `search_text` (nombre anterior), `tab_color` |
+| `xlsx_delete_sheet` | Elimina una pestaña | `sheet_name` | |
+| `xlsx_list_sheets` | Lista todas las pestañas disponibles en el archivo | | |
+| `xlsx_copy_sheet` | Copia una hoja a un nuevo nombre dentro del mismo libro | `sheet_name` (origen), `text` (nuevo nombre) | `sheet_index` (posición destino) |
+| `xlsx_move_sheet` | Mueve (reordena) una hoja a otra posición en el libro | `sheet_name`, `sheet_index` (0-based) | |
+| `xlsx_clear_sheet` | Borra **todo** el contenido de una hoja sin eliminarla (celdas, estilos, merges, tablas) | `sheet_name` | |
+| `xlsx_get_sheet_info` | Devuelve estadísticas de una hoja: filas, columnas, rango usado, celdas fusionadas, muestra de datos | `sheet_name` | |
+| `xlsx_freeze_panes` | Congela filas/columnas: `cell='B2'` congela la fila 1 y la columna A | `cell` (ej: 'B2'), `sheet_name` | |
+| `xlsx_protect_sheet` | Protege la hoja con contraseña para evitar edición manual en el editor | `sheet_name` | `text` (contraseña, opcional) |
+| `xlsx_set_sheet_tab_color` | Cambia el color de la pestaña de una hoja ya existente | `sheet_name`, `tab_color` (hex, ej: 'FF0000') | |
+
+### Edición de contenido
+
 | Acción | Descripción | Campos requeridos | Campos opcionales |
 |---|---|---|---|
 | `xlsx_create_table` | Crea una tabla estilizada con temas, formatos de columna y fórmulas de totales | `table_data` (matriz 2D) | `theme`, `has_total_row`, `total_formulas`, `column_formats`, `auto_fit_columns`, `start_cell`, `sheet_name` |
-| `xlsx_write_cell` | Escribe en una celda específica (soporta fórmulas `=SUM(...)`) | `cell` (ej: 'B3'), `text` | `sheet_name` |
+| `xlsx_write_cell` | Escribe un valor o fórmula en una celda (si `text` empieza con `=` se guarda como fórmula evaluable) | `cell` (ej: 'B3'), `text` | `sheet_name` |
 | `xlsx_append_row` | Añade una fila al final (convierte números y fórmulas) | `row_data` (lista de valores) | `sheet_name` |
 | `xlsx_write_range` | Escribe una matriz de valores/fórmulas en un rango | `range_address` (ej: 'A1:C5'), `range_data` | `sheet_name` |
 | `xlsx_format_cells` | Aplica formatos avanzados (fuente, relleno, alineación, bordes, number_format) | `range_address`, `format_options` | `sheet_name` |
@@ -121,6 +139,12 @@ Si prefieres un diseño único, puedes anular aspectos del tema seleccionado usa
 | `xlsx_insert_column` / `xlsx_delete_column` | Inserta o elimina columnas | `column_index` | `sheet_name` |
 | `xlsx_merge_cells` | Fusionar celdas en un rango | `range_address` | `sheet_name` |
 | `xlsx_set_column_width` / `xlsx_set_row_height` | Ajustar ancho de columna / alto de fila | `column_index`/`row_index`, `width`/`height` | `sheet_name` |
+
+> 💡 **Creación automática de pestañas**: Al ejecutar acciones de edición (`xlsx_create_table`, `xlsx_write_cell`, `xlsx_write_range`, etc.) indicando un `sheet_name` que no exista en el libro, la pestaña se creará automáticamente.
+
+> 💡 **Flujo recomendado para múltiples hojas**: Usa `xlsx_list_sheets` o `xlsx_get_sheet_info` primero para entender la estructura del libro antes de editar.
+
+
 
 ### Temas de Diseño Premium (`theme`)
 - `corporate_blue` (Encabezado azul rey `#1E3A8A`, filas zebra slate, fila total acentuada con borde doble inferior)

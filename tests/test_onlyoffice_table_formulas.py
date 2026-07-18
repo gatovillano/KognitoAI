@@ -175,3 +175,85 @@ def test_xlsx_create_table_with_formulas(monkeypatch, tmp_path):
     assert ws["C6"].value == "=SUM(C3:C5)"
     assert ws["D6"].value == "=SUM(D3:D5)"
     assert ws["C3"].number_format == "$#,##0.00"
+
+
+def test_xlsx_multiple_sheets(monkeypatch, tmp_path):
+    account_id = str(uuid.uuid4())
+    document_id = uuid.uuid4()
+    xlsx_file = tmp_path / account_id / "multihis.xlsx"
+    xlsx_file.parent.mkdir(parents=True, exist_ok=True)
+
+    wb = openpyxl.Workbook()
+    wb.save(str(xlsx_file))
+
+    doc_meta = SimpleNamespace(
+        id=document_id,
+        account_id=uuid.UUID(account_id),
+        filename="multihis.xlsx",
+        extension="xlsx",
+        file_path=f"{account_id}/multihis.xlsx",
+        updated_at=None,
+    )
+
+    monkeypatch.setattr(edit_tool_module, "SessionLocal", lambda: _FakeSession(doc_meta))
+    monkeypatch.setattr(edit_tool_module, "resolve_onlyoffice_file_path", lambda _: xlsx_file)
+
+    tool = EditOnlyOfficeDocumentTool(account_id=account_id)
+
+    # 1. Crear explícitamente una pestaña "Resumen"
+    res1 = asyncio.run(
+        tool._arun(
+            document_id=str(document_id),
+            action="xlsx_create_sheet",
+            sheet_name="Resumen",
+            tab_color="1E3A8A"
+        )
+    )
+    assert "✅ Pestaña 'Resumen' creada" in res1
+
+    # 2. Escribir tabla en una nueva pestaña "Ventas Q1" (auto-creación de pestaña)
+    table_data = [
+        ["Mes", "Ventas"],
+        ["Enero", 1000],
+        ["Febrero", 1500]
+    ]
+    res2 = asyncio.run(
+        tool._arun(
+            document_id=str(document_id),
+            action="xlsx_create_table",
+            sheet_name="Ventas Q1",
+            table_data=table_data,
+            tab_color="065F46"
+        )
+    )
+    assert "✅ Tabla Excel" in res2
+    assert "Ventas Q1" in res2
+
+    # 3. Listar pestañas
+    res_list = asyncio.run(
+        tool._arun(
+            document_id=str(document_id),
+            action="xlsx_list_sheets"
+        )
+    )
+    assert "Sheet" in res_list or "Resumen" in res_list
+
+    # 4. Renombrar Sheet original a "General"
+    res_ren = asyncio.run(
+        tool._arun(
+            document_id=str(document_id),
+            action="xlsx_rename_sheet",
+            search_text="Sheet",
+            sheet_name="General"
+        )
+    )
+    assert "renombrada" in res_ren
+
+    # Verificar resultado en openpyxl
+    loaded_wb = openpyxl.load_workbook(str(xlsx_file))
+    assert "Resumen" in loaded_wb.sheetnames
+    assert "Ventas Q1" in loaded_wb.sheetnames
+    assert "General" in loaded_wb.sheetnames
+    assert loaded_wb["Ventas Q1"]["A1"].value == "Mes"
+    assert loaded_wb["Ventas Q1"]["B2"].value == 1000
+
