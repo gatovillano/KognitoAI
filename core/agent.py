@@ -37,13 +37,8 @@ from pydantic import ValidationError
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, BaseMessage
 from langchain_community.chat_message_histories import PostgresChatMessageHistory
-from langchain_core.runnables import RunnablePassthrough, RunnableLambda, RunnableConfig
-from langchain_core.language_models.base import BaseLanguageModel
+from langchain_core.runnables import RunnableConfig
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.agents import (
-    AgentAction,
-    AgentFinish,
-)  # Importar AgentAction y AgentFinish
 from sqlalchemy import update
 from langchain_core.messages import ToolMessage
 
@@ -78,7 +73,6 @@ from core.memory_manager import (
     get_relevant_memories,
     get_document_chunks,
 )
-from core.context_cache import get_cached_context, cache_context
 from core.database import SessionLocal, Account, ChatThread, Workspace
 from utils.db_session import DBSession
 
@@ -93,25 +87,18 @@ from core.citation_models import (
 from core.llm_manager import (
     get_main_llm,
     get_fast_llm,
-    get_vision_llm,
     get_llm_for_user,
 )
 from core.prompts import SUMMARIZATION_PROMPT, THREAD_TITLE_PROMPT
 from core.enhanced_memory_manager import EnhancedMemoryManager
 from knowledge_graph.graph_database import GraphDB
 from knowledge_graph.graph_reasoning_node import GraphReasoningNode  # NUEVO
-from knowledge_graph.knowledge_extraction_node import KnowledgeExtractionNode  # NUEVO
-from skills.search_and_research_skill.scripts.deep_research_tool import (
-    DeepResearchTool,
-)  # Importar DeepResearchTool
 from core.skill_manager import get_skill_manager
 
 # --- Claves para estado temporal ---
-from utils.image_generation import GENERATED_IMAGE_KEY
 
 # from skills.get_document_content_tool import DOCUMENT_NAME_KEY
 from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 
 from core.websocket_manager import (
     send_personal_message,
@@ -189,7 +176,6 @@ def normalize_image_url(url_or_base64: Optional[str]) -> str:
     return f"data:{mime};base64,{url_str}"
 
 
-from core.tool_selector import filter_relevant_tools
 from core.tool_call_parser import parse_tool_calls_from_text
 
 _graph_db_instance = None
@@ -899,7 +885,6 @@ async def get_or_create_specific_heartbeat_thread(
 # ==============================================================================
 
 from langgraph.graph import StateGraph, END
-from langgraph.checkpoint.memory import MemorySaver
 
 # --- 1. Nodos del Grafo ---
 
