@@ -420,7 +420,7 @@ class EditOnlyOfficeInput(BaseModel):
             "'xlsx_set_row_height' (altura fila - requiere row_index y height)."
         ),
     )
-    text: Optional[str] = Field(None, description="Texto principal a insertar (soporta Markdown enriquecido) o nuevo texto en 'replace'.")
+    text: Optional[str] = Field(None, description="Texto principal a insertar (soporta Markdown enriquecido) o nuevo texto en 'replace'. Para Excel, si empieza con '=' se tratará como fórmula (ej. '=SUM(A1:A10)').")
     search_text: Optional[str] = Field(None, description="Texto a buscar (para 'replace', 'replace_section', 'apply_bold').")
     heading_level: Optional[int] = Field(None, description="Nivel del título: 1 (H1), 2 (H2), 3 (H3). Usar con 'append_heading'.")
     list_items: Optional[List[str]] = Field(None, description="Lista de cadenas para crear una lista de viñetas. Usar con 'append_list'.")
@@ -428,7 +428,7 @@ class EditOnlyOfficeInput(BaseModel):
     # Para Excel
     sheet_name: Optional[str] = Field(None, description="Nombre de la hoja de Excel. Si no se indica, se usa la primera hoja.")
     cell: Optional[str] = Field(None, description="Coordenada de celda Excel (ej: 'A1', 'B3'). Usar con 'xlsx_write_cell'.")
-    row_data: Optional[List[str]] = Field(None, description="Lista de valores para añadir como fila. Usar con 'xlsx_append_row'.")
+    row_data: Optional[List[str]] = Field(None, description="Lista de valores para añadir como fila. Para fórmulas, iniciar con '='. Usar con 'xlsx_append_row'.")
     # Nuevos campos DOCX
     paragraph_index: Optional[int] = Field(None, description="Índice del párrafo a editar (0-based). Usar con 'edit_paragraph'.")
     image_path: Optional[str] = Field(None, description="Ruta del archivo de imagen a insertar. Usar con 'insert_image'.")
@@ -442,8 +442,8 @@ class EditOnlyOfficeInput(BaseModel):
     cell_coords: Optional[str] = Field(None, description="Coordenadas de celda: 'A1'. Usar con 'apply_cell_style'.")
     # Nuevos campos XLSX
     range_address: Optional[str] = Field(None, description="Rango de celdas (ej: 'A1:C3'). Usar con 'xlsx_write_range', 'xlsx_format_cells', 'xlsx_merge_cells'.")
-    range_data: Optional[List[List[str]]] = Field(None, description="Datos para escribir en el rango. Usar con 'xlsx_write_range'.")
-    format_options: Optional[dict] = Field(None, description="Opciones de formato: {'bold': True, 'font_size': 12, 'fill_color': 'FFFF00', 'align': 'center'}. Usar con 'xlsx_format_cells'.")
+    range_data: Optional[List[List[str]]] = Field(None, description="Datos para escribir en el rango. Fórmulas deben empezar con '='. Usar con 'xlsx_write_range'.")
+    format_options: Optional[dict] = Field(None, description="Opciones de formato: {'bold': True, 'italic': True, 'font_size': 12, 'font_color': 'FF0000', 'font_name': 'Arial', 'fill_color': 'FFFF00', 'align': 'center', 'valign': 'center', 'wrap_text': True, 'border': 'thin', 'number_format': '0.00%'}. Usar con 'xlsx_format_cells'.")
     row_index: Optional[int] = Field(None, description="Índice de fila (0-based). Usar con 'xlsx_insert_row', 'xlsx_delete_row'.")
     column_index: Optional[int] = Field(None, description="Índice de columna (0-based). Usar con 'xlsx_insert_column', 'xlsx_delete_column'.")
     width: Optional[float] = Field(None, description="Ancho en cm. Usar con 'xlsx_set_column_width'.")
@@ -1102,7 +1102,7 @@ class EditOnlyOfficeDocumentTool(BaseTool):
             return f"❌ Error al escribir en rango: {str(e)}"
 
     def _xlsx_format_cells(self, ws, range_address: str, format_options: dict, filename: str, sheet_name: str) -> str:
-        """Formatea celdas con estilos."""
+        """Formatea celdas con estilos avanzados."""
         try:
             if ':' in range_address:
                 range_ref = [cell for row in ws[range_address] for cell in row]
@@ -1110,22 +1110,57 @@ class EditOnlyOfficeDocumentTool(BaseTool):
                 range_ref = [ws[range_address]]
             
             for cell in range_ref:
+                # Font
                 font_kwargs = {}
-                if format_options.get('bold'):
-                    font_kwargs['bold'] = True
-                if format_options.get('italic'):
-                    font_kwargs['italic'] = True
+                if 'bold' in format_options:
+                    font_kwargs['bold'] = format_options.get('bold')
+                if 'italic' in format_options:
+                    font_kwargs['italic'] = format_options.get('italic')
                 if format_options.get('font_size'):
                     font_kwargs['size'] = format_options['font_size']
-                if font_kwargs:
+                if format_options.get('font_color'):
+                    font_kwargs['color'] = str(format_options['font_color']).lstrip('#')
+                if format_options.get('font_name'):
+                    font_kwargs['name'] = format_options['font_name']
+                
+                if font_kwargs or getattr(cell, 'font', None):
+                    if cell.font:
+                        for attr in ['name', 'size', 'bold', 'italic', 'color', 'underline']:
+                            if attr not in font_kwargs and getattr(cell.font, attr) is not None:
+                                font_kwargs[attr] = getattr(cell.font, attr)
                     cell.font = Font(**font_kwargs)
+                
+                # Fill
                 if format_options.get('fill_color'):
-                    fill = PatternFill(start_color=format_options['fill_color'], end_color=format_options['fill_color'], fill_type='solid')
+                    color = str(format_options['fill_color']).lstrip('#')
+                    fill = PatternFill(start_color=color, end_color=color, fill_type='solid')
                     cell.fill = fill
+                
+                # Alignment
+                align_kwargs = {}
                 if format_options.get('align'):
-                    align = format_options['align'].lower()
-                    if align in ('center', 'left', 'right'):
-                        cell.alignment = Alignment(horizontal=align)
+                    align_kwargs['horizontal'] = format_options['align'].lower()
+                if format_options.get('valign'):
+                    align_kwargs['vertical'] = format_options['valign'].lower()
+                if 'wrap_text' in format_options:
+                    align_kwargs['wrap_text'] = format_options.get('wrap_text')
+                
+                if align_kwargs or getattr(cell, 'alignment', None):
+                    if cell.alignment:
+                        for attr in ['horizontal', 'vertical', 'wrap_text']:
+                            if attr not in align_kwargs and getattr(cell.alignment, attr) is not None:
+                                align_kwargs[attr] = getattr(cell.alignment, attr)
+                    cell.alignment = Alignment(**align_kwargs)
+                
+                # Borders
+                if format_options.get('border'):
+                    border_style = format_options['border']
+                    side = Side(border_style=border_style, color='000000')
+                    cell.border = Border(left=side, right=side, top=side, bottom=side)
+                
+                # Number Format
+                if format_options.get('number_format'):
+                    cell.number_format = format_options['number_format']
             
             return f"✅ Formato aplicado al rango '{range_address}' en hoja '{sheet_name}'."
         except Exception as e:
