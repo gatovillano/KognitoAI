@@ -160,7 +160,11 @@ def normalize_image_url(url_or_base64: Optional[str]) -> str:
     url_str = str(url_or_base64).strip()
     if not url_str:
         return ""
-    if url_str.startswith("http://") or url_str.startswith("https://") or url_str.startswith("data:"):
+    if (
+        url_str.startswith("http://")
+        or url_str.startswith("https://")
+        or url_str.startswith("data:")
+    ):
         return url_str
     if url_str.startswith("iVBORw0KGgo"):
         mime = "image/png"
@@ -180,6 +184,7 @@ from core.tool_call_parser import parse_tool_calls_from_text
 
 _graph_db_instance = None
 _enhanced_memory_manager_instance = None
+
 
 async def get_shared_graph_dependencies():
     """
@@ -959,13 +964,15 @@ async def call_model_node(state: AgentState):
         last_msg_text = extract_text_content(state["messages"][-1].content)
         if last_msg_text.strip():
             tool_query_parts.append(last_msg_text)
-    
-    human_messages = [msg for msg in state.get("messages", []) if isinstance(msg, HumanMessage)]
+
+    human_messages = [
+        msg for msg in state.get("messages", []) if isinstance(msg, HumanMessage)
+    ]
     for hm in human_messages[-3:]:
         hm_text = extract_text_content(hm.content)
         if hm_text.strip() and hm_text not in tool_query_parts:
             tool_query_parts.append(hm_text)
-            
+
     tool_query = " ".join(tool_query_parts)
 
     logger.info(
@@ -1116,10 +1123,14 @@ async def call_model_node(state: AgentState):
 
     # Recopilar identificadores de fuentes SOLO del turno actual (últimos N mensajes)
     if last_human_idx != -1:
-        messages_to_scan = state["messages"][last_human_idx + 1:]
+        messages_to_scan = state["messages"][last_human_idx + 1 :]
     else:
         # Si no hay human messages recientes, limitar a últimos 10 mensajes
-        messages_to_scan = state["messages"][-10:] if len(state["messages"]) > 10 else state.get("messages", [])
+        messages_to_scan = (
+            state["messages"][-10:]
+            if len(state["messages"]) > 10
+            else state.get("messages", [])
+        )
 
     for msg in messages_to_scan:
         if isinstance(msg, ToolMessage):
@@ -1233,7 +1244,11 @@ async def call_model_node(state: AgentState):
         # OPTIMIZACIÓN: Solo procesar ToolMessages del turno actual (últimos 20 mensajes)
         # Evita O(N) en historiales largos donde los IDs anteriores ya están consolidados
         if state.get("messages"):
-            messages_to_update = state["messages"][-20:] if len(state["messages"]) > 20 else state["messages"]
+            messages_to_update = (
+                state["messages"][-20:]
+                if len(state["messages"]) > 20
+                else state["messages"]
+            )
             for msg in messages_to_update:
                 if isinstance(msg, ToolMessage):
                     tool_sources = msg.additional_kwargs.get("sources")
@@ -1362,8 +1377,12 @@ async def call_model_node(state: AgentState):
         return False
 
     # Soporte multimodal (visión) si hay imágenes en el último mensaje humano del estado
-    latest_human_msg = next((m for m in reversed(state["messages"]) if isinstance(m, HumanMessage)), None)
-    has_image = _message_has_image_parts(latest_human_msg) if latest_human_msg else False
+    latest_human_msg = next(
+        (m for m in reversed(state["messages"]) if isinstance(m, HumanMessage)), None
+    )
+    has_image = (
+        _message_has_image_parts(latest_human_msg) if latest_human_msg else False
+    )
     if has_image:
         main_model_name = getattr(llm, "model_name", getattr(llm, "model", ""))
         if not is_multimodal_model(main_model_name):
@@ -1375,7 +1394,6 @@ async def call_model_node(state: AgentState):
             logger.info(
                 f"👁️ El modelo principal '{main_model_name}' es multimodal, se utilizará directamente para procesar las imágenes."
             )
-
 
     if not llm:
         raise ValueError("El LLM no está disponible.")
@@ -1855,12 +1873,16 @@ async def call_model_node(state: AgentState):
             if isinstance(getattr(msg, "content", None), list):
                 for part in msg.content:
                     if isinstance(part, dict):
-                        if part.get("type") in {"image_url", "input_image"} and isinstance(part.get("image_url"), dict):
+                        if part.get("type") in {
+                            "image_url",
+                            "input_image",
+                        } and isinstance(part.get("image_url"), dict):
                             raw_url = part["image_url"].get("url", "")
                             part["image_url"]["url"] = normalize_image_url(raw_url)
-                        elif "image_url" in part and isinstance(part.get("image_url"), str):
+                        elif "image_url" in part and isinstance(
+                            part.get("image_url"), str
+                        ):
                             part["image_url"] = normalize_image_url(part["image_url"])
-
 
     full_ai_message_content = ""
     full_reasoning_content = ""  # Acumulador para razonamiento
@@ -1913,17 +1935,31 @@ async def call_model_node(state: AgentState):
     for _stream_attempt in range(_MAX_STREAM_RETRIES + 1):
         try:
             if has_images:
-                last_human = next((m for m in reversed(cleaned_messages) if isinstance(m, HumanMessage)), None)
+                last_human = next(
+                    (
+                        m
+                        for m in reversed(cleaned_messages)
+                        if isinstance(m, HumanMessage)
+                    ),
+                    None,
+                )
                 img_count = 0
                 if last_human and isinstance(last_human.content, list):
-                    img_count = sum(1 for p in last_human.content if isinstance(p, dict) and (p.get("type") in {"image_url", "input_image"} or "image_url" in p))
+                    img_count = sum(
+                        1
+                        for p in last_human.content
+                        if isinstance(p, dict)
+                        and (
+                            p.get("type") in {"image_url", "input_image"}
+                            or "image_url" in p
+                        )
+                    )
                 logger.info(
                     f"📸 Diagnostic Log: Sending multimodal payload to model '{model_name}'. "
                     f"Cleaned messages count: {len(cleaned_messages)}, Image parts in current turn: {img_count}."
                 )
 
             async for chunk in chain.astream({"messages": cleaned_messages}):
-
                 if isinstance(chunk, AIMessage):
                     # DEBUG: Log del chunk completo para ver el formato crudo
                     if logger.isEnabledFor(logging.DEBUG):
@@ -2203,7 +2239,7 @@ async def call_model_node(state: AgentState):
                     full_ai_message_content = ""
                     full_reasoning_content = ""
                     tool_calls_from_llm = []
-                    
+
                     non_stream_res = await chain.ainvoke({"messages": cleaned_messages})
                     if isinstance(non_stream_res, AIMessage):
                         if isinstance(non_stream_res.content, str):
@@ -2212,10 +2248,10 @@ async def call_model_node(state: AgentState):
                             for p in non_stream_res.content:
                                 if isinstance(p, dict) and p.get("type") == "text":
                                     full_ai_message_content += p.get("text", "")
-                        
+
                         if getattr(non_stream_res, "tool_calls", None):
                             tool_calls_from_llm = list(non_stream_res.tool_calls)
-                        
+
                         if full_ai_message_content:
                             await send_personal_message(
                                 target_account_id,
@@ -2231,9 +2267,10 @@ async def call_model_node(state: AgentState):
                         final_response_message = non_stream_res
                         break
                 except Exception as _ainvoke_exc:
-                    logger.error(f"❌ Fallback no-stream (ainvoke) también falló: {_ainvoke_exc}")
+                    logger.error(
+                        f"❌ Fallback no-stream (ainvoke) también falló: {_ainvoke_exc}"
+                    )
                     raise _stream_exc
-
 
     logger.debug(
         f"DEBUG (agent.py - call_model_node): Respuesta cruda del LLM acumulada."
@@ -2946,7 +2983,9 @@ async def unified_context_node(state: AgentState):
     """
     Nodo orquestador optimizado que ejecuta RAG, Recuperación Proactiva y la Decisión del Router en paralelo para reducir significativamente la latencia de respuesta.
     """
-    logger.info("--- (Grafo) Nodo: Orquestador de Contexto Unificado (Ultra-Optimizado) ---")
+    logger.info(
+        "--- (Grafo) Nodo: Orquestador de Contexto Unificado (Ultra-Optimizado) ---"
+    )
 
     # 0. Heurística ultra-rápida (0ms) para decidir si activamos el enrutador de grafo
     # Esto elimina la necesidad de un LLM secuencial y permite lanzar el router en paralelo.
@@ -2957,12 +2996,32 @@ async def unified_context_node(state: AgentState):
         if len(user_message.strip()) >= 5:
             user_lower = user_message.lower()
             graph_keywords = [
-                "relacion", "conexion", "conecta", "vinculo", "grafo", "mapa", 
-                "estructura", "depende", "impacta", "quien", "historia", 
-                "contexto", "analiza", "profundo", "explic", "resum", "proyecto",
-                "arquitectura", "base de datos", "sistema", "codigo"
+                "relacion",
+                "conexion",
+                "conecta",
+                "vinculo",
+                "grafo",
+                "mapa",
+                "estructura",
+                "depende",
+                "impacta",
+                "quien",
+                "historia",
+                "contexto",
+                "analiza",
+                "profundo",
+                "explic",
+                "resum",
+                "proyecto",
+                "arquitectura",
+                "base de datos",
+                "sistema",
+                "codigo",
             ]
-            if any(kw in user_lower for kw in graph_keywords) or len(user_message.split()) > 6:
+            if (
+                any(kw in user_lower for kw in graph_keywords)
+                or len(user_message.split()) > 6
+            ):
                 use_graph = True
 
     # 1. Lanzamos RAG y Recuperación Proactiva en PARALELO.
@@ -2976,7 +3035,9 @@ async def unified_context_node(state: AgentState):
         logger.info("🧠 Enrutador Heurístico: Activando Graph Router en paralelo.")
         tasks.append(graph_router_node(state))
     else:
-        logger.info("🔍 Enrutador Heurístico: Solo RAG y Memoria Proactiva para consulta simple.")
+        logger.info(
+            "🔍 Enrutador Heurístico: Solo RAG y Memoria Proactiva para consulta simple."
+        )
 
     logger.info(f"🚀 Iniciando {len(tasks)} tareas de contexto en paralelo...")
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -3031,6 +3092,7 @@ async def unified_context_node(state: AgentState):
                     combined_updates[key] = value
 
     return combined_updates
+
 
 def create_langgraph_agent():
     """
@@ -3382,15 +3444,32 @@ async def should_use_graph_reasoning(state: AgentState):
     # 2. Heurística rápida (Sin LLM)
     user_lower = user_message.lower()
     graph_keywords = [
-        "relacion", "conexion", "conecta", "vinculo", "grafo", "mapa", 
-        "estructura", "depende", "impacta", "quien", "historia", 
-        "contexto", "analiza", "profundo", "explic", "resum", "proyecto",
-        "arquitectura", "base de datos", "sistema", "codigo"
+        "relacion",
+        "conexion",
+        "conecta",
+        "vinculo",
+        "grafo",
+        "mapa",
+        "estructura",
+        "depende",
+        "impacta",
+        "quien",
+        "historia",
+        "contexto",
+        "analiza",
+        "profundo",
+        "explic",
+        "resum",
+        "proyecto",
+        "arquitectura",
+        "base de datos",
+        "sistema",
+        "codigo",
     ]
-    
+
     if any(kw in user_lower for kw in graph_keywords) or len(user_message.split()) > 6:
         curr_destinations.append("graph_router")
-        
+
     return curr_destinations
 
 
