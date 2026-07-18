@@ -2131,7 +2131,7 @@ async def call_model_node(state: AgentState):
                                             existing_tc["args"] = json.loads(
                                                 existing_tc["_args_str"]
                                             )
-                                        except:
+                                        except json.JSONDecodeError:
                                             pass
                                     if tc_chunk.get("id"):
                                         existing_tc["id"] = tc_chunk["id"]
@@ -2148,7 +2148,7 @@ async def call_model_node(state: AgentState):
                                 if new_tc["_args_str"]:
                                     try:
                                         new_tc["args"] = json.loads(new_tc["_args_str"])
-                                    except:
+                                    except json.JSONDecodeError:
                                         pass
                                 tool_calls_from_llm.append(new_tc)
 
@@ -2392,7 +2392,7 @@ async def call_model_node(state: AgentState):
         if isinstance(args, str):
             try:
                 args = json.loads(args)
-            except:
+            except json.JSONDecodeError:
                 logger.warning(
                     f"⚠️ No se pudo parsear argumentos como JSON para {tc_name}: {args}"
                 )
@@ -2707,7 +2707,7 @@ async def tool_node(state: AgentState):
                     sources_list = parsed.get("sources", [])
                     visual_schema = parsed.get("visual_schema")
                     recommendations = parsed.get("recommendations", [])
-                except:
+                except json.JSONDecodeError:
                     context_content = output_dump
             elif isinstance(output_dump, dict):
                 context_content = output_dump.get(
