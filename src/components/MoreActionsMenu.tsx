@@ -22,7 +22,7 @@ interface MoreActionsMenuProps {
   onToggleComprehensiveAnalysisForced?: () => void;
   onToggleDeepResearchForced?: () => void;
   onFileUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  onImageUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onImageUpload: (e: React.ChangeEvent<HTMLInputElement> | { target: { files: FileList | File[] | null } }) => void;
 }
 
 export function MoreActionsMenu({
