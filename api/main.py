@@ -402,7 +402,7 @@ app.include_router(onlyoffice_router, prefix="/api/onlyoffice", tags=["onlyoffic
 app.include_router(deep_research_router, prefix="/api", tags=["deep-research"])
 app.include_router(gap_development_router, prefix="/api", tags=["gap-development"])
 app.include_router(mfa_router, prefix="/api", tags=["mfa"])
-# Incluir API pública nueva (reemplaza openai_router)
+# Incluir API pública nueva
 app.include_router(public_api_router, prefix="", tags=["openai-compatible"])
 
 # Extensiones
