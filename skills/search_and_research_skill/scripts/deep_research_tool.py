@@ -183,6 +183,17 @@ class DeepResearchTool(BaseTool):
                         await db_session.commit()
                         logger.info(f"Deep Research saved to DB with ID: {new_task.id}")
                         
+                        # --- SAVE PARALLEL WORD DOC ---
+                        try:
+                            from utils.deep_research_word_saver import save_deep_research_as_word
+                            await save_deep_research_as_word(
+                                account_id=self.account_id,
+                                query=query,
+                                report_text=report,
+                                workspace_id=self.workspace_id
+                            )
+                        except Exception as save_err:
+                            logger.error(f"Error saving deep research Word document in tool run: {save_err}", exc_info=True)
                 except Exception as e:
                     logger.error(f"Error saving Deep Research to DB: {e}", exc_info=True)
                     # We don't fail the tool execution just because DB save failed
@@ -279,6 +290,18 @@ class DeepResearchTool(BaseTool):
                             await db_session.commit()
                     except Exception as e:
                         logger.error(f"Error saving Deep Research to DB: {e}")
+
+                    # --- SAVE PARALLEL WORD DOC ---
+                    try:
+                        from utils.deep_research_word_saver import save_deep_research_as_word
+                        await save_deep_research_as_word(
+                            account_id=self.account_id,
+                            query=query,
+                            report_text=report,
+                            workspace_id=self.workspace_id
+                        )
+                    except Exception as save_err:
+                        logger.error(f"Error saving deep research Word document in tool arun: {save_err}", exc_info=True)
 
                     # Notify completion
                     msg = {
