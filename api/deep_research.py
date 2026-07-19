@@ -36,6 +36,7 @@ except Exception as e:
 class DeepResearchRequest(BaseModel):
     query: str
     account_id: str = "api_user"
+    workspace_id: Optional[str] = None
 
 class ClarificationResponse(BaseModel):
     run_id: str
@@ -87,6 +88,18 @@ async def _run_deep_research_background(run_id: str, inputs: dict, config: dict)
                 if isinstance(final_sources, dict) and final_sources.get("type") == "override":
                     final_sources = final_sources.get("value", [])
                 
+                # --- SAVE PARALLEL WORD DOC ---
+                try:
+                    from utils.deep_research_word_saver import save_deep_research_as_word
+                    await save_deep_research_as_word(
+                        account_id=inputs.get("account_id"),
+                        query=inputs.get("messages")[0].content if inputs.get("messages") else "Investigación Profunda",
+                        report_text=final_state.get("final_report"),
+                        workspace_id=inputs.get("workspace_id")
+                    )
+                except Exception as save_err:
+                    logger.error(f"Error saving deep research Word document in background task: {save_err}", exc_info=True)
+                
                 research_jobs[run_id] = {
                     "status": "success",
                     "report": {
@@ -128,7 +141,8 @@ async def run_deep_research_async(
     }
     inputs = {
         "messages": [HumanMessage(content=request.query)],
-        "account_id": request.account_id
+        "account_id": request.account_id,
+        "workspace_id": request.workspace_id
     }
 
     # Initialize job state
@@ -210,6 +224,19 @@ async def run_deep_research(
                 return {"status": "clarification_needed", "message": clarification_question, "run_id": run_id}
             
             logger.info(f"Deep research completed successfully for run_id: {run_id}")
+            
+            # --- SAVE PARALLEL WORD DOC ---
+            try:
+                from utils.deep_research_word_saver import save_deep_research_as_word
+                await save_deep_research_as_word(
+                    account_id=request.account_id,
+                    query=request.query,
+                    report_text=final_state.get("final_report"),
+                    workspace_id=request.workspace_id
+                )
+            except Exception as save_err:
+                logger.error(f"Error saving deep research Word document: {save_err}", exc_info=True)
+
              # Deserializar formato de "override" para fuentes
             final_sources = final_state.get("sources", [])
             if isinstance(final_sources, dict) and final_sources.get("type") == "override":
@@ -290,6 +317,22 @@ async def clarify_deep_research(
                 return {"status": "clarification_needed", "message": clarification_question, "run_id": request.run_id}
             
             logger.info(f"Deep research completed successfully for run_id: {request.run_id} after clarification.")
+            
+            # --- SAVE PARALLEL WORD DOC ---
+            try:
+                original_query = "Investigación Profunda"
+                if final_state.get("messages"):
+                    original_query = final_state["messages"][0].content
+                from utils.deep_research_word_saver import save_deep_research_as_word
+                await save_deep_research_as_word(
+                    account_id=request.account_id,
+                    query=original_query,
+                    report_text=final_state.get("final_report"),
+                    workspace_id=None
+                )
+            except Exception as save_err:
+                logger.error(f"Error saving deep research Word document after clarification: {save_err}", exc_info=True)
+
              # Deserializar formato de "override" para fuentes
             final_sources = final_state.get("sources", [])
             if isinstance(final_sources, dict) and final_sources.get("type") == "override":

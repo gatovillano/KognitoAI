@@ -2969,7 +2969,7 @@ async def run_gap_development_and_save(task_id: str, account_id: str, query: str
             
             from api.deep_research import run_deep_research, DeepResearchRequest
             
-            research_request = DeepResearchRequest(query=query, account_id=account_id)
+            research_request = DeepResearchRequest(query=query, account_id=account_id, workspace_id=workspace_id)
             research_result = await run_deep_research(research_request)
             
             if research_result.get("status") == "success":
