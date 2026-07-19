@@ -217,6 +217,19 @@ async def run_gap_development_analysis(
             )
             db.add(analysis_task)
             await db.commit()
+
+            # Trigger parallel Word doc saving if we did a research analysis
+            if mode == "research":
+                try:
+                    from utils.deep_research_word_saver import save_deep_research_as_word
+                    await save_deep_research_as_word(
+                        account_id=account_id,
+                        query=research_query,
+                        report_text=report_data.get("final_report", ""),
+                        workspace_id=workspace_id
+                    )
+                except Exception as save_err:
+                    logger.error(f"Error saving deep research Word document in gap development: {save_err}", exc_info=True)
         
         await send_personal_message(
             account_id,

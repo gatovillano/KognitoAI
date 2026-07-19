@@ -1346,7 +1346,9 @@ export default function DocumentsPage() {
                 <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider pl-1">Carpetas</h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
                   <AnimatePresence>
-                  {filteredFolders.map((folder) => (
+                  {filteredFolders.map((folder) => {
+                    const isDeepResearchFolder = folder.name === "Investigaciones Profundas";
+                    return (
                     <motion.div 
                       key={`folder-${folder.id}`}
                       layout
@@ -1374,7 +1376,9 @@ export default function DocumentsPage() {
                         className={`group relative flex flex-col h-64 overflow-hidden transition-all duration-200 hover:bg-muted/60 cursor-grab active:cursor-grabbing rounded-2xl border ${
                           selectedFolders.includes(folder.id) 
                             ? 'bg-primary/5 border-primary ring-1 ring-primary/50 shadow-md' 
-                            : 'bg-card border-border/60 hover:bg-muted/20 shadow-sm hover:shadow-md'
+                            : isDeepResearchFolder
+                              ? 'bg-gradient-to-b from-card to-purple-500/5 border-purple-500/30 hover:border-purple-500/50 shadow-sm hover:shadow-md hover:shadow-purple-500/5'
+                              : 'bg-card border-border/60 hover:bg-muted/20 shadow-sm hover:shadow-md'
                         }`}
                         onClick={(e) => {
                            const isMod = (e as any).shiftKey || (e as any).ctrlKey || (e as any).metaKey;
@@ -1475,25 +1479,30 @@ export default function DocumentsPage() {
                         </div>
 
                         {/* Folder Preview Area (Mock) */}
-                        <div className="flex-1 bg-muted/30 flex items-center justify-center p-6 border-b border-border/40">
-                          <div className="p-4 rounded-3xl bg-background shadow-sm text-foreground/70 transition-transform group-hover:scale-110 duration-500" style={{ color: folder.workspace_color || 'currentColor' }}>
-                            <Folder className="h-14 w-14 fill-current opacity-80" />
+                        <div className={`flex-1 flex items-center justify-center p-6 border-b border-border/40 ${isDeepResearchFolder ? 'bg-gradient-to-br from-purple-500/10 to-indigo-500/10' : 'bg-muted/30'}`}>
+                          <div className="p-4 rounded-3xl bg-background shadow-sm text-foreground/70 transition-transform group-hover:scale-110 duration-500 relative" style={{ color: isDeepResearchFolder ? '#8b5cf6' : (folder.workspace_color || 'currentColor') }}>
+                            <Folder className={`h-14 w-14 fill-current opacity-80 ${isDeepResearchFolder ? 'text-purple-600 fill-purple-200' : ''}`} />
+                            {isDeepResearchFolder && (
+                              <div className="absolute -top-1 -right-1 bg-purple-600 text-white rounded-full p-1 shadow-md border border-background">
+                                <Bot className="h-3.5 w-3.5" />
+                              </div>
+                            )}
                           </div>
                         </div>
 
                         {/* Folder Info Area */}
                         <div className="p-4 bg-card h-24 flex flex-col justify-center">
                           <div className="flex items-center gap-2 mb-1">
-                            <Folder className="h-4 w-4 shrink-0" style={{ color: folder.workspace_color || 'currentColor' }} />
-                            <h3 className="font-medium text-sm leading-tight truncate text-foreground" title={folder.name}>
+                            <Folder className="h-4 w-4 shrink-0" style={{ color: isDeepResearchFolder ? '#8b5cf6' : (folder.workspace_color || 'currentColor') }} />
+                            <h3 className={`font-medium text-sm leading-tight truncate ${isDeepResearchFolder ? 'text-purple-900 dark:text-purple-300 font-semibold' : 'text-foreground'}`} title={folder.name}>
                               {folder.name}
                             </h3>
                           </div>
                           
                           <div className="flex items-center justify-between mt-1">
-                            <span className="text-[11px] text-muted-foreground flex items-center gap-1">
-                              <Folder className="h-3 w-3" />
-                              Carpeta
+                            <span className={`text-[11px] flex items-center gap-1 ${isDeepResearchFolder ? 'text-purple-600 font-medium' : 'text-muted-foreground'}`}>
+                              {isDeepResearchFolder ? <Bot className="h-3 w-3" /> : <Folder className="h-3 w-3" />}
+                              {isDeepResearchFolder ? 'Investigación' : 'Carpeta'}
                             </span>
                             
                             {folder.workspace_name && (
@@ -1518,7 +1527,8 @@ export default function DocumentsPage() {
                         </div>
                       </Card>
                     </motion.div>
-                  ))}
+                    );
+                  })}
                   </AnimatePresence>
                 </div>
               </div>
@@ -1748,7 +1758,9 @@ export default function DocumentsPage() {
             </div>
             
             <AnimatePresence>
-              {filteredFolders.map((folder) => (
+              {filteredFolders.map((folder) => {
+                const isDeepResearchFolder = folder.name === "Investigaciones Profundas";
+                return (
                 <motion.div
                   key={`list-folder-${folder.id}`}
                   layout
@@ -1756,7 +1768,11 @@ export default function DocumentsPage() {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
                   className={`grid grid-cols-12 gap-4 items-center px-4 py-2 rounded-xl cursor-pointer transition-colors border border-transparent ${
-                    selectedFolders.includes(folder.id) ? 'bg-primary/10 border-primary/20 hover:bg-primary/20' : 'hover:bg-muted/50'
+                    selectedFolders.includes(folder.id) 
+                      ? 'bg-primary/10 border-primary/20 hover:bg-primary/20' 
+                      : isDeepResearchFolder
+                        ? 'bg-purple-500/5 hover:bg-purple-500/10 border-purple-500/10'
+                        : 'hover:bg-muted/50'
                   }`}
                   onClick={(e) => {
                      const isMod = (e as any).shiftKey || (e as any).ctrlKey || (e as any).metaKey;
@@ -1774,10 +1790,15 @@ export default function DocumentsPage() {
                       onClick={(e) => e.stopPropagation()}
                       className="data-[state=checked]:bg-orange-600 data-[state=checked]:border-orange-600"
                     />
-                    <div className="p-2 rounded-lg bg-orange-500/10 text-orange-600">
-                      <Folder className="h-5 w-5 fill-current" />
+                    <div className={`p-2 rounded-lg ${isDeepResearchFolder ? 'bg-purple-500/10 text-purple-600' : 'bg-orange-500/10 text-orange-600'}`}>
+                      <Folder className={`h-5 w-5 fill-current ${isDeepResearchFolder ? 'fill-purple-200 text-purple-600' : ''}`} />
                     </div>
-                    <span className="font-bold truncate" title={folder.name}>{folder.name}</span>
+                    <span className={`font-bold truncate ${isDeepResearchFolder ? 'text-purple-950 dark:text-purple-300' : ''}`} title={folder.name}>{folder.name}</span>
+                    {isDeepResearchFolder && (
+                      <Badge variant="secondary" className="bg-purple-100 text-purple-800 border-purple-200 text-[10px] font-semibold py-0 px-2 rounded-full shrink-0">
+                        Deep Research
+                      </Badge>
+                    )}
                   </div>
                   <div className="col-span-3 hidden md:flex items-center">
                     {folder.workspace_name && (
@@ -1851,7 +1872,8 @@ export default function DocumentsPage() {
                     </DropdownMenu>
                   </div>
                 </motion.div>
-              ))}
+                );
+              })}
 
               {filteredDocs.map((doc) => (
                 <motion.div
