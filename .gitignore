@@ -79,3 +79,4 @@ kokoro_service/models/extensions/
 /extensions/
 # Package lock file (local changes, don't track)
 package-lock.json
+SECURITY_AUDIT_REPORT_2025.md

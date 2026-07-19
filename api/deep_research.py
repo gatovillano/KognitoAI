@@ -3,11 +3,9 @@ import uuid
 import asyncio
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel
-from typing import Dict, Any
-from langchain_core.messages import HumanMessage, AIMessage 
-from typing import List, Union 
+from typing import Dict, Any, List, Union, Optional
+from langchain_core.messages import HumanMessage, AIMessage
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-
 from core.agents.deep_researcher import compile_deep_researcher_graph
 from core.llm_manager import get_main_llm, get_llm_for_user
 from core.utils.llm_utils import safe_bind_tools  # OpenRouter compatibility
