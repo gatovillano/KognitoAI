@@ -144,6 +144,8 @@ cmd_upgrade() {
     cd "${REPO_DIR}"
     local branch
     branch=$(_detect_branch)
+    echo -e "${YELLOW}🧹 Limpiando modificaciones temporales en la instalación de prueba...${NC}"
+    git reset --hard HEAD
     git pull origin "${branch}"
     echo -e "${BLUE}🐍 Actualizando dependencias de Python...${NC}"
     if [ -d "venv_host" ]; then
