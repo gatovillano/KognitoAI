@@ -943,7 +943,11 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         setIsResponding(false);
       }
     },
+<<<<<<< Updated upstream
     [user, threadId, selectedContext, router, uploadedImages, serializeSelectedContext, workspaceId]
+=======
+    [user, threadId, selectedContext, router, uploadedImages, scheduleStreamScroll, serializeSelectedContext, workspaceId]
+>>>>>>> Stashed changes
   );
 
   const handleImageUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement> | { target: { files: FileList | File[] | null } }) => {
