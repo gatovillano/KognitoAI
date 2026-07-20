@@ -940,14 +940,9 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
       } catch (error: any) {
         console.error('Error sending message:', error);
         setMessages((prev) => [...prev, { text: 'Lo siento, ocurrió un error.', sender: 'ai', created_at: new Date().toISOString() }]);
-        setIsResponding(false);
       }
     },
-<<<<<<< Updated upstream
-    [user, threadId, selectedContext, router, uploadedImages, serializeSelectedContext, workspaceId]
-=======
     [user, threadId, selectedContext, router, uploadedImages, scheduleStreamScroll, serializeSelectedContext, workspaceId]
->>>>>>> Stashed changes
   );
 
   const handleImageUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement> | { target: { files: FileList | File[] | null } }) => {

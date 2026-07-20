@@ -1912,14 +1912,7 @@ class EmailAttachment(Base):
 
 
 # Import models defined in separate files at the bottom to ensure they are registered with SQLAlchemy
-from core.api_key_model import ApiKey
-
-
-
-<<<<<<< Updated upstream
-=======
 # --- Al final del archivo, asegúrate de que todos los modelos estén definidos antes de exportar ---
 
 # Importar modelos adicionales para relaciones
 from core.api_key_model import ApiKey
->>>>>>> Stashed changes
