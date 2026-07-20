@@ -2147,6 +2147,7 @@ class GetAllAnalysisRequest(BaseModel):
     offset: Optional[int] = 0
     analysis_type: Optional[str] = None  # 'document', 'collection', 'mindmap', 'insight', 'code'
     search_query: Optional[str] = None
+    topic_keywords: Optional[List[str]] = None
 
 async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: str, analysis_type: str = 'all'):
     """Función pesada que se ejecuta en segundo plano para análisis de código."""
@@ -2630,301 +2631,305 @@ async def get_all_analysis_endpoint(
     Obtiene todos los análisis del usuario de forma unificada.
     Combina AnalysisTask, MindmapTask y ProactiveInsight en una sola respuesta.
     """
-    account_uuid = uuid.UUID(current_account_id)
-    all_analysis = []
+    try:
+        account_uuid = uuid.UUID(current_account_id)
+        all_analysis = []
 
-    # 1. Obtener AnalysisTask (análisis de documentos, colecciones, código, semánticos, investigación, neural insights)
-    if not req.analysis_type or req.analysis_type in ['document', 'collection', 'code', 'semantic_summary', 'semantic', 'custom', 'gap_development', 'deep_research', 'comprehensive_web_analysis', 'neural_insight']:
-        analysis_stmt = select(AnalysisTask).where(
-            AnalysisTask.account_id == account_uuid,
-            AnalysisTask.status == "completed"
-        ).order_by(AnalysisTask.updated_at.desc())
+        analysis_task_types = [
+            'document', 'collection', 'code', 'semantic_summary', 'semantic', 'custom', 
+            'gap_development', 'deep_research', 'comprehensive_web_analysis', 'neural_insight',
+            'note_analysis', 'note_collection_analysis', 'single_note', 'single_note_summary', 'notes_collection'
+        ]
 
-        # Filtrar por analysis_type específico si se solicita
-        if req.analysis_type:
-            analysis_stmt = analysis_stmt.where(AnalysisTask.analysis_type == req.analysis_type)
+        # 1. Obtener AnalysisTask
+        if not req.analysis_type or req.analysis_type in analysis_task_types:
+            analysis_stmt = select(AnalysisTask).where(
+                AnalysisTask.account_id == account_uuid,
+                AnalysisTask.status == "completed"
+            ).order_by(desc(AnalysisTask.created_at))
 
-        if req.search_query:
-            analysis_stmt = analysis_stmt.where(
-                or_(
-                    AnalysisTask.file_name.ilike(f"%{req.search_query}%"),
-                    func.cast(AnalysisTask.result_payload, String).ilike(f"%{req.search_query}%")
-                )
-            )
-
-        analysis_results = await db.execute(analysis_stmt)
-        analysis_tasks = analysis_results.scalars().all()
-
-        for task in analysis_tasks:
-            # Determinar el tipo específico basado en el file_name y analysis_type
-            file_name = str(task.file_name) if task.file_name is not None else ""
-            task_analysis_type = getattr(task, 'analysis_type', None)
-
-            # Usar el analysis_type de la tarea si está disponible, sino inferir del file_name
-            if task_analysis_type: # Priorizar el tipo de la tarea si está definido
-                analysis_type = task_analysis_type
-                title = file_name
-            elif file_name.startswith("Resumen Semántico:"):
-                analysis_type = "semantic_summary"
-                title = file_name
-            elif file_name == "Semantic Topic Analysis":
-                analysis_type = "semantic"
-                title = "Análisis Semántico de Temas"
-            elif "repositorio" in file_name.lower() or file_name.endswith(".git") or "Análisis de Repositorio:" in file_name:
-                analysis_type = "code"
-                title = file_name if "Análisis de Repositorio:" in file_name else f"Análisis de Código: {file_name}"
-            elif file_name.startswith("Análisis Personalizado:"):
-                analysis_type = "custom"
-                title = file_name
-            elif task_analysis_type == "single_note":
-                analysis_type = "note_analysis"
-                title = file_name if "Nota:" in file_name else f"Análisis de Nota: {file_name}"
-            elif task_analysis_type == "single_note_summary":
-                analysis_type = "note_analysis"
-                title = file_name if "Resumen de Nota:" in file_name else f"Resumen de Nota: {file_name}"
-            elif task_analysis_type == "notes_collection":
-                analysis_type = "note_collection_analysis"
-                title = file_name if "Colección de Notas:" in file_name else f"Análisis de Colección de Notas: {file_name}"
-            elif task_analysis_type == "gap_development":
-                analysis_type = "gap_development"
-                title = file_name
-            else:
-                # Fallback: inferir del contenido del resultado o default a "document"
-                analysis_type = "document"
-                title = f"Análisis de Documento: {file_name}"
-
-            # Extraer resumen del resultado
-            summary = "Sin resumen disponible"
-            tool_used = "Desconocido"
-
-            if task.result_payload is not None:
-                # Asegurarse de que result_payload es un diccionario
-                payload_dict = task.result_payload if isinstance(task.result_payload, dict) else {}
- 
-                if analysis_type == "collection" and 'collection_summary' in payload_dict:
-                    coll_summary = str(payload_dict['collection_summary'])
-                    summary = coll_summary[:200] + "..." if len(coll_summary) > 200 else coll_summary
-                elif 'executive_summary' in payload_dict:
-                    summary = payload_dict['executive_summary']
-                elif 'resumen_ejecutivo' in payload_dict:
-                    summary = payload_dict['resumen_ejecutivo']
-                elif 'resumen_semantico' in payload_dict:
-                    sem_summary = str(payload_dict['resumen_semantico']) # Convertir a str para len()
-                    summary = sem_summary[:200] + "..." if len(sem_summary) > 200 else sem_summary
-                elif 'summary' in payload_dict and isinstance(payload_dict['summary'], str):
-                    summary = payload_dict['summary']
-                elif 'sections' in payload_dict and isinstance(payload_dict['sections'], list) and len(cast(list, payload_dict['sections'])) > 0:
-                    # Para análisis personalizados, extraer resumen de la primera sección
-                    first_section = payload_dict['sections'][0]
-                    if 'content' in first_section:
-                        content = str(first_section['content'])
-                        summary = content[:200] + "..." if len(content) > 200 else content
-                    else:
-                        sections_list = cast(list, payload_dict['sections'])
-                        sections_count = len(sections_list)
-                        summary = f"Análisis personalizado con {sections_count} secciones"
-                elif 'sections' in payload_dict:
-                    # Si existe 'sections' pero está vacío
-                    summary = "Análisis personalizado sin contenido"
-                elif 'formatted_result' in payload_dict:
-                    summary = str(payload_dict['formatted_result'])[:200] + "..."
-                elif (analysis_type == "gap_development" or task_analysis_type == "gap_development" or analysis_type == "deep_research") and ('report' in payload_dict or 'final_report' in payload_dict or 'summary' in payload_dict):
-                    if 'report' in payload_dict:
-                        report_obj = payload_dict['report']
-                        if isinstance(report_obj, dict) and 'summary' in report_obj:
-                            summary = report_obj['summary']
-                        else:
-                            report_content = str(report_obj)
-                            summary = report_content[:200] + "..." if len(report_content) > 200 else report_content
-                    elif 'summary' in payload_dict:
-                        summary = payload_dict['summary']
-                    elif 'final_report' in payload_dict:
-                        report_content = str(payload_dict['final_report'])
-                        summary = payload_dict['summary']
-                    elif 'final_report' in payload_dict:
-                        report_content = str(payload_dict['final_report'])
-                        summary = report_content[:200] + "..." if len(report_content) > 200 else report_content
- 
-                # Obtener herramienta usada desde los metadatos o inferir basándose en la estructura
-                if 'tool_used' in payload_dict:
-                    tool_used = payload_dict['tool_used']
-                elif 'analysis_metadata' in payload_dict and 'tool_used' in payload_dict['analysis_metadata']:
-                    tool_used = payload_dict['analysis_metadata']['tool_used']
+            if req.analysis_type:
+                if req.analysis_type == 'note_analysis':
+                    analysis_stmt = analysis_stmt.where(AnalysisTask.analysis_type.in_(['single_note', 'single_note_summary', 'note_analysis']))
+                elif req.analysis_type == 'note_collection_analysis':
+                    analysis_stmt = analysis_stmt.where(AnalysisTask.analysis_type.in_(['notes_collection', 'note_collection_analysis']))
                 else:
-                    # Fallback: inferir basándose en la estructura del payload y file_name
-                    if 'code_structure' in payload_dict and 'design_patterns' in payload_dict:
-                        tool_used = "advanced_code_analyzer.py"
-                    elif 'grouped_topics' in payload_dict and 'detailed_clusters' in payload_dict:
-                        tool_used = "semantic_topic_analysis_tool.py"
-                    elif file_name == "Semantic Topic Analysis":
-                        tool_used = "semantic_topic_analysis_tool.py"
-                    elif 'resumen_semantico' in payload_dict and 'temas_transversales' in payload_dict:
-                        tool_used = "semantic_summary_analysis"
-                    elif 'cross_cutting_themes' in payload_dict:
-                        tool_used = "advanced_text_analyzer.py (colección)"
-                    elif 'key_themes' in payload_dict and 'central_concepts' in payload_dict:
-                        tool_used = "advanced_text_analyzer.py (documento)"
-                    elif file_name.startswith("Resumen Semántico:"):
-                        tool_used = "semantic_summary_analysis"
-                    elif file_name.startswith("Colección:"):
-                        tool_used = "collection_analysis_tool.py"
-                    elif "repositorio" in file_name.lower() or file_name.endswith(".git"):
-                        tool_used = "advanced_code_analyzer.py"
-                    elif analysis_type == "custom" or 'sections' in payload_dict:
-                        tool_used = "custom_analysis_tool"
-                    elif analysis_type == "document":
-                        tool_used = "document_analysis_tool.py"
+                    analysis_stmt = analysis_stmt.where(AnalysisTask.analysis_type == req.analysis_type)
+
+            if req.search_query:
+                analysis_stmt = analysis_stmt.where(
+                    or_(
+                        AnalysisTask.file_name.ilike(f"%{req.search_query}%"),
+                        func.cast(AnalysisTask.result_payload, String).ilike(f"%{req.search_query}%")
+                    )
+                )
+
+            analysis_results = await db.execute(analysis_stmt)
+            analysis_tasks = analysis_results.scalars().all()
+
+            for task in analysis_tasks:
+                file_name = str(task.file_name) if task.file_name is not None else ""
+                task_analysis_type = getattr(task, 'analysis_type', None)
+
+                if task_analysis_type:
+                    analysis_type = task_analysis_type
+                    title = file_name
+                elif file_name.startswith("Resumen Semántico:"):
+                    analysis_type = "semantic_summary"
+                    title = file_name
+                elif file_name == "Semantic Topic Analysis":
+                    analysis_type = "semantic"
+                    title = "Análisis Semántico de Temas"
+                elif "repositorio" in file_name.lower() or file_name.endswith(".git") or "Análisis de Repositorio:" in file_name:
+                    analysis_type = "code"
+                    title = file_name if "Análisis de Repositorio:" in file_name else f"Análisis de Código: {file_name}"
+                elif file_name.startswith("Análisis Personalizado:"):
+                    analysis_type = "custom"
+                    title = file_name
+                elif task_analysis_type == "single_note":
+                    analysis_type = "note_analysis"
+                    title = file_name if "Nota:" in file_name else f"Análisis de Nota: {file_name}"
+                elif task_analysis_type == "single_note_summary":
+                    analysis_type = "note_analysis"
+                    title = file_name if "Resumen de Nota:" in file_name else f"Resumen de Nota: {file_name}"
+                elif task_analysis_type == "notes_collection":
+                    analysis_type = "note_collection_analysis"
+                    title = file_name if "Colección de Notas:" in file_name else f"Análisis de Colección de Notas: {file_name}"
+                elif task_analysis_type == "gap_development":
+                    analysis_type = "gap_development"
+                    title = file_name
+                else:
+                    analysis_type = "document"
+                    title = f"Análisis de Documento: {file_name}"
+
+                summary = "Sin resumen disponible"
+                tool_used = "Desconocido"
+
+                if task.result_payload is not None:
+                    payload_dict = task.result_payload if isinstance(task.result_payload, dict) else {}
+
+                    if analysis_type == "collection" and 'collection_summary' in payload_dict:
+                        coll_summary = str(payload_dict['collection_summary'])
+                        summary = coll_summary[:200] + "..." if len(coll_summary) > 200 else coll_summary
+                    elif 'executive_summary' in payload_dict:
+                        summary = str(payload_dict['executive_summary'])
+                    elif 'resumen_ejecutivo' in payload_dict:
+                        summary = str(payload_dict['resumen_ejecutivo'])
+                    elif 'resumen_semantico' in payload_dict:
+                        sem_summary = str(payload_dict['resumen_semantico'])
+                        summary = sem_summary[:200] + "..." if len(sem_summary) > 200 else sem_summary
+                    elif 'summary' in payload_dict and payload_dict['summary'] is not None:
+                        summary = str(payload_dict['summary']) if not isinstance(payload_dict['summary'], str) else payload_dict['summary']
+                    elif 'sections' in payload_dict and isinstance(payload_dict['sections'], list) and len(cast(list, payload_dict['sections'])) > 0:
+                        first_section = payload_dict['sections'][0]
+                        if isinstance(first_section, dict) and 'content' in first_section:
+                            content = str(first_section['content'])
+                            summary = content[:200] + "..." if len(content) > 200 else content
+                        else:
+                            sections_list = cast(list, payload_dict['sections'])
+                            sections_count = len(sections_list)
+                            summary = f"Análisis personalizado con {sections_count} secciones"
+                    elif 'sections' in payload_dict:
+                        summary = "Análisis personalizado sin contenido"
+                    elif 'formatted_result' in payload_dict:
+                        summary = str(payload_dict['formatted_result'])[:200] + "..."
+                    elif (analysis_type == "gap_development" or task_analysis_type == "gap_development" or analysis_type == "deep_research") and ('report' in payload_dict or 'final_report' in payload_dict or 'summary' in payload_dict):
+                        if 'report' in payload_dict:
+                            report_obj = payload_dict['report']
+                            if isinstance(report_obj, dict) and 'summary' in report_obj:
+                                summary = str(report_obj['summary'])
+                            else:
+                                report_content = str(report_obj)
+                                summary = report_content[:200] + "..." if len(report_content) > 200 else report_content
+                        elif 'summary' in payload_dict and payload_dict['summary'] is not None:
+                            summary = str(payload_dict['summary'])
+                        elif 'final_report' in payload_dict:
+                            report_content = str(payload_dict['final_report'])
+                            summary = report_content[:200] + "..." if len(report_content) > 200 else report_content
+
+                    if 'tool_used' in payload_dict:
+                        tool_used = str(payload_dict['tool_used'])
+                    elif 'analysis_metadata' in payload_dict and isinstance(payload_dict['analysis_metadata'], dict) and 'tool_used' in payload_dict['analysis_metadata']:
+                        tool_used = str(payload_dict['analysis_metadata']['tool_used'])
                     else:
-                        tool_used = f"herramienta_{analysis_type}"
-            
-            logger.info(f"DEBUG: Processing task {task.id}: Type={analysis_type}, Title='{title}', Summary='{summary[:50]}...'")
+                        if 'code_structure' in payload_dict and 'design_patterns' in payload_dict:
+                            tool_used = "advanced_code_analyzer.py"
+                        elif 'grouped_topics' in payload_dict and 'detailed_clusters' in payload_dict:
+                            tool_used = "semantic_topic_analysis_tool.py"
+                        elif file_name == "Semantic Topic Analysis":
+                            tool_used = "semantic_topic_analysis_tool.py"
+                        elif 'resumen_semantico' in payload_dict and 'temas_transversales' in payload_dict:
+                            tool_used = "semantic_summary_analysis"
+                        elif 'cross_cutting_themes' in payload_dict:
+                            tool_used = "advanced_text_analyzer.py (colección)"
+                        elif 'key_themes' in payload_dict and 'central_concepts' in payload_dict:
+                            tool_used = "advanced_text_analyzer.py (documento)"
+                        elif file_name.startswith("Resumen Semántico:"):
+                            tool_used = "semantic_summary_analysis"
+                        elif file_name.startswith("Colección:"):
+                            tool_used = "collection_analysis_tool.py"
+                        elif "repositorio" in file_name.lower() or file_name.endswith(".git"):
+                            tool_used = "advanced_code_analyzer.py"
+                        elif analysis_type == "custom" or 'sections' in payload_dict:
+                            tool_used = "custom_analysis_tool"
+                        elif analysis_type == "document":
+                            tool_used = "document_analysis_tool.py"
+                        else:
+                            tool_used = f"herramienta_{analysis_type}"
 
-            all_analysis.append({
-                "id": str(task.id),
-                "type": analysis_type,
-                "title": title,
-                "summary": summary,
-                "created_at": task.created_at.isoformat(),
-                "updated_at": task.updated_at.isoformat(),
-                "source_table": "analysis_tasks",
-                "tool_used": tool_used,
-                "full_data": task.result_payload
-            })
+                created_at_str = task.created_at.isoformat() if task.created_at else datetime.now(timezone.utc).isoformat()
+                updated_at_str = task.updated_at.isoformat() if task.updated_at else created_at_str
 
-    # 2. Obtener MindmapTask
-    if not req.analysis_type or req.analysis_type == 'mindmap':
-        # Seleccionar solo las columnas que existen en mindmap_tasks (sin analysis_type)
-        mindmap_stmt = select(
-            MindmapTask.id,
-            MindmapTask.account_id,
-            MindmapTask.topic,
-            MindmapTask.ideas_input,
-            MindmapTask.document_name,
-            MindmapTask.concept_query,
-            MindmapTask.status,
-            MindmapTask.result_payload,
-            MindmapTask.error_message,
-            MindmapTask.created_at,
-            MindmapTask.updated_at
-        ).where(
-            MindmapTask.account_id == account_uuid,
-            MindmapTask.status == "completed"
-        ).order_by(MindmapTask.updated_at.desc())
+                all_analysis.append({
+                    "id": str(task.id),
+                    "type": analysis_type,
+                    "title": title,
+                    "summary": summary,
+                    "created_at": created_at_str,
+                    "updated_at": updated_at_str,
+                    "source_table": "analysis_tasks",
+                    "tool_used": tool_used,
+                    "full_data": task.result_payload
+                })
 
-        if req.search_query:
-            mindmap_stmt = mindmap_stmt.where(
-                or_(
-                    MindmapTask.topic.ilike(f"%{req.search_query}%"),
-                    func.cast(MindmapTask.result_payload, String).ilike(f"%{req.search_query}%")
+        # 2. Obtener MindmapTask
+        if not req.analysis_type or req.analysis_type == 'mindmap':
+            mindmap_stmt = select(
+                MindmapTask.id,
+                MindmapTask.account_id,
+                MindmapTask.topic,
+                MindmapTask.ideas_input,
+                MindmapTask.document_name,
+                MindmapTask.concept_query,
+                MindmapTask.status,
+                MindmapTask.result_payload,
+                MindmapTask.error_message,
+                MindmapTask.created_at,
+                MindmapTask.updated_at
+            ).where(
+                MindmapTask.account_id == account_uuid,
+                MindmapTask.status == "completed"
+            ).order_by(desc(MindmapTask.created_at))
+
+            if req.search_query:
+                mindmap_stmt = mindmap_stmt.where(
+                    or_(
+                        MindmapTask.topic.ilike(f"%{req.search_query}%"),
+                        func.cast(MindmapTask.result_payload, String).ilike(f"%{req.search_query}%")
+                    )
                 )
-            )
 
-        mindmap_results = await db.execute(mindmap_stmt)
-        mindmap_rows = mindmap_results.fetchall()
+            mindmap_results = await db.execute(mindmap_stmt)
+            mindmap_rows = mindmap_results.fetchall()
 
-        for row in mindmap_rows:
-            summary = f"Mapa mental sobre: {row.topic}"
-            if row.result_payload is not None and 'summary' in row.result_payload:
-                summary = row.result_payload['summary']
+            for row in mindmap_rows:
+                summary = f"Mapa mental sobre: {row.topic}"
+                if row.result_payload is not None and isinstance(row.result_payload, dict) and 'summary' in row.result_payload:
+                    summary = str(row.result_payload['summary'])
 
-            # Obtener herramienta usada desde los metadatos o usar fallback
-            tool_used = "mindmap_generator_tool.py"
-            if row.result_payload is not None:
-                if 'tool_used' in row.result_payload:
-                    tool_used = row.result_payload['tool_used']
-                elif 'analysis_metadata' in row.result_payload and 'tool_used' in row.result_payload['analysis_metadata']:
-                    tool_used = row.result_payload['analysis_metadata']['tool_used']
+                tool_used = "mindmap_generator_tool.py"
+                if row.result_payload is not None and isinstance(row.result_payload, dict):
+                    if 'tool_used' in row.result_payload:
+                        tool_used = str(row.result_payload['tool_used'])
+                    elif 'analysis_metadata' in row.result_payload and isinstance(row.result_payload['analysis_metadata'], dict) and 'tool_used' in row.result_payload['analysis_metadata']:
+                        tool_used = str(row.result_payload['analysis_metadata']['tool_used'])
 
-            all_analysis.append({
-                "id": str(row.id),
-                "type": "mindmap",
-                "title": f"Mapa Mental: {row.topic}",
-                "summary": summary,
-                "created_at": row.created_at.isoformat(),
-                "updated_at": row.updated_at.isoformat(),
-                "source_table": "mindmap_tasks",
-                "tool_used": tool_used,
-                "full_data": row.result_payload
-            })
+                created_at_str = row.created_at.isoformat() if row.created_at else datetime.now(timezone.utc).isoformat()
+                updated_at_str = row.updated_at.isoformat() if row.updated_at else created_at_str
 
-    # 3. Obtener ProactiveInsight
-    if not req.analysis_type or req.analysis_type == 'insight':
-        insight_stmt = select(ProactiveInsight).options(joinedload(ProactiveInsight.workspace)).where(
-            ProactiveInsight.account_id == account_uuid
-        ).order_by(ProactiveInsight.created_at.desc())
+                all_analysis.append({
+                    "id": str(row.id),
+                    "type": "mindmap",
+                    "title": f"Mapa Mental: {row.topic}",
+                    "summary": summary,
+                    "created_at": created_at_str,
+                    "updated_at": updated_at_str,
+                    "source_table": "mindmap_tasks",
+                    "tool_used": tool_used,
+                    "full_data": row.result_payload
+                })
 
-        if req.search_query:
-            insight_stmt = insight_stmt.where(
-                or_(
-                    ProactiveInsight.insight_message.ilike(f"%{req.search_query}%"),
-                    ProactiveInsight.type.ilike(f"%{req.search_query}%")
+        # 3. Obtener ProactiveInsight
+        if not req.analysis_type or req.analysis_type == 'insight':
+            insight_stmt = select(ProactiveInsight).options(joinedload(ProactiveInsight.workspace)).where(
+                ProactiveInsight.account_id == account_uuid
+            ).order_by(desc(ProactiveInsight.created_at))
+
+            if req.search_query:
+                insight_stmt = insight_stmt.where(
+                    or_(
+                        ProactiveInsight.insight_message.ilike(f"%{req.search_query}%"),
+                        ProactiveInsight.type.ilike(f"%{req.search_query}%")
+                    )
                 )
-            )
 
-        insight_results = await db.execute(insight_stmt)
-        insights = insight_results.scalars().all()
+            insight_results = await db.execute(insight_stmt)
+            insights = insight_results.scalars().all()
 
-        for insight in insights:
-            # Obtener herramienta usada desde los metadatos o usar fallback
-            tool_used = "proactive_knowledge_linker_tool_removed.py"
-            related_items = insight.related_items or {}
+            for insight in insights:
+                tool_used = "proactive_knowledge_linker_tool_removed.py"
+                related_items = insight.related_items or {}
 
-            if isinstance(related_items, dict):
-                if 'tool_used' in related_items:
-                    tool_used = related_items['tool_used']
-                elif 'analysis_metadata' in related_items and 'tool_used' in related_items['analysis_metadata']:
-                    tool_used = related_items['analysis_metadata']['tool_used']
+                if isinstance(related_items, dict):
+                    if 'tool_used' in related_items:
+                        tool_used = str(related_items['tool_used'])
+                    elif 'analysis_metadata' in related_items and isinstance(related_items['analysis_metadata'], dict) and 'tool_used' in related_items['analysis_metadata']:
+                        tool_used = str(related_items['analysis_metadata']['tool_used'])
 
-                # Extraer los items reales si están en la nueva estructura
-                actual_items = related_items.get('items', related_items)
-            else:
-                # Fallback para estructura antigua
-                actual_items = related_items
+                    actual_items = related_items.get('items', related_items)
+                else:
+                    actual_items = related_items
 
-            all_analysis.append({
-                "id": str(insight.id),
-                "type": "insight",
-                "title": f"Insight {insight.type.title()}",
-                "summary": insight.insight_message,
-                "created_at": insight.created_at.isoformat(),
-                "updated_at": insight.created_at.isoformat(),
-                "source_table": "proactive_insights",
-                "tool_used": tool_used,
-                "confidence_score": insight.confidence_score,
-                "action_suggestion": insight.action_suggestion,
-                "related_items": actual_items,
-                "status": insight.status,
-                "workspace_id": str(insight.workspace_id) if getattr(insight, 'workspace_id', None) else None,
-                "workspace_name": insight.workspace.name if getattr(insight, 'workspace', None) else None,
-                "workspace_color": insight.workspace.color if getattr(insight, 'workspace', None) else None,
-                "full_data": {
-                    "type": insight.type,
-                    "title": insight.title,
-                    "insight_message": insight.insight_message,
+                created_at_str = insight.created_at.isoformat() if insight.created_at else datetime.now(timezone.utc).isoformat()
+
+                all_analysis.append({
+                    "id": str(insight.id),
+                    "type": "insight",
+                    "title": f"Insight {insight.type.title() if insight.type else ''}",
+                    "summary": insight.insight_message or "",
+                    "created_at": created_at_str,
+                    "updated_at": created_at_str,
+                    "source_table": "proactive_insights",
+                    "tool_used": tool_used,
                     "confidence_score": insight.confidence_score,
                     "action_suggestion": insight.action_suggestion,
-                    "innovation_potential": insight.innovation_potential,
-                    "related_items": insight.related_items,
-                    "tool_used": tool_used
-                }
-            })
-    # 4. Obtener GapDevelopmentAnalysis (Comentado para evitar duplicados en el listado, ya que se registran y retornan a través de AnalysisTask)
+                    "related_items": actual_items,
+                    "status": insight.status,
+                    "workspace_id": str(insight.workspace_id) if getattr(insight, 'workspace_id', None) else None,
+                    "workspace_name": insight.workspace.name if getattr(insight, 'workspace', None) else None,
+                    "workspace_color": insight.workspace.color if getattr(insight, 'workspace', None) else None,
+                    "full_data": {
+                        "type": insight.type,
+                        "title": insight.title,
+                        "insight_message": insight.insight_message,
+                        "confidence_score": insight.confidence_score,
+                        "action_suggestion": insight.action_suggestion,
+                        "innovation_potential": insight.innovation_potential,
+                        "related_items": insight.related_items,
+                        "tool_used": tool_used
+                    }
+                })
 
-    # 5. Ordenar por fecha de actualización y aplicar paginación
-    all_analysis.sort(key=lambda x: x['updated_at'], reverse=True)
+        # 5. Ordenar por fecha de actualización y aplicar paginación
+        all_analysis.sort(key=lambda x: str(x.get('updated_at') or x.get('created_at') or ''), reverse=True)
 
-    # Aplicar paginación
-    start_idx = req.offset or 0
-    end_idx = start_idx + (req.limit or 20)
-    paginated_analysis = all_analysis[start_idx:end_idx]
+        start_idx = req.offset or 0
+        end_idx = start_idx + (req.limit or 20)
+        paginated_analysis = all_analysis[start_idx:end_idx]
 
-    return {
-        "analysis": paginated_analysis,
-        "total": len(all_analysis),
-        "limit": req.limit or 20,
-        "offset": req.offset or 0,
-        "has_more": end_idx < len(all_analysis)
-    }
+        return {
+            "analysis": paginated_analysis,
+            "total": len(all_analysis),
+            "limit": req.limit or 20,
+            "offset": req.offset or 0,
+            "has_more": end_idx < len(all_analysis)
+        }
+    except Exception as e:
+        logger.error(f"Error en get_all_analysis_endpoint: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error al recuperar los análisis: {str(e)}"
+        )
 
 class GapDevelopmentRequest(BaseModel):
     query: str

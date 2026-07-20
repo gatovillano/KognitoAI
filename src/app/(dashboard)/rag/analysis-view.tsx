@@ -156,7 +156,8 @@ export function AnalysisView() {
             });
 
             const data: AnalysisResponse = response.data;
-            const filteredAnalysis = data.analysis.filter(
+            const rawList = Array.isArray(data?.analysis) ? data.analysis : [];
+            const filteredAnalysis = rawList.filter(
                 (item) =>
                     item.type !== 'insight' &&
                     item.type !== 'proactive_insight_manual' &&
@@ -168,9 +169,10 @@ export function AnalysisView() {
                 setAnalyses(prev => [...prev, ...filteredAnalysis]);
             }
 
-            setHasMore(!!data.has_more);
-            offsetRef.current = currentOffset + data.analysis.length;
+            setHasMore(!!data?.has_more);
+            offsetRef.current = currentOffset + rawList.length;
         } catch (error) {
+            console.error('Error al cargar análisis:', error);
             toast.error('Error al cargar los análisis');
             setHasMore(false);
         } finally {

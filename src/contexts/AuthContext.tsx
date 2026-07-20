@@ -44,7 +44,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const response = await apiClient.get('/api/users/me', {
         headers: { Authorization: `Bearer ${newToken}` },
       });
-      console.log('AuthContext: API /api/users/me response', response.data);
       setUser(response.data);
     } catch (error) {
       console.error('Failed to fetch user', error);
