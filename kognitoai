@@ -144,9 +144,23 @@ cmd_upgrade() {
     cd "${REPO_DIR}"
     local branch
     branch=$(_detect_branch)
-    echo -e "${YELLOW}🧹 Limpiando modificaciones temporales en la instalación de prueba...${NC}"
+
+    # 1. Detectar y desinstalar temporalmente extensiones activas
+    if [ -f "scripts/upgrade_helper.py" ]; then
+        echo -e "${YELLOW}🧩 Guardando y preparando extensiones modulares...${NC}"
+        python3 scripts/upgrade_helper.py --pre-upgrade
+    fi
+
+    # 2. Resetear modificaciones temporales a archivos rastreados y actualizar
     git reset --hard HEAD
     git pull origin "${branch}"
+
+    # 3. Reinstalar automáticamente las extensiones activas
+    if [ -f "scripts/upgrade_helper.py" ]; then
+        echo -e "${YELLOW}🧩 Reinstalando extensiones modulares...${NC}"
+        python3 scripts/upgrade_helper.py --post-upgrade
+    fi
+
     echo -e "${BLUE}🐍 Actualizando dependencias de Python...${NC}"
     if [ -d "venv_host" ]; then
         ./venv_host/bin/pip install -r requirements.txt --quiet
