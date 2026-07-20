@@ -2633,8 +2633,8 @@ async def get_all_analysis_endpoint(
     account_uuid = uuid.UUID(current_account_id)
     all_analysis = []
 
-    # 1. Obtener AnalysisTask (análisis de documentos, colecciones, código, semánticos, investigación)
-    if not req.analysis_type or req.analysis_type in ['document', 'collection', 'code', 'semantic_summary', 'semantic', 'custom', 'gap_development', 'deep_research', 'comprehensive_web_analysis']:
+    # 1. Obtener AnalysisTask (análisis de documentos, colecciones, código, semánticos, investigación, neural insights)
+    if not req.analysis_type or req.analysis_type in ['document', 'collection', 'code', 'semantic_summary', 'semantic', 'custom', 'gap_development', 'deep_research', 'comprehensive_web_analysis', 'neural_insight']:
         analysis_stmt = select(AnalysisTask).where(
             AnalysisTask.account_id == account_uuid,
             AnalysisTask.status == "completed"
@@ -2711,6 +2711,8 @@ async def get_all_analysis_endpoint(
                 elif 'resumen_semantico' in payload_dict:
                     sem_summary = str(payload_dict['resumen_semantico']) # Convertir a str para len()
                     summary = sem_summary[:200] + "..." if len(sem_summary) > 200 else sem_summary
+                elif 'summary' in payload_dict and isinstance(payload_dict['summary'], str):
+                    summary = payload_dict['summary']
                 elif 'sections' in payload_dict and isinstance(payload_dict['sections'], list) and len(cast(list, payload_dict['sections'])) > 0:
                     # Para análisis personalizados, extraer resumen de la primera sección
                     first_section = payload_dict['sections'][0]
@@ -2735,6 +2737,9 @@ async def get_all_analysis_endpoint(
                             report_content = str(report_obj)
                             summary = report_content[:200] + "..." if len(report_content) > 200 else report_content
                     elif 'summary' in payload_dict:
+                        summary = payload_dict['summary']
+                    elif 'final_report' in payload_dict:
+                        report_content = str(payload_dict['final_report'])
                         summary = payload_dict['summary']
                     elif 'final_report' in payload_dict:
                         report_content = str(payload_dict['final_report'])

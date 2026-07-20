@@ -145,9 +145,12 @@ class GraphReasoningNode:
             custom_stopwords = {
                 "quien", "quién", "como", "cómo", "donde", "dónde", "cuando", "cuándo", "porque", "por", "para", "sobre", "entre", "desde",
                 "el", "la", "los", "las", "un", "una", "unos", "unas", "y", "o", "e", "u", "pero", "sino", "que", "qué", "de", "del", "en", "con",
-                "para", "por", "si", "no", "es", "son", "fue", "ser", "estar", "tiene", "tienen", "hace", "hacen", "dime", "sobre", "este", "esta",
+                "para", "por", "si", "no", "es", "son", "fue", "ser", "estar", "tiene", "tienen", "hace", "hacen", "dime", "dame", "sobre", "este", "esta",
                 "mis", "tus", "sus", "mi", "tu", "su", "me", "te", "se", "lo", "la", "le", "les", "nos", "os", "relacion", "relación", "conexion", 
-                "conexión", "buscar", "busca", "encuentra", "analiza", "analisis", "análisis", "concepto", "conceptos", "grafo"
+                "conexión", "buscar", "busca", "encuentra", "analiza", "analisis", "análisis", "concepto", "conceptos", "grafo",
+                "revisa", "revisar", "haremos", "hacer", "participante", "heartbeat", "hola", "gracias", "ejecuta", "ejecutar", "muestra",
+                "mostrar", "sistema", "bot", "tarea", "favor", "porfa", "porfavor", "aqui", "aquí", "alla", "allá", "esto", "estos", "estas",
+                "algo", "nada", "todo", "todos", "todas", "buenos", "dias", "días", "tardes", "noches"
             }
             for w in words:
                 if len(w) > 3 and w not in custom_stopwords:
@@ -157,20 +160,21 @@ class GraphReasoningNode:
         except Exception as e:
             logger.warning(f"Error en extracción heurística de conceptos: {e}")
 
-        # Si la heurística encuentra suficientes conceptos, los usamos para ahorrar latencia (0ms)
+        # Si la heurística encuentra suficientes conceptos válidos, los usamos
         if len(heuristic_concepts) >= 2:
             concepts = heuristic_concepts
             logger.info(f"🧠 Conceptos clave identificados heurísticamente (0ms): {concepts}")
         else:
             try:
-                # Usar el LLM solo si la heurística no detectó suficientes conceptos únicos
-                concepts_prompt = f"Extrae los 3 conceptos o entidades más importantes de esta consulta para buscar en un grafo: '{user_query}'. Responde solo con los nombres separados por comas, sin explicaciones."
+                # Usar el LLM si la heurística no detectó suficientes conceptos sustantivos
+                concepts_prompt = f"Extrae los 3 conceptos, sustantivos o entidades más importantes de esta consulta para buscar en un grafo de conocimiento: '{user_query}'. Responde solo con los nombres separados por comas, sin verbos ni explicaciones."
                 concepts_resp = await llm_to_use.ainvoke(concepts_prompt)
-                concepts = [c.strip() for c in str(concepts_resp.content).split(",") if c.strip() and len(c) > 2]
+                extracted_raw = [c.strip() for c in str(concepts_resp.content).split(",") if c.strip() and len(c) > 2]
+                concepts = [c for c in extracted_raw if c.lower() not in custom_stopwords][:3]
                 logger.info(f"🧠 Conceptos clave identificados vía LLM: {concepts}")
             except Exception as e:
                 logger.error(f"Error extrayendo conceptos vía LLM: {e}")
-                concepts = heuristic_concepts if heuristic_concepts else [w for w in user_query.split() if len(w) > 4][:3]
+                concepts = heuristic_concepts if heuristic_concepts else [w for w in user_query.split() if len(w) > 4 and w.lower() not in custom_stopwords][:3]
         
         all_neural_data = []
         
@@ -256,7 +260,6 @@ class GraphReasoningNode:
         all_neural_data.sort(key=score_path, reverse=True)
             
         # Pedir al LLM que "piense" sobre estos datos latentes
-        # Para el prompt de síntesis, enriquecemos la semántica (tipo y descripción)
         simplified_data = []
         parser = GraphOutputParser()
         # Tomamos los top 15 después del ranking
@@ -279,6 +282,17 @@ class GraphReasoningNode:
                 nodes = []
                 rels = []
             simplified_data.append({"camino": " -> ".join(filter(None, nodes)), "relaciones": rels})
+
+        # Generar el diagrama Mermaid a partir de la data
+        mermaid_diagram = self._generate_mermaid_diagram(all_neural_data)
+
+        # Determinar si vale la pena guardar la tarea AnalysisTask en la BD (Filtro de Relevancia)
+        should_persist_task = (
+            len(user_query.strip()) >= 15 and
+            len(all_neural_data) >= 1 and
+            bool(concepts) and
+            not any(cmd in user_query.lower() for cmd in ["heartbeat", "ping", "status"])
+        )
 
         thinking_prompt = f"""
 Analiza estos fragmentos de relaciones encontrados en el grafo de conocimiento para la consulta: "{user_query}"
@@ -303,13 +317,14 @@ Enfócate en cómo estos conceptos se entrelazan y qué revelan sobre el context
                 insight = str(response.content).strip()
                 logger.info(f"🧠 Síntesis completada en segundo plano.")
                 
-                if account_id and insight:
+                if account_id and insight and should_persist_task:
                     async with DBSession(SessionLocal) as db:
                         result_payload = {
                             "summary": insight,
                             "neural_data_sample": simplified_data,
                             "user_query": user_query,
                             "concepts": concepts,
+                            "mermaid_diagram": mermaid_diagram,
                             "analysis_metadata": {
                                 "analysis_type": "neural_insight",
                                 "created_at": datetime.now().isoformat(),
@@ -317,16 +332,24 @@ Enfócate en cómo estos conceptos se entrelazan y qué revelan sobre el context
                             }
                         }
                         
+                        # Título contextualizado y significativo
+                        if len(concepts) >= 2:
+                            title_name = f"Relaciones: {concepts[0].capitalize()} y {concepts[1].capitalize()}"
+                        elif concepts:
+                            title_name = f"Análisis Relacional: {concepts[0].capitalize()}"
+                        else:
+                            title_name = f"Neural Insight: {user_query[:30]}..."
+
                         new_task = AnalysisTask(
                             account_id=uuid.UUID(account_id),
-                            file_name=f"Neural Insight: {concepts[0] if concepts else 'General'}",
+                            file_name=title_name,
                             status="completed",
                             analysis_type="neural_insight",
                             result_payload=result_payload
                         )
                         db.add(new_task)
                         await db.commit()
-                        logger.info(f"💾 Neural Insight guardado como AnalysisTask (ID: {new_task.id})")
+                        logger.info(f"💾 Neural Insight guardado como AnalysisTask '{title_name}' (ID: {new_task.id})")
             except Exception as e:
                 logger.error(f"❌ Error al guardar Neural Insight en BD (segundo plano): {e}", exc_info=True)
 
