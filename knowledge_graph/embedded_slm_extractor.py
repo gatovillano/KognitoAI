@@ -126,16 +126,14 @@ Responde ÚNICAMENTE con un objeto JSON válido con la siguiente estructura exac
         if self.fallback_mode or not self.llm:
             try:
                 from core.llm_manager import get_fast_llm
-                from langchain_core.prompts import ChatPromptTemplate
+                from langchain_core.messages import SystemMessage, HumanMessage
                 
                 logger.info("ℹ️ Ejecutando extracción vía LLM Fallback (LangChain / LLM Rápido)...")
-                prompt_template = ChatPromptTemplate.from_messages([
-                    ("system", system_prompt),
-                    ("human", "{content}")
-                ])
                 fast_llm = get_fast_llm()
-                chain = prompt_template | fast_llm
-                resp = await chain.ainvoke({"content": user_content})
+                resp = await fast_llm.ainvoke([
+                    SystemMessage(content=system_prompt),
+                    HumanMessage(content=user_content)
+                ])
                 raw_text = str(resp.content).strip()
             except Exception as e:
                 logger.error(f"❌ Error en fallback de extracción: {e}")
