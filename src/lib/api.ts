@@ -12,8 +12,6 @@ const apiClient = axios.create({
   timeout: 900000, // 15 minutos en milisegundos
 });
 
-console.log('DEBUG (apiClient): Final baseURL used by axios:', apiClient.defaults.baseURL); // Nuevo log
-
 // Interceptor para manejar tokens
 apiClient.interceptors.request.use(
   (config) => {
@@ -30,9 +28,6 @@ apiClient.interceptors.request.use(
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
       }
-      // Log the full URL of the request to verify the base URL
-      console.log('DEBUG (Frontend): Request URL:', `${config.baseURL || ''}${config.url || ''}`);
-      console.log('DEBUG (Frontend): Current baseURL:', config.baseURL);
     }
     return config;
   },
