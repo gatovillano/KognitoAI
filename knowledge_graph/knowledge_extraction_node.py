@@ -111,13 +111,9 @@ class KnowledgeExtractionNode:
 
     async def ainvoke(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Analiza el último turno de la conversación y guarda el conocimiento en el grafo.
+        Analiza el último turno de la conversación y guarda el conocimiento en el grafo usando el SLM Embebido.
         """
-        logger.info("--- (Grafo) Nodo: Extracción de Conocimiento (GLiNER + LLM) ---")
-        
-        # Asegurar inicialización
-        if not self.initialized:
-            await self._initialize_gliner()
+        logger.info("--- (Grafo) Nodo: Extracción de Conocimiento (SLM Embebido Qwen2.5-3B) ---")
 
         messages = state.get("messages", [])
         account_id = state.get("account_id")
@@ -135,17 +131,9 @@ class KnowledgeExtractionNode:
                     workspace_obj = res.scalar_one_or_none()
                     if workspace_obj:
                         workspace_name = workspace_obj.name
-                        logger.info(f"💼 Workspace resolved to name: '{workspace_name}'")
+                        logger.info(f"💼 Workspace resuelto a nombre: '{workspace_name}'")
             except Exception as e:
                 logger.error(f"Error resolviendo workspace_name en KnowledgeExtractionNode: {e}")
-
-        # Intentar obtener un LLM específico para el usuario si está disponible
-        llm_to_use = self.llm
-        if account_id:
-            from core.llm_manager import get_llm_for_user
-            user_llm = await get_llm_for_user(account_id, purpose="fast")
-            if user_llm:
-                llm_to_use = user_llm
 
         if len(messages) < 2:
             return state
@@ -164,65 +152,23 @@ class KnowledgeExtractionNode:
         if not user_message or not ai_message:
             return state
 
-        # 1. Extracción Zero-Shot con GLiNER (Entidades base)
-        gliner_entities = []
-        if self.gliner_model:
-            try:
-                combined_text = f"{user_message} {ai_message}"
-                # GLiNER tiene un límite de tokens, truncamos para seguridad
-                truncated_text = combined_text[:1000]
-                entities = await asyncio.to_thread(
-                    self.gliner_model.predict_entities,
-                    truncated_text,
-                    self.gliner_labels,
-                    threshold=settings.gliner_threshold
-                )
-                gliner_entities = [
-                    {"name": ent["text"], "type": ent["label"], "score": ent["score"]}
-                    for ent in entities
-                ]
-                logger.info(f"GLiNER detectó {len(gliner_entities)} entidades.")
-            except Exception as e:
-                logger.warning(f"Error en predicción GLiNER: {e}")
+        # Extracción vía SLM Embebido (Qwen2.5-3B en llama-cpp-python o fallback)
+        from knowledge_graph.embedded_slm_extractor import get_embedded_slm_extractor
+        extractor = get_embedded_slm_extractor()
+        extracted_data = await extractor.extract(
+            user_message=user_message,
+            ai_message=ai_message,
+            workspace_name=workspace_name or "General / Desconocido"
+        )
 
-        # 2. Refinamiento y Relaciones con LLM
-        extracted_data = await self._refine_with_llm(user_message, ai_message, gliner_entities, llm=llm_to_use, workspace_name=workspace_name)
         if not extracted_data:
+            logger.info("🧠 No se extrajeron entidades o conocimientos nuevos en este turno.")
             return state
 
-        # 3. Persistir en Neo4j
+        # Persistir en Neo4j
         await self._persist_knowledge(extracted_data, state, workspace_name=workspace_name)
 
         return state
-
-    async def _refine_with_llm(self, user_msg: str, ai_msg: str, gliner_ents: List[Dict], llm: Optional[Any] = None, workspace_name: Optional[str] = None) -> Optional[Dict]:
-        """Usa el LLM para conectar las entidades y extraer relaciones."""
-        llm_to_use = llm or self.llm
-        if not llm_to_use:
-            return None
-
-        prompt = ChatPromptTemplate.from_template(KNOWLEDGE_EXTRACTION_PROMPT)
-        chain = prompt | llm_to_use
-        
-        try:
-            gliner_json = json.dumps(gliner_ents, ensure_ascii=False, indent=2)
-            response = await chain.ainvoke({
-                "gliner_entities": gliner_json,
-                "user_message": user_msg[:1000],
-                "ai_message": ai_msg[:2000],
-                "workspace_name": workspace_name or "General / Desconocido"
-            })
-            
-            content = str(response.content).strip()
-            if content.startswith("```json"):
-                content = content[7:]
-            if content.endswith("```"):
-                content = content[:-3]
-            
-            return json.loads(content.strip())
-        except Exception as e:
-            logger.error(f"Error refinando con LLM: {e}")
-            return None
 
     def _generate_id(self, name: str, type_: str) -> str:
         """Genera un ID consistente con Neo4jAdapter."""
