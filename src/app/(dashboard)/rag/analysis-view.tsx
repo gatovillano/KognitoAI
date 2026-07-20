@@ -48,6 +48,8 @@ const getAnalysisIcon = (type: string) => {
         case 'insight':
         case 'proactive_insight_manual':
             return <Lightbulb className="h-5 w-5 text-yellow-500" />;
+        case 'neural_insight':
+            return <Zap className="h-5 w-5 text-purple-500" />;
         case 'code':
             return <Code className="h-5 w-5 text-orange-500" />;
         case 'semantic':
@@ -74,6 +76,7 @@ const getAnalysisTypeLabel = (type: string, mode?: string) => {
         case 'collection': return 'Colección';
         case 'insight':
         case 'proactive_insight_manual': return 'Insight';
+        case 'neural_insight': return 'Neural Insight';
         case 'code': return 'Código';
         case 'semantic': return 'Semántico';
         case 'semantic_summary': return 'Resumen Semántico';
@@ -81,7 +84,7 @@ const getAnalysisTypeLabel = (type: string, mode?: string) => {
         case 'knowledge_graph': return 'Grafo de Conocimiento';
         case 'note_analysis': return 'Nota';
         case 'note_collection_analysis': return 'Colección de Notas';
-        case 'gap_development': return mode === 'draft' ? 'Borrador' : 'Investigación';
+        case 'gap_development': return mode === 'draft' ? 'Borrador' : 'Desarrollo de Brecha';
         case 'deep_research': return 'Investigación Profunda';
         case 'comprehensive_web_analysis': return 'Análisis Web Integral';
         default: return 'Análisis';
@@ -94,6 +97,7 @@ const getAnalysisTypeBadgeColor = (type: string, mode?: string) => {
         case 'collection': return 'bg-green-100 text-green-800 border-green-200';
         case 'insight':
         case 'proactive_insight_manual': return 'bg-yellow-100 text-yellow-800 border-yellow-200';
+        case 'neural_insight': return 'bg-purple-100 text-purple-800 border-purple-200';
         case 'code': return 'bg-orange-100 text-orange-800 border-orange-200';
         case 'semantic':
         case 'semantic_summary': return 'bg-indigo-100 text-indigo-800 border-indigo-200';
@@ -156,8 +160,7 @@ export function AnalysisView() {
                 (item) =>
                     item.type !== 'insight' &&
                     item.type !== 'proactive_insight_manual' &&
-                    item.type !== 'proactive_insight' &&
-                    item.type !== 'neural_insight'
+                    item.type !== 'proactive_insight'
             );
             if (reset) {
                 setAnalyses(filteredAnalysis);
@@ -329,6 +332,8 @@ export function AnalysisView() {
 
     const analysisTypes = [
         { value: null, label: 'Todos los tipos' },
+        { value: 'neural_insight', label: 'Neural Insights' },
+        { value: 'deep_research', label: 'Investigación Profunda' },
         { value: 'document', label: 'Documentos' },
         { value: 'collection', label: 'Colecciones' },
         { value: 'note_analysis', label: 'Notas' },
@@ -337,9 +342,7 @@ export function AnalysisView() {
         { value: 'semantic', label: 'Semántico' },
         { value: 'semantic_summary', label: 'Resumen Semántico' },
         { value: 'gap_development', label: 'Borradores y Desarrollo' },
-        { value: 'deep_research', label: 'Investigación Profunda' },
         { value: 'comprehensive_web_analysis', label: 'Análisis Web Integral' }
-
     ];
 
     const chartData = useMemo(() => {
