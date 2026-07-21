@@ -163,8 +163,9 @@ cmd_upgrade() {
         python3 scripts/upgrade_helper.py --pre-upgrade
     fi
 
-    # 2. Resetear modificaciones temporales a archivos rastreados y actualizar
+    # 2. Resetear modificaciones temporales y archivos sin seguimiento para un pull limpio
     git reset --hard HEAD >/dev/null 2>&1 || true
+    git clean -fd >/dev/null 2>&1 || true
     git pull origin "${branch}"
 
     # Capturar commit nuevo
