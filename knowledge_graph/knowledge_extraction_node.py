@@ -273,6 +273,20 @@ class KnowledgeExtractionNode:
                     }
                 })
 
+        # 0. Procesar Acciones de Active Forgetting (DELETE / UPDATE)
+        actions = parsed_output.get("actions", [])
+        for act in actions:
+            action_type = str(act.get("action", "")).upper()
+            target_name = act.get("target_name") or act.get("target_id")
+            if not target_name:
+                continue
+            if action_type == "DELETE":
+                await self.adapter.delete_entity_by_name(target_name, account_id=account_id)
+            elif action_type == "UPDATE":
+                new_props = act.get("new_props", {})
+                if new_props:
+                    await self.adapter.update_entity_by_name(target_name, new_props, account_id=account_id)
+
         try:
             await self.adapter.add_cognee_results_to_graph(
                 entities=formatted_entities,
@@ -284,3 +298,4 @@ class KnowledgeExtractionNode:
             logger.info(f"✅ Conocimiento persistido: {len(formatted_entities)} entidades/insights, {len(formatted_relationships)} relaciones.")
         except Exception as e:
             logger.error(f"Error persistiendo conocimiento: {e}")
+

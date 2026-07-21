@@ -25,6 +25,29 @@ class Neo4jAdapter:
         self.graph_db = graph_db
         logger.info("✅ Neo4jAdapter inicializado")
     
+    def _compute_trust(self, confidence: Optional[float] = 0.8, source: Optional[str] = None, method: Optional[str] = None) -> float:
+        """
+        Calcula el score de confianza (trust_score) para una entidad o relación.
+        - Base: confidence (default 0.8)
+        - Descuento: si method es 'slm_extractor' y confidence < 0.6, se aplica penalización (x0.7)
+        - Bonus: si source indica documento verificado o 'user', se otorga un bonus (+0.1)
+        - Rango final: [0.0, 1.0]
+        """
+        try:
+            score = float(confidence) if confidence is not None else 0.8
+        except (ValueError, TypeError):
+            score = 0.8
+
+        if method == "slm_extractor" and score < 0.6:
+            score *= 0.7
+
+        source_str = str(source).lower() if source else ""
+        if source_str in ["source_document", "verified_doc", "user"] or "doc" in source_str or "user" in source_str:
+            score += 0.1
+
+        return max(0.0, min(1.0, round(score, 2)))
+
+    
     async def add_cognee_results_to_graph(self, entities: List[Dict], relationships: List[Dict], workspace_id: Optional[str] = None, account_id: Optional[str] = None, dataset_name: Optional[str] = None, workspace: Optional[str] = None) -> Dict[str, Any]:
         """
         Agrega entidades y relaciones del pipeline híbrido a Neo4j.
@@ -276,6 +299,13 @@ class Neo4jAdapter:
                     concept = props.get("concept") or entity.get("concept") # Extraer concept
                     category = props.get("category") or entity.get("category") # Extraer category
 
+                    provenance_source = props.get("provenance_source") or props.get("source_document") or entity.get("provenance_source") or entity.get("source_document") or source
+                    provenance_method = props.get("provenance_method") or props.get("extraction_method") or entity.get("provenance_method") or entity.get("extraction_method") or extraction_method
+                    extraction_model = props.get("extraction_model") or entity.get("extraction_model", "Qwen2.5-3B-Instruct")
+                    trust_score = props.get("trust_score") or entity.get("trust_score")
+                    if trust_score is None:
+                        trust_score = self._compute_trust(confidence, provenance_source, provenance_method)
+
                     # Asegurar IDs como strings
                     acc_id_str = str(account_id) if account_id else None
                     ws_id_str = str(workspace_id) if workspace_id else (str(entity.get("workspace_id")) if entity.get("workspace_id") else None)
@@ -294,7 +324,11 @@ class Neo4jAdapter:
                         "category": category, # Incluir category
                         "source_document_id": str(entity.get("source_document_id")) if entity.get("source_document_id") else None,
                         "dataset_name": final_dataset_name,
-                        "workspace": ws_name_str
+                        "workspace": ws_name_str,
+                        "provenance_source": provenance_source,
+                        "provenance_method": provenance_method,
+                        "trust_score": float(trust_score),
+                        "extraction_model": extraction_model
                     }
                     entity_data["workspace_id"] = ws_id_str
                     entity_data["account_id"] = acc_id_str
@@ -305,6 +339,7 @@ class Neo4jAdapter:
                         logger.info(f"   📛 Name: {entity_data['name']}")
                         logger.info(f"   🏷️ Type: {entity_data['type']}")
                         logger.info(f"   📄 Description: {entity_data['description']}")
+                        logger.info(f"   🛡️ Trust Score: {entity_data['trust_score']}")
 
                     batch_data.append(entity_data)
 
@@ -340,9 +375,14 @@ class Neo4jAdapter:
                         n.account_id = entity.account_id,
                         n.dataset_name = entity.dataset_name,
                         n.concept = entity.concept,
-                        n.category = entity.category
+                        n.category = entity.category,
+                        n.provenance_source = entity.provenance_source,
+                        n.provenance_method = entity.provenance_method,
+                        n.trust_score = entity.trust_score,
+                        n.extraction_model = entity.extraction_model
                     RETURN count(n) as created
                     """
+
 
                     result = await self.graph_db.execute_query(type_query, {"entities": type_entities})
                     created_count = result[0]["created"] if result else 0
@@ -444,6 +484,17 @@ class Neo4jAdapter:
                         created_at = rel_props.get("created_at") or relationship.get("created_at", datetime.now().isoformat())
                         extraction_method = rel_props.get("extraction_method") or relationship.get("extraction_method", "hybrid")
 
+                        provenance_source = rel_props.get("provenance_source") or source
+                        provenance_method = rel_props.get("provenance_method") or extraction_method
+                        extraction_model = rel_props.get("extraction_model") or relationship.get("extraction_model", "Qwen2.5-3B-Instruct")
+                        trust_score = rel_props.get("trust_score") or relationship.get("trust_score")
+                        if trust_score is None:
+                            trust_score = self._compute_trust(confidence, provenance_source, provenance_method)
+
+                        is_current = rel_props.get("is_current") if "is_current" in rel_props else relationship.get("is_current", True)
+                        valid_from = rel_props.get("valid_from") or relationship.get("valid_from") or created_at
+                        valid_to = rel_props.get("valid_to") or relationship.get("valid_to")
+
                         rel_data = {
                             "source_id": source_id,
                             "target_id": target_id,
@@ -453,7 +504,14 @@ class Neo4jAdapter:
                             "source": source,
                             "created_at": created_at,
                             "extraction_method": extraction_method,
-                            "workspace": final_workspace_name
+                            "workspace": final_workspace_name,
+                            "provenance_source": provenance_source,
+                            "provenance_method": provenance_method,
+                            "trust_score": float(trust_score),
+                            "extraction_model": extraction_model,
+                            "is_current": is_current,
+                            "valid_from": valid_from,
+                            "valid_to": valid_to
                         }
                         rel_data["workspace_id"] = final_workspace_id
                         rel_data["account_id"] = final_account_id
@@ -488,6 +546,7 @@ class Neo4jAdapter:
                         if await self._relationship_exists_in_db(source_id, target_id, rel_type, account_id):
                             logger.debug(f"⚠️ Relación inversa ya existente o duplicada omitida: {source_id}-[:{rel_type}]->{target_id}")
                             continue
+
                         filtered_relationships.append(rel)
 
                     if not filtered_relationships:
@@ -510,11 +569,20 @@ class Neo4jAdapter:
                         r.workspace_id = rel.workspace_id,
                         r.workspace = rel.workspace,
                         r.account_id = rel.account_id,
-                        r.dataset_name = rel.dataset_name
+                        r.dataset_name = rel.dataset_name,
+                        r.provenance_source = rel.provenance_source,
+                        r.provenance_method = rel.provenance_method,
+                        r.trust_score = rel.trust_score,
+                        r.extraction_model = rel.extraction_model,
+                        r.is_current = rel.is_current,
+                        r.valid_from = rel.valid_from,
+                        r.valid_to = rel.valid_to
                     RETURN count(r) as created
                     """
 
+
                     result = await self.graph_db.execute_query(type_query, {"relationships": filtered_relationships})
+
                     created_count = result[0]["created"] if result else 0
                     relationships_added += created_count
                     logger.info(f"✅ Creadas {created_count} relaciones de tipo {rel_type}")
@@ -961,6 +1029,96 @@ class Neo4jAdapter:
             """
             await self.graph_db.execute_query(query, {"mentions": mentions})
             logger.info(f"🔗 Creadas {len(mentions)} relaciones MENTIONS entre documentos y entidades")
-            
         except Exception as e:
             logger.warning(f"⚠️ Error creando relaciones MENTIONS: {e}")
+
+    async def invalidate_relationship(self, source_id: str, target_id: str, rel_type: str, account_id: Optional[str] = None) -> int:
+        """
+        Marca una relación entre dos nodos como obsoleta (is_current = False, valid_to = datetime()).
+        """
+        try:
+            acc_id_str = str(account_id) if account_id else None
+            safe_rel_type = f"`{rel_type}`"
+            query = f"""
+            MATCH (s {{id: $source_id}})-[r:{safe_rel_type}]->(t {{id: $target_id}})
+            WHERE ($account_id IS NULL OR s.account_id = $account_id OR r.account_id = $account_id)
+              AND (r.is_current IS NULL OR r.is_current = true)
+            SET r.is_current = false,
+                r.valid_to = datetime().isoformat()
+            RETURN count(r) as invalidated
+            """
+            result = await self.graph_db.execute_query(query, {"source_id": str(source_id), "target_id": str(target_id), "account_id": acc_id_str})
+            count = result[0]["invalidated"] if result else 0
+            logger.info(f"⏳ Invalidadas {count} relaciones del tipo {rel_type} entre {source_id} y {target_id}")
+            return count
+        except Exception as e:
+            logger.error(f"❌ Error al invalidar relación temporal: {e}")
+            return 0
+
+    async def update_temporal_fact(self, source_id: str, target_id: str, rel_type: str, new_rel_data: Dict, account_id: Optional[str] = None, workspace_id: Optional[str] = None) -> bool:
+        """
+        Actualiza un hecho temporal en Neo4j invalidando la versión previa y creando la nueva versión vigente.
+        """
+        try:
+            await self.invalidate_relationship(source_id, target_id, rel_type, account_id)
+            new_rel = dict(new_rel_data)
+            new_rel["source_id"] = str(source_id)
+            new_rel["target_id"] = str(target_id)
+            new_rel["type"] = rel_type
+            new_rel["is_current"] = True
+            new_rel["valid_from"] = datetime.now().isoformat()
+            new_rel["valid_to"] = None
+            await self._add_relationships_to_neo4j([new_rel], workspace_id=workspace_id, account_id=account_id)
+            logger.info(f"🔄 Hecho temporal actualizado: {source_id} -[{rel_type}]-> {target_id}")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Error al actualizar hecho temporal: {e}")
+            return False
+
+    async def delete_entity_by_name(self, name: str, account_id: Optional[str] = None) -> int:
+        """
+        Elimina activamente un nodo (y sus relaciones asociadas DETACH DELETE) en Neo4j por nombre o ID.
+        """
+        try:
+            acc_id_str = str(account_id) if account_id else None
+            query = """
+            MATCH (n)
+            WHERE (toLower(n.name) = toLower($name) OR n.id = $name)
+              AND ($account_id IS NULL OR n.account_id = $account_id)
+            WITH collect(n) AS nodes
+            FOREACH (n IN nodes | DETACH DELETE n)
+            RETURN size(nodes) AS deleted
+            """
+            result = await self.graph_db.execute_query(query, {"name": str(name), "account_id": acc_id_str})
+            count = result[0]["deleted"] if result else 0
+            if count > 0:
+                logger.info(f"🗑️ Active Forgetting: {count} nodos con nombre/ID '{name}' eliminados de Neo4j.")
+            return count
+        except Exception as e:
+            logger.error(f"❌ Error al eliminar entidad activamente '{name}': {e}")
+            return 0
+
+    async def update_entity_by_name(self, name: str, new_props: Dict[str, Any], account_id: Optional[str] = None) -> bool:
+        """
+        Actualiza las propiedades de un nodo existente en Neo4j por nombre o ID.
+        """
+        try:
+            acc_id_str = str(account_id) if account_id else None
+            query = """
+            MATCH (n)
+            WHERE (toLower(n.name) = toLower($name) OR n.id = $name)
+              AND ($account_id IS NULL OR n.account_id = $account_id)
+            SET n += $new_props,
+                n.updated_at = datetime().isoformat()
+            RETURN count(n) AS updated
+            """
+            result = await self.graph_db.execute_query(query, {"name": str(name), "new_props": new_props, "account_id": acc_id_str})
+            count = result[0]["updated"] if result else 0
+            if count > 0:
+                logger.info(f"✏️ Active Forgetting: {count} nodos actualizados para '{name}'.")
+            return count > 0
+        except Exception as e:
+            logger.error(f"❌ Error al actualizar entidad '{name}': {e}")
+            return False
+
+

@@ -722,17 +722,34 @@ async def process_memory_batches(account_id: str, task_id: Optional[str] = None,
         )
         logger.info(f"🔗 {cross_links} relaciones MEMORY_MENTIONS creadas hacia entidades del grafo.")
 
-        # ── Paso 5: Marcar como procesadas ──────────────────────────────────
+        # ── Paso 5: Marcar como procesadas y poblar memoria episódica ─────────
         tracker.update_phase(
             ProcessingPhase.SAVING_TO_NEO4J,
-            "Marcando memorias como procesadas...",
+            "Marcando memorias como procesadas y guardando memoria episódica...",
             90,
             {"relationships_count": related + cross_links},
         )
         memory_ids = [mem["id"] for mem in memories_raw]
         await mark_memories_as_processed(memory_ids)
 
+        try:
+            from core.enhanced_memory_manager import EnhancedMemoryManager
+            emm = EnhancedMemoryManager()
+            for mem_node in memory_nodes:
+                text_content = mem_node.get("content") or mem_node.get("name", "")
+                if text_content and account_id:
+                    await emm.add_episodic_memory(
+                        event_text=text_content,
+                        user_id=str(account_id),
+                        workspace_id=str(mem_node.get("workspace_id")) if mem_node.get("workspace_id") else None,
+                        episode_type="chat",
+                        extra_metadata={"memory_id": mem_node.get("id")}
+                    )
+        except Exception as ep_err:
+            logger.warning(f"⚠️ No se pudo poblar memoria episódica en Postgres: {ep_err}")
+
         # ── Limpieza de espacio en Neo4j ─────────────────────────────────────
+
         # 1. Quitar embeddings de MEMORY nodes (ya guardados en pgvector/Postgres)
         stripped = await adapter.strip_memory_embeddings(account_id)
         # 2. Borrar nodos DOCUMENT huérfanos del pipeline roto (id STARTS WITH 'memory_')
