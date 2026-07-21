@@ -173,8 +173,13 @@ cmd_upgrade() {
     NEW_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "")
 
     # 3. Reinstalar automáticamente las extensiones activas
+    local EXT_PROCESSED=false
     if [ -f "scripts/upgrade_helper.py" ]; then
         echo -e "${YELLOW}🧩 Reinstalando extensiones modulares...${NC}"
+        local state_file="${HOME}/.kognito/config/active_extensions.json"
+        if [ -f "${state_file}" ]; then
+            EXT_PROCESSED=true
+        fi
         python3 scripts/upgrade_helper.py --post-upgrade
     fi
 
@@ -221,7 +226,7 @@ cmd_upgrade() {
         FE_CHANGED=true
     fi
 
-    if [ "${FORCE}" = true ] || [ "${FE_CHANGED}" = true ] || [ ! -d ".next" ]; then
+    if [ "${FORCE}" = true ] || [ "${FE_CHANGED}" = true ] || [ "${EXT_PROCESSED}" = true ] || [ ! -d ".next" ] || [ ! -f ".next/BUILD_ID" ]; then
         echo -e "${YELLOW}🏗️  Reconstruyendo Frontend (npm run build)...${NC}"
         npm run build
         echo -e "${GREEN}✅ Frontend reconstruido exitosamente.${NC}"
