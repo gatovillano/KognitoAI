@@ -287,11 +287,46 @@ class EnhancedMemoryManager:
         insights = await self._generate_insights(traditional_context, graph_context, user_query)
         enhanced_context["enhanced_insights"] = insights
         
+        # Generar resolución de conflictos entre grafo y contexto tradicional
+        conflicts = await self._detect_and_resolve_conflicts(traditional_context, graph_context, user_query)
+        enhanced_context["conflicts_resolved"] = conflicts
+
         # Generar caminos de razonamiento
         reasoning_paths = await self._generate_reasoning_paths(graph_context, user_query)
         enhanced_context["reasoning_paths"] = reasoning_paths
         
         return enhanced_context
+
+    async def _detect_and_resolve_conflicts(
+        self,
+        traditional_context: Dict[str, Any],
+        graph_context: Dict[str, Any],
+        user_query: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Detecta y resuelve conflictos de hechos entre el Grafo de Conocimiento (Neo4j)
+        y los recuerdos de la memoria tradicional/vectorial, priorizando según trust_score y validez temporal.
+        """
+        resolved_conflicts = []
+        graph_entities = {str(e.get("name", "")).lower(): e for e in graph_context.get("entities", []) if e.get("name")}
+        
+        memories = traditional_context.get("memories", []) if isinstance(traditional_context, dict) else []
+        for mem in memories:
+            mem_text = str(mem.get("content") or mem.get("event_text") or "").lower()
+            for ent_name, ent_data in graph_entities.items():
+                if ent_name in mem_text:
+                    trust = ent_data.get("trust_score", ent_data.get("confidence", 0.5))
+                    # Si el nodo del grafo tiene alto trust_score (>= 0.7), prevalece la versión del grafo
+                    if trust >= 0.7:
+                        resolved_conflicts.append({
+                            "entity": ent_data.get("name"),
+                            "prevailed_source": "knowledge_graph",
+                            "trust_score": trust,
+                            "description": f"Hecho de '{ent_data.get('name')}' en Grafo prevalece (trust: {trust}) sobre memoria tradicional.",
+                            "status": "resolved"
+                        })
+        return resolved_conflicts
+
     
     async def _generate_insights(
         self, 
@@ -433,3 +468,118 @@ class EnhancedMemoryManager:
         except Exception as e:
             logger.error(f"❌ Error añadiendo memoria a través de EnhancedMemoryManager: {e}")
             return False
+
+    async def add_episodic_memory(
+        self,
+        event_text: str,
+        user_id: str,
+        workspace_id: Optional[str] = None,
+        episode_type: str = "chat",
+        extra_metadata: Optional[Dict] = None
+    ) -> bool:
+        """
+        Almacena una memoria episódica en PostgreSQL con su vector de embedding.
+        """
+        try:
+            from core.database import SessionLocal, EpisodicMemory
+            from core.embedding_manager import KognitoInternalEmbeddingService
+            import uuid
+
+            embedding_service = KognitoInternalEmbeddingService()
+            embedding = await embedding_service.aembed_query(event_text)
+
+            acc_id = uuid.UUID(user_id) if isinstance(user_id, str) and len(user_id) == 36 else user_id
+            ws_id = uuid.UUID(workspace_id) if isinstance(workspace_id, str) and len(workspace_id) == 36 else workspace_id
+
+            async with SessionLocal() as session:
+                episodic_record = EpisodicMemory(
+                    account_id=acc_id,
+                    workspace_id=ws_id,
+                    event_text=event_text,
+                    embedding=embedding,
+                    episode_type=episode_type,
+                    extra_metadata=extra_metadata
+                )
+                session.add(episodic_record)
+                await session.commit()
+
+            logger.info(f"✅ Memoria episódica de tipo '{episode_type}' guardada para usuario {user_id}")
+            return True
+        except Exception as e:
+            logger.error(f"❌ Error guardando memoria episódica: {e}")
+            return False
+
+    async def get_episodic_context(
+        self,
+        query: str,
+        user_id: str,
+        workspace_id: Optional[str] = None,
+        limit: int = 5,
+        recency_weight: float = 0.3
+    ) -> List[Dict[str, Any]]:
+        """
+        Obtiene recuerdos episódicos aplicando una mezcla ponderada de similitud de embedding y recencia.
+        """
+        try:
+            from core.database import SessionLocal, EpisodicMemory
+            from core.embedding_manager import KognitoInternalEmbeddingService
+            from sqlalchemy import select, and_
+            import uuid
+
+            embedding_service = KognitoInternalEmbeddingService()
+            query_embedding = await embedding_service.aembed_query(query)
+
+            acc_id = uuid.UUID(user_id) if isinstance(user_id, str) and len(user_id) == 36 else user_id
+            ws_id = uuid.UUID(workspace_id) if isinstance(workspace_id, str) and len(workspace_id) == 36 else workspace_id
+
+            async with SessionLocal() as session:
+                conditions = [EpisodicMemory.account_id == acc_id]
+                if ws_id:
+                    conditions.append(EpisodicMemory.workspace_id == ws_id)
+
+                stmt = (
+                    select(EpisodicMemory)
+                    .where(and_(*conditions))
+                    .order_by(EpisodicMemory.occurred_at.desc())
+                    .limit(50)
+                )
+                res = await session.execute(stmt)
+                records = res.scalars().all()
+
+            if not records:
+                return []
+
+            # Calcular score mixto = (1 - recency_weight) * similarity + recency_weight * recency_factor
+            now = datetime.now()
+            scored_records = []
+            for rec in records:
+                # Similitud coseno aproximada entre embeddings
+                sim = 0.5
+                if rec.embedding is not None and len(rec.embedding) == len(query_embedding):
+                    dot = sum(a * b for a, b in zip(query_embedding, rec.embedding))
+                    norm_a = sum(a * a for a in query_embedding) ** 0.5
+                    norm_b = sum(b * b for b in rec.embedding) ** 0.5
+                    if norm_a > 0 and norm_b > 0:
+                        sim = dot / (norm_a * norm_b)
+
+                # Factor de recencia (decaimiento por días)
+                age_days = (now - rec.occurred_at.replace(tzinfo=None)).total_seconds() / 86400.0
+                recency_factor = max(0.0, 1.0 - (age_days / 30.0))
+
+                final_score = (1.0 - recency_weight) * sim + recency_weight * recency_factor
+
+                scored_records.append({
+                    "id": str(rec.id),
+                    "event_text": rec.event_text,
+                    "episode_type": rec.episode_type,
+                    "occurred_at": rec.occurred_at.isoformat() if rec.occurred_at else None,
+                    "score": round(final_score, 4)
+                })
+
+            scored_records.sort(key=lambda x: x["score"], reverse=True)
+            return scored_records[:limit]
+
+        except Exception as e:
+            logger.error(f"❌ Error consultando memoria episódica: {e}")
+            return []
+

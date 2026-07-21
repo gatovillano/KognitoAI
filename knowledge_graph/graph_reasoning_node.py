@@ -29,18 +29,20 @@ class GraphReasoningNode:
     4.  Genera una visualización Mermaid del subgrafo resultante.
     """
 
-    def __init__(self, graph_db: GraphDB):
+    def __init__(self, graph_db: GraphDB, min_trust: float = 0.5):
         """
         Inicializa el nodo con una conexión a la base de datos del grafo.
 
         Args:
             graph_db: Instancia de GraphDB para la conexión con Neo4j.
+            min_trust: Umbral mínimo de confianza para filtrar nodos y relaciones.
         """
         self.graph_db = graph_db
+        self.min_trust = min_trust
         self.llm = get_fast_llm()
         if not self.llm:
             raise ValueError("No se pudo obtener un LLM rápido para el GraphReasoningNode.")
-        logger.info("✅ GraphReasoningNode inicializado con LLM rápido.")
+        logger.info(f"✅ GraphReasoningNode inicializado con LLM rápido y min_trust={self.min_trust}.")
 
     async def ainvoke(self, state: Dict[str, Any], target_datasets: Optional[List[str]] = None) -> Dict[str, Any]:
         """
@@ -66,6 +68,7 @@ class GraphReasoningNode:
         # Obtener LLM específico para el usuario si está disponible
         account_id = state.get("account_id")
         workspace_id = state.get("workspace_id")
+        min_trust = state.get("min_trust", self.min_trust)
         
         llm_to_use = self.llm
         if account_id:
@@ -81,8 +84,9 @@ class GraphReasoningNode:
 
         # 1. Ejecutar Pensamiento Neuronal (Exploración Latente)
         neural_insights, analysis_id, neural_data = await self._perform_neural_thinking(
-            user_message, target_datasets, account_id, workspace_id, llm=llm_to_use
+            user_message, target_datasets, account_id, workspace_id, llm=llm_to_use, min_trust=min_trust
         )
+
         
         if not neural_data and not neural_insights:
             logger.info("❌ El pensamiento neuronal no encontró conexiones relevantes.")
@@ -124,7 +128,7 @@ class GraphReasoningNode:
             "mermaid_diagram": mermaid_diagram,
         }
 
-    async def _perform_neural_thinking(self, user_query: str, target_datasets: Optional[List[str]] = None, account_id: Optional[str] = None, workspace_id: Optional[str] = None, llm: Optional[Any] = None) -> Tuple[str, Optional[str], List[Dict[str, Any]]]:
+    async def _perform_neural_thinking(self, user_query: str, target_datasets: Optional[List[str]] = None, account_id: Optional[str] = None, workspace_id: Optional[str] = None, llm: Optional[Any] = None, min_trust: Optional[float] = None) -> Tuple[str, Optional[str], List[Dict[str, Any]]]:
         """
         Realiza un 'Pensamiento Neuronal' explorando el grafo de forma agresiva 
         para encontrar relaciones que no son evidentes en una consulta simple.
@@ -134,6 +138,8 @@ class GraphReasoningNode:
         llm_to_use = llm or self.llm
         if not llm_to_use:
             return "", None, []
+
+        effective_min_trust = min_trust if min_trust is not None else self.min_trust
 
         # Identificar conceptos clave
         concepts = []
@@ -191,7 +197,7 @@ class GraphReasoningNode:
             concept2 = concepts[1]
             
             workspace_filter_nodes = ""
-            params_sp = {"concept1": concept1, "concept2": concept2, "account_id": account_id}
+            params_sp = {"concept1": concept1, "concept2": concept2, "account_id": account_id, "min_trust": effective_min_trust}
             if workspace_id:
                 workspace_filter_nodes = "AND n.workspace_id = $workspace_id AND m.workspace_id = $workspace_id AND ALL(node IN nodes(p) WHERE node.workspace_id = $workspace_id) AND ALL(rel IN relationships(p) WHERE rel.workspace_id = $workspace_id)"
                 params_sp["workspace_id"] = workspace_id
@@ -206,8 +212,8 @@ class GraphReasoningNode:
               AND (m.account_id = $account_id OR m.account_id IS NULL)
               AND n <> m
             MATCH p = shortestPath((n)-[*1..4]-(m))
-            WHERE ALL(node IN nodes(p) WHERE (node.account_id = $account_id OR node.account_id IS NULL))
-              AND ALL(rel IN relationships(p) WHERE (rel.account_id = $account_id OR rel.account_id IS NULL))
+            WHERE ALL(node IN nodes(p) WHERE (node.account_id = $account_id OR node.account_id IS NULL) AND (node.trust_score IS NULL OR node.trust_score >= $min_trust))
+              AND ALL(rel IN relationships(p) WHERE (rel.account_id = $account_id OR rel.account_id IS NULL) AND (rel.trust_score IS NULL OR rel.trust_score >= $min_trust) AND (rel.is_current IS NULL OR rel.is_current = true))
               {workspace_filter_nodes}
               {dataset_filter_sp}
             RETURN p as path
@@ -222,7 +228,7 @@ class GraphReasoningNode:
                 dataset_filter = f"AND ALL(node IN nodes(p) WHERE node.dataset_name IN {target_datasets})"
             
             workspace_filter_path = ""
-            params = {"concept": concept, "account_id": account_id}
+            params = {"concept": concept, "account_id": account_id, "min_trust": effective_min_trust}
             if workspace_id:
                 workspace_filter_path = "AND ALL(node IN nodes(p) WHERE node.workspace_id = $workspace_id) AND ALL(rel IN relationships(p) WHERE rel.workspace_id = $workspace_id)"
                 params["workspace_id"] = workspace_id
@@ -232,14 +238,16 @@ class GraphReasoningNode:
             neural_query = f"""
             MATCH p = (n)-[r*1..2]-(m)
             WHERE (n.name CONTAINS $concept OR n.description CONTAINS $concept)
-              AND ALL(node IN nodes(p) WHERE (node.account_id = $account_id OR node.account_id IS NULL))
-              AND ALL(rel IN relationships(p) WHERE (rel.account_id = $account_id OR rel.account_id IS NULL))
+              AND ALL(node IN nodes(p) WHERE (node.account_id = $account_id OR node.account_id IS NULL) AND (node.trust_score IS NULL OR node.trust_score >= $min_trust))
+              AND ALL(rel IN relationships(p) WHERE (rel.account_id = $account_id OR rel.account_id IS NULL) AND (rel.trust_score IS NULL OR rel.trust_score >= $min_trust) AND (rel.is_current IS NULL OR rel.is_current = true))
               {workspace_filter_path}
               {dataset_filter}
             RETURN p as path
             LIMIT 10
             """
+
             tasks.append(self.graph_db.execute_query(neural_query, params))
+
             
         if tasks:
             import asyncio
