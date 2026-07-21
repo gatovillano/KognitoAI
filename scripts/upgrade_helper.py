@@ -92,9 +92,9 @@ def pre_upgrade():
         print(f"  🔄 Desinstalando temporalmente: {ext} ...")
         try:
             result = subprocess.run(
-                [python_bin, ext_install_py, "--uninstall"],
+                [python_bin, ext_install_py, "--uninstall", "--no-build"],
                 cwd=REPO_DIR,
-                env=dict(os.environ, PYTHONPATH=REPO_DIR),
+                env=dict(os.environ, PYTHONPATH=REPO_DIR, KOGNITO_SKIP_BUILD="1"),
                 check=False,
             )
             if result.returncode == 0:
@@ -143,9 +143,9 @@ def post_upgrade():
         print(f"  ⚙️  Reinstalando: {ext} ...")
         try:
             result = subprocess.run(
-                [python_bin, ext_install_py],
+                [python_bin, ext_install_py, "--no-build"],
                 cwd=REPO_DIR,
-                env=dict(os.environ, PYTHONPATH=REPO_DIR),
+                env=dict(os.environ, PYTHONPATH=REPO_DIR, KOGNITO_SKIP_BUILD="1"),
                 check=False,
             )
             if result.returncode == 0:
