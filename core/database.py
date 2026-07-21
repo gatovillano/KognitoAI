@@ -1916,3 +1916,34 @@ class EmailAttachment(Base):
 
 # Importar modelos adicionales para relaciones
 from core.api_key_model import ApiKey
+
+
+class EpisodicMemory(Base):
+    """
+    Tabla de Memoria Episódica en PostgreSQL con pgvector.
+    Almacena experiencias, eventos de chat, tareas y decisiones con estampa temporal
+    y vector de embeddings para recuperación híbrida (semántica + recencia).
+    """
+    __tablename__ = "episodic_memory"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id", ondelete="CASCADE"), nullable=True, index=True)
+    workspace_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+    event_text = Column(Text, nullable=False)
+    embedding = Column(Vector(768), nullable=True)
+    occurred_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"), index=True)
+
+    episode_type = Column(String(50), default="chat", index=True)
+    extra_metadata = Column(JSONB, nullable=True)
+
+    account = relationship("Account", backref=backref("episodic_memories", cascade="all, delete-orphan"))
+
+
+    __table_args__ = (
+        Index('ix_episodic_memory_recency', account_id, occurred_at.desc()),
+        Index('ix_episodic_memory_type', account_id, episode_type),
+    )
+
+    def __repr__(self):
+        return f"<EpisodicMemory(id={self.id}, account_id={self.account_id}, type={self.episode_type})>"
+

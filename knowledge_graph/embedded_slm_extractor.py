@@ -8,7 +8,7 @@ import logging
 import json
 import asyncio
 import os
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +95,18 @@ REGLAS DE EXCLUSIÓN (MUY IMPORTANTE):
 
 Responde ÚNICAMENTE con un objeto JSON válido con la siguiente estructura exacta:
 {{
+    "actions": [
+        {{
+            "action": "DELETE",
+            "target_name": "Nombre de entidad obsoleta/contradicha a eliminar si corresponde",
+            "reason": "Motivo del borrado"
+        }},
+        {{
+            "action": "UPDATE",
+            "target_name": "Nombre de entidad a actualizar",
+            "new_props": {{"description": "Nueva descripción actualizada"}}
+        }}
+    ],
     "conceptual_insights": [
         {{
             "concept": "Nombre del concepto de alto nivel",
@@ -173,6 +185,84 @@ Responde ÚNICAMENTE con un objeto JSON válido con la siguiente estructura exac
         except Exception as e:
             logger.warning(f"⚠️ Error al parsear JSON devuelto por SLM: {e}. Texto bruto: {raw_text[:200]}")
             return None
+
+    async def reconcile(
+        self,
+        new_msg: str,
+        existing_nodes: List[Dict[str, Any]],
+        workspace_name: str
+    ) -> Dict[str, Any]:
+        """
+        Reconcilia el nuevo mensaje contra los nodos ya existentes en el grafo
+        para detectar contradicciones y generar acciones de borrado (DELETE) o actualización (UPDATE).
+        """
+        await self.initialize()
+
+        nodes_summary = json.dumps([
+            {"name": n.get("name"), "type": n.get("type"), "description": n.get("description")}
+            for n in existing_nodes[:20]
+        ], ensure_ascii=False)
+
+        prompt = f"""Analiza este nuevo mensaje en el workspace "{workspace_name}" comparándolo con los nodos de conocimiento ya existentes en el grafo:
+
+Nodos Existentes en Grafo:
+{nodes_summary}
+
+Nuevo Mensaje:
+"{new_msg[:1000]}"
+
+Detecta si el nuevo mensaje contradice, invalida o actualiza alguno de los Nodos Existentes.
+Responde ÚNICAMENTE con un JSON con la siguiente estructura:
+{{
+    "actions": [
+        {{
+            "action": "DELETE",
+            "target_name": "Nombre exacto del nodo a eliminar si es obsoleto o erróneo",
+            "reason": "Explicación"
+        }},
+        {{
+            "action": "UPDATE",
+            "target_name": "Nombre del nodo a actualizar",
+            "new_props": {{"description": "Nueva descripción actualizada"}}
+        }}
+    ]
+}}"""
+
+        if self.fallback_mode or not self.llm:
+            try:
+                from core.llm_manager import get_fast_llm
+                from langchain_core.messages import SystemMessage
+                fast_llm = get_fast_llm()
+                resp = await fast_llm.ainvoke([SystemMessage(content=prompt)])
+                raw_text = str(resp.content).strip()
+            except Exception as e:
+                logger.error(f"❌ Error en reconcile fallback: {e}")
+                return {"actions": []}
+        else:
+            try:
+                def _infer():
+                    response = self.llm.create_chat_completion(
+                        messages=[{"role": "system", "content": prompt}],
+                        temperature=0.1,
+                        response_format={"type": "json_object"}
+                    )
+                    return response["choices"][0]["message"]["content"]
+                raw_text = await asyncio.to_thread(_infer)
+            except Exception as e:
+                logger.error(f"❌ Error durante inferencia de reconcile: {e}")
+                return {"actions": []}
+
+        try:
+            cleaned_text = raw_text.strip()
+            if cleaned_text.startswith("```json"):
+                cleaned_text = cleaned_text[7:]
+            if cleaned_text.startswith("```"):
+                cleaned_text = cleaned_text[3:]
+            if cleaned_text.endswith("```"):
+                cleaned_text = cleaned_text[:-3]
+            return json.loads(cleaned_text.strip())
+        except Exception:
+            return {"actions": []}
 
 
 def get_embedded_slm_extractor() -> EmbeddedSLMExtractor:
