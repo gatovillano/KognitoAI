@@ -165,18 +165,54 @@ run_update() {
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${BOLD}🔄 Actualizando Kognito AI desde GitHub...${NC}"
     git checkout -- package-lock.json 2>/dev/null || true
+
+    local OLD_HEAD
+    OLD_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "")
+
     if ! git pull; then
         echo -e "${RED}❌ El 'git pull' falló por cambios locales no resueltos.${NC}"
         echo -e "${YELLOW}   Guarda tus cambios (git stash) o descarta el archivo en conflicto y reintenta.${NC}"
         return 1
     fi
-    "${PROJECT_DIR}/venv_host/bin/pip" install -r requirements.txt --quiet 2>/dev/null || true
-    npm install --silent
-    echo -e "${YELLOW}🏗️  Reconstruyendo Frontend (npm run build)...${NC}"
-    npm run build
+
+    local NEW_HEAD
+    NEW_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "")
+
+    local CHANGED_FILES=""
+    if [ -n "${OLD_HEAD}" ] && [ -n "${NEW_HEAD}" ] && [ "${OLD_HEAD}" != "${NEW_HEAD}" ]; then
+        CHANGED_FILES=$(git diff --name-only "${OLD_HEAD}" "${NEW_HEAD}" 2>/dev/null || echo "")
+    fi
+
+    # Python dependencies
+    if [ ! -d "${PROJECT_DIR}/venv_host" ] || echo "${CHANGED_FILES}" | grep -q "^requirements.txt$"; then
+        echo -e "${BLUE}🐍 Actualizando dependencias de Python...${NC}"
+        [ ! -d "${PROJECT_DIR}/venv_host" ] && python3 -m venv "${PROJECT_DIR}/venv_host"
+        "${PROJECT_DIR}/venv_host/bin/pip" install -r requirements.txt --quiet 2>/dev/null || true
+    else
+        echo -e "${GREEN}⚡ Sin cambios en requirements.txt. Omitiendo pip install.${NC}"
+    fi
+
+    # Node dependencies
+    if [ ! -d "${PROJECT_DIR}/node_modules" ] || echo "${CHANGED_FILES}" | grep -E -q "^(package\.json|package-lock\.json)$"; then
+        echo -e "${BLUE}📦 Actualizando dependencias de Node...${NC}"
+        npm install --silent
+    else
+        echo -e "${GREEN}⚡ Sin cambios en package.json/lock. Omitiendo npm install.${NC}"
+    fi
+
+    # Frontend build
+    if [ ! -d "${PROJECT_DIR}/.next" ] || echo "${CHANGED_FILES}" | grep -E -q "^(src/|public/|package\.json|package-lock\.json|next\.config\.mjs|tsconfig\.json|tailwind\.config\.)"; then
+        echo -e "${YELLOW}🏗️  Reconstruyendo Frontend (npm run build)...${NC}"
+        npm run build
+    else
+        echo -e "${GREEN}⚡ Sin cambios en el frontend. Omitiendo npm run build (usando build existente).${NC}"
+    fi
+
     # Re-install CLI in case it changed
-    cp "${PROJECT_DIR}/kognitoai" "${HOME}/.local/bin/kognitoai"
-    chmod +x "${HOME}/.local/bin/kognitoai"
+    if [ -f "${HOME}/.local/bin/kognitoai" ]; then
+        cp "${PROJECT_DIR}/kognitoai" "${HOME}/.local/bin/kognitoai" 2>/dev/null || true
+        chmod +x "${HOME}/.local/bin/kognitoai" 2>/dev/null || true
+    fi
     echo -e "${GREEN}✅ Actualización completada.${NC}"
 }
 

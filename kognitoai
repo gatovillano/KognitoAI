@@ -142,8 +142,20 @@ cmd_upgrade() {
     check_repo
     echo -e "${YELLOW}🔄 Actualizando Kognito AI desde GitHub...${NC}"
     cd "${REPO_DIR}"
+
+    local FORCE=false
+    for arg in "$@"; do
+        if [[ "$arg" == "--force" || "$arg" == "-f" ]]; then
+            FORCE=true
+        fi
+    done
+
     local branch
     branch=$(_detect_branch)
+
+    # Capturar commit anterior
+    local OLD_HEAD
+    OLD_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "")
 
     # 1. Detectar y desinstalar temporalmente extensiones activas
     if [ -f "scripts/upgrade_helper.py" ]; then
@@ -152,8 +164,12 @@ cmd_upgrade() {
     fi
 
     # 2. Resetear modificaciones temporales a archivos rastreados y actualizar
-    git reset --hard HEAD
+    git reset --hard HEAD >/dev/null 2>&1 || true
     git pull origin "${branch}"
+
+    # Capturar commit nuevo
+    local NEW_HEAD
+    NEW_HEAD=$(git rev-parse HEAD 2>/dev/null || echo "")
 
     # 3. Reinstalar automáticamente las extensiones activas
     if [ -f "scripts/upgrade_helper.py" ]; then
@@ -161,15 +177,63 @@ cmd_upgrade() {
         python3 scripts/upgrade_helper.py --post-upgrade
     fi
 
-    echo -e "${BLUE}🐍 Actualizando dependencias de Python...${NC}"
-    if [ -d "venv_host" ]; then
+    # Determinar qué archivos cambiaron entre commits
+    local CHANGED_FILES=""
+    if [ -n "${OLD_HEAD}" ] && [ -n "${NEW_HEAD}" ] && [ "${OLD_HEAD}" != "${NEW_HEAD}" ]; then
+        CHANGED_FILES=$(git diff --name-only "${OLD_HEAD}" "${NEW_HEAD}" 2>/dev/null || echo "")
+    fi
+
+    # 4. Dependencias de Python
+    local REQ_CHANGED=false
+    if echo "${CHANGED_FILES}" | grep -q "^requirements.txt$"; then
+        REQ_CHANGED=true
+    fi
+
+    if [ "${FORCE}" = true ] || [ "${REQ_CHANGED}" = true ] || [ ! -d "venv_host" ]; then
+        echo -e "${BLUE}🐍 Actualizando dependencias de Python...${NC}"
+        if [ ! -d "venv_host" ]; then
+            python3 -m venv venv_host
+        fi
         ./venv_host/bin/pip install -r requirements.txt --quiet
         echo -e "${GREEN}✅ Python actualizado.${NC}"
+    else
+        echo -e "${GREEN}⚡ Sin cambios en requirements.txt. Omitiendo pip install.${NC}"
     fi
-    echo -e "${BLUE}📦 Actualizando dependencias de Node...${NC}"
-    npm install --silent
-    echo -e "${YELLOW}🏗️  Reconstruyendo Frontend (npm run build)...${NC}"
-    npm run build
+
+    # 5. Dependencias de Node
+    local PKG_CHANGED=false
+    if echo "${CHANGED_FILES}" | grep -E -q "^(package\.json|package-lock\.json)$"; then
+        PKG_CHANGED=true
+    fi
+
+    if [ "${FORCE}" = true ] || [ "${PKG_CHANGED}" = true ] || [ ! -d "node_modules" ]; then
+        echo -e "${BLUE}📦 Actualizando dependencias de Node...${NC}"
+        npm install --silent
+        echo -e "${GREEN}✅ Dependencias Node actualizadas.${NC}"
+    else
+        echo -e "${GREEN}⚡ Sin cambios en package.json/lock. Omitiendo npm install.${NC}"
+    fi
+
+    # 6. Reconstrucción de Frontend
+    local FE_CHANGED=false
+    if echo "${CHANGED_FILES}" | grep -E -q "^(src/|public/|package\.json|package-lock\.json|next\.config\.mjs|tsconfig\.json|tailwind\.config\.)"; then
+        FE_CHANGED=true
+    fi
+
+    if [ "${FORCE}" = true ] || [ "${FE_CHANGED}" = true ] || [ ! -d ".next" ]; then
+        echo -e "${YELLOW}🏗️  Reconstruyendo Frontend (npm run build)...${NC}"
+        npm run build
+        echo -e "${GREEN}✅ Frontend reconstruido exitosamente.${NC}"
+    else
+        echo -e "${GREEN}⚡ Sin cambios en el frontend. Omitiendo npm run build (usando build existente).${NC}"
+    fi
+
+    # Copiar binario CLI actualizado a ~/.local/bin/kognitoai si corresponde
+    if [ -f "${HOME}/.local/bin/kognitoai" ]; then
+        cp "${REPO_DIR}/kognitoai" "${HOME}/.local/bin/kognitoai" 2>/dev/null || true
+        chmod +x "${HOME}/.local/bin/kognitoai" 2>/dev/null || true
+    fi
+
     echo -e "${GREEN}✅ Actualización completada. Reiniciando...${NC}"
     exec bash start_local.sh
 }
@@ -271,13 +335,14 @@ cmd_uninstall() {
 
 # ── Main dispatcher ───────────────────────────────────────────────────────────────
 COMMAND="${1:-help}"
+shift 2>/dev/null || true
 case "${COMMAND}" in
-    install)   cmd_install ;;
-    start)     cmd_start ;;
-    upgrade)   cmd_upgrade ;;
-    setup)     cmd_setup ;;
-    status)    cmd_status ;;
-    stop)      cmd_stop ;;
-    uninstall) cmd_uninstall ;;
-    *)         show_help ;;
+    install)   cmd_install "$@" ;;
+    start)     cmd_start "$@" ;;
+    upgrade)   cmd_upgrade "$@" ;;
+    setup)     cmd_setup "$@" ;;
+    status)    cmd_status "$@" ;;
+    stop)      cmd_stop "$@" ;;
+    uninstall) cmd_uninstall "$@" ;;
+    *)         show_help "$@" ;;
 esac
