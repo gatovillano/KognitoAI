@@ -46,5 +46,34 @@ class TestUpgradeHelper(unittest.TestCase):
         self.assertNotIn('--uninstall', mock_run.call_args[0][0])
         mock_remove.assert_called_with(uh.STATE_FILE)
 
+    @patch('scripts.upgrade_helper.os.path.isfile')
+    def test_find_ext_install_py(self, mock_isfile):
+        # 1. Test local path exists
+        mock_isfile.side_effect = lambda path: 'kognito-ai/extensions/ext_local' in path
+        path = uh.find_ext_install_py('ext_local')
+        self.assertIn('kognito-ai/extensions/ext_local/install.py', path)
+
+        # 2. Test parent path exists when local doesn't
+        mock_isfile.side_effect = lambda path: 'Proyectos/KognitoAI/extensions/ext_parent' in path
+        path = uh.find_ext_install_py('ext_parent')
+        self.assertIn('Proyectos/KognitoAI/extensions/ext_parent/install.py', path)
+
+    @patch('scripts.upgrade_helper.os.path.isdir')
+    @patch('builtins.open', new_callable=unittest.mock.mock_open, read_data="from extensions.jitsi_meet.backend.router import ...")
+    @patch('scripts.upgrade_helper.os.path.isfile')
+    def test_is_extension_active(self, mock_isfile, mock_open, mock_isdir):
+        # Test backend dir heuristic
+        mock_isdir.side_effect = lambda path: path.endswith('api/gallery_selection_panel')
+        self.assertTrue(uh.is_extension_active('gallery_selection_panel'))
+
+        # Test skill dir heuristic
+        mock_isdir.side_effect = lambda path: path.endswith('skills/kai_ethno_skill')
+        self.assertTrue(uh.is_extension_active('kai_ethno'))
+
+        # Test registry in main.py heuristic
+        mock_isdir.side_effect = lambda path: False
+        mock_isfile.return_value = True  # main.py exists
+        self.assertTrue(uh.is_extension_active('jitsi_meet'))
+
 if __name__ == '__main__':
     unittest.main()
