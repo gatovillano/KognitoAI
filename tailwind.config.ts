@@ -38,6 +38,7 @@ const config: Config = {
 			colors: {
 				background: 'hsl(var(--background))',
 				foreground: 'hsl(var(--foreground))',
+				'user-bubble': 'hsl(var(--user-bubble))',
 				card: {
 					DEFAULT: 'hsl(var(--card))',
 					foreground: 'hsl(var(--card-foreground))'

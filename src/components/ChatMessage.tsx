@@ -389,15 +389,15 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
       {msg.sender === 'user' ? (
         <div className="flex flex-col items-end mb-2">
           <div className="flex items-start gap-3 max-w-[100%] mr-4" style={{ marginRight: '20px' }}>
-            <div className="rounded-3xl rounded-br-none px-3 py-1.5 sm:px-4 sm:py-2 shadow-sm bg-muted/80 backdrop-blur-sm text-foreground border border-border/10 relative min-w-[100px]">
+            <div className="rounded-2xl bg-user-bubble/80 border border-border/20 px-4 py-3 text-foreground relative min-w-[100px] shadow-sm">
               {isEditing ? (
                 <textarea
                   value={editedText}
                   onChange={(e) => setEditedText(e.target.value)}
-                  className="w-full min-h-[80px] p-3 border border-border rounded-2xl resize-y focus:outline-none focus:ring-2 focus:ring-primary bg-background text-foreground"
+                  className="w-full min-h-[80px] p-3 border border-border/30 rounded-2xl resize-y focus:outline-none focus:ring-2 focus:ring-primary bg-background text-foreground"
                 />
               ) : (
-                <div className="text-sm sm:text-base break-words font-sans [&_p]:my-0">
+                <div className="text-sm sm:text-base break-words font-sans [&_p]:my-0 leading-relaxed text-foreground">
                   <MarkdownRenderer content={msg.text} />
                 </div>
               )}
@@ -438,25 +438,65 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
               )}
             </div>
           </div>
-          <div className="flex items-center gap-1 mt-0 mr-12 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all">
-            <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => handleCopyMessage(msg.text)}><Copy className="h-3 w-3" /></Button>
+          <div className="flex items-center gap-1 mt-1 mr-4 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 w-7 p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/40 rounded-lg transition-all"
+              onClick={() => handleCopyMessage(msg.text)}
+              title="Copiar"
+            >
+              <Copy className="h-3.5 w-3.5" />
+            </Button>
             {isEditing ? (
               <>
-                <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-green-600" onClick={handleSave}><Check className="h-3 w-3" /></Button>
-                <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-red-600" onClick={handleCancel}><X className="h-3 w-3" /></Button>
-              </>
-            ) : (
-              <>
-                <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => handleRetry(msg.text)}><RefreshCw className="h-3 w-3" /></Button>
-                <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={handleEdit}><Edit3 className="h-3 w-3" /></Button>
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-8 w-8 p-0 text-red-600"
+                  className="h-7 w-7 p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/40 text-green-600 rounded-lg transition-all"
+                  onClick={handleSave}
+                  title="Guardar"
+                >
+                  <Check className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/40 text-red-600 rounded-lg transition-all"
+                  onClick={handleCancel}
+                  title="Cancelar"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/40 rounded-lg transition-all"
+                  onClick={() => handleRetry(msg.text)}
+                  title="Reintentar"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/40 rounded-lg transition-all"
+                  onClick={handleEdit}
+                  title="Editar"
+                >
+                  <Edit3 className="h-3.5 w-3.5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 w-7 p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/40 text-red-500 rounded-lg transition-all"
                   onClick={() => handleDeleteMessage?.({ text: msg.text, sender: msg.sender, created_at: msg.created_at })}
                   title="Eliminar mensaje"
                 >
-                  <Trash2 className="h-3 w-3" />
+                  <Trash2 className="h-3.5 w-3.5" />
                 </Button>
               </>
             )}
@@ -470,10 +510,10 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
             </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-2">
-                <div className="flex items-center gap-2 bg-primary/10 px-3 py-1 rounded-full border border-primary/20 shadow-sm">
-                  <span className="font-black text-[10px] uppercase tracking-tighter text-primary">KAI Intelligence</span>
+                <div className="flex items-center gap-1.5 bg-primary/10 px-2.5 py-0.5 rounded-full">
+                  <span className="font-bold text-[10px] uppercase tracking-wider text-primary">KAI Intelligence</span>
                 </div>
-                <span className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-widest">{displayModelName}</span>
+                <span className="text-[10px] font-medium text-muted-foreground/60 tracking-wider">{displayModelName}</span>
               </div>
 
               <div className="w-full">
@@ -572,23 +612,23 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
               
               <div className="flex items-center gap-1 mt-3 ml-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all">
                 {msg.sender === 'ai' && responsePosition && responsePosition.total > 1 && (
-                  <div className="flex items-center gap-1 mr-2 px-2 py-1 rounded-xl border border-border/40 bg-muted/30">
+                  <div className="flex items-center gap-1 mr-2 px-2 py-0.5 rounded-lg border border-border/20 bg-muted/20">
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-7 w-7 p-0 rounded-lg"
+                      className="h-7 w-7 p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/40 rounded-lg transition-all"
                       onClick={onPrevResponse}
                       disabled={!onPrevResponse || responsePosition.current <= 1}
                     >
                       <ChevronLeft className="h-3.5 w-3.5" />
                     </Button>
-                    <span className="text-[11px] font-medium text-muted-foreground min-w-[52px] text-center">
+                    <span className="text-[11px] font-medium text-muted-foreground min-w-[44px] text-center">
                       {responsePosition.current}/{responsePosition.total}
                     </span>
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-7 w-7 p-0 rounded-lg"
+                      className="h-7 w-7 p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/40 rounded-lg transition-all"
                       onClick={onNextResponse}
                       disabled={!onNextResponse || responsePosition.current >= responsePosition.total}
                     >
@@ -596,20 +636,28 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
                     </Button>
                   </div>
                 )}
-                <Button variant="ghost" size="sm" className="h-9 w-9 p-0 rounded-xl" onClick={() => handleCopyMessage(msg.text)}><Copy className="h-3.5 w-3.5" /></Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 w-8 p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/40 rounded-lg transition-all"
+                  onClick={() => handleCopyMessage(msg.text)}
+                  title="Copiar"
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                </Button>
                 <Button 
                   variant="ghost" 
                   size="sm" 
-                  className="h-9 w-9 p-0 rounded-xl" 
+                  className="h-8 w-8 p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/40 rounded-lg transition-all" 
                   onClick={() => {
                     const cleanText = stripHtml(msg.text);
                     if (playingMessageIndex === index && !isAudioLoading) {
-                      // Si ya está sonando, el handlePlayAudio debería actuar como toggle de pausa/play
                       handlePlayAudio(cleanText, index);
                     } else {
                       handlePlayAudio(cleanText, index);
                     }
                   }}
+                  title="Audio"
                 >
                   {playingMessageIndex === index ? (
                     isAudioLoading ? (
@@ -626,7 +674,7 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-9 w-9 p-0 rounded-xl text-red-600"
+                  className="h-8 w-8 p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/40 text-red-500 rounded-lg transition-all"
                   onClick={() => handleDeleteMessage?.({ text: msg.text, sender: msg.sender, created_at: msg.created_at })}
                   title="Eliminar mensaje"
                 >
