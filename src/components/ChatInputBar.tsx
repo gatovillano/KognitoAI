@@ -171,7 +171,7 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
           skillsCacheRef.current = fullOptions;
         }
 
-        const filtered = fullOptions
+        const filtered = (fullOptions || [])
           .filter(o => o.toLowerCase().includes(query.toLowerCase()))
           .slice(0, 50);
 

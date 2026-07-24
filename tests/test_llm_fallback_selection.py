@@ -82,3 +82,50 @@ def test_get_configured_fallback_llm_prefers_user_main_for_fast_fail():
         llm_manager.get_llm_for_user = original_get_llm_for_user
         llm_manager.get_main_llm = original_get_main_llm
         llm_manager.get_fast_llm = original_get_fast_llm
+
+
+def test_llm_cache_retention_and_invalidation():
+    import time
+    test_user = "test-user-id"
+    llm_manager.clear_user_llm_cache(test_user)
+    
+    original_get_llm_for_user = llm_manager.get_llm_for_user
+    
+    call_count = 0
+    async def mock_get_llm_for_user(account_id: str, purpose: str = "main"):
+        nonlocal call_count
+        cache_key = (account_id, purpose)
+        if cache_key in llm_manager._llm_cache:
+            instance, ts = llm_manager._llm_cache[cache_key]
+            return instance
+            
+        call_count += 1
+        llm_instance = _fake_llm(f"model-v{call_count}")
+        llm_manager._llm_cache[cache_key] = (llm_instance, time.time())
+        return llm_instance
+
+    llm_manager.get_llm_for_user = mock_get_llm_for_user
+    
+    try:
+        # Primera llamada: Debe crear la instancia v1
+        llm1 = asyncio.run(llm_manager.get_llm_for_user(test_user))
+        assert llm1.model_name == "model-v1"
+        assert call_count == 1
+        
+        # Segunda llamada: Debe retornar v1 desde la caché sin incrementar call_count
+        llm2 = asyncio.run(llm_manager.get_llm_for_user(test_user))
+        assert llm2.model_name == "model-v1"
+        assert call_count == 1
+        
+        # Limpiar caché para test_user
+        llm_manager.clear_user_llm_cache(test_user)
+        
+        # Tercera llamada: Al haberse limpiado la caché, debe generar la instancia v2
+        llm3 = asyncio.run(llm_manager.get_llm_for_user(test_user))
+        assert llm3.model_name == "model-v2"
+        assert call_count == 2
+        
+    finally:
+        llm_manager.get_llm_for_user = original_get_llm_for_user
+        llm_manager.clear_user_llm_cache(test_user)
+

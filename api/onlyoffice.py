@@ -584,6 +584,11 @@ async def get_onlyoffice_config(
             "key": key,
             "title": doc.filename,
             "url": file_url,
+            "permissions": {
+                "chat": False,
+                "comment": can_edit,
+                "edit": can_edit,
+            }
         },
         "documentType": get_document_type(doc.extension),
         "editorConfig": {
@@ -596,7 +601,6 @@ async def get_onlyoffice_config(
             },
             "customization": {
                 "forcesave": True,
-                "chat": False,
                 "comments": can_edit,
                 "help": False,
                 "editRights": can_edit,
@@ -660,6 +664,11 @@ async def get_onlyoffice_public_config(
             "key": key,
             "title": doc.filename,
             "url": file_url,
+            "permissions": {
+                "chat": False,
+                "comment": share_entry.can_edit,
+                "edit": share_entry.can_edit,
+            }
         },
         "documentType": get_document_type(doc.extension),
         "editorConfig": {
@@ -672,7 +681,6 @@ async def get_onlyoffice_public_config(
             },
             "customization": {
                 "forcesave": True,
-                "chat": False,
                 "comments": share_entry.can_edit,
                 "help": False,
                 "editRights": share_entry.can_edit,

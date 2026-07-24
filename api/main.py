@@ -431,6 +431,13 @@ try:
 except ImportError:
     pass
 
+try:
+    from extensions.kognito_chat.backend.router import router as kognito_chat_router
+    app.include_router(kognito_chat_router)
+except ImportError:
+    pass
+
+
 
 
 
