@@ -7,9 +7,11 @@ YELLOW='\033[0;33m'
 RED='\033[0;31m'
 NC='\033[0m' # Sin color
 
-# Crear directorio de logs y archivos de logs si no existen
+# Crear directorio de logs y limpiar archivos de logs para esta sesión
 mkdir -p logs
-touch logs/backend.log logs/frontend.log logs/telegram_gateway.log
+> logs/backend.log
+> logs/frontend.log
+> logs/telegram_gateway.log
 
 echo -e "${BLUE}🐳 Verificando contenedores de base de datos...${NC}"
 if docker ps --format "{{.Names}}" 2>/dev/null | grep -q "^kognito_db$"; then
@@ -33,10 +35,8 @@ BACKEND_PID=$!
 
 echo -e "${BLUE}Iniciando el servidor Frontend (Next.js)...${NC}"
 echo -e "${BLUE}  → Logs: ./logs/frontend.log${NC}"
-if [ ! -d ".next" ] || [ ! -f ".next/BUILD_ID" ]; then
-    echo -e "${YELLOW}Compilando el frontend por primera vez...${NC}"
-    PORT=3002 npm run build >> logs/frontend.log 2>&1
-fi
+echo -e "${YELLOW}Compilando el frontend con los últimos cambios...${NC}"
+PORT=3002 npm run build >> logs/frontend.log 2>&1
 PORT=3002 npm run start >> logs/frontend.log 2>&1 &
 FRONTEND_PID=$!
 echo -e "${YELLOW}Iniciando Telegram Gateway (ultraligero)...${NC}"
