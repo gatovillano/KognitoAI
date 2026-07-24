@@ -174,9 +174,9 @@ export function AppShell({ children }: AppShellProps) {
           </aside>
 
           {/* Contenido principal */}
-          <div className="flex-1 flex flex-col min-w-0 h-full relative z-10">
+          <div className="flex-1 flex flex-col min-w-0 h-full relative z-10 transition-all duration-300">
 
-            <header className="flex h-16 sm:h-20 items-center gap-2 sm:gap-4 bg-transparent px-4 sm:px-6 md:px-8 shrink-0 z-10">
+            <header className="flex h-16 sm:h-20 items-center gap-2 sm:gap-4 backdrop-blur-md bg-background/80 border-b border-border/20 px-4 sm:px-6 md:px-8 shrink-0 z-10 transition-all duration-300">
               {/* Botón de toggle para desktop */}
               <Button
                 variant="ghost"
