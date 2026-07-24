@@ -431,23 +431,14 @@ try:
 except ImportError:
     pass
 
-try:
-    from extensions.gallery_selection_panel.backend.router import router as gallery_router
-    app.include_router(gallery_router)
-except ImportError:
-    pass
 
-try:
-    from extensions.email_management.backend.router import router as email_router
-    app.include_router(email_router)
-except ImportError:
-    pass
 
-try:
-    from extensions.jitsi_meet.backend.router import router as jitsi_router
-    app.include_router(jitsi_router)
-except ImportError:
-    pass
+
+
+
+
+
+
 
 class GenerateHTMLRequest(BaseModel):
     content: str = Field(..., description="El contenido en formato Markdown o texto plano.")
