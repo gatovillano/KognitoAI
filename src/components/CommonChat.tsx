@@ -1676,32 +1676,32 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
   return (
     <div className="flex h-full bg-transparent overflow-hidden">
       <div className="flex flex-col h-full w-full overflow-hidden">
-        <div ref={scrollAreaRef} className="flex-1 overflow-y-auto min-h-0 relative">
+        <div ref={scrollAreaRef} className="flex-1 overflow-y-auto min-h-0 relative custom-scrollbar pr-1">
           {/* Share Button */}
           {threadId && (
             <motion.button
               initial={{ opacity: 0, scale: 0.8 }}
               animate={{ opacity: 1, scale: 1 }}
               onClick={() => setIsShareDialogOpen(true)}
-              className="absolute top-3 right-3 z-50 p-2.5 rounded-full bg-background/80 backdrop-blur-sm border border-border text-muted-foreground shadow-md hover:text-primary hover:bg-primary/10 hover:shadow-lg transition-all hover:scale-110 flex items-center justify-center"
+              className="absolute top-3 right-3 z-50 p-2 rounded-full bg-background/80 backdrop-blur-sm border border-border/20 text-muted-foreground/70 shadow-sm hover:text-primary hover:bg-primary/10 hover:shadow transition-all hover:scale-105 flex items-center justify-center"
               aria-label="Compartir conversación"
               title="Compartir conversación"
             >
               <Share2 className="w-4 h-4" />
             </motion.button>
           )}
-          <div className="p-1 sm:p-4 md:p-6 space-y-3 sm:space-y-6 w-full md:max-w-6xl mx-auto">
+          <div className="px-2 py-4 sm:px-6 sm:py-6 space-y-4 sm:space-y-6 w-full md:max-w-4xl lg:max-w-5xl mx-auto">
             <div>
               {(hasMoreMessages || hasMoreRenderedMessages) && (
                 <div ref={topSentinelRef} className="flex justify-center p-4">
-                  {hasMoreRenderedMessages && !isLoadingMore && <p>Mostrando mensajes recientes. Desplaza arriba para cargar más.</p>}
-                  {isLoadingMore && <p>Cargando más mensajes...</p>}
+                  {hasMoreRenderedMessages && !isLoadingMore && <p className="text-xs text-muted-foreground/60 font-medium">Mostrando mensajes recientes. Desplaza arriba para cargar más.</p>}
+                  {isLoadingMore && <p className="text-xs text-muted-foreground/60 font-medium">Cargando más mensajes...</p>}
                 </div>
               )}
               {chatRenderItems.map((item) => {
                 if (item.type === 'single') {
                   return (
-                    <div key={item.key}>
+                    <div key={item.key} className="py-1">
                       <ChatMessage
                         index={item.index}
                         msg={item.message}
@@ -1727,7 +1727,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                 const activeResponse = totalResponses > 0 ? item.responses[activeResponseIndex] : null;
 
                 return (
-                  <div key={item.key}>
+                  <div key={item.key} className="py-1 space-y-1">
                     <ChatMessage
                       index={item.userIndex}
                       msg={item.userMessage}
@@ -1811,15 +1811,15 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 10, scale: 0.8 }}
                 onClick={() => scrollToBottom('smooth')}
-                className="absolute bottom-4 right-4 z-50 p-3 rounded-full bg-[#3B82F6] text-white shadow-xl hover:bg-blue-600 transition-all hover:scale-110 flex items-center justify-center group"
+                className="absolute bottom-4 right-4 z-50 p-2.5 rounded-full bg-primary text-primary-foreground shadow-lg border border-border/20 hover:bg-primary/90 transition-all hover:scale-105 flex items-center justify-center group"
                 aria-label="Ir al final"
               >
                 <div className="relative flex items-center justify-center">
                   <ArrowLeft className="w-5 h-5 -rotate-90 stroke-[3px]" />
                   {isResponding && (
                     <span className="absolute -top-1 -right-1 flex h-3 w-3">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-3 w-3 bg-blue-500"></span>
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary/40 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-3 w-3 bg-primary"></span>
                     </span>
                   )}
                 </div>
