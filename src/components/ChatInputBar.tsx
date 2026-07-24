@@ -493,7 +493,7 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
       <div className="flex justify-center w-full">
         <form onSubmit={handleSubmit} className="relative w-full">
 
-          <div className="rounded-3xl bg-card border border-border px-2 py-1 sm:px-4 sm:py-2 shadow-medium hover:shadow-strong transition-shadow duration-300">
+          <div className="glass-input rounded-2xl p-3 shadow-lg border border-border/30 backdrop-blur-md transition-all duration-200 focus-within:border-primary/40 focus-within:ring-1 focus-within:ring-primary/20">
             {currentContext.length > 0 && (
               <div className="mb-2 flex gap-2 overflow-x-auto pb-2">
                 {contextItems}
@@ -570,12 +570,12 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
               onKeyDown={handleKeyDown}
               placeholder={inputPlaceholder || (currentContext.length > 0 ? "Escribe tu mensaje..." : "Escribe tu mensaje o selecciona contexto...")}
               autoComplete="on"
-              className="w-full resize-none bg-transparent border-0 focus:ring-0 p-0 text-base sm:text-lg placeholder:text-muted-foreground/70"
+              className="w-full resize-none bg-transparent border-0 focus:outline-none focus:ring-0 focus-visible:ring-0 focus-visible:ring-offset-0 p-0 text-base sm:text-lg placeholder:text-muted-foreground/60 shadow-none"
               rows={1}
               onChange={handleMessageChange}
               onInput={adjustTextareaHeight}
             />
-            <div className="flex items-center justify-between mt-2 pt-2 border-t border-border/50">
+            <div className="flex items-center justify-between mt-2 pt-2 border-t border-border/30">
               <div className="flex items-center gap-2">
                 <MoreActionsMenu
                   isWebSearchActive={isWebSearchActive}
@@ -601,7 +601,7 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="rounded-full text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                  className="rounded-xl text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-all"
                   onClick={openContextDialog}
                   title="Añadir contexto"
                 >
@@ -619,7 +619,7 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
                     action?.();
                   }}
                   disabled={isProcessingAudio}
-                  className={`rounded-full ${isRecording ? 'text-red-500 hover:bg-red-100 dark:hover:bg-red-900/50' : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'}`}
+                  className={`rounded-xl transition-all ${isRecording ? 'text-red-500 bg-red-500/10 hover:bg-red-500/20' : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'}`}
                 >
                   {isProcessingAudio ? <Loader2 className="h-5 w-5 animate-spin" /> : <Mic className="h-5 w-5" />}
                 </Button>
@@ -629,7 +629,7 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
                     size="icon"
                     onClick={onStopResponding}
                     title="Detener respuesta"
-                    className="rounded-full bg-red-500 hover:bg-red-600 text-white"
+                    className="rounded-xl bg-destructive hover:bg-destructive/90 text-destructive-foreground shadow-sm transition-all"
                   >
                     <Square className="h-4 w-4 fill-current" />
                   </Button>
@@ -638,7 +638,7 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
                     type="submit"
                     size="icon"
                     disabled={isUploadingFile || isVectorizingFile || (!newMessage.trim() && currentContext.length === 0 && (!uploadedImagePreviews || uploadedImagePreviews.length === 0))}
-                    className="rounded-full"
+                    className="rounded-xl bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 hover:shadow-primary/20 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     {(isUploadingFile || isVectorizingFile) ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowUp className="h-4 w-4" />}
                   </Button>

@@ -36,7 +36,7 @@ export function MoreActionsMenu({
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon" className="rounded-full">
+          <Button variant="ghost" size="icon" className="rounded-xl text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-all">
             <Plus className="h-5 w-5" />
           </Button>
         </DropdownMenuTrigger>

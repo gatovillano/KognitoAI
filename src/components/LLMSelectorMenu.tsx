@@ -172,7 +172,7 @@ export const LLMSelectorMenu: React.FC = () => {
         <Button
           variant="ghost"
           size="sm"
-          className="h-8 px-2.5 text-xs font-medium rounded-full flex items-center gap-1.5 bg-muted/40 hover:bg-muted border border-border/50 text-muted-foreground hover:text-foreground transition-all shrink-0 max-w-[220px]"
+          className="h-8 px-2.5 text-xs font-medium rounded-xl flex items-center gap-1.5 bg-muted/40 hover:bg-accent/50 border border-border/50 text-muted-foreground hover:text-foreground transition-all shrink-0 max-w-[220px]"
           title="Configurar Proveedor y Modelo de IA"
         >
           <Brain className="h-3.5 w-3.5 text-primary shrink-0" />
