@@ -1023,6 +1023,53 @@ async def call_model_node(state: AgentState):
     relevant_skills = (
         metadata_results[3] if not isinstance(metadata_results[3], Exception) else []
     )
+    
+    # Extract and inject explicitly tagged skills via / symbol
+    if user_message:
+        try:
+            matches = re.findall(r'/([a-zA-Z0-9_\-]+)', user_message)
+            if matches:
+                tagged_skills_ids = [m.lower() for m in matches]
+                # Load all available skill markdowns to resolve the tags
+                all_skills = await skill_manager._load_skill_markdowns(
+                    account_id=state["account_id"],
+                    workspace_name=workspace_name,
+                )
+                
+                # Build a flexible mapping of tags/names to skill structures
+                skill_mapping = {}
+                for s in all_skills:
+                    sid = s["id"].lower()
+                    skill_mapping[sid] = s
+                    skill_mapping[sid.replace("_", "-")] = s
+                    
+                    cleaned_id = sid.replace("_skill", "")
+                    skill_mapping[cleaned_id] = s
+                    skill_mapping[cleaned_id.replace("_", "-")] = s
+                    
+                    sname = s["name"].lower().strip()
+                    skill_mapping[sname] = s
+                    skill_mapping[sname.replace(" ", "_")] = s
+                    skill_mapping[sname.replace(" ", "-")] = s
+                
+                matched_skills = []
+                seen_matched_ids = set()
+                for tag in tagged_skills_ids:
+                    if tag in skill_mapping:
+                        matched_skill = skill_mapping[tag]
+                        if matched_skill["id"] not in seen_matched_ids:
+                            matched_skills.append(matched_skill)
+                            seen_matched_ids.add(matched_skill["id"])
+                
+                if matched_skills:
+                    logger.info(f"Explicitly tagged skills detected: {[s['id'] for s in matched_skills]}")
+                    combined_skills = list(matched_skills)
+                    for s in relevant_skills:
+                        if s["id"] not in seen_matched_ids:
+                            combined_skills.append(s)
+                    relevant_skills = combined_skills
+        except Exception as e:
+            logger.error(f"Error resolving explicitly tagged skills: {e}", exc_info=True)
     if isinstance(metadata_results[0], Exception):
         logger.error(f"Error cargando perfil: {metadata_results[0]}")
     if isinstance(metadata_results[2], Exception):

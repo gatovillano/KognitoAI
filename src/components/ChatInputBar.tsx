@@ -14,7 +14,7 @@ import { SelectedContextItem } from '@/types/context';
 
 interface AutocompleteState {
   isVisible: boolean;
-  trigger: '#' | '@' | null;
+  trigger: '#' | '@' | '/' | null;
   query: string;
   options: string[];
   activeIndex: number;
@@ -115,6 +115,7 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
   const autocompleteAbortRef = useRef<AbortController | null>(null);
   const autocompleteTimerRef = useRef<number | null>(null);
   const repoTreeCacheRef = useRef<Map<string, string[]>>(new Map());
+  const skillsCacheRef = useRef<string[] | null>(null);
   const [isContextSelectorOpen, setIsContextSelectorOpen] = useState(false);
   const [isKnowledgeAnalysisForcedState, setIsKnowledgeAnalysisForcedState] = useState(false);
   const [isWebSearchForcedState, setIsWebSearchForcedState] = useState(false);
@@ -146,7 +147,7 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
     setIsDeepResearchForcedState(prev => !prev);
   }, []);
 
-  const updateAutocompleteOptions = useCallback(async (trigger: '#' | '@', query: string) => {
+  const updateAutocompleteOptions = useCallback(async (trigger: '#' | '@' | '/', query: string) => {
     autocompleteAbortRef.current?.abort();
     const controller = new AbortController();
     autocompleteAbortRef.current = controller;
@@ -157,6 +158,31 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
         return;
       }
       
+      if (trigger === '/') {
+        let fullOptions = skillsCacheRef.current;
+        if (!fullOptions) {
+          const res = await fetch(`/api/skills/available`, {
+            headers: { 'Authorization': `Bearer ${token}` },
+            signal: controller.signal,
+          });
+          const data = await res.json();
+          const skills = Array.isArray(data.skills) ? data.skills : [];
+          fullOptions = skills.map((s: any) => s.id);
+          skillsCacheRef.current = fullOptions;
+        }
+
+        const filtered = fullOptions
+          .filter(o => o.toLowerCase().includes(query.toLowerCase()))
+          .slice(0, 50);
+
+        setAutocomplete(prev => ({
+          ...prev,
+          options: filtered,
+          activeIndex: 0,
+        }));
+        return;
+      }
+
       if (trigger === '#') {
         const repoUrl = activeRepositoryContext?.type === 'github' ? activeRepositoryContext.url || activeRepositoryContext.path : null;
         if (!repoUrl) {
@@ -208,7 +234,7 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
     }
   }, [activeRepositoryContext, token]);
 
-  const scheduleAutocompleteUpdate = useCallback((trigger: '#' | '@', query: string) => {
+  const scheduleAutocompleteUpdate = useCallback((trigger: '#' | '@' | '/', query: string) => {
     if (autocompleteTimerRef.current) {
       window.clearTimeout(autocompleteTimerRef.current);
     }
@@ -241,12 +267,12 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
     // Autocomplete detection
     const cursorPosition = e.target.selectionStart;
     const textBeforeCursor = val.slice(0, cursorPosition);
-    const match = /(#|@)([^\s]*)$/.exec(textBeforeCursor);
+    const match = /(?:^|\s)(#|@|\/)([^\s]*)$/.exec(textBeforeCursor);
     
     if (match) {
-      const trigger = match[1] as '#' | '@';
+      const trigger = match[1] as '#' | '@' | '/';
       const query = match[2];
-      const wordStartIndex = match.index;
+      const wordStartIndex = match.index + (match[0].match(/^\s/) ? 1 : 0);
       setAutocomplete(prev => ({
         ...prev,
         isVisible: true,
@@ -502,7 +528,11 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
               <div className="absolute z-50 bottom-full left-0 right-0 mb-3 bg-popover/95 backdrop-blur-md text-popover-foreground border border-border shadow-xl rounded-2xl w-full max-h-72 overflow-y-auto transition-all duration-200">
                 <div className="p-2">
                   <div className="text-[10px] font-bold text-muted-foreground/80 tracking-wider uppercase px-3 py-2 border-b border-border/40 mb-1.5 flex items-center justify-between">
-                    <span>{autocomplete.trigger === '#' ? 'Archivos del Repositorio' : 'Archivos Locales'}</span>
+                    <span>
+                      {autocomplete.trigger === '#' ? 'Archivos del Repositorio' : 
+                       autocomplete.trigger === '@' ? 'Archivos Locales' : 
+                       'Skills Procedimentales'}
+                    </span>
                     <span className="text-[9px] font-normal lowercase bg-muted px-1.5 py-0.5 rounded-full">{autocomplete.options.length} sugerencias</span>
                   </div>
                   <div className="grid grid-cols-1 gap-0.5">
@@ -521,7 +551,11 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
                           setAutocomplete(prev => ({ ...prev, isVisible: false }));
                         }}
                       >
-                        <Paperclip className="h-4 w-4 shrink-0 opacity-70" />
+                        {autocomplete.trigger === '/' ? (
+                          <BookMarked className="h-4 w-4 shrink-0 opacity-70" />
+                        ) : (
+                          <Paperclip className="h-4 w-4 shrink-0 opacity-70" />
+                        )}
                         <span className="truncate font-mono text-xs sm:text-sm">{option}</span>
                       </div>
                     ))}
