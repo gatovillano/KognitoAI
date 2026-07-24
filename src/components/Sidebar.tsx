@@ -247,9 +247,9 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
           <Button
             variant={pathname === `/chat/${thread.id}` ? "secondary" : "ghost"}
             className={cn(
-              "w-full font-normal items-start text-left transition-all duration-200 hover:bg-muted rounded-xl overflow-hidden whitespace-normal h-auto",
+              "w-full font-normal items-start text-left transition-all duration-200 hover:bg-accent/50 rounded-xl overflow-hidden whitespace-normal h-auto",
               isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-auto py-1.5 px-2",
-              pathname === `/chat/${thread.id}` && "bg-primary/10 text-primary border border-primary/20"
+              pathname === `/chat/${thread.id}` && "bg-primary/10 text-primary font-medium"
             )}
           >
             <div className="flex w-full items-start gap-2 overflow-hidden">
@@ -268,7 +268,7 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <div
-                        className="h-5 w-5 p-0 cursor-pointer flex items-center justify-center"
+                        className="h-5 w-5 p-0 cursor-pointer flex items-center justify-center rounded-lg hover:bg-accent/50 transition-colors"
                         onClick={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
@@ -336,14 +336,14 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
   };
 
   return (
-    <div className={cn("flex flex-col h-full overflow-x-hidden", isCollapsed ? "items-center p-2" : "p-6")}>
+    <div className={cn("flex flex-col h-full overflow-x-hidden border-r border-border/20 backdrop-blur-md", isCollapsed ? "items-center p-2" : "p-6")}>
       {/* Header del sidebar */}
-      <div className={cn("flex items-center w-full pb-4 mb-2 border-b border-border/50", isCollapsed ? "justify-center" : "justify-start")}>
+      <div className={cn("flex items-center w-full pb-4 mb-2 border-b border-border/20", isCollapsed ? "justify-center" : "justify-start")}>
         <Button
           onClick={handleNewChat}
           variant="default"
           className={cn(
-            "w-full transition-all duration-200",
+            "w-full transition-all duration-200 shadow-sm hover:shadow-md",
             isCollapsed ? "h-9 w-9 p-0 rounded-full" : "h-9 px-4 rounded-full"
           )}
         >
@@ -360,7 +360,7 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
             <Button
               variant="ghost"
               size="icon"
-              className="p-0 h-6 w-6 rounded-full hover:bg-muted"
+              className="p-0 h-6 w-6 rounded-full hover:bg-accent/50 transition-colors"
               onClick={() => setIsToolsCollapsed(!isToolsCollapsed)}
             >
               {isToolsCollapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
@@ -374,9 +374,9 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
               <Button
                 variant={pathname === '/dashboard' ? 'secondary' : 'ghost'}
                 className={cn(
-                  "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
+                  "w-full transition-all duration-200 hover:bg-accent/50 rounded-xl group",
                   isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-9 px-2",
-                  pathname === '/dashboard' && "bg-primary/10 text-primary border border-primary/20"
+                  pathname === '/dashboard' && "bg-primary/10 text-primary font-medium"
                 )}
               >
                 <FolderKanban className={cn("h-4 w-4 transition-transform group-hover:scale-110", showToolText && "mr-2")} />
@@ -388,9 +388,9 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
               <Button
                 variant={pathname?.startsWith('/inbox') ? 'secondary' : 'ghost'}
                 className={cn(
-                  "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
+                  "w-full transition-all duration-200 hover:bg-accent/50 rounded-xl group",
                   isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-9 px-2",
-                  pathname?.startsWith('/inbox') && "bg-primary/10 text-primary border border-primary/20"
+                  pathname?.startsWith('/inbox') && "bg-primary/10 text-primary font-medium"
                 )}
               >
                 <Inbox className={cn("h-4 w-4 transition-transform group-hover:scale-110", showToolText && "mr-2")} />
@@ -401,9 +401,9 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
               <Button
                 variant={pathname?.startsWith('/rag') ? 'secondary' : 'ghost'}
                 className={cn(
-                  "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
+                  "w-full transition-all duration-200 hover:bg-accent/50 rounded-xl group",
                   isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-9 px-2",
-                  pathname?.startsWith('/rag') && "bg-primary/10 text-primary border border-primary/20"
+                  pathname?.startsWith('/rag') && "bg-primary/10 text-primary font-medium"
                 )}
               >
                 <Brain className={cn("h-4 w-4 transition-transform group-hover:scale-110", showToolText && "mr-2")} />
@@ -414,9 +414,9 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
               <Button
                 variant={pathname?.startsWith('/agenda') ? 'secondary' : 'ghost'}
                 className={cn(
-                  "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
+                  "w-full transition-all duration-200 hover:bg-accent/50 rounded-xl group",
                   isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-9 px-2",
-                  pathname?.startsWith('/agenda') && "bg-primary/10 text-primary border border-primary/20"
+                  pathname?.startsWith('/agenda') && "bg-primary/10 text-primary font-medium"
                 )}
               >
                 <Calendar className={cn("h-4 w-4 transition-transform group-hover:scale-110", showToolText && "mr-2")} />
@@ -428,9 +428,9 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
                 <Button
                   variant={pathname?.startsWith('/galleries') ? 'secondary' : 'ghost'}
                   className={cn(
-                    "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
+                    "w-full transition-all duration-200 hover:bg-accent/50 rounded-xl group",
                     isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-9 px-2",
-                    pathname?.startsWith('/galleries') && "bg-primary/10 text-primary border border-primary/20"
+                    pathname?.startsWith('/galleries') && "bg-primary/10 text-primary font-medium"
                   )}
                 >
                   <ImageIcon className={cn("h-4 w-4 transition-transform group-hover:scale-110", showToolText && "mr-2")} />
@@ -443,9 +443,9 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
                 <Button
                   variant={pathname?.startsWith('/forms') ? 'secondary' : 'ghost'}
                   className={cn(
-                    "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
+                    "w-full transition-all duration-200 hover:bg-accent/50 rounded-xl group",
                     isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-9 px-2",
-                    pathname?.startsWith('/forms') && "bg-primary/10 text-primary border border-primary/20"
+                    pathname?.startsWith('/forms') && "bg-primary/10 text-primary font-medium"
                   )}
                 >
                   <ClipboardList className={cn("h-4 w-4 transition-transform group-hover:scale-110", showToolText && "mr-2")} />
@@ -458,9 +458,9 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
               <Button
                 variant={pathname?.startsWith('/documents') ? 'secondary' : 'ghost'}
                 className={cn(
-                  "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
+                  "w-full transition-all duration-200 hover:bg-accent/50 rounded-xl group",
                   isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-9 px-2",
-                  pathname?.startsWith('/documents') && "bg-primary/10 text-primary border border-primary/20"
+                  pathname?.startsWith('/documents') && "bg-primary/10 text-primary font-medium"
                 )}
               >
                 <FileText className={cn("h-4 w-4 transition-transform group-hover:scale-110", showToolText && "mr-2")} />
@@ -472,9 +472,9 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
               <Button
                 variant={pathname?.startsWith('/workspaces') ? 'secondary' : 'ghost'}
                 className={cn(
-                  "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
+                  "w-full transition-all duration-200 hover:bg-accent/50 rounded-xl group",
                   isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-9 px-2",
-                  pathname?.startsWith('/workspaces') && "bg-primary/10 text-primary border border-primary/20"
+                  pathname?.startsWith('/workspaces') && "bg-primary/10 text-primary font-medium"
                 )}
               >
                 <Bot className={cn("h-4 w-4 transition-transform group-hover:scale-110", showToolText && "mr-2")} />
@@ -487,9 +487,9 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
                 <Button
                   variant={pathname?.startsWith('/fediverso') ? 'secondary' : 'ghost'}
                   className={cn(
-                    "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
+                    "w-full transition-all duration-200 hover:bg-accent/50 rounded-xl group",
                     isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-9 px-2",
-                    pathname?.startsWith('/fediverso') && "bg-primary/10 text-primary border border-primary/20"
+                    pathname?.startsWith('/fediverso') && "bg-primary/10 text-primary font-medium"
                   )}
                 >
                   <Globe className={cn("h-4 w-4 transition-transform group-hover:scale-110", showToolText && "mr-2")} />
@@ -503,9 +503,9 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
                 <Button
                   variant={pathname?.startsWith('/email') ? 'secondary' : 'ghost'}
                   className={cn(
-                    "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
+                    "w-full transition-all duration-200 hover:bg-accent/50 rounded-xl group",
                     isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-9 px-2",
-                    pathname?.startsWith('/email') && "bg-primary/10 text-primary border border-primary/20"
+                    pathname?.startsWith('/email') && "bg-primary/10 text-primary font-medium"
                   )}
                 >
                   <Mail className={cn("h-4 w-4 transition-transform group-hover:scale-110", showToolText && "mr-2")} />
@@ -519,9 +519,9 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
                 <Button
                   variant={pathname?.startsWith('/meet') ? 'secondary' : 'ghost'}
                   className={cn(
-                    "w-full transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
+                    "w-full transition-all duration-200 hover:bg-accent/50 rounded-xl group",
                     isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-9 px-2",
-                    pathname?.startsWith('/meet') && "bg-primary/10 text-primary border border-primary/20"
+                    pathname?.startsWith('/meet') && "bg-primary/10 text-primary font-medium"
                   )}
                 >
                   <Video className={cn("h-4 w-4 transition-transform group-hover:scale-110", showToolText && "mr-2")} />
@@ -543,7 +543,7 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
               </div>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-5 w-5 p-0 rounded-full hover:bg-muted">
+                  <Button variant="ghost" size="icon" className="h-5 w-5 p-0 rounded-full hover:bg-accent/50 transition-colors">
                     <MoreVertical className="h-3.5 w-3.5 text-muted-foreground" />
                   </Button>
                 </DropdownMenuTrigger>
@@ -564,7 +564,7 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
             <Button
               variant="ghost"
               size="icon"
-              className="p-0 h-6 w-6 rounded-full hover:bg-muted"
+              className="p-0 h-6 w-6 rounded-full hover:bg-accent/50 transition-colors"
               onClick={() => setIsPinnedCollapsed(!isPinnedCollapsed)}
             >
               {isPinnedCollapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
@@ -594,7 +594,7 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
             <Button
               variant="ghost"
               size="icon"
-              className="p-0 h-6 w-6 rounded-full hover:bg-muted"
+              className="p-0 h-6 w-6 rounded-full hover:bg-accent/50 transition-colors"
               onClick={() => setIsRecentCollapsed(!isRecentCollapsed)}
             >
               {isRecentCollapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
@@ -613,18 +613,18 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
       </ScrollArea>
 
       {/* Usuario */}
-      <div className={cn("mt-auto w-full pt-4 border-t border-border/50", isCollapsed && "flex flex-col items-center")}>
+      <div className={cn("mt-auto w-full pt-4 border-t border-border/20", isCollapsed && "flex flex-col items-center")}>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
               variant="ghost"
               className={cn(
-                "w-full h-auto py-2 transition-all duration-300 hover:bg-primary/10 hover:text-primary rounded-xl group",
+                "w-full h-auto py-2 transition-all duration-200 hover:bg-accent/50 rounded-xl group",
                 isCollapsed ? "h-10 w-10 p-0" : "justify-start gap-2"
               )}
             >
               <div className="relative">
-                <Avatar className="h-8 w-8 border-2 border-primary/20">
+                <Avatar className="h-8 w-8 border border-primary/20">
                   <AvatarImage src="https://github.com/shadcn.png" alt="@shadcn" />
                   <AvatarFallback className="bg-primary text-primary-foreground font-semibold text-sm">
                     {user?.username?.slice(0, 2).toUpperCase() || "KA"}
