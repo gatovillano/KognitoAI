@@ -205,6 +205,7 @@ class Account(Base):
     reranker_model = Column(String(255), nullable=True, comment="Modelo de Reranker preferido.")
     reranker_api_base = Column(String(255), nullable=True, comment="URL base opcional para la API de Reranker.")
     disabled_skills = Column(JSONB, nullable=True, server_default=text("'[]'::jsonb"), comment="Lista de IDs de skills desactivadas por el usuario.")
+    installed_extensions = Column(JSONB, nullable=True, server_default=text("'[]'::jsonb"), comment="Lista de IDs de extensiones instaladas y activas.")
 
     # Configuración de Acceso Remoto / SSH (para local_file_navigator)
     ssh_host = Column(String(255), nullable=True, comment="Hostname o IP del servidor SSH (o localhost para Docker host).")

@@ -1,6 +1,13 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { useUserSettings } from '@/contexts/UserSettingsContext';
+import dynamic from 'next/dynamic';
+
+const KogniPhotosGalleryView = dynamic(
+  () => import('@/components/KogniPhotosGalleryView').then((mod) => mod.KogniPhotosGalleryView),
+  { ssr: false }
+);
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
@@ -134,6 +141,12 @@ const AlbumCard = ({ album, onEditClick, onDeleteClick, onLinkProfileClick }: { 
 };
 
 const GalleriesPage = () => {
+  const { settings } = useUserSettings();
+
+  if (settings?.installed_extensions?.includes('gallery_selection_panel')) {
+    return <KogniPhotosGalleryView />;
+  }
+
   const [albums, setAlbums] = useState<AlbumResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

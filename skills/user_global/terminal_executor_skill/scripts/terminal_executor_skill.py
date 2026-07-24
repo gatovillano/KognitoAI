@@ -274,7 +274,7 @@ class TerminalExecutor(BaseTool):
         if streaming and interactive:
             # Modo interactivo: crear sesión PTY real y devolver placeholder HTML
             try:
-                from core.pty_sessions import create_session
+                from core.pty_sessions import create_session, get_session
                 acct = getattr(self, "account_id", None) or kwargs.get("account_id")
                 if not acct:
                     return "❌ Error: account_id no disponible para crear sesión PTY."
@@ -283,11 +283,40 @@ class TerminalExecutor(BaseTool):
                     account_id=acct,
                     cwd=cwd,
                 )
+                
+                # Esperar a que el proceso termine para capturar la salida para el agente
+                session = get_session(session_id)
+                if session:
+                    close_event = session.get("close_event")
+                    if close_event:
+                        try:
+                            await asyncio.wait_for(close_event.wait(), timeout=float(timeout))
+                        except asyncio.TimeoutError:
+                            logger.warning(f"Timeout de {timeout}s alcanzado esperando PTY session {session_id}")
+                
+                # Obtener la salida acumulada
+                accumulated = []
+                if session:
+                    accumulated = session.get("accumulated_output", [])
+                
+                raw_output = "".join(accumulated)
+                
+                # Limpiar secuencias ANSI para el agente
+                import re
+                clean = re.sub(r"\x1b\[[0-9;]*[mGKHABCDJfsuhl]", "", raw_output)
+                clean = re.sub(r"\x1b\].*?\x07", "", clean)
+                clean = clean.replace("\r\n", "\n").replace("\r", "\n")
+                
+                # Truncar si es muy larga
+                if len(clean) > MAX_OUTPUT_CHARS:
+                    clean = clean[:MAX_OUTPUT_CHARS] + "\n[... salida truncada ...]"
+                
                 import html as _html
                 safe_cmd = _html.escape(command)
                 return (
                     f'<div class="pty-session-placeholder" '
-                    f'data-session-id="{session_id}" data-cmd="{safe_cmd}"></div>'
+                    f'data-session-id="{session_id}" data-cmd="{safe_cmd}"></div>\n'
+                    f'\nSalida de la terminal:\n{clean}'
                 )
             except Exception as e:
                 logger.exception(f"Error creando sesión PTY interactiva: {e}")

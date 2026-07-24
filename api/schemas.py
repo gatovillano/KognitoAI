@@ -49,6 +49,7 @@ class UserSettingsResponse(BaseModel):
     reranker_model: Optional[str] = None
     reranker_api_base: Optional[str] = None
     disabled_skills: Optional[list] = []
+    installed_extensions: Optional[list] = []
     # Campos de SSH
     ssh_host: Optional[str] = None
     ssh_port: Optional[str] = "22"
@@ -115,6 +116,7 @@ class UserSettingsUpdateRequest(BaseModel):
     reranker_model: Optional[str] = None
     reranker_api_base: Optional[str] = None
     disabled_skills: Optional[list] = None
+    installed_extensions: Optional[list] = None
     # Campos de SSH
     ssh_host: Optional[str] = None
     ssh_port: Optional[str] = None
