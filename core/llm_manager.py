@@ -369,6 +369,17 @@ _llm_cache: Dict[tuple, tuple] = {}
 _LLM_CACHE_TTL = 300  # 5 minutes
 
 
+def clear_user_llm_cache(account_id: Union[str, uuid.UUID]):
+    """
+    Limpia las instancias de LLM en caché para un usuario específico.
+    """
+    acc_id_str = str(account_id)
+    keys_to_remove = [k for k in _llm_cache.keys() if str(k[0]) == acc_id_str]
+    for k in keys_to_remove:
+        _llm_cache.pop(k, None)
+    logger.info(f"🧹 Cache de LLM limpiado para el usuario {acc_id_str}")
+
+
 def get_main_llm() -> Optional[ChatLiteLLM]:  # More specific return type
     """Returns the initialized main agent LLM instance."""
     return _main_agent_llm_instance
