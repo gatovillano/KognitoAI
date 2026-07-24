@@ -137,3 +137,31 @@ async def test_pty_session_history_and_delay():
     # 5. Limpieza explícita
     await close_session(session_id)
     assert get_session(session_id) is None
+
+@pytest.mark.anyio
+async def test_terminal_executor_arun_with_interactive_output():
+    import uuid
+    from skills.user_global.terminal_executor_skill.scripts.terminal_executor_skill import TerminalExecutor
+    
+    account_id = str(uuid.uuid4())
+    executor = TerminalExecutor(account_id=account_id)
+    
+    result = await executor._arun(
+        command="echo 'hello from interactive PTY'",
+        timeout=5,
+        streaming=True,
+        interactive=True,
+    )
+    
+    # Verificar que el marcador de posición HTML esté presente
+    assert '<div class="pty-session-placeholder"' in result
+    assert 'data-session-id="' in result
+    
+    # Verificar que la salida del comando esté incluida en la respuesta
+    assert "hello from interactive PTY" in result
+    
+    # Obtener el session_id para limpiarlo
+    match = re.search(r'data-session-id="([^"]+)"', result)
+    assert match is not None
+    session_id = match.group(1)
+    await close_session(session_id)

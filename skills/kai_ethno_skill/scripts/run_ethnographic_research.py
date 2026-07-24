@@ -78,8 +78,10 @@ class RunEthnographicResearchTool(BaseTool):
             orchestrator = KAIEthnoOrchestrator(
                 enable_ethics=True,
                 enable_memory=False,
-                enable_message_bus=False
+                enable_message_bus=False,
+                account_id=self.account_id
             )
+
 
             year_range = None
             if year_range_start and year_range_end:

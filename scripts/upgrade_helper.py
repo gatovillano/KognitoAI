@@ -14,7 +14,47 @@ import subprocess
 
 REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXT_DIR = os.path.join(REPO_DIR, "extensions")
+EXT_DIR_PARENT = os.path.join(os.path.dirname(REPO_DIR), "extensions")
 STATE_FILE = os.path.expanduser("~/.kognito/config/active_extensions.json")
+
+
+def find_ext_install_py(ext_name: str) -> str:
+    """Finds the path to install.py for a given extension name."""
+    local_path = os.path.join(REPO_DIR, "extensions", ext_name, "install.py")
+    if os.path.isfile(local_path):
+        return local_path
+
+    parent_path = os.path.join(EXT_DIR_PARENT, ext_name, "install.py")
+    if os.path.isfile(parent_path):
+        return parent_path
+
+    return ""
+
+
+def is_extension_active(ext_name: str) -> bool:
+    """Checks if the extension is currently installed/active in the repository."""
+    # 1. Heuristic A: backend directory exists in api/
+    if os.path.isdir(os.path.join(REPO_DIR, "api", ext_name)):
+        return True
+    
+    # 2. Heuristic B: skill directory exists in skills/
+    if os.path.isdir(os.path.join(REPO_DIR, "skills", f"{ext_name}_skill")):
+        return True
+    if os.path.isdir(os.path.join(REPO_DIR, "skills", ext_name)):
+        return True
+
+    # 3. Heuristic C: registered in api/main.py
+    main_py = os.path.join(REPO_DIR, "api", "main.py")
+    if os.path.isfile(main_py):
+        try:
+            with open(main_py, "r", encoding="utf-8") as f:
+                content = f.read()
+            if ext_name in content:
+                return True
+        except Exception:
+            pass
+
+    return False
 
 
 def get_python_bin() -> str:
@@ -26,31 +66,30 @@ def get_python_bin() -> str:
 
 
 def get_installed_extensions() -> list:
-    """
-    Scans the extensions/ directory for active extensions.
-
-    An extension is considered active if:
-      1. It has a subdirectory in extensions/ with an install.py file.
-      2. It has a matching backend subdirectory inside api/ (e.g. api/gallery_selection_panel).
-    """
+    """Scans local and parent extensions/ directories for active extensions."""
     active = []
-    if not os.path.isdir(EXT_DIR):
-        return active
-
-    for item in sorted(os.listdir(EXT_DIR)):
-        item_path = os.path.join(EXT_DIR, item)
-        if not os.path.isdir(item_path):
-            continue
-
-        install_py = os.path.join(item_path, "install.py")
-        if not os.path.isfile(install_py):
-            continue
-
-        # Heuristic: active = backend directory was injected into api/
-        backend_dir = os.path.join(REPO_DIR, "api", item)
-        if os.path.isdir(backend_dir):
-            active.append(item)
-
+    ext_dirs = []
+    
+    local_ext = os.path.join(REPO_DIR, "extensions")
+    if os.path.isdir(local_ext):
+        ext_dirs.append(local_ext)
+        
+    parent_ext = EXT_DIR_PARENT
+    if os.path.isdir(parent_ext):
+        ext_dirs.append(parent_ext)
+        
+    candidates = set()
+    for d in ext_dirs:
+        for item in os.listdir(d):
+            item_path = os.path.join(d, item)
+            if os.path.isdir(item_path):
+                if os.path.isfile(os.path.join(item_path, "install.py")):
+                    candidates.add(item)
+                    
+    for ext in sorted(candidates):
+        if is_extension_active(ext):
+            active.append(ext)
+            
     return active
 
 
@@ -84,8 +123,8 @@ def pre_upgrade():
     python_bin = get_python_bin()
 
     for ext in active:
-        ext_install_py = os.path.join(EXT_DIR, ext, "install.py")
-        if not os.path.isfile(ext_install_py):
+        ext_install_py = find_ext_install_py(ext)
+        if not ext_install_py:
             print(f"  ⚠️  No se encontró install.py para {ext}. Omitiendo desinstalación.")
             continue
 
@@ -135,9 +174,9 @@ def post_upgrade():
     python_bin = get_python_bin()
 
     for ext in active:
-        ext_install_py = os.path.join(EXT_DIR, ext, "install.py")
-        if not os.path.isfile(ext_install_py):
-            print(f"  ❌ No se encontró install.py para {ext} en {ext_install_py}. Omitiendo.")
+        ext_install_py = find_ext_install_py(ext)
+        if not ext_install_py:
+            print(f"  ❌ No se encontró install.py para {ext}. Omitiendo.")
             continue
 
         print(f"  ⚙️  Reinstalando: {ext} ...")

@@ -33,7 +33,7 @@ BACKEND_PID=$!
 
 echo -e "${BLUE}Iniciando el servidor Frontend (Next.js)...${NC}"
 echo -e "${BLUE}  → Logs: ./logs/frontend.log${NC}"
-if [ ! -d ".next" ]; then
+if [ ! -d ".next" ] || [ ! -f ".next/BUILD_ID" ]; then
     echo -e "${YELLOW}Compilando el frontend por primera vez...${NC}"
     PORT=3002 npm run build >> logs/frontend.log 2>&1
 fi
