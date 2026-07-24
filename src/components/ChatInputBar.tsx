@@ -159,8 +159,8 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
       }
       
       if (trigger === '/') {
-        let fullOptions = skillsCacheRef.current;
-        if (!fullOptions) {
+        let fullOptions: string[] = skillsCacheRef.current || [];
+        if (!skillsCacheRef.current) {
           const res = await fetch(`/api/skills/available`, {
             headers: { 'Authorization': `Bearer ${token}` },
             signal: controller.signal,
@@ -202,7 +202,7 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
           repoTreeCacheRef.current.set(repoUrl, fullOptions);
         }
 
-        const filtered = fullOptions
+        const filtered = (fullOptions || [])
           .filter(o => o.toLowerCase().includes(query.toLowerCase()))
           .slice(0, 50);
 
