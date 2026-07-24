@@ -55,6 +55,10 @@ const nextConfig = {
         destination: `${apiServerUrl}/media/:path*`,
       },
       {
+        source: '/thumbnails/:path*',
+        destination: `${apiServerUrl}/thumbnails/:path*`,
+      },
+      {
         source: '/tmp/pollinations_images/:path*',
         destination: `${apiServerUrl}/tmp/pollinations_images/:path*`,
       },

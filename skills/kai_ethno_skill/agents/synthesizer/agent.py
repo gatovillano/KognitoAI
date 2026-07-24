@@ -40,15 +40,7 @@ class SynthesizerAgent:
     description = "Tejedor de Sentidos - Integración analítica y triangulación"
     
     def __init__(self, llm_service: Any = None):
-        if llm_service is not None:
-            self.llm = llm_service
-        else:
-            try:
-                from core.llm_service import get_default_llm_service
-                self.llm = get_default_llm_service()
-            except ImportError:
-                self.llm = None
-
+        self.llm = llm_service
         self.state = SynthesizerState()
         self.graph = self._build_graph()
 
@@ -159,40 +151,8 @@ class SynthesizerAgent:
         
         return {"status": "triangulated", "triangulation_matrix": matrix}
     
-    async def _detect_contradictions(self, state: SynthesizerState) -> Dict[str, Any]:
-        """Detecta contradicciones entre fuentes usando LLM si está disponible, o heurística de respaldo."""
-        valid_sources = [s for s in state.sources if isinstance(s, dict)]
-        
-        if self.llm and hasattr(self.llm, "is_available") and self.llm.is_available():
-            sources_summary = "\n".join([f"- [{s.get('title', '')}]: {s.get('abstract', '')[:300]}" for s in valid_sources[:8]])
-            prompt = (
-                "Analiza las siguientes fuentes académicas y detecta contradicciones teóricas, hallazgos opuestos o tensiones conceptuales:\n\n"
-                f"{sources_summary}\n\n"
-                "Responde en formato JSON con la llave 'contradictions': una lista de objetos "
-                "{ 'source_a': title_a, 'source_b': title_b, 'opposition': descripcion, 'severity': 'high'|'moderate' }"
-            )
-            system_prompt = "Eres un epistemólogo y analista de triangulación cualitativa."
-            llm_response = await self.llm.generate(prompt, system_prompt=system_prompt)
-            if llm_response:
-                try:
-                    import json
-                    clean_json = llm_response.strip()
-                    if "```json" in clean_json:
-                        clean_json = clean_json.split("```json")[1].split("```")[0].strip()
-                    elif "```" in clean_json:
-                        clean_json = clean_json.split("```")[1].split("```")[0].strip()
-                    data = json.loads(clean_json)
-                    contradictions = data.get("contradictions", [])
-                    state.contradictions = contradictions
-                    return {
-                        "status": "contradictions_detected",
-                        "contradictions": contradictions,
-                        "temporal_gaps": []
-                    }
-                except Exception as e:
-                    logger.warning(f"Error parseando contradicciones de LLM: {e}")
-
-        # Fallback heurístico
+    def _detect_contradictions(self, state: SynthesizerState) -> Dict[str, Any]:
+        """Detecta contradicciones entre fuentes"""
         contradictions = []
         opposition_pairs = [
             ("aumenta", "disminuye"), ("crece", "decrece"), ("positivo", "negativo"),
@@ -200,15 +160,18 @@ class SynthesizerAgent:
             ("moderno", "tradicional"), ("global", "local"), ("central", "periférico")
         ]
         
+        valid_sources = [s for s in state.sources if isinstance(s, dict)]
         for i, source_a in enumerate(valid_sources):
             for j, source_b in enumerate(valid_sources):
                 if i >= j:
                     continue
-                text_a = (str(source_a.get("title", "")) + " " + str(source_a.get("abstract", ""))).lower()
-                text_b = (str(source_b.get("title", "")) + " " + str(source_b.get("abstract", ""))).lower()
+                text_a = str(source_a.get("title", "")) + " " + str(source_a.get("abstract", ""))
+                text_b = str(source_b.get("title", "")) + " " + str(source_b.get("abstract", ""))
+                text_a_low = text_a.lower()
+                text_b_low = text_b.lower()
                 
                 for pos, neg in opposition_pairs:
-                    if (pos in text_a and neg in text_b) or (neg in text_a and pos in text_b):
+                    if (pos in text_a_low and neg in text_b_low) or (neg in text_a_low and pos in text_b_low):
                         contradictions.append({
                             "source_a": source_a.get("title", "")[:50],
                             "source_b": source_b.get("title", "")[:50],
@@ -224,15 +187,14 @@ class SynthesizerAgent:
                 if years[i+1] - years[i] > 3:
                     gaps.append(f"{years[i]}-{years[i+1]}")
         
-        state.contradictions = contradictions
         return {
             "status": "contradictions_detected",
             "contradictions": contradictions[:20],
             "temporal_gaps": gaps
         }
     
-    async def _generate_synthesis(self, state: SynthesizerState) -> Dict[str, Any]:
-        """Genera reporte de síntesis final con narrativa LLM cuando está disponible."""
+    def _generate_synthesis(self, state: SynthesizerState) -> Dict[str, Any]:
+        """Genera reporte de síntesis final"""
         valid_sources = [s for s in state.sources if isinstance(s, dict)]
         total_sources = len(valid_sources)
         themes = state.patterns.get("themes", {}) if isinstance(state.patterns, dict) else {}
@@ -240,21 +202,10 @@ class SynthesizerAgent:
         
         main_themes = sorted(themes.items(), key=lambda x: len(x[1]) if isinstance(x[1], list) else 1, reverse=True)[:5]
         
-        narrative_synthesis = None
-        if self.llm and hasattr(self.llm, "is_available") and self.llm.is_available():
-            prompt = (
-                f"Genera una síntesis cualitativa integradora sobre {total_sources} fuentes académicas. "
-                f"Temas principales identificados: {[t for t, _ in main_themes]}. "
-                f"Contradicciones encontradas: {len(contradictions)}."
-            )
-            system_prompt = "Eres un investigador académico sénior sintetizando hallazgos de ciencias sociales."
-            narrative_synthesis = await self.llm.generate(prompt, system_prompt=system_prompt)
-
         synthesis = {
             "total_sources_analyzed": total_sources,
             "main_themes": [{"theme": t, "evidence_count": len(ev) if isinstance(ev, list) else 1} for t, ev in main_themes],
             "contradictions_found": len(contradictions),
-            "narrative_synthesis": narrative_synthesis,
             "temporal_coverage": {
                 "earliest": min((s.get("year") for s in valid_sources if s.get("year")), default=None),
                 "latest": max((s.get("year") for s in valid_sources if s.get("year")), default=None)
@@ -267,7 +218,6 @@ class SynthesizerAgent:
             "recommendations": self._generate_recommendations(state)
         }
         
-        state.synthesis_report = synthesis
         return {"status": "synthesis_complete", "synthesis_report": synthesis}
 
     def _build_graph(self) -> StateGraph:
@@ -288,7 +238,6 @@ class SynthesizerAgent:
         workflow.add_edge("synthesize", END)
         
         return workflow.compile()
-
     
     def _calculate_confidence(self, state: SynthesizerState) -> float:
         """Calcula score de confianza de la síntesis"""
