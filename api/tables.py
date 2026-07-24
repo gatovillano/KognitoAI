@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 import pandas as pd
 import io
 from fastapi import APIRouter, HTTPException, Depends, status, Query, Body, UploadFile, File, Form
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, update
 from pydantic import BaseModel, Field
@@ -436,6 +437,76 @@ async def import_data(
         logger.error(f"Error al importar datos: {e}")
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"Error al procesar el archivo: {str(e)}")
+
+
+@router.get("/{table_id}/export")
+async def export_table(
+    table_id: uuid.UUID,
+    format: str = Query("xlsx", pattern="^(xlsx|csv)$"),
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """Exporta los datos de una tabla a formato Excel (.xlsx) o CSV."""
+    stmt = select(UserTable).where(
+        UserTable.id == table_id,
+        UserTable.account_id == uuid.UUID(current_account_id)
+    )
+    result = await db.execute(stmt)
+    table = result.scalar_one_or_none()
+    if not table:
+        raise HTTPException(status_code=404, detail="Tabla no encontrada.")
+    
+    rows_stmt = select(UserTableRow).where(UserTableRow.table_id == table_id)
+    rows_result = await db.execute(rows_stmt)
+    rows = rows_result.scalars().all()
+    
+    col_names = [col["name"] for col in table.columns] if table.columns else []
+    
+    data_list = []
+    for row in rows:
+        row_data = row.data or {}
+        formatted_row = {}
+        for col in col_names:
+            val = row_data.get(col)
+            if isinstance(val, (dict, list)):
+                val = json.dumps(val, ensure_ascii=False)
+            formatted_row[col] = val
+        for k, v in row_data.items():
+            if k not in formatted_row:
+                if isinstance(v, (dict, list)):
+                    v = json.dumps(v, ensure_ascii=False)
+                formatted_row[k] = v
+        data_list.append(formatted_row)
+        
+    df = pd.DataFrame(data_list)
+    if col_names and not df.empty:
+        existing_cols = [c for c in col_names if c in df.columns]
+        other_cols = [c for c in df.columns if c not in existing_cols]
+        df = df[existing_cols + other_cols]
+        
+    df = df.where(pd.notnull(df), "")
+    
+    safe_filename = "".join(c for c in table.name if c.isalnum() or c in (" ", "_", "-")).strip() or "tabla"
+    
+    if format == "csv":
+        output = io.StringIO()
+        df.to_csv(output, index=False, encoding="utf-8-sig")
+        output.seek(0)
+        return StreamingResponse(
+            io.BytesIO(output.getvalue().encode("utf-8-sig")),
+            media_type="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{safe_filename}.csv"'}
+        )
+    else:
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            df.to_excel(writer, index=False, sheet_name=safe_filename[:31])
+        output.seek(0)
+        return StreamingResponse(
+            output,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{safe_filename}.xlsx"'}
+        )
 
 # --- Análisis de Datos ---
 

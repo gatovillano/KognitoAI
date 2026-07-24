@@ -51,6 +51,14 @@ AVAILABLE_EXTENSIONS = [
         "requires_db": True
     },
     {
+        "id": "kognito_chat",
+        "name": "KognitoChat",
+        "category": "Communication / AI",
+        "description": "Chat multiusuario en tiempo real entre miembros de la instancia con asistencia del agente @KAI.",
+        "icon": "MessageSquare",
+        "requires_db": True
+    },
+    {
         "id": "kai_ethno",
         "name": "KAI Ethno",
         "category": "Research / AI",
@@ -158,6 +166,14 @@ async def install_extension(
                 import extensions.fediverso.backend.models # noqa: F401
             except ImportError:
                 logger.warning("No se pudo importar el modelo de fediverso")
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+
+        elif ext_id == "kognito_chat":
+            try:
+                import extensions.kognito_chat.backend.models # noqa: F401
+            except ImportError:
+                logger.warning("No se pudo importar el modelo de kognito_chat")
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
 
