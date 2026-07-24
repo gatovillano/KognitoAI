@@ -21,6 +21,7 @@ export const SETTINGS_MENU = [
   { id: 'security', label: 'Seguridad', icon: ShieldCheck },
   { id: 'remote', label: 'Acceso Remoto / SSH', icon: Globe },
   { id: 'sync', label: 'Sincronización', icon: RefreshCw },
+  { id: 'extensions', label: 'Tienda de Extensiones', icon: Puzzle },
   { id: 'integrations', label: 'Integraciones', icon: Puzzle },
 ];
 

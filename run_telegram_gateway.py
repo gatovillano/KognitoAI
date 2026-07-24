@@ -101,14 +101,23 @@ async def lifespan(app: FastAPI):
     def done_callback(task: asyncio.Task) -> None:
         if task.cancelled():
             return
-        if task.exception():
-            logger.error("❌ Excepción en tarea de fondo PTB:", exc_info=task.exception())
+        try:
+            exc = task.exception()
+            if exc:
+                logger.error("❌ Excepción en tarea de fondo PTB:", exc_info=exc)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"❌ Error al obtener excepción de tarea: {e}", exc_info=True)
+
+    def polling_error_callback(exc: Exception) -> None:
+        logger.error(f"❌ Error en polling loop de Telegram: {exc}", exc_info=exc)
 
     if ptb_app.updater:
         logger.info("Iniciando polling de Telegram...")
         await ptb_app.start()
         polling_task = asyncio.create_task(
-            ptb_app.updater.start_polling(drop_pending_updates=True, error_callback=done_callback)
+            ptb_app.updater.start_polling(drop_pending_updates=True, error_callback=polling_error_callback)
         )
         polling_task.add_done_callback(done_callback)
         logger.info("✅ Polling iniciado.")

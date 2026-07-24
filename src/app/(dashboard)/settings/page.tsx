@@ -14,7 +14,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import apiClient from '@/lib/api'; // Importar apiClient
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Edit, Trash2, Eye, Calendar, User, Sparkles, Brain, Zap, Image as ImageIcon, Wrench, Puzzle, Info, RefreshCw, Globe, Github, Slack, ShieldCheck, Menu, X, Server } from 'lucide-react';
+import { Plus, Edit, Trash2, Eye, Calendar, User, Sparkles, Brain, Zap, Image as ImageIcon, Wrench, Puzzle, Info, RefreshCw, Globe, Github, Slack, ShieldCheck, Menu, X, Server, Mail, Video } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -361,6 +361,134 @@ const IntegrationsSettings: React.FC = () => {
           </Card>
         ))}
       </div>
+    </div>
+  );
+};
+
+const ExtensionsSettings: React.FC = () => {
+  const { settings, getSettings } = useUserSettings();
+  const [extensions, setExtensions] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState<Record<string, boolean>>({});
+
+  const fetchExtensions = async () => {
+    try {
+      const response = await apiClient.get('/api/extensions/available');
+      setExtensions(response.data.extensions);
+    } catch (error) {
+      console.error('Error al cargar las extensiones:', error);
+      toast.error('Error al cargar las extensiones.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchExtensions();
+  }, []);
+
+  const handleInstall = async (extId: string) => {
+    setActionLoading(prev => ({ ...prev, [extId]: true }));
+    try {
+      const resp = await apiClient.post('/api/extensions/install', { extension_id: extId });
+      toast.success(resp.data.message || 'Extensión instalada con éxito.');
+      await fetchExtensions();
+      await getSettings(); // Actualizar configuración del usuario para el Sidebar
+    } catch (error: any) {
+      console.error('Error al instalar la extensión:', error);
+      toast.error(error.response?.data?.detail || 'Error al instalar la extensión.');
+    } finally {
+      setActionLoading(prev => ({ ...prev, [extId]: false }));
+    }
+  };
+
+  const handleUninstall = async (extId: string) => {
+    if (!window.confirm('¿Estás seguro de que deseas desinstalar esta extensión?')) {
+      return;
+    }
+    setActionLoading(prev => ({ ...prev, [extId]: true }));
+    try {
+      const resp = await apiClient.post('/api/extensions/uninstall', { extension_id: extId });
+      toast.success(resp.data.message || 'Extensión desinstalada.');
+      await fetchExtensions();
+      await getSettings(); // Actualizar configuración del usuario para el Sidebar
+    } catch (error: any) {
+      console.error('Error al desinstalar la extensión:', error);
+      toast.error(error.response?.data?.detail || 'Error al desinstalar la extensión.');
+    } finally {
+      setActionLoading(prev => ({ ...prev, [extId]: false }));
+    }
+  };
+
+  if (loading) return <div className="p-8 text-center text-sm text-muted-foreground">Cargando extensiones...</div>;
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      {extensions.map((ext) => {
+        const isInstalled = ext.is_installed;
+        const IconComponent = ext.icon === 'Mail' ? Mail :
+                              ext.icon === 'Video' ? Video :
+                              ext.icon === 'Globe' ? Globe :
+                              ext.icon === 'ImageIcon' ? ImageIcon : Brain;
+        
+        return (
+          <Card 
+            key={ext.id} 
+            className={`overflow-hidden transition-all duration-300 relative group border-2 ${isInstalled ? 'border-primary/20 bg-primary/5 shadow-md' : 'opacity-85 border-muted-foreground/15 hover:border-muted-foreground/30'}`}
+          >
+            {/* Gradient accent top line */}
+            <div className={`h-1.5 w-full bg-gradient-to-r ${
+              ext.id === 'gallery_selection_panel' ? 'from-pink-500 via-rose-500 to-amber-500' :
+              ext.id === 'email_management' ? 'from-violet-500 via-purple-500 to-pink-500' :
+              ext.id === 'jitsi_meet' ? 'from-cyan-500 via-blue-500 to-indigo-500' :
+              ext.id === 'fediverso' ? 'from-emerald-500 via-teal-500 to-cyan-500' :
+              'from-yellow-500 via-amber-600 to-orange-600'
+            }`} />
+            
+            <CardHeader className="pb-3 pt-5">
+              <div className="flex justify-between items-start">
+                <div className="flex items-center gap-3">
+                  <div className={`p-2.5 rounded-xl transition-colors duration-300 ${isInstalled ? 'bg-primary/20 text-primary' : 'bg-muted text-muted-foreground'}`}>
+                    <IconComponent className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <Badge variant="outline" className="text-[9px] uppercase font-extrabold tracking-wider px-1.5 py-0 mb-1.5 block w-fit">
+                      {ext.category}
+                    </Badge>
+                    <CardTitle className="text-sm font-extrabold tracking-tight">{ext.name}</CardTitle>
+                  </div>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="pb-5">
+              <p className="text-xs text-muted-foreground min-h-[48px] leading-relaxed">
+                {ext.description}
+              </p>
+              <div className="mt-6 flex items-center justify-between gap-2">
+                <Badge variant={isInstalled ? 'default' : 'secondary'} className="text-[10px] uppercase font-extrabold px-2 py-0.5">
+                  {isInstalled ? 'Activa' : 'Disponible'}
+                </Badge>
+                
+                <Button
+                  size="sm"
+                  variant={isInstalled ? 'destructive' : 'default'}
+                  onClick={() => isInstalled ? handleUninstall(ext.id) : handleInstall(ext.id)}
+                  disabled={actionLoading[ext.id]}
+                  className="h-8 rounded-xl px-4 text-xs font-semibold shadow-sm transition-all duration-200"
+                >
+                  {actionLoading[ext.id] ? (
+                    <div className="h-3 w-3 animate-spin rounded-full border border-current border-t-transparent" />
+                  ) : isInstalled ? (
+                    'Desinstalar'
+                  ) : (
+                    'Instalar'
+                  )}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })}
     </div>
   );
 };
@@ -1992,6 +2120,7 @@ const SettingsPage: React.FC = () => {
           <TabsTrigger value="security">Seguridad</TabsTrigger>
           <TabsTrigger value="remote">Acceso Remoto / SSH</TabsTrigger>
           <TabsTrigger value="sync">Sincronización</TabsTrigger>
+          <TabsTrigger value="extensions">Tienda de Extensiones</TabsTrigger>
           <TabsTrigger value="integrations">Integraciones</TabsTrigger>
         </TabsList>
         <TabsContent value="personal-data">
@@ -2974,6 +3103,23 @@ const SettingsPage: React.FC = () => {
                   </li>
                 </ol>
               </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="extensions">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Puzzle className="h-5 w-5 text-primary" />
+                Tienda de Extensiones
+              </CardTitle>
+              <CardDescription>
+                Activa y desactiva extensiones y complementos para tu cuenta de forma instantánea.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ExtensionsSettings />
             </CardContent>
           </Card>
         </TabsContent>
