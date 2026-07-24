@@ -58,15 +58,7 @@ class EthnographAgent:
     description = "Etnógrafo Digital - Procesamiento de materiales etnográficos"
     
     def __init__(self, llm_service: Any = None):
-        if llm_service is not None:
-            self.llm = llm_service
-        else:
-            try:
-                from core.llm_service import get_default_llm_service
-                self.llm = get_default_llm_service()
-            except ImportError:
-                self.llm = None
-
+        self.llm = llm_service
         self.graph = self._build_graph()
         self.state = EthnographState()
     
@@ -136,45 +128,11 @@ class EthnographAgent:
                 "total_pii_instances": pii_count
             }
         
-        async def code_themes(state: EthnographState) -> Dict[str, Any]:
-            """Codifica temas y categorías analíticas utilizando LLM si está disponible, o heurística de respaldo."""
-            all_texts = [item.get("redacted_text", item.get("normalized", "")) for item in state.processed_data]
+        def code_themes(state: EthnographState) -> Dict[str, Any]:
+            """Codifica temas y categorías analíticas"""
+            all_texts = [item["redacted_text"] for item in state.processed_data]
             
-            # --- Intentar análisis con LLM ---
-            if self.llm and hasattr(self.llm, "is_available") and self.llm.is_available():
-                corpus_sample = "\n---\n".join([t[:1200] for t in all_texts[:6]])
-                prompt = (
-                    "Realiza un análisis de codificación temática cualitativa profunda (Braun & Clarke) sobre el siguiente corpus etnográfico:\n\n"
-                    f"{corpus_sample}\n\n"
-                    "Responde estrictamente en formato JSON con la siguiente estructura:\n"
-                    "{\n"
-                    '  "top_themes": {"nombre_tema_1": 10, "nombre_tema_2": 8},\n'
-                    '  "coded_segments": [{"text": "cita relevante", "codes": ["tema1"]}]\n'
-                    "}"
-                )
-                system_prompt = "Eres un antropólogo digital experto en análisis cualitativo del discurso y codificación temática."
-                llm_response = await self.llm.generate(prompt, system_prompt=system_prompt)
-                if llm_response:
-                    try:
-                        import json
-                        clean_json = llm_response.strip()
-                        if "```json" in clean_json:
-                            clean_json = clean_json.split("```json")[1].split("```")[0].strip()
-                        elif "```" in clean_json:
-                            clean_json = clean_json.split("```")[1].split("```")[0].strip()
-                        data = json.loads(clean_json)
-                        top_themes = data.get("top_themes", {})
-                        coded_segments = data.get("coded_segments", [])
-                        state.themes = top_themes
-                        return {
-                            "status": "coded",
-                            "themes": top_themes,
-                            "coded_segments": coded_segments
-                        }
-                    except Exception as e:
-                        logger.warning(f"Error parseando JSON de LLM en code_themes: {e}")
-
-            # --- Fallback Heurístico ---
+            # Extracción de temas por frecuencia de términos significativos
             word_freq = {}
             for text in all_texts:
                 words = re.findall(r'\b[a-zA-ZáéíóúüñÁÉÍÓÚÜÑ]{4,}\b', text.lower())
@@ -186,18 +144,24 @@ class EthnographAgent:
                     if w not in stopwords and len(w) > 3:
                         word_freq[w] = word_freq.get(w, 0) + 1
             
+            # Top temas
             sorted_words = sorted(word_freq.items(), key=lambda x: x[1], reverse=True)
             top_themes = {word: count for word, count in sorted_words[:20]}
             
+            # Codificación de segmentos
             coded_segments = []
             for item in state.processed_data:
-                text = item.get("redacted_text", item.get("normalized", ""))
+                text = item["redacted_text"]
                 sentences = re.split(r'(?<=[.!?])\s+', text)
                 for sent in sentences:
                     sent = sent.strip()
                     if len(sent) < 10:
                         continue
-                    codes = [theme for theme in top_themes.keys() if theme in sent.lower()]
+                    # Asignar temas basados en palabras clave
+                    codes = []
+                    for theme in top_themes.keys():
+                        if theme in sent.lower():
+                            codes.append(theme)
                     if codes:
                         coded_segments.append({
                             "text": sent,
@@ -212,27 +176,9 @@ class EthnographAgent:
                 "coded_segments": coded_segments
             }
         
-        async def analyze_discourse(state: EthnographState) -> Dict[str, Any]:
-            """Aplica análisis del discurso según framework seleccionado (LLM o regex)"""
-            all_texts = [item.get("redacted_text", item.get("normalized", "")) for item in state.processed_data]
-            
-            if self.llm and hasattr(self.llm, "is_available") and self.llm.is_available():
-                corpus_sample = "\n---\n".join([t[:1200] for t in all_texts[:6]])
-                prompt = (
-                    "Realiza un análisis del discurso crítico (Fairclough / van Dijk) sobre el siguiente corpus:\n\n"
-                    f"{corpus_sample}\n\n"
-                    "Analiza: 1. Modalidades epistémicas y deónticas. 2. Estructuras de poder y legitimación. 3. Posicionamientos de actores sociales."
-                )
-                system_prompt = "Eres un lingüista y etnógrafo especializado en Análisis del Discurso Crítico."
-                llm_response = await self.llm.generate(prompt, system_prompt=system_prompt)
-                if llm_response:
-                    return {
-                        "status": "discourse_analyzed",
-                        "discourse_analysis": {"llm_summary": llm_response},
-                        "framework": "fairclough_llm"
-                    }
-
-            # Fallback heurístico
+        def analyze_discourse(state: EthnographState) -> Dict[str, Any]:
+            """Aplica análisis del discurso según framework seleccionado"""
+            # Análisis simplificado: identificación de marcas lingüísticas
             discourse_markers = {
                 "modalidad_deóntica": re.compile(r'\b(debe|debería|tiene que|es necesario|obligatorio|prohibido)\b', re.I),
                 "modalidad_epistémica": re.compile(r'\b(parece|probablemente|posiblemente|tal vez|quizás|supongo)\b', re.I),
@@ -254,7 +200,6 @@ class EthnographAgent:
                 "discourse_analysis": discourse_analysis,
                 "framework": "fairclough_inspired"
             }
-
         
         def map_actors(state: EthnographState) -> Dict[str, Any]:
             """Mapea actores y redes (ANT simplificada)"""

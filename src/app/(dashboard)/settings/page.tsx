@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from 'sonner';
 import { useUserSettings } from '@/contexts/UserSettingsContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { EmailSettingsModal } from '@/components/EmailSettingsModal';
 import apiClient from '@/lib/api'; // Importar apiClient
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -1603,6 +1604,7 @@ const SettingsPage: React.FC = () => {
   const { settings, loading, error, getSettings, updateSettings } = useUserSettings();
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('personal-data');
+  const [isEmailSettingsOpen, setIsEmailSettingsOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [localSettings, setLocalSettings] = useState(settings);
 
@@ -2120,6 +2122,7 @@ const SettingsPage: React.FC = () => {
           <TabsTrigger value="security">Seguridad</TabsTrigger>
           <TabsTrigger value="remote">Acceso Remoto / SSH</TabsTrigger>
           <TabsTrigger value="sync">Sincronización</TabsTrigger>
+          <TabsTrigger value="email">Correo Electrónico</TabsTrigger>
           <TabsTrigger value="extensions">Tienda de Extensiones</TabsTrigger>
           <TabsTrigger value="integrations">Integraciones</TabsTrigger>
         </TabsList>

@@ -10,23 +10,11 @@ from typing import Any, Dict, List, Optional
 
 import os
 import sys
-import importlib.util
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 skill_dir = os.path.dirname(current_dir)
 if skill_dir not in sys.path:
     sys.path.insert(0, skill_dir)
-
-
-def _load_local_module(rel_path: str, module_name: str):
-    full_path = os.path.join(skill_dir, rel_path)
-    spec = importlib.util.spec_from_file_location(module_name, full_path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Cannot load module {module_name} from {full_path}")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
 
 try:
     from ..agents.archivist import ArchivistAgent, ArchivistState
@@ -39,43 +27,15 @@ try:
     from ..core.ethics_council import EthicsCouncil, EthicsVerdict
     from ..core.message_bus import MessageBus, MessageType
 except (ImportError, ValueError):
-    try:
-        from agents.archivist import ArchivistAgent, ArchivistState
-        from agents.bibliomancer import BibliomancerAgent, BibliomancerState
-        from agents.ethnograph import EthnographAgent, EthnographState
-        from agents.pattern_finder import PatternFinderAgent, PatternFinderState
-        from agents.scribe import ScribeAgent, ScribeState
-        from agents.synthesizer import SynthesizerAgent, SynthesizerState
-        from agents.visualizer import VisualizerAgent, VisualizerState
-        from core.ethics_council import EthicsCouncil, EthicsVerdict
-        from core.message_bus import MessageBus, MessageType
-    except (ImportError, ModuleNotFoundError):
-        _archivist = _load_local_module("agents/archivist/agent.py", "kai_ethno_archivist")
-        ArchivistAgent, ArchivistState = _archivist.ArchivistAgent, _archivist.ArchivistState
-
-        _biblio = _load_local_module("agents/bibliomancer/agent.py", "kai_ethno_bibliomancer")
-        BibliomancerAgent, BibliomancerState = _biblio.BibliomancerAgent, _biblio.BibliomancerState
-
-        _ethno = _load_local_module("agents/ethnograph/agent.py", "kai_ethno_ethnograph")
-        EthnographAgent, EthnographState = _ethno.EthnographAgent, _ethno.EthnographState
-
-        _pattern = _load_local_module("agents/pattern_finder/agent.py", "kai_ethno_pattern_finder")
-        PatternFinderAgent, PatternFinderState = _pattern.PatternFinderAgent, _pattern.PatternFinderState
-
-        _scribe = _load_local_module("agents/scribe/agent.py", "kai_ethno_scribe")
-        ScribeAgent, ScribeState = _scribe.ScribeAgent, _scribe.ScribeState
-
-        _synth = _load_local_module("agents/synthesizer/agent.py", "kai_ethno_synthesizer")
-        SynthesizerAgent, SynthesizerState = _synth.SynthesizerAgent, _synth.SynthesizerState
-
-        _viz = _load_local_module("agents/visualizer/agent.py", "kai_ethno_visualizer")
-        VisualizerAgent, VisualizerState = _viz.VisualizerAgent, _viz.VisualizerState
-
-        _ethics = _load_local_module("core/ethics_council.py", "kai_ethno_ethics")
-        EthicsCouncil, EthicsVerdict = _ethics.EthicsCouncil, _ethics.EthicsVerdict
-
-        _msgbus = _load_local_module("core/message_bus.py", "kai_ethno_message_bus")
-        MessageBus, MessageType = _msgbus.MessageBus, _msgbus.MessageType
+    from agents.archivist import ArchivistAgent, ArchivistState
+    from agents.bibliomancer import BibliomancerAgent, BibliomancerState
+    from agents.ethnograph import EthnographAgent, EthnographState
+    from agents.pattern_finder import PatternFinderAgent, PatternFinderState
+    from agents.scribe import ScribeAgent, ScribeState
+    from agents.synthesizer import SynthesizerAgent, SynthesizerState
+    from agents.visualizer import VisualizerAgent, VisualizerState
+    from core.ethics_council import EthicsCouncil, EthicsVerdict
+    from core.message_bus import MessageBus, MessageType
 
 logger = logging.getLogger(__name__)
 
@@ -92,34 +52,24 @@ class KAIEthnoOrchestrator:
         enable_memory: bool = True,
         enable_message_bus: bool = True,
         output_dir: str = "./output",
-        account_id: Optional[str] = None,
     ):
         self.enable_ethics = enable_ethics
         self.enable_memory = enable_memory
         self.enable_message_bus = enable_message_bus
         self.output_dir = output_dir
-        self.account_id = account_id
 
-        # Inicializar componentes core y LLMService
+        # Inicializar componentes core
         self.message_bus = MessageBus() if enable_message_bus else None
         self.ethics_council = EthicsCouncil() if enable_ethics else None
-        
-        try:
-            from core.llm_service import get_default_llm_service
-            self.llm_service = get_default_llm_service(account_id=account_id)
-        except ImportError:
-            self.llm_service = None
 
-        # Inicializar agentes con LLMService
-        self.bibliomancer = BibliomancerAgent(llm_service=self.llm_service)
-        self.ethnograph = EthnographAgent(llm_service=self.llm_service)
-        self.pattern_finder = PatternFinderAgent(llm_service=self.llm_service)
-        self.synthesizer = SynthesizerAgent(llm_service=self.llm_service)
-        self.visualizer = VisualizerAgent(llm_service=self.llm_service)
-        self.scribe = ScribeAgent(llm_service=self.llm_service)
-        self.archivist = ArchivistAgent(llm_service=self.llm_service)
-
-
+        # Inicializar agentes
+        self.bibliomancer = BibliomancerAgent()
+        self.ethnograph = EthnographAgent()
+        self.pattern_finder = PatternFinderAgent()
+        self.synthesizer = SynthesizerAgent()
+        self.visualizer = VisualizerAgent()
+        self.scribe = ScribeAgent()
+        self.archivist = ArchivistAgent()
 
         # Estado del pipeline
         self._initialized = False

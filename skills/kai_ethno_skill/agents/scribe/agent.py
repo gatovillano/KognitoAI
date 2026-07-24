@@ -43,15 +43,7 @@ class ScribeAgent:
     description = "Escriba Académico - Redacción de documentos académicos"
 
     def __init__(self, llm_service: Any = None):
-        if llm_service is not None:
-            self.llm = llm_service
-        else:
-            try:
-                from core.llm_service import get_default_llm_service
-                self.llm = get_default_llm_service()
-            except ImportError:
-                self.llm = None
-
+        self.llm = llm_service
         self.graph = self._build_graph()
         self.state = ScribeState()
 
@@ -99,79 +91,39 @@ class ScribeAgent:
             
             return {"status": "structure_planned", "document_structure": structure}
         
-        async def draft_sections(state: ScribeState) -> Dict[str, Any]:
-            """Redacta cada sección del documento con LLM o plantillas de respaldo"""
+        def draft_sections(state: ScribeState) -> Dict[str, Any]:
+            """Redacta cada sección del documento"""
             sections = {}
-            rq = state.research_question
-            sources_summary = "\n".join([
-                f"- [{s.get('title', '')} ({s.get('year', 's.f.')})]: {s.get('abstract', '')[:250]}"
-                for s in state.sources[:10] if isinstance(s, dict)
-            ])
-            analysis_str = str(state.analysis_results.get("synthesis", state.analysis_results))[:800]
-
-            if self.llm and hasattr(self.llm, "is_available") and self.llm.is_available():
-                system_prompt = "Eres un redactor académico sénior especializado en publicaciones de antropología y ciencias sociales."
-                
-                # 1. Abstract
-                prompt_abs = f"Redacta un resumen ejecutivo (Abstract) riguroso de 150-250 palabras para una investigación sobre: '{rq}'. Fuentes analizadas:\n{sources_summary[:600]}"
-                abs_llm = await self.llm.generate(prompt_abs, system_prompt=system_prompt)
-                sections["abstract"] = abs_llm or self._draft_abstract(state)
-
-                # 2. Introducción
-                prompt_intro = f"Redacta una Introducción académica completa para el tema: '{rq}'. Incluye contexto, justificación y planteamiento del problema."
-                intro_llm = await self.llm.generate(prompt_intro, system_prompt=system_prompt)
-                sections["introduction"] = intro_llm or self._draft_introduction(state)
-
-                # 3. Metodología
-                method_key = "methodology" if "methodology" in state.document_structure else "methods"
-                prompt_meth = f"Redacta la sección de Metodología etnográfica y bibliográfica para estudiar: '{rq}'. Detalla criterios de inclusión, bases de datos y codificación."
-                meth_llm = await self.llm.generate(prompt_meth, system_prompt=system_prompt)
-                sections[method_key] = meth_llm or self._draft_methodology(state)
-
-                # 4. Trabajo de campo
-                if "fieldwork" in state.document_structure:
-                    prompt_field = f"Redacta la sección de Trabajo de Campo etnográfico para '{rq}', describiendo observación participante y técnicas cualitativas."
-                    field_llm = await self.llm.generate(prompt_field, system_prompt=system_prompt)
-                    sections["fieldwork"] = field_llm or self._draft_fieldwork(state)
-
-                # 5. Análisis / Resultados
-                res_key = "analysis" if "analysis" in state.document_structure else "results"
-                prompt_res = f"Redacta los Resultados y Análisis para '{rq}' integrando la siguiente evidencia:\n{analysis_str}"
-                res_llm = await self.llm.generate(prompt_res, system_prompt=system_prompt)
-                sections[res_key] = res_llm or self._draft_analysis(state)
-
-                # 6. Discusión
-                prompt_disc = f"Redacta la Discusión académica relacionando los hallazgos sobre '{rq}' con debates teóricos existentes y limitaciones del estudio."
-                disc_llm = await self.llm.generate(prompt_disc, system_prompt=system_prompt)
-                sections["discussion"] = disc_llm or self._draft_discussion(state)
-
-                # 7. Conclusiones
-                prompt_conc = f"Redacta las Conclusiones y recomendaciones para la investigación futura sobre: '{rq}'."
-                conc_llm = await self.llm.generate(prompt_conc, system_prompt=system_prompt)
-                sections["conclusions"] = conc_llm or self._draft_conclusions(state)
-
-            else:
-                # Fallback a plantillas
-                sections["abstract"] = self._draft_abstract(state)
-                sections["introduction"] = self._draft_introduction(state)
-                if "methodology" in state.document_structure:
-                    sections["methodology"] = self._draft_methodology(state)
-                elif "methods" in state.document_structure:
-                    sections["methods"] = self._draft_methodology(state)
-                
-                if "fieldwork" in state.document_structure:
-                    sections["fieldwork"] = self._draft_fieldwork(state)
-                
-                if "analysis" in state.document_structure:
-                    sections["analysis"] = self._draft_analysis(state)
-                elif "results" in state.document_structure:
-                    sections["results"] = self._draft_analysis(state)
-                
-                sections["discussion"] = self._draft_discussion(state)
-                sections["conclusions"] = self._draft_conclusions(state)
+            
+            # Abstract
+            sections["abstract"] = self._draft_abstract(state)
+            
+            # Introducción
+            sections["introduction"] = self._draft_introduction(state)
+            
+            # Metodología
+            if "methodology" in state.document_structure:
+                sections["methodology"] = self._draft_methodology(state)
+            elif "methods" in state.document_structure:
+                sections["methods"] = self._draft_methodology(state)
+            
+            # Trabajo de campo (si es etnográfico)
+            if "fieldwork" in state.document_structure:
+                sections["fieldwork"] = self._draft_fieldwork(state)
+            
+            # Análisis / Resultados
+            if "analysis" in state.document_structure:
+                sections["analysis"] = self._draft_analysis(state)
+            elif "results" in state.document_structure:
+                sections["results"] = self._draft_analysis(state)
+            
+            # Discusión
+            sections["discussion"] = self._draft_discussion(state)
+            
+            # Conclusiones
+            sections["conclusions"] = self._draft_conclusions(state)
             
             return {"status": "sections_drafted", "draft_sections": sections}
-
         
         def format_citations(state: ScribeState) -> Dict[str, Any]:
             """Formatea citas según estilo seleccionado"""
