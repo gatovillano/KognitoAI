@@ -340,6 +340,19 @@ async def update_user_settings(
     if email_account:
         await db.refresh(email_account)
 
+    # Si se actualizaron campos de LLM, limpiar el cache de LLM del usuario
+    llm_fields = {
+        'llm_provider', 'llm_model', 'llm_temperature', 'llm_api_base',
+        'fast_llm_model', 'fast_llm_provider',
+        'vision_llm_model', 'vision_llm_provider'
+    }
+    if any(field in update_data for field in llm_fields):
+        try:
+            from core.llm_manager import clear_user_llm_cache
+            clear_user_llm_cache(current_account_id)
+        except Exception as e:
+            logger.error(f"Error al limpiar cache de LLM tras actualización de configuración: {e}")
+
     # Si se actualizaron campos de heartbeat, reprogramar el job
     heartbeat_fields = ['custom_heartbeat_instructions', 'custom_heartbeat_interval_minutes', 'custom_heartbeat_allowed_tools']
     if any(field in update_data for field in heartbeat_fields):
@@ -491,6 +504,13 @@ async def set_user_secret(
     
     masked = f"{secret_req.value[:8]}...{secret_req.value[-4:]}" if len(secret_req.value) > 12 else "****"
     
+    # Limpiar caché de LLM ya que una API key asociada pudo cambiar
+    try:
+        from core.llm_manager import clear_user_llm_cache
+        clear_user_llm_cache(current_account_id)
+    except Exception as e:
+        logger.error(f"Error al limpiar cache de LLM tras actualizar secreto: {e}")
+
     return UserSecretResponse(
         key_name=secret_obj.key_name,
         description=secret_obj.description,
@@ -512,6 +532,14 @@ async def delete_user_secret(
     deleted = await repo.delete_secret(uuid.UUID(current_account_id), key_name)
     if not deleted:
         raise HTTPException(status_code=404, detail="Secreto no encontrado.")
+
+    # Limpiar caché de LLM ya que una API key asociada fue eliminada
+    try:
+        from core.llm_manager import clear_user_llm_cache
+        clear_user_llm_cache(current_account_id)
+    except Exception as e:
+        logger.error(f"Error al limpiar cache de LLM tras eliminar secreto: {e}")
+
     return {"message": f"Secreto '{key_name}' eliminado correctamente."}
 
 
