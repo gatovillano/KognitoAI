@@ -3,7 +3,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Loader2, MessageSquare, Download, Settings2, BarChart3 } from 'lucide-react';
+import { Loader2, MessageSquare, Download, Settings2, BarChart3, FileSpreadsheet, FileText } from 'lucide-react';
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import apiClient from '@/lib/api';
 import { toast } from 'sonner';
 import { ContextualChat } from '@/components/ContextualChat';
@@ -24,6 +30,42 @@ export function TableDetailDialog({ isOpen, onOpenChange, tableId, tableName }: 
     const [isChatOpen, setIsChatOpen] = useState(false);
     const [isColumnManagerOpen, setIsColumnManagerOpen] = useState(false);
     const [isAnalysisOpen, setIsAnalysisOpen] = useState(false);
+    const [isExporting, setIsExporting] = useState(false);
+
+    const handleExport = async (format: 'xlsx' | 'csv') => {
+        if (!tableId) return;
+        setIsExporting(true);
+        const toastId = toast.loading(`Exportando datos a ${format.toUpperCase()}...`);
+        try {
+            const response = await apiClient.get(`/api/tables/${tableId}/export`, {
+                params: { format },
+                responseType: 'blob',
+            });
+
+            const blob = new Blob([response.data], {
+                type: format === 'xlsx'
+                    ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                    : 'text/csv;charset=utf-8;'
+            });
+
+            const url = window.URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            const filename = `${table?.name || tableName || 'tabla'}.${format}`;
+            link.setAttribute('download', filename);
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            window.URL.revokeObjectURL(url);
+
+            toast.success(`Tabla exportada exitosamente a ${format.toUpperCase()}`, { id: toastId });
+        } catch (error) {
+            console.error('Error exportando tabla:', error);
+            toast.error('Error al exportar la tabla.', { id: toastId });
+        } finally {
+            setIsExporting(false);
+        }
+    };
 
     const fetchTableDetails = useCallback(async () => {
         if (!tableId) return;
@@ -57,10 +99,24 @@ export function TableDetailDialog({ isOpen, onOpenChange, tableId, tableName }: 
                             <Settings2 className="h-4 w-4" />
                             Columnas
                         </Button>
-                        <Button variant="outline" size="sm" className="gap-2">
-                            <Download className="h-4 w-4" />
-                            Exportar
-                        </Button>
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <Button variant="outline" size="sm" className="gap-2" disabled={isExporting}>
+                                    {isExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                                    Exportar
+                                </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => handleExport('xlsx')} className="gap-2 cursor-pointer">
+                                    <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
+                                    Excel (.xlsx)
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => handleExport('csv')} className="gap-2 cursor-pointer">
+                                    <FileText className="h-4 w-4 text-blue-600" />
+                                    CSV (.csv)
+                                </DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
                         <Button variant="outline" size="sm" className="gap-2" onClick={() => setIsAnalysisOpen(true)}>
                             <BarChart3 className="h-4 w-4" />
                             Analizar
