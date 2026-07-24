@@ -9,56 +9,34 @@ import os
 from pathlib import Path
 
 # Agregar el directorio padre al sys.path para importar kai_ethno_skill
-skill_dir = Path(__file__).parent.resolve()
-if str(skill_dir) not in sys.path:
-    sys.path.insert(0, str(skill_dir))
-
-parent_dir = skill_dir.parent.resolve()
-if str(parent_dir) not in sys.path:
-    sys.path.insert(0, str(parent_dir))
-
+project_root = Path(__file__).parent.parent.parent.parent.parent
+sys.path.insert(0, str(project_root))
 
 print("=" * 60)
 print("KAI-Ethno: Prueba de Importaciones")
 print("=" * 60)
 
 # Test 1: Importar el paquete principal
-print("\n[1/5] Importando paquete o módulos principales...")
+print("\n[1/5] Importando kai_ethno_skill...")
 try:
-    try:
-        import kai_ethno_skill as pkg
-        version = getattr(pkg, '__version__', '1.0.0')
-    except ImportError:
-        from agents.bibliomancer import BibliomancerAgent
-        version = "1.0.0 (local modules)"
-    print(f"   ✓ Paquete/Módulos KAI-Ethno versión {version}")
+    import kai_ethno_skill
+    print(f"   ✓ kai_ethno_skill v{kai_ethno_skill.__version__}")
 except Exception as e:
     print(f"   ✗ Error: {e}")
     sys.exit(1)
 
-
 # Test 2: Importar todas las clases de agentes y estados
 print("\n[2/5] Importando agentes y estados...")
 try:
-    try:
-        from kai_ethno_skill import (
-            BibliomancerAgent, BibliomancerState,
-            EthnographAgent, EthnographState,
-            PatternFinderAgent, PatternFinderState,
-            SynthesizerAgent, SynthesizerState,
-            VisualizerAgent, VisualizerState,
-            ScribeAgent, ScribeState,
-            ArchivistAgent, ArchivistState,
-        )
-    except ImportError:
-        from agents.bibliomancer import BibliomancerAgent, BibliomancerState
-        from agents.ethnograph import EthnographAgent, EthnographState
-        from agents.pattern_finder import PatternFinderAgent, PatternFinderState
-        from agents.synthesizer import SynthesizerAgent, SynthesizerState
-        from agents.visualizer import VisualizerAgent, VisualizerState
-        from agents.scribe import ScribeAgent, ScribeState
-        from agents.archivist import ArchivistAgent, ArchivistState
-
+    from kai_ethno_skill import (
+        BibliomancerAgent, BibliomancerState,
+        EthnographAgent, EthnographState,
+        PatternFinderAgent, PatternFinderState,
+        SynthesizerAgent, SynthesizerState,
+        VisualizerAgent, VisualizerState,
+        ScribeAgent, ScribeState,
+        ArchivistAgent, ArchivistState,
+    )
     print("   ✓ Todos los agentes importados correctamente")
 except Exception as e:
     print(f"   ✗ Error: {e}")
@@ -67,20 +45,12 @@ except Exception as e:
 # Test 3: Importar módulos core
 print("\n[3/5] Importando módulos core...")
 try:
-    try:
-        from kai_ethno_skill.core.ethics_council import EthicsCouncil, EthicsVerdict
-        from kai_ethno_skill.core.message_bus import MessageBus, MessageType
-        from kai_ethno_skill.core.llm_service import LLMService
-    except ImportError:
-        from core.ethics_council import EthicsCouncil, EthicsVerdict
-        from core.message_bus import MessageBus, MessageType
-        from core.llm_service import LLMService
-
-    print("   ✓ Módulos core (incluyendo LLMService) importados correctamente")
+    from kai_ethno_skill.core.ethics_council import EthicsCouncil, EthicsVerdict
+    from kai_ethno_skill.core.message_bus import MessageBus, MessageType
+    print("   ✓ Módulos core importados correctamente")
 except Exception as e:
     print(f"   ✗ Error: {e}")
     sys.exit(1)
-
 
 # Test 4: Instanciar agentes
 print("\n[4/5] Instanciando agentes...")

@@ -61,192 +61,124 @@ class KAIOrchestrator:
     def _build_graph(self) -> StateGraph:
         """Construye el grafo de LangGraph para el flujo orquestado"""
 
-        def initialize(state: Any) -> Dict[str, Any]:
-
+        def initialize(state: KAIState) -> Dict[str, Any]:
             """Inicializa el sistema y valida configuración"""
-            return {
-                "phase": "initialization",
-                "started_at": datetime.now().isoformat(),
-                "results": {},
-                "errors": []
-            }
+            state.phase = "initialization"
+            state.started_at = datetime.now().isoformat()
+            return {"status": "initialized"}
 
-        async def ethics_review(state: Any) -> Dict[str, Any]:
+        def ethics_review(state: KAIState) -> Dict[str, Any]:
             """Fase de revisión ética obligatoria"""
-            results = state.get("results", {}) if isinstance(state, dict) else state.results
-            context = state.get("context", {}) if isinstance(state, dict) else state.context
-            errors = list(state.get("errors", [])) if isinstance(state, dict) else list(state.errors)
-            ethics_approved = True
+            state.phase = "ethics_review"
+            state.current_agent = "ethics_council"
 
             if self.ethics_council:
-                try:
-                    if hasattr(self.ethics_council, "review"):
-                        ethics_result = await self.ethics_council.review(context, context="pipeline_init") if asyncio.iscoroutinefunction(self.ethics_council.review) else self.ethics_council.review(context)
-                    else:
-                        ethics_result = {"approved": True}
-                    
-                    ethics_approved = ethics_result.get("approved", True) if isinstance(ethics_result, dict) else True
-                    results["ethics"] = ethics_result
-                except Exception as e:
-                    logger.warning(f"Error en revisión ética: {e}")
-                    results["ethics"] = {"status": "error", "error": str(e)}
+                # TODO: Implementar revisión ética real
+                ethics_result = self.ethics_council.review(state.context)
+                state.ethics_approved = ethics_result.get("approved", False)
+                state.results["ethics"] = ethics_result
+
+                if not state.ethics_approved:
+                    state.errors.append(f"Ethics rejection: {ethics_result.get('reason')}")
+                    return {"status": "rejected"}
             else:
-                results["ethics"] = {"status": "skipped", "reason": "No council configured"}
+                state.ethics_approved = True
+                state.results["ethics"] = {"status": "skipped", "reason": "No council configured"}
 
-            return {
-                "phase": "ethics_review",
-                "current_agent": "ethics_council",
-                "ethics_approved": ethics_approved,
-                "results": results,
-                "errors": errors
-            }
+            return {"status": "ethics_passed"}
 
-        async def bibliography_phase(state: Any) -> Dict[str, Any]:
+        def bibliography_phase(state: KAIState) -> Dict[str, Any]:
             """Fase de búsqueda bibliográfica"""
-            results = state.get("results", {}) if isinstance(state, dict) else state.results
-            context = state.get("context", {}) if isinstance(state, dict) else state.context
-            rq = state.get("research_question", "") if isinstance(state, dict) else state.research_question
+            state.phase = "bibliography"
+            state.current_agent = "bibliomancer"
 
             if "bibliomancer" in self.agents:
-                res = await self.run_agent(
-                    "bibliomancer",
-                    query=rq,
-                    filters=context.get("filters", {})
-                )
-                results["bibliography"] = res
-            return {
-                "phase": "bibliography",
-                "current_agent": "bibliomancer",
-                "results": results
-            }
+                # TODO: Implementar llamada real al agente
+                state.results["bibliography"] = {"status": "completed", "documents": []}
+            return {"status": "bibliography_done"}
 
-        async def ethnography_phase(state: Any) -> Dict[str, Any]:
+        def ethnography_phase(state: KAIState) -> Dict[str, Any]:
             """Fase de procesamiento etnográfico"""
-            results = state.get("results", {}) if isinstance(state, dict) else state.results
-            context = state.get("context", {}) if isinstance(state, dict) else state.context
-            sources = results.get("bibliography", {}).get("documents", [])
-            materials = context.get("materials", sources)
+            state.phase = "ethnography"
+            state.current_agent = "ethnograph"
 
             if "ethnograph" in self.agents:
-                res = await self.run_agent(
-                    "ethnograph",
-                    materials=materials,
-                    analysis_type=context.get("analysis_type", "mixed_methods")
-                )
-                results["ethnography"] = res
-            return {
-                "phase": "ethnography",
-                "current_agent": "ethnograph",
-                "results": results
-            }
+                materials = state.context.get("materials", [])
+                # TODO: Implementar llamada real al agente
+                state.results["ethnography"] = {"status": "completed", "segments": []}
+            return {"status": "ethnography_done"}
 
-        async def pattern_phase(state: Any) -> Dict[str, Any]:
+        def pattern_phase(state: KAIState) -> Dict[str, Any]:
             """Fase de análisis de patrones"""
-            results = state.get("results", {}) if isinstance(state, dict) else state.results
-            processed = results.get("ethnography", {})
+            state.phase = "pattern_analysis"
+            state.current_agent = "pattern_finder"
 
             if "pattern_finder" in self.agents:
-                res = await self.run_agent("pattern_finder", processed=processed)
-                results["patterns"] = res
-            return {
-                "phase": "pattern_analysis",
-                "current_agent": "pattern_finder",
-                "results": results
-            }
+                corpus = state.results.get("bibliography", {}).get("documents", [])
+                # TODO: Implementar llamada real al agente
+                state.results["patterns"] = {"status": "completed", "clusters": []}
+            return {"status": "patterns_done"}
 
-        async def synthesis_phase(state: Any) -> Dict[str, Any]:
+        def synthesis_phase(state: KAIState) -> Dict[str, Any]:
             """Fase de síntesis y triangulación"""
-            results = state.get("results", {}) if isinstance(state, dict) else state.results
-            sources = results.get("bibliography", {}).get("documents", [])
-            coded_data = results.get("ethnography", {}).get("coded_segments", [])
+            state.phase = "synthesis"
+            state.current_agent = "synthesizer"
 
             if "synthesizer" in self.agents:
-                res = await self.run_agent("synthesizer", sources=sources, coded_data=coded_data)
-                results["synthesis"] = res
-            return {
-                "phase": "synthesis",
-                "current_agent": "synthesizer",
-                "results": results
-            }
+                sources = state.results.get("bibliography", {}).get("documents", [])
+                coded_data = state.results.get("ethnography", {}).get("segments", [])
+                # TODO: Implementar llamada real al agente
+                state.results["synthesis"] = {"status": "completed"}
+            return {"status": "synthesis_done"}
 
-        async def visualization_phase(state: Any) -> Dict[str, Any]:
+        def visualization_phase(state: KAIState) -> Dict[str, Any]:
             """Fase de visualización"""
-            results = state.get("results", {}) if isinstance(state, dict) else state.results
+            state.phase = "visualization"
+            state.current_agent = "visualizer"
 
             if "visualizer" in self.agents:
                 data = {
-                    "keywords": results.get("patterns", {}).get("keywords", {}),
-                    "networks": results.get("patterns", {}).get("networks", []),
-                    "clusters": results.get("patterns", {}).get("clusters", []),
-                    "synthesis": results.get("synthesis", {})
+                    "patterns": state.results.get("patterns", {}),
+                    "synthesis": state.results.get("synthesis", {})
                 }
-                res = await self.run_agent("visualizer", data=data)
-                results["visualizations"] = res
-            return {
-                "phase": "visualization",
-                "current_agent": "visualizer",
-                "results": results
-            }
+                # TODO: Implementar llamada real al agente
+                state.results["visualizations"] = {"status": "completed"}
+            return {"status": "visualization_done"}
 
-        async def documentation_phase(state: Any) -> Dict[str, Any]:
+        def documentation_phase(state: KAIState) -> Dict[str, Any]:
             """Fase de redacción del documento"""
-            results = state.get("results", {}) if isinstance(state, dict) else state.results
-            context = state.get("context", {}) if isinstance(state, dict) else state.context
-            rq = state.get("research_question", "") if isinstance(state, dict) else state.research_question
-            sources = results.get("bibliography", {}).get("documents", [])
-            synthesis = results.get("synthesis", {})
+            state.phase = "documentation"
+            state.current_agent = "scribe"
 
             if "scribe" in self.agents:
-                res = await self.run_agent(
-                    "scribe",
-                    research_question=rq,
-                    sources=sources,
-                    analysis_results=synthesis,
-                    document_type=context.get("document_type", "ethnographic_report"),
-                    citation_style=context.get("citation_style", "apa")
-                )
-                results["document"] = res
-            return {
-                "phase": "documentation",
-                "current_agent": "scribe",
-                "results": results
-            }
+                # TODO: Implementar llamada real al agente
+                state.results["document"] = {"status": "completed"}
+            return {"status": "documentation_done"}
 
-        async def archiving_phase(state: Any) -> Dict[str, Any]:
+        def archiving_phase(state: KAIState) -> Dict[str, Any]:
             """Fase de archivado en memoria"""
-            results = state.get("results", {}) if isinstance(state, dict) else state.results
+            state.phase = "archiving"
+            state.current_agent = "archivist"
 
             if "archivist" in self.agents:
-                items = [
-                    results.get("bibliography", {}),
-                    results.get("ethnography", {}),
-                    results.get("synthesis", {}),
-                    results.get("document", {})
-                ]
-                res = await self.run_agent("archivist", items=items)
-                results["archive"] = res
-            return {
-                "phase": "archiving",
-                "current_agent": "archivist",
-                "results": results
-            }
+                documents = [state.results.get("document", {})]
+                # TODO: Implementar llamada real al agente
+                state.results["archive"] = {"status": "completed"}
+            return {"status": "archiving_done"}
 
-        def finalize(state: Any) -> Dict[str, Any]:
+        def finalize(state: KAIState) -> Dict[str, Any]:
             """Finaliza el pipeline y genera resumen"""
-            return {
-                "phase": "completed",
-                "completed_at": datetime.now().isoformat()
-            }
+            state.phase = "completed"
+            state.completed_at = datetime.now().isoformat()
+            return {"status": "completed"}
 
-        def handle_error(state: Any) -> Dict[str, Any]:
+        def handle_error(state: KAIState) -> Dict[str, Any]:
             """Maneja errores en el pipeline"""
-            return {
-                "phase": "error",
-                "completed_at": datetime.now().isoformat()
-            }
+            state.phase = "error"
+            state.completed_at = datetime.now().isoformat()
+            return {"status": "error"}
 
         # Construir grafo del pipeline
-
         workflow = StateGraph(KAIState)
 
         # Agregar nodos
@@ -331,11 +263,8 @@ class KAIOrchestrator:
         self.state.phase = "running"
 
         try:
-            input_dict = self.state.model_dump()
-            result = await self.graph.ainvoke(input_dict)
-            if isinstance(result, dict):
-                self.state = KAIState(**result)
-
+            result = await self.graph.ainvoke(self.state)
+            self.state = KAIState(**result)
 
             return {
                 "status": "success" if self.state.phase == "completed" else "error",

@@ -1,3 +1,4 @@
+from extensions.jitsi_meet.backend.router import router as jitsi_meet_router
 import logging
 import asyncio # Added
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request, status, Depends
@@ -146,6 +147,8 @@ app.add_middleware(
 
 
 from api.galleries import router as galleries_router, MEDIA_ROOT, THUMBNAIL_ROOT
+from api.gallery_selection_panel.router import router as gallery_selection_extension_router
+from api.email_management.router import router as email_extension_router
 
 app.mount("/media", StaticFiles(directory=MEDIA_ROOT), name="media")
 
@@ -374,6 +377,9 @@ app.include_router(knowledge_graph_router, prefix="/api/knowledge-graph", tags=[
 app.include_router(graph_router, prefix="/api", tags=["graph"])
 app.include_router(search_router, prefix="/api", tags=["search"])
 app.include_router(galleries_router, prefix="/api/galleries", tags=["galleries"])
+app.include_router(gallery_selection_extension_router)
+app.include_router(jitsi_meet_router)
+app.include_router(email_extension_router)
 app.include_router(forms_router, prefix="/api", tags=["forms"])
 app.include_router(collections_router, prefix="/api", tags=["collections"])
 app.include_router(universal_search_router, prefix="/api", tags=["universal-search"])

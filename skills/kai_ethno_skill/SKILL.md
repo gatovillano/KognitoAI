@@ -1,6 +1,6 @@
 ---
-name: kai-ethno
-description: Ecosistema completo de investigación etnográfica y antropológica aumentada. Sistema multi-agente (Bibliomancer, Ethnograph, PatternFinder, Synthesizer, Visualizer, Scribe, Archivist, Ethics Council) para búsqueda bibliográfica multi-API, análisis del discurso, minería de patrones y generación de documentos académicos.
+name: kai_ethno_skill
+description: Skill especializada para investigación etnográfica, antropología digital, análisis del discurso y revisiones de literatura académica.
 ---
 
 # KAI-Ethno: Investigación Antropológica Aumentada

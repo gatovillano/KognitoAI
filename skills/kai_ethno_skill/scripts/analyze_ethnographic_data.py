@@ -51,16 +51,14 @@ class AnalyzeEthnographicDataTool(BaseTool):
             from core.citation_models import Source, SourceType, ToolOutputWithSources
         except ImportError:
             logger.warning("core.citation_models no disponible. Retornando texto plano.")
+            return await self._arun_plain_text(text_content, anonymize_pii, coding_framework)
+
         try:
             from agents.ethnograph import EthnographAgent
             from agents.pattern_finder import PatternFinderAgent
-            from core.llm_service import get_default_llm_service
 
-
-            llm_svc = get_default_llm_service(account_id=self.account_id)
-            ethnograph = EthnographAgent(llm_service=llm_svc)
-            pattern_finder = PatternFinderAgent(llm_service=llm_svc)
-
+            ethnograph = EthnographAgent()
+            pattern_finder = PatternFinderAgent()
 
             source_item = {
                 "id": "user_input_transcript",
