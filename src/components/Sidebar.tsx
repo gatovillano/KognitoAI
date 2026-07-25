@@ -529,6 +529,22 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
                 </Button>
               </Link>
             )}
+
+            {settings?.installed_extensions?.includes('kognito_chat') && (
+              <Link href="/kognito-chat" passHref onClick={onLinkClick} title="KognitoChat" className="w-full block">
+                <Button
+                  variant={pathname?.startsWith('/kognito-chat') ? 'secondary' : 'ghost'}
+                  className={cn(
+                    "w-full transition-all duration-200 hover:bg-accent/50 rounded-xl group",
+                    isCollapsed ? "justify-center h-9 w-9 p-0" : "justify-start h-9 px-2",
+                    pathname?.startsWith('/kognito-chat') && "bg-primary/10 text-primary font-medium"
+                  )}
+                >
+                  <MessageSquare className={cn("h-4 w-4 transition-transform group-hover:scale-110", showToolText && "mr-2")} />
+                  {showToolText && <span className="text-sm font-medium">KognitoChat</span>}
+                </Button>
+              </Link>
+            )}
           </nav>
         )}
 

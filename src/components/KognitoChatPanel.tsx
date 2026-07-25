@@ -131,10 +131,20 @@ export default function KognitoChatPanel() {
       wsRef.current.close();
     }
 
-    const token = localStorage.getItem('access_token') || localStorage.getItem('token') || '';
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
-    const wsUrl = `${protocol}//${host}/api/kognito-chat/ws/${activeRoomId}?token=${encodeURIComponent(token)}`;
+    const token = localStorage.getItem('authToken') || localStorage.getItem('access_token') || localStorage.getItem('token') || '';
+    const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || window.location.origin;
+    let wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    let wsHost = window.location.host;
+
+    try {
+      const url = new URL(apiBaseUrl);
+      wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+      wsHost = url.host;
+    } catch (e) {
+      console.error('Error parseando API_BASE_URL para WebSocket:', e);
+    }
+
+    const wsUrl = `${wsProtocol}//${wsHost}/api/kognito-chat/ws/${activeRoomId}?token=${encodeURIComponent(token)}`;
 
     try {
       const ws = new WebSocket(wsUrl);
@@ -147,6 +157,20 @@ export default function KognitoChatPanel() {
               return [...prev, data.message];
             });
             // Actualizar lista de salas
+            fetchRooms();
+          } else if (data.type === 'kai_stream_start' && data.message) {
+            setMessages((prev) => {
+              if (prev.some((m) => m.id === data.message.id)) return prev;
+              return [...prev, data.message];
+            });
+          } else if (data.type === 'kai_stream_chunk' && data.message_id) {
+            setMessages((prev) =>
+              prev.map((m) => (m.id === data.message_id ? { ...m, content: m.content + data.chunk } : m))
+            );
+          } else if (data.type === 'kai_stream_end' && data.message) {
+            setMessages((prev) =>
+              prev.map((m) => (m.id === data.message.id ? data.message : m))
+            );
             fetchRooms();
           }
         } catch (e) {

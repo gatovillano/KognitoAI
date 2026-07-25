@@ -66,6 +66,12 @@ class ReadOnlyOfficeDocumentTool(BaseTool):
                     f"Ruta buscada: {file_path}"
                 )
 
+            if not file_path.is_file():
+                return (
+                    f"La ruta física de '{doc.filename}' no es un archivo válido "
+                    f"(es un directorio). Ruta: {file_path}"
+                )
+
             with open(file_path, "rb") as f:
                 file_bytes = f.read()
 
