@@ -412,8 +412,16 @@ Usa esta información para responder preguntas sobre el tiempo, programar evento
 
         procedural_instructions = ""
         if relevant_skills is not None and len(relevant_skills) > 0:
-            procedural_parts = ["\n\n<b>📝 MANUAL DE SKILLS Y PROCEDIMIENTOS RELEVANTES:</b>"]
-            procedural_parts.append("Has recibido pautas de comportamiento y procedimientos adicionales que se adaptan a la consulta del usuario. DEBES seguirlos estrictamente cuando sea aplicable:")
+            procedural_parts = ["\n\n<b>📝 MANUAL DE SKILLS Y PROCEDIMIENTOS RELEVANTES (SOPs):</b>"]
+            procedural_parts.append(
+                "Has recibido pautas de comportamiento y procedimientos adicionales que se adaptan a la consulta del usuario. "
+                "DEBES seguirlos estrictamente cuando sea aplicable.\n\n"
+                "⚠️ **REGLA CRÍTICA DE EJECUCIÓN PROCEDIMENTAL:**\n"
+                "Estas skills son manuales de instrucciones en texto plano (SOPs), NO son funciones JSON. "
+                "Para llevar a cabo las acciones que dictan (como instalar paquetes, editar código, navegar por la web o ejecutar scripts), "
+                "DEBES usar tus herramientas genéricas existentes (ej. `execute_command` para comandos de terminal, "
+                "`advanced_file_editor` para modificar código, etc.). NUNCA intentes invocar el nombre de la skill como si fuera una herramienta JSON."
+            )
             for skill in relevant_skills:
                 name = skill.get("name") or skill.get("id", "(sin-nombre)")
                 desc = skill.get("description", "Sin descripción.")

@@ -176,6 +176,23 @@ async def install_extension(
                 logger.warning("No se pudo importar el modelo de kognito_chat")
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
+            # Run full installer (copies files, patches sidebar, rebuilds frontend, restarts Next.js)
+            api_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.dirname(api_dir)
+            install_script = os.path.join(project_root, "extensions", "kognito_chat", "install.py")
+            python_bin = os.path.join(project_root, "venv_host", "bin", "python")
+            if os.path.exists(install_script) and os.path.exists(python_bin):
+                try:
+                    subprocess.Popen(
+                        [python_bin, install_script],
+                        cwd=project_root,
+                        stdout=open(os.path.join(project_root, "logs", "kognito_chat_install.log"), "a"),
+                        stderr=subprocess.STDOUT,
+                        start_new_session=True,
+                    )
+                    logger.info("KognitoChat install.py lanzado en segundo plano")
+                except Exception as install_err:
+                    logger.warning(f"No se pudo ejecutar install.py de KognitoChat: {install_err}")
 
         elif ext_id == "kai_ethno":
             # Ejecutar instalación de pip en segundo plano/proceso

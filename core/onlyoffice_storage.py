@@ -42,6 +42,10 @@ def resolve_onlyoffice_file_path(file_path: Union[str, os.PathLike[str]]) -> Pat
     try:
         resolved_onlyoffice.relative_to(ONLYOFFICE_DOCS_ROOT)
         if resolved_onlyoffice.exists():
+            if not resolved_onlyoffice.is_file():
+                raise ValueError(
+                    f"La ruta resuelta no es un archivo (es un directorio): {raw_path}"
+                )
             return resolved_onlyoffice
     except ValueError:
         pass
@@ -53,6 +57,10 @@ def resolve_onlyoffice_file_path(file_path: Union[str, os.PathLike[str]]) -> Pat
             resolved_media = (media_docs_root / candidate).resolve()
             resolved_media.relative_to(media_docs_root)
             if resolved_media.exists():
+                if not resolved_media.is_file():
+                    raise ValueError(
+                        f"La ruta resuelta no es un archivo (es un directorio): {raw_path}"
+                    )
                 return resolved_media
         except ValueError:
             pass
@@ -65,6 +73,10 @@ def resolve_onlyoffice_file_path(file_path: Union[str, os.PathLike[str]]) -> Pat
         resolved_local = (local_fallback_root / candidate).resolve()
         resolved_local.relative_to(local_fallback_root)
         if resolved_local.exists():
+            if not resolved_local.is_file():
+                raise ValueError(
+                    f"La ruta resuelta no es un archivo (es un directorio): {raw_path}"
+                )
             return resolved_local
     except ValueError:
         pass
@@ -75,6 +87,11 @@ def resolve_onlyoffice_file_path(file_path: Union[str, os.PathLike[str]]) -> Pat
         resolved_onlyoffice.relative_to(ONLYOFFICE_DOCS_ROOT)
     except ValueError as exc:
         raise ValueError(f"OnlyOffice file_path fuera de la raíz configurada: {raw_path}") from exc
+
+    if resolved_onlyoffice.exists() and not resolved_onlyoffice.is_file():
+        raise ValueError(
+            f"La ruta resuelta no es un archivo (es un directorio): {raw_path}"
+        )
 
     return resolved_onlyoffice
 

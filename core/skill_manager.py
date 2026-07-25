@@ -46,7 +46,7 @@ import contextvars
 _in_tool_logging = contextvars.ContextVar('_in_tool_logging', default=False)
 
 # Categorías que siempre se cargan independientemente del filtro dinámico
-ALWAYS_ON_CATEGORIES = {"core_skills", "search_and_research_skill", "knowledge_and_memory_skill"}
+ALWAYS_ON_CATEGORIES = {"core_skills", "search_and_research_skill", "knowledge_and_memory_skill", "developer_tools_skill"}
 
 _skill_manager_instance = None
 

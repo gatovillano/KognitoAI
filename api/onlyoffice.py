@@ -1009,7 +1009,15 @@ async def download_document(
             file_full_path,
         )
         raise HTTPException(status_code=404, detail="Archivo del documento no encontrado")
-        
+
+    if not file_full_path.is_file():
+        logger.error(
+            "La ruta del documento %s no es un archivo (es un directorio): %s",
+            document_id,
+            file_full_path,
+        )
+        raise HTTPException(status_code=500, detail="La ruta del documento no es un archivo válido")
+
     media_type, _ = mimetypes.guess_type(doc.filename or "")
     response_headers = None
 
@@ -1023,6 +1031,85 @@ async def download_document(
         media_type=media_type or "application/octet-stream",
         headers=response_headers,
     )
+
+
+
+@router.post("/downloadfile/{document_id}")
+async def download_file_for_onlyoffice(
+    document_id: uuid.UUID,
+    request: Request,
+    db = Depends(get_db_session),
+):
+    """Endpoint para OnlyOffice Document Server (POST /downloadfile/{id}).
+
+    El DS llama a este endpoint para obtener el archivo durante la edición.
+    Usa la misma lógica de autenticación y resolución de ruta que /download/.
+    """
+    jwt_secret = os.getenv("ONLYOFFICE_JWT_SECRET")
+    jwt_enabled = os.getenv("ONLYOFFICE_JWT_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+
+    token = request.query_params.get("token")
+    if not token:
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.replace("Bearer ", "").strip()
+
+    is_authenticated = False
+
+    if jwt_enabled and jwt_secret and token:
+        try:
+            jwt.decode(token, jwt_secret, algorithms=["HS256"])
+            is_authenticated = True
+        except Exception:
+            pass
+
+    if not is_authenticated and token:
+        try:
+            user_id = decode_access_token(token)
+            if user_id:
+                is_authenticated = True
+        except Exception:
+            pass
+
+    if jwt_enabled and not is_authenticated:
+        logger.warning(
+            "Acceso denegado a downloadfile de documento %s: Autenticación fallida.",
+            document_id,
+        )
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso denegado. Se requiere un token JWT válido.",
+        )
+
+    doc = await db.get(Document, document_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Documento no encontrado")
+
+    try:
+        file_full_path = resolve_onlyoffice_file_path(doc.file_path)
+    except ValueError as exc:
+        logger.error("Ruta física inválida para documento %s: %s", document_id, exc)
+        raise HTTPException(status_code=500, detail="Ruta física del documento inválida") from exc
+
+    if not file_full_path.exists():
+        raise HTTPException(status_code=404, detail="Archivo del documento no encontrado")
+
+    if not file_full_path.is_file():
+        logger.error(
+            "La ruta del documento %s no es un archivo (es un directorio): %s",
+            document_id,
+            file_full_path,
+        )
+        raise HTTPException(status_code=500, detail="La ruta del documento no es un archivo válido")
+
+    media_type, _ = mimetypes.guess_type(doc.filename or "")
+
+    return FileResponse(
+        str(file_full_path),
+        filename=doc.filename,
+        media_type=media_type or "application/octet-stream",
+    )
+
 
 @router.post("/office-callback/{document_id}")
 async def onlyoffice_callback(document_id: uuid.UUID, request: Request):
@@ -1069,7 +1156,7 @@ async def onlyoffice_callback(document_id: uuid.UUID, request: Request):
                 return {"error": 1}
                 
             logger.info(f"Descargando archivo desde: {download_url}")
-            async with httpx.AsyncClient(verify=False) as client:
+            async with httpx.AsyncClient(verify=False, timeout=300.0) as client:
                 resp = await client.get(download_url)
                 if resp.status_code == 200:
                     async with SessionLocal() as db:
