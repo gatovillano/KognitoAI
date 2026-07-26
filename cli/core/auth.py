@@ -31,7 +31,8 @@ class TokenValidator:
             return {}
         try:
             if JWT_AVAILABLE:
-                return _jwt.decode(token, options={"verify_signature": False})
+                jwt_secret = os.getenv("JWT_SECRET_KEY", "")
+                return _jwt.decode(token, jwt_secret, algorithms=["HS256"])
             # Fallback manual sin dependencia
             import base64, json
             parts = token.split(".")

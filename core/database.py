@@ -1948,3 +1948,26 @@ class EpisodicMemory(Base):
     def __repr__(self):
         return f"<EpisodicMemory(id={self.id}, account_id={self.account_id}, type={self.episode_type})>"
 
+
+class PTYAuditLog(Base):
+    """
+    Registra comandos ejecutados en sesiones PTY para trazabilidad de auditoría.
+    """
+    __tablename__ = "pty_audit_logs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(String(255), nullable=False, index=True)
+    command = Column(Text, nullable=False)
+    exit_code = Column(Integer, nullable=True)
+    timestamp = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"), index=True)
+    session_id = Column(String(255), nullable=True, index=True)
+    ip_address = Column(String(100), nullable=True)
+
+    __table_args__ = (
+        Index('ix_pty_audit_user_time', 'user_id', 'timestamp'),
+    )
+
+    def __repr__(self):
+        return f"<PTYAuditLog(id={self.id}, user_id={self.user_id}, command={self.command[:30]})>"
+
+

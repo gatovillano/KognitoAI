@@ -241,7 +241,7 @@ class ArchivistAgent:
         authors = "".join(doc.get("authors", []))
         year = str(doc.get("year", ""))
         raw = f"{title}{authors}{year}"
-        return hashlib.md5(raw.encode()).hexdigest()[:12]
+        return hashlib.sha256(raw.encode()).hexdigest()[:12]
     
     def _detect_language(self, text: str) -> str:
         """Detección de idioma simple basada en caracteres comunes"""

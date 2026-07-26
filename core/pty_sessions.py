@@ -72,16 +72,16 @@ async def create_session(
     def _start_proc():
         # Iniciar el proceso dentro del PTY
         try:
+            cmd_args = ["/bin/bash", "-c", command] if isinstance(command, str) else command
             proc = subprocess.Popen(
-                command,
-                shell=True,
+                cmd_args,
+                shell=False,
                 stdin=slave_fd,
                 stdout=slave_fd,
                 stderr=slave_fd,
                 close_fds=True,
                 env=_env,
                 cwd=cwd or None,
-                executable=DEFAULT_SHELL,
             )
             # el padre no necesita el fd slave
             try:
@@ -273,3 +273,47 @@ async def close_session(session_id: str) -> None:
         except Exception:
             pass
         _sessions.pop(session_id, None)
+
+
+async def log_pty_audit(user_id: str, command: str, exit_code: Optional[int] = 0, session_id: Optional[str] = None, ip_address: Optional[str] = None) -> None:
+    """Registra comandos PTY en la tabla pty_audit_logs."""
+    try:
+        from core.database import SessionLocal, PTYAuditLog
+        async with SessionLocal() as db:
+            log_entry = PTYAuditLog(
+                user_id=str(user_id),
+                command=command,
+                exit_code=exit_code,
+                session_id=session_id,
+                ip_address=ip_address
+            )
+            db.add(log_entry)
+            await db.commit()
+    except Exception as e:
+        logger.error(f"Error registrando auditoría PTY: {e}")
+
+
+async def cleanup_orphan_pty_sessions() -> int:
+    """Termina todos los procesos PTY huérfanos o cerrados en memoria (Watchdog PTY)."""
+    cleaned = 0
+    to_remove = []
+    for s_id, session in list(_sessions.items()):
+        proc = session.get("proc")
+        if not proc or proc.poll() is not None:
+            to_remove.append(s_id)
+            continue
+        try:
+            proc.terminate()
+            cleaned += 1
+        except Exception:
+            pass
+        to_remove.append(s_id)
+
+    for s_id in to_remove:
+        _sessions.pop(s_id, None)
+
+    if cleaned > 0:
+        logger.info(f"🧹 Watchdog PTY: {cleaned} sesiones huérfanas terminadas.")
+    return cleaned
+
+

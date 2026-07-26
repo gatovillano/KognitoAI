@@ -210,7 +210,7 @@ class Config:
         # ¡NUEVA LÍNEA! URL interna para comunicación entre contenedores (Docker network)
         self.internal_api_server_url: str = os.getenv("INTERNAL_API_SERVER_URL", default_internal)
         # ¡NUEVA LÍNEA! Un secreto para proteger los endpoints de administración.
-        self.admin_secret: str = get_secret("admin_secret", "ADMIN_SECRET", "default-admin-secret")
+        self.admin_secret: Optional[str] = get_secret("admin_secret", "ADMIN_SECRET")
         
         # Clave maestra para el cifrado de datos en la base de datos (pgcrypto)
         self.db_encryption_key: Optional[str] = get_secret("db_encryption_key", "DB_ENCRYPTION_KEY")
@@ -230,12 +230,10 @@ class Config:
         self.neo4j_user: Optional[str] = os.getenv("NEO4J_USER", "neo4j")
         self.neo4j_password: Optional[str] = get_secret("neo4j_password", "NEO4J_PASSWORD")
 
-
-        
         # --- Configuración de RAG (Chunking) ---
         self.chunk_size: int = int(os.getenv("CHUNK_SIZE", 100))
         self.chunk_overlap: int = int(os.getenv("CHUNK_OVERLAP", 20))
-        self.internal_api_key_for_bot: str = get_secret("internal_api_key_for_bot", "INTERNAL_API_KEY_FOR_BOT", "super-secret-internal-key")
+        self.internal_api_key_for_bot: Optional[str] = get_secret("internal_api_key_for_bot", "INTERNAL_API_KEY_FOR_BOT")
         self.global_collection_name: str = os.getenv("GLOBAL_COLLECTION_NAME", "global_knowledge_base") # Nueva variable
         self.cors_allowed_origins: Optional[str] = os.getenv("CORS_ALLOWED_ORIGINS")
 
@@ -408,25 +406,30 @@ class Config:
             raise ValueError("ERROR CRÍTICO: DATABASE_URL no está definido. La persistencia no funcionará.")
 
         # Validar claves de seguridad críticas
-        if not self.jwt_secret_key or self.jwt_secret_key == "supersecretkey":
-            if not self.debug_mode:
-                raise ValueError(
-                    "ERROR CRÍTICO DE SEGURIDAD: JWT_SECRET_KEY no está configurada o usa el valor por defecto inseguro en producción. "
-                    "Configure un JWT_SECRET_KEY seguro."
-                )
-            else:
-                logger.warning("⚠️ ADVERTENCIA DE SEGURIDAD: JWT_SECRET_KEY no está configurada o usa el valor por defecto inseguro. Se usará 'supersecretkey' para desarrollo.")
-                self.jwt_secret_key = "supersecretkey"
+        if not self.jwt_secret_key or self.jwt_secret_key in ("supersecretkey", "default-jwt-secret"):
+            raise ValueError(
+                "ERROR CRÍTICO DE SEGURIDAD: JWT_SECRET_KEY no está configurada o usa un valor por defecto inseguro. "
+                "Configure la variable de entorno JWT_SECRET_KEY con un secreto seguro."
+            )
 
-        if not self.db_encryption_key or self.db_encryption_key == "super-secret-db-encryption-key":
+        if not self.db_encryption_key or self.db_encryption_key in ("super-secret-db-encryption-key", "default-db-key"):
             if not self.debug_mode:
                 raise ValueError(
-                    "ERROR CRÍTICO DE SEGURIDAD: DB_ENCRYPTION_KEY no está configurada o usa el valor por defecto inseguro en producción. "
+                    "ERROR CRÍTICO DE SEGURIDAD: DB_ENCRYPTION_KEY no está configurada o usa un valor por defecto inseguro. "
                     "Configure un DB_ENCRYPTION_KEY seguro."
                 )
-            else:
-                logger.warning("⚠️ ADVERTENCIA DE SEGURIDAD: DB_ENCRYPTION_KEY no está configurada o usa el valor por defecto inseguro. Se usará 'super-secret-db-encryption-key' para desarrollo.")
-                self.db_encryption_key = "super-secret-db-encryption-key"
+
+        if not self.admin_secret or self.admin_secret == "default-admin-secret":
+            if not self.debug_mode:
+                raise ValueError(
+                    "ERROR CRÍTICO DE SEGURIDAD: ADMIN_SECRET no está configurada o usa el valor por defecto inseguro."
+                )
+
+        if not self.internal_api_key_for_bot or self.internal_api_key_for_bot == "super-secret-internal-key":
+            if not self.debug_mode:
+                raise ValueError(
+                    "ERROR CRÍTICO DE SEGURIDAD: INTERNAL_API_KEY_FOR_BOT no está configurada o usa el valor por defecto inseguro."
+                )
 
         # Esenciales para la IA de Google.
         # Esenciales para la IA (LiteLLM maneja las keys internamente, pero advertimos si faltan las comunes)

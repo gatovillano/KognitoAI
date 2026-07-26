@@ -1,5 +1,6 @@
 # api/auth.py
 
+import os
 import logging
 import uuid
 import random
@@ -312,18 +313,7 @@ class AuthVerifyCode(BaseModel):
     identifier: str
     code: str
 
-@router.options("/auth/request-code", summary=" Manejar preflight para solicitar código de verificación")
-async def request_verification_code_options():
-    """Responde a las solicitudes OPTIONS para el endpoint de solicitud de código."""
-    return JSONResponse(
-        status_code=200,
-        content={"message": "OK"},
-        headers={
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "POST, OPTIONS",
-            "Access-Control-Allow-Headers": "*"
-        }
-    )
+
 
 @router.post("/auth/request-code", summary="Solicitar código de verificación")
 @limiter.limit("3/minute")
@@ -419,11 +409,26 @@ async def refresh_token(current_account_id: str = Depends(get_current_account_id
     access_token = create_access_token(data={"sub": current_account_id})
     return TokenResponse(access_token=access_token)
 
-@router.get("/auth/debug-token", summary="Debug token (solo en modo debug)")
-async def debug_token(token: str = Depends(oauth2_scheme)):
-    """Endpoint para debuggear problemas de JWT (solo disponible en modo debug)."""
+def _verify_debug_access(request: Request):
+    """Verifica que debug_mode esté activado y la IP esté en la lista blanca (solo localhost/VPN)."""
     if not settings.debug_mode:
         raise HTTPException(status_code=404, detail="Endpoint no disponible")
+    
+    client_ip = request.client.host if request.client else ""
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        client_ip = forwarded.split(",")[0].strip()
+    
+    allowed_ips = os.getenv("DEBUG_ALLOWED_IPS", "127.0.0.1,::1,localhost").split(",")
+    allowed_ips = [ip.strip() for ip in allowed_ips if ip.strip()]
+    
+    if client_ip not in allowed_ips:
+        raise HTTPException(status_code=404, detail="Endpoint no disponible")
+
+@router.get("/auth/debug-token", summary="Debug token (solo en modo debug)")
+async def debug_token(request: Request, token: str = Depends(oauth2_scheme)):
+    """Endpoint para debuggear problemas de JWT (solo disponible en modo debug)."""
+    _verify_debug_access(request)
 
     try:
         from utils.security import decode_access_token
@@ -431,22 +436,21 @@ async def debug_token(token: str = Depends(oauth2_scheme)):
         return {
             "token_valid": account_id is not None,
             "account_id": account_id,
-            "jwt_secret_key_prefix": settings.jwt_secret_key[:10] + "...",
+            "jwt_secret_key_prefix": (settings.jwt_secret_key[:10] + "...") if settings.jwt_secret_key else "None",
             "debug_mode": settings.debug_mode
         }
     except Exception as e:
         return {
             "token_valid": False,
             "error": str(e),
-            "jwt_secret_key_prefix": settings.jwt_secret_key[:10] + "...",
+            "jwt_secret_key_prefix": (settings.jwt_secret_key[:10] + "...") if settings.jwt_secret_key else "None",
             "debug_mode": settings.debug_mode
         }
 
 @router.post("/auth/emergency-token", response_model=TokenResponse, summary="Token de emergencia (solo debug)")
-async def emergency_token(telegram_id: str, db: AsyncSession = Depends(get_db_session)):
+async def emergency_token(request: Request, telegram_id: str, db: AsyncSession = Depends(get_db_session)):
     """Genera un token de emergencia para un usuario de Telegram (solo en modo debug)."""
-    if not settings.debug_mode:
-        raise HTTPException(status_code=404, detail="Endpoint no disponible")
+    _verify_debug_access(request)
 
     try:
         # Buscar la cuenta de Telegram
@@ -465,15 +469,14 @@ async def emergency_token(telegram_id: str, db: AsyncSession = Depends(get_db_se
         raise HTTPException(status_code=500, detail="Error generando token")
 
 @router.get("/auth/clear-tokens", summary="Limpiar tokens del frontend (solo debug)")
-async def clear_frontend_tokens():
+async def clear_frontend_tokens(request: Request):
     """Endpoint para indicar al frontend que limpie sus tokens (solo en modo debug)."""
-    if not settings.debug_mode:
-        raise HTTPException(status_code=404, detail="Endpoint no disponible")
+    _verify_debug_access(request)
 
     return {
         "action": "clear_tokens",
         "message": "Limpia localStorage.removeItem('authToken') y localStorage.removeItem('access_token')",
-        "jwt_secret_prefix": settings.jwt_secret_key[:10] + "...",
+        "jwt_secret_prefix": (settings.jwt_secret_key[:10] + "...") if settings.jwt_secret_key else "None",
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
 
