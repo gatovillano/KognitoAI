@@ -52,6 +52,32 @@ def _set_pty_size(fd: int, cols: int, rows: int) -> None:
         logger.warning(f"No se pudo ajustar el tamaño del PTY: {e}")
 
 
+ALLOWED_PTY_COMMANDS = {
+    "ls", "cat", "grep", "ps", "top", "df", "free", "whoami", "pwd",
+    "cd", "echo", "date", "uptime", "systemctl", "journalctl", "tail",
+    "head", "less", "more", "find", "wc", "sort", "uniq", "awk", "sed"
+}
+
+
+def validate_pty_command(cmd: str) -> bool:
+    """Valida un comando o secuencia de comandos PTY contra la lista blanca permitida."""
+    if not cmd or not cmd.strip():
+        return True
+    import re
+    if ">" in cmd or "<" in cmd:
+        return False
+    segments = re.split(r"[;&|]+", cmd)
+    for seg in segments:
+        seg = seg.strip()
+        if not seg:
+            continue
+        tokens = seg.split()
+        binary = os.path.basename(tokens[0])
+        if binary not in ALLOWED_PTY_COMMANDS:
+            return False
+    return True
+
+
 @router.websocket("/ws/terminal/{account_id}")
 async def terminal_websocket(websocket: WebSocket, account_id: str):
     """
@@ -75,7 +101,6 @@ async def terminal_websocket(websocket: WebSocket, account_id: str):
         return
 
     # ── 1.5. Verificación de rol de administrador ─────────────────────────────
-    # Solo los administradores pueden crear o conectarse a sesiones PTY.
     async with SessionLocal() as db:
         result = await db.execute(select(Account).where(Account.id == account_id))
         account = result.scalars().first()
@@ -88,9 +113,7 @@ async def terminal_websocket(websocket: WebSocket, account_id: str):
 
     await websocket.accept()
     session_id = websocket.query_params.get("session_id")
-    # If the client attaches to an existing PTY session, register as a terminal client and proxy inputs
     if session_id:
-        # Register connection so pty_sessions can push output (connection_type='terminal')
         await websocket_manager.connect(websocket, account_id, connection_type="terminal")
         logger.info(f"Terminal cliente conectado para cuenta {account_id}, sesión {session_id}")
         session = get_session(session_id)
@@ -100,12 +123,10 @@ async def terminal_websocket(websocket: WebSocket, account_id: str):
             await websocket.close()
             return
 
-        # Enviar historial acumulado si existe
         accumulated = session.get("accumulated_output", [])
         for chunk in accumulated:
             await websocket.send_json({"type": "output", "data": chunk})
 
-        # Si la sesión ya está cerrada, desconectar y salir
         if session.get("closed", False):
             websocket_manager.disconnect(websocket, account_id, "terminal")
             await websocket.close()
@@ -136,6 +157,10 @@ async def terminal_websocket(websocket: WebSocket, account_id: str):
                 if msg_type == "input":
                     data = msg.get("data", "")
                     if data:
+                        # TAREA 2.1: Validar comandos enviados a sesión PTY existente
+                        if not validate_pty_command(data.strip()):
+                            await websocket.send_json({"error": "command not allowed"})
+                            continue
                         await write_to_session(session_id, data)
 
                 elif msg_type == "resize":
@@ -160,8 +185,6 @@ async def terminal_websocket(websocket: WebSocket, account_id: str):
 
     # ── 2. Crear PTY y lanzar shell ──────────────────────────────────────────
     master_fd, slave_fd = pty.openpty()
-
-    # Ajuste de tamaño inicial razonable
     _set_pty_size(master_fd, cols=220, rows=50)
 
     pid = os.fork()
@@ -174,23 +197,28 @@ async def terminal_websocket(websocket: WebSocket, account_id: str):
         os.dup2(slave_fd, 2)
         os.close(master_fd)
         os.close(slave_fd)
-        env = os.environ.copy()
-        env.update({
+        
+        # TAREA 2.4: Construir diccionario env mínimo sin secretos heredados
+        clean_env = {
+            "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            "HOME": os.getenv("HOME", "/tmp"),
             "TERM": "xterm-256color",
             "COLORTERM": "truecolor",
             "LANG": "en_US.UTF-8",
-        })
-        os.execve(DEFAULT_SHELL, [DEFAULT_SHELL, "--login"], env)
-        os._exit(1)  # por si execve falla
+        }
+        os.execve(DEFAULT_SHELL, [DEFAULT_SHELL, "--login"], clean_env)
+        os._exit(1)
 
-    # Proceso padre: cierra el slave y opera sobre master_fd
     os.close(slave_fd)
-    # Si el cliente proporcionó un comando inicial via ?cmd=..., enviarlo al PTY
     initial_cmd = websocket.query_params.get("cmd")
     loop = asyncio.get_event_loop()
     if initial_cmd:
+        if not validate_pty_command(initial_cmd.strip()):
+            await websocket.send_json({"error": "command not allowed"})
+            os.close(master_fd)
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Command not allowed")
+            return
         try:
-            # Escribir el comando en el PTY usando un executor para no bloquear el event loop
             loop.run_in_executor(None, lambda: os.write(master_fd, (initial_cmd + "\n").encode("utf-8")))
         except Exception as e:
             logger.warning(f"No se pudo enviar el comando inicial al PTY: {e}")

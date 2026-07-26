@@ -970,7 +970,7 @@ async def download_document(
     
     if jwt_enabled and jwt_secret and token:
         try:
-            jwt.decode(token, jwt_secret, algorithms=["HS256"])
+            jwt.decode(token, jwt_secret, algorithms=["HS256"], leeway=30, options={"verify_exp": True})
             is_authenticated = True
             logger.debug(f"Acceso a descarga de documento {document_id} verificado mediante JWT de OnlyOffice.")
         except Exception:
@@ -1058,7 +1058,7 @@ async def download_file_for_onlyoffice(
 
     if jwt_enabled and jwt_secret and token:
         try:
-            jwt.decode(token, jwt_secret, algorithms=["HS256"])
+            jwt.decode(token, jwt_secret, algorithms=["HS256"], leeway=30, options={"verify_exp": True})
             is_authenticated = True
         except Exception:
             pass
@@ -1136,7 +1136,7 @@ async def onlyoffice_callback(document_id: uuid.UUID, request: Request):
             
         import jwt
         try:
-            decoded = jwt.decode(token, jwt_secret, algorithms=["HS256"])
+            decoded = jwt.decode(token, jwt_secret, algorithms=["HS256"], leeway=30, options={"verify_exp": True})
             if isinstance(decoded, dict) and "payload" in decoded:
                 body = decoded["payload"]
             else:

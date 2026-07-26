@@ -182,11 +182,12 @@ class KnowledgeExtractionNode:
         # Nombre del dataset para memorias conversacionales (aislado por account_id y workspace_id en las propiedades)
         dataset_name = "Agent Memories"
 
+        actions = data.get("actions", [])
         entities = data.get("entities", [])
         relationships = data.get("relationships", [])
         conceptual_insights = data.get("conceptual_insights", [])
 
-        if not entities and not relationships and not conceptual_insights:
+        if not entities and not relationships and not conceptual_insights and not actions:
             return
 
         # Mapa para buscar IDs por nombre de entidad/concepto
@@ -274,7 +275,7 @@ class KnowledgeExtractionNode:
                 })
 
         # 0. Procesar Acciones de Active Forgetting (DELETE / UPDATE)
-        actions = parsed_output.get("actions", [])
+        actions = data.get("actions", [])
         for act in actions:
             action_type = str(act.get("action", "")).upper()
             target_name = act.get("target_name") or act.get("target_id")

@@ -1,0 +1,22 @@
+# Dockerfile.pty
+# Contenedor aislado de baja superficie de ataque para ejecuciones PTY en KognitoAI
+
+FROM alpine:3.20
+
+# Instalar utilidades mínimas necesarias para la terminal
+RUN apk add --no-cache bash coreutils procps util-linux grep findutils sed gawk ncurses
+
+# Crear usuario sin privilegios
+RUN addgroup -g 1000 ptyuser && \
+    adduser -D -u 1000 -G ptyuser -s /bin/bash ptyuser
+
+USER ptyuser
+WORKDIR /tmp
+
+# Configurar variables de entorno aisladas
+ENV HOME=/tmp \
+    TERM=xterm-256color \
+    LANG=en_US.UTF-8 \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+ENTRYPOINT ["/bin/bash"]
