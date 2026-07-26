@@ -53,6 +53,7 @@ Encapsula la lógica para:
 - Proporcionar una dependencia de FastAPI para proteger endpoints.
 """
 
+import os
 import logging
 import re
 from datetime import datetime, timedelta, timezone
@@ -167,23 +168,37 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
 def decode_access_token(token: str) -> Optional[dict]:
     """
     Decodifica un token JWT y devuelve el payload.
-
-    Returns:
-        El payload (dict) si el token es válido, o None si ha expirado o es inválido.
+    Soporta rotación de claves intentando JWT_SECRET_KEY y luego JWT_SECRET_KEY_OLD.
     """
-    try:
-        payload = jwt.decode(token, settings.jwt_secret_key, algorithms=["HS256"], leeway=60)
-        return payload
-    except jwt.ExpiredSignatureError:
-        logger.warning("❌ Token JWT expirado.")
-        return None
-    except jwt.InvalidSignatureError:
-        # Puede ocurrir cuando un servicio externo (ej. OnlyOffice) usa su propio JWT.
-        logger.debug("Token JWT con firma invalida para JWT_SECRET_KEY local.")
-        return None
-    except jwt.PyJWTError as e:
-        logger.warning(f"❌ Error de decodificación de JWT: {e}")
-        return None
+    keys_to_try = []
+    if settings.jwt_secret_key:
+        keys_to_try.append(settings.jwt_secret_key)
+    
+    old_key = getattr(settings, "jwt_secret_key_old", None) or os.getenv("JWT_SECRET_KEY_OLD")
+    if old_key and old_key not in keys_to_try:
+        keys_to_try.append(old_key)
+
+    for key in keys_to_try:
+        try:
+            payload = jwt.decode(
+                token,
+                key,
+                algorithms=["HS256"],
+                leeway=30,
+                options={"verify_exp": True}
+            )
+            return payload
+        except jwt.ExpiredSignatureError:
+            logger.warning("❌ Token JWT expirado.")
+            return None
+        except jwt.InvalidSignatureError:
+            continue
+        except jwt.PyJWTError as e:
+            logger.warning(f"❌ Error de decodificación de JWT: {e}")
+            return None
+
+    logger.debug("Token JWT con firma inválida para las claves disponibles.")
+    return None
 
 
 # --- Dependencia de FastAPI ---

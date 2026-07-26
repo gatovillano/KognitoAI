@@ -92,8 +92,7 @@ def test_knowledge_extraction_node_processes_actions(mock_get_fast_llm):
     }
 
     # Llamar formateo / guardado directo
-    asyncio.run(node.adapter.delete_entity_by_name("LegacyTool", account_id="acc1"))
-    asyncio.run(node.adapter.update_entity_by_name("CurrentTool", new_props={"version": "v2"}, account_id="acc1"))
+    asyncio.run(node._persist_knowledge(parsed_output, {"account_id": "acc1", "workspace_id": "ws1"}))
 
     assert node.adapter.delete_entity_by_name.called
     assert node.adapter.update_entity_by_name.called

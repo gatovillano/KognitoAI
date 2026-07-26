@@ -34,16 +34,20 @@ class GatewayConfig:
         self.core_ws_url: str = os.getenv("CORE_WS_URL", _ws_default)
 
         # Seguridad
-        self.jwt_secret_key: str = os.getenv("JWT_SECRET_KEY", "supersecretkey")
+        self.jwt_secret_key: Optional[str] = os.getenv("JWT_SECRET_KEY")
         self.jwt_expiry_days: int = int(os.getenv("JWT_EXPIRY_DAYS", 7))
-        self.internal_api_key_for_bot: str = os.getenv("INTERNAL_API_KEY_FOR_BOT", "super-secret-internal-key")
-        self.admin_secret: str = os.getenv("ADMIN_SECRET", "default-admin-secret")
+        self.internal_api_key_for_bot: Optional[str] = os.getenv("INTERNAL_API_KEY_FOR_BOT")
+        self.admin_secret: Optional[str] = os.getenv("ADMIN_SECRET")
 
         # Logging
         self.log_level: str = os.getenv("LOG_LEVEL", "INFO").upper()
 
         # Validaciones críticas
         if not self.telegram_bot_token:
-            logger.warning("⚠️ TELEGRAM_BOT_TOKEN no está configurado. El bot de Telegram no iniciará.")
+            raise ValueError("ERROR CRÍTICO: TELEGRAM_BOT_TOKEN es obligatorio para el inicio de telegram_gateway.")
+        if not self.jwt_secret_key or self.jwt_secret_key in ("supersecretkey", "default-jwt-secret"):
+            raise ValueError("ERROR CRÍTICO DE SEGURIDAD: JWT_SECRET_KEY no está configurado en telegram_gateway.")
+        if not self.internal_api_key_for_bot or self.internal_api_key_for_bot == "super-secret-internal-key":
+            raise ValueError("ERROR CRÍTICO DE SEGURIDAD: INTERNAL_API_KEY_FOR_BOT no está configurado en telegram_gateway.")
 
 config = GatewayConfig()

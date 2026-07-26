@@ -95,7 +95,8 @@ def get_account_id() -> Optional[str]:
     if not token: return None
     try:
         import jwt
-        payload = jwt.decode(token, options={"verify_signature": False})
+        jwt_secret = os.getenv("JWT_SECRET_KEY", "")
+        payload = jwt.decode(token, jwt_secret, algorithms=["HS256"])
         return payload.get("sub")
     except Exception: return None
 
