@@ -64,7 +64,7 @@ cleanup() {
     exit 0
 }
 
-trap cleanup SIGINT
+trap cleanup SIGINT SIGTERM
 
 echo "=========================================================="
 echo -e "${GREEN}🎉 Servicios en ejecución exitosamente:${NC}"
