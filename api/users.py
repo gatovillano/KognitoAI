@@ -192,6 +192,14 @@ async def get_user_settings(current_account_id: str = Depends(get_current_accoun
     except Exception as e:
         logger.warning(f"No se pudo obtener el secreto email_password: {e}")
 
+    installed_exts = list(account.installed_extensions or [])
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for ext_name in ["kognito_chat", "fediverso", "email_management", "jitsi_meet", "gallery_selection_panel"]:
+        if ext_name not in installed_exts:
+            ext_path = os.path.join(project_root, "extensions", ext_name)
+            if os.path.exists(ext_path):
+                installed_exts.append(ext_name)
+
     return UserSettingsResponse(
         name=account.name,
         email=account.email,
@@ -230,7 +238,7 @@ async def get_user_settings(current_account_id: str = Depends(get_current_accoun
         reranker_model=account.reranker_model,
         reranker_api_base=account.reranker_api_base,
         disabled_skills=account.disabled_skills,
-        installed_extensions=account.installed_extensions,
+        installed_extensions=installed_exts,
         ssh_host=account.ssh_host,
         ssh_port=account.ssh_port,
         ssh_user=account.ssh_user,
