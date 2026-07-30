@@ -49,6 +49,7 @@ show_help() {
     echo -e "  ${YELLOW}kognitoai upgrade${NC}    - Descarga la última versión y reinicia"
     echo -e "  ${BLUE}kognitoai setup${NC}      - Reconfigura el entorno de usuario (~/.kognito)"
     echo -e "  ${BLUE}kognitoai status${NC}     - Muestra el estado de los servicios"
+    echo -e "  ${BLUE}kognitoai logs${NC}       - Muestra y monitorea los registros (logs) del sistema"
     echo -e "  ${RED}kognitoai stop${NC}       - Detiene todos los servicios"
     echo -e "  ${RED}kognitoai uninstall${NC}  - Desinstala Kognito AI"
     echo ""
@@ -263,6 +264,157 @@ cmd_status() {
     pgrep -f "run_telegram_gateway" &>/dev/null && echo -e "  ${GREEN}✅ Telegram Gateway${NC}" || echo -e "  ${RED}❌ Telegram Gateway${NC}"
 }
 
+cmd_logs() {
+    check_repo
+    cd "${REPO_DIR}"
+    
+    local TARGET=""
+    local LINES=50
+    local FOLLOW=true
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -n|--lines)
+                LINES="$2"
+                shift 2
+                ;;
+            --no-follow)
+                FOLLOW=false
+                shift
+                ;;
+            -f|--follow)
+                FOLLOW=true
+                shift
+                ;;
+            list)
+                TARGET="list"
+                shift
+                ;;
+            clear)
+                TARGET="clear"
+                shift
+                ;;
+            *)
+                TARGET="$1"
+                shift
+                ;;
+        esac
+    done
+
+    mkdir -p logs
+
+    case "${TARGET}" in
+        list)
+            echo -e "${BOLD}Archivos de log disponibles en ${REPO_DIR}/logs:${NC}"
+            if ls -lh logs/*.log 2>/dev/null; then
+                :
+            else
+                echo -e "${YELLOW}No se encontraron archivos de log en logs/${NC}"
+            fi
+            ;;
+        clear)
+            echo -e "${YELLOW}🧹 Limpiando archivos de log en ${REPO_DIR}/logs...${NC}"
+            rm -f logs/*.log logs/*.out 2>/dev/null || true
+            echo -e "${GREEN}✅ Logs limpiados.${NC}"
+            ;;
+        backend|api)
+            local log_file="logs/backend.log"
+            if [ ! -f "${log_file}" ]; then
+                echo -e "${YELLOW}⚠️  El archivo ${log_file} no existe aún.${NC}"
+                exit 1
+            fi
+            echo -e "${GREEN}📄 Mostrando registros de Backend (${log_file})...${NC}"
+            if [ "${FOLLOW}" = true ]; then
+                tail -n "${LINES}" -f "${log_file}"
+            else
+                tail -n "${LINES}" "${log_file}"
+            fi
+            ;;
+        frontend|web|next)
+            local log_file="logs/frontend.log"
+            if [ ! -f "${log_file}" ]; then
+                echo -e "${YELLOW}⚠️  El archivo ${log_file} no existe aún.${NC}"
+                exit 1
+            fi
+            echo -e "${BLUE}📄 Mostrando registros de Frontend (${log_file})...${NC}"
+            if [ "${FOLLOW}" = true ]; then
+                tail -n "${LINES}" -f "${log_file}"
+            else
+                tail -n "${LINES}" "${log_file}"
+            fi
+            ;;
+        telegram|gateway)
+            local log_file="logs/telegram_gateway.log"
+            if [ ! -f "${log_file}" ]; then
+                echo -e "${YELLOW}⚠️  El archivo ${log_file} no existe aún.${NC}"
+                exit 1
+            fi
+            echo -e "${YELLOW}📄 Mostrando registros de Telegram Gateway (${log_file})...${NC}"
+            if [ "${FOLLOW}" = true ]; then
+                tail -n "${LINES}" -f "${log_file}"
+            else
+                tail -n "${LINES}" "${log_file}"
+            fi
+            ;;
+        llm)
+            local latest_llm
+            latest_llm=$(ls -t logs/llm_detailed_*.log 2>/dev/null | head -n 1)
+            if [ -z "${latest_llm}" ]; then
+                echo -e "${YELLOW}⚠️  No se encontraron registros de LLM (logs/llm_detailed_*.log).${NC}"
+                exit 1
+            fi
+            echo -e "${GREEN}📄 Mostrando último registro de LLM (${latest_llm})...${NC}"
+            if [ "${FOLLOW}" = true ]; then
+                tail -n "${LINES}" -f "${latest_llm}"
+            else
+                tail -n "${LINES}" "${latest_llm}"
+            fi
+            ;;
+        docker|db)
+            if [ -f "docker-compose.yml" ]; then
+                echo -e "${BLUE}📄 Mostrando registros de Docker Compose...${NC}"
+                if [ "${FOLLOW}" = true ]; then
+                    docker compose logs -f --tail="${LINES}" 2>/dev/null || docker-compose logs -f --tail="${LINES}"
+                else
+                    docker compose logs --tail="${LINES}" 2>/dev/null || docker-compose logs --tail="${LINES}"
+                fi
+            else
+                echo -e "${YELLOW}⚠️  No se encontró docker-compose.yml en ${REPO_DIR}${NC}"
+            fi
+            ;;
+        all|follow|live|stream|"")
+            local active_logs=()
+            [ -f "logs/backend.log" ] && active_logs+=("logs/backend.log")
+            [ -f "logs/frontend.log" ] && active_logs+=("logs/frontend.log")
+            [ -f "logs/telegram_gateway.log" ] && active_logs+=("logs/telegram_gateway.log")
+
+            if [ ${#active_logs[@]} -eq 0 ]; then
+                echo -e "${YELLOW}⚠️  No hay archivos de log activos en ${REPO_DIR}/logs.${NC}"
+                echo -e "${YELLOW}   Ejecuta: ${BOLD}kognitoai start${NC} para iniciar los servicios.${NC}"
+                exit 1
+            fi
+
+            echo -e "${GREEN}📄 Mostrando registros en tiempo real (${active_logs[*]})...${NC}"
+            if [ "${FOLLOW}" = true ]; then
+                tail -n "${LINES}" -f "${active_logs[@]}"
+            else
+                tail -n "${LINES}" "${active_logs[@]}"
+            fi
+            ;;
+        *)
+            echo -e "${RED}Opción o servicio de logs desconocido: '${TARGET}'${NC}"
+            echo ""
+            echo -e "${BOLD}Uso de kognitoai logs:${NC}"
+            echo -e "  kognitoai logs [all]                  - Visualiza logs de todos los servicios activos"
+            echo -e "  kognitoai logs backend | frontend | telegram | llm | docker"
+            echo -e "  kognitoai logs list                   - Lista los archivos de logs disponibles"
+            echo -e "  kognitoai logs clear                  - Borra los archivos de logs"
+            echo -e "  Opciones: -n <líneas> / --no-follow"
+            exit 1
+            ;;
+    esac
+}
+
 cmd_stop() {
     echo -e "${RED}🛑 Deteniendo servicios de Kognito AI...${NC}"
     pkill -f "run_api.py" 2>/dev/null && echo "  Backend detenido." || true
@@ -348,6 +500,7 @@ case "${COMMAND}" in
     upgrade)   cmd_upgrade "$@" ;;
     setup)     cmd_setup "$@" ;;
     status)    cmd_status "$@" ;;
+    logs)      cmd_logs "$@" ;;
     stop)      cmd_stop "$@" ;;
     uninstall) cmd_uninstall "$@" ;;
     *)         show_help "$@" ;;
