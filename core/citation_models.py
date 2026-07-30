@@ -10,7 +10,7 @@ para mostrar al usuario.
 """
 
 from typing import List, Optional, Dict, Any, Union
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from enum import Enum
 
 
@@ -45,6 +45,13 @@ class Source(BaseModel):
     type: SourceType = Field(default=SourceType.WEB, description="Tipo de fuente")
     is_cited: bool = Field(default=False, description="Indica si la fuente fue citada en la respuesta")
     metadata: Optional[Dict[str, Any]] = Field(default=None, description="Metadatos adicionales")
+
+    @field_validator("url", "title", "snippet", mode="before")
+    @classmethod
+    def _coerce_str_fields(cls, v: Any) -> str:
+        if v is None:
+            return ""
+        return str(v)
 
 
 class ToolOutputWithSources(BaseModel):

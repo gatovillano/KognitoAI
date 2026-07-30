@@ -1,6 +1,7 @@
 ---
 name: conversations_skill
-description: Permite al agente buscar, listar y leer el historial de mensajes de conversaciones pasadas almacenadas en la base de datos de KAI.
+description: Use when Permite al agente buscar, listar y leer el historial de mensajes
+  de conversaciones pasadas almacenadas en la base de datos de KAI.
 ---
 
 # CONVERSATIONS_SKILL: Historial de Conversaciones de KAI

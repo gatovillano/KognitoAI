@@ -129,3 +129,33 @@ def test_llm_cache_retention_and_invalidation():
         llm_manager.get_llm_for_user = original_get_llm_for_user
         llm_manager.clear_user_llm_cache(test_user)
 
+
+def test_get_configured_fallback_llm_falls_back_to_admin_model():
+    original_get_llm_for_user = llm_manager.get_llm_for_user
+    original_get_main_llm = llm_manager.get_main_llm
+    original_get_fast_llm = llm_manager.get_fast_llm
+    try:
+        admin_model = _fake_llm("openrouter/admin-main-model")
+        # El usuario tiene el mismo modelo en main y fast (o falla)
+        async def fake_get_llm_for_user(account_id: str, purpose: str = "main"):
+            return _fake_llm("openrouter/user-broken-model")
+
+        llm_manager.get_llm_for_user = fake_get_llm_for_user
+        llm_manager.get_main_llm = lambda: admin_model
+        llm_manager.get_fast_llm = lambda: _fake_llm("openrouter/user-broken-model")
+
+        fallback = asyncio.run(
+            llm_manager.get_configured_fallback_llm(
+                account_id="user-2",
+                failed_purpose="main",
+            )
+        )
+
+        assert fallback is not None
+        assert fallback.model_name == "openrouter/admin-main-model"
+    finally:
+        llm_manager.get_llm_for_user = original_get_llm_for_user
+        llm_manager.get_main_llm = original_get_main_llm
+        llm_manager.get_fast_llm = original_get_fast_llm
+
+

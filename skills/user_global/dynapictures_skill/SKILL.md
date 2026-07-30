@@ -1,18 +1,12 @@
 ---
 name: dynapictures-skill
-description: |
-  Generate dynamic images using predefined templates via the DynaPictures REST API.
-  Supports single-page image generation, multi-page templates, PDF generation,
-  batch processing, template management, workspace management, and media library operations.
-  API key is configured securely via the DYNAPICTURES_API_KEY environment variable.
-license: MIT
-compatibility: Python 3.10+, requires async runtime
-metadata:
-  author: KognitoAI Team
-  version: "1.0.0"
-  category: image-generation
-allowed-tools: |
-  dynapictures
+description: 'Use when | Generate dynamic images using predefined templates via the
+  DynaPictures REST API. Supports single-page image generation, multi-page templates,
+  PDF generation, batch processing, template management, workspace management, and
+  media library operations. API key is configured securely via the DYNAPICTURES_API_KEY
+  environment variable. license: MIT compatibility: Python 3.10+, requires async runtime
+  metadata: author: KognitoAI Team version: "1.0.0" category: image-generation allowed-tools:
+  | dynapictures'
 ---
 
 # DynaPictures Skill 🎨

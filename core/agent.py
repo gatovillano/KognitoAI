@@ -88,6 +88,7 @@ from core.llm_manager import (
     get_main_llm,
     get_fast_llm,
     get_llm_for_user,
+    _get_global_llm_for_purpose,
 )
 from core.prompts import SUMMARIZATION_PROMPT, THREAD_TITLE_PROMPT
 from core.enhanced_memory_manager import EnhancedMemoryManager
@@ -1267,6 +1268,10 @@ async def call_model_node(state: AgentState):
             s_dict_copy = s_dict.copy()
             # ASIGNAR EL NUEVO ID SECUENCIAL
             s_dict_copy["id"] = i
+            # Sanitizar campos obligatorios de texto a str
+            s_dict_copy["url"] = str(s_dict_copy.get("url") or s_dict_copy.get("id") or "")
+            s_dict_copy["title"] = str(s_dict_copy.get("title") or "Fuente sin título")
+            s_dict_copy["snippet"] = str(s_dict_copy.get("snippet") or "")
 
             # Crear objeto Source para el formateador
             source_obj = Source(**s_dict_copy)
@@ -2315,9 +2320,47 @@ async def call_model_node(state: AgentState):
                         break
                 except Exception as _ainvoke_exc:
                     logger.error(
-                        f"❌ Fallback no-stream (ainvoke) también falló: {_ainvoke_exc}"
+                        f"❌ Fallback no-stream (ainvoke) del modelo de usuario también falló: {_ainvoke_exc}. "
+                        f"Cambiando automáticamente al modelo configurado de la cuenta de administrador..."
                     )
-                    raise _stream_exc
+                    try:
+                        admin_llm = _get_global_llm_for_purpose("vision" if has_images else "main") or get_main_llm()
+                        if admin_llm:
+                            admin_chain = admin_llm.bind_tools(tools) if tools else admin_llm
+                            if has_images:
+                                admin_chain = admin_chain.with_config(tags=["vision_model"])
+                            admin_res = await admin_chain.ainvoke({"messages": cleaned_messages})
+                            if isinstance(admin_res, AIMessage):
+                                if isinstance(admin_res.content, str):
+                                    full_ai_message_content = admin_res.content
+                                elif isinstance(admin_res.content, list):
+                                    for p in admin_res.content:
+                                        if isinstance(p, dict) and p.get("type") == "text":
+                                            full_ai_message_content += p.get("text", "")
+
+                                if getattr(admin_res, "tool_calls", None):
+                                    tool_calls_from_llm = list(admin_res.tool_calls)
+
+                                if full_ai_message_content:
+                                    await send_personal_message(
+                                        target_account_id,
+                                        {
+                                            "type": "stream_chunk",
+                                            "thread_id": state["thread_id"],
+                                            "taskId": state.get("task_id"),
+                                            "chunk": full_ai_message_content,
+                                            "full_text": full_ai_message_content,
+                                        },
+                                        connection_type=conn_type,
+                                    )
+                                final_response_message = admin_res
+                                logger.info("✅ Invocación con modelo de administrador completada con éxito.")
+                                break
+                        else:
+                            raise _stream_exc
+                    except Exception as _admin_exc:
+                        logger.error(f"❌ Fallback a modelo de administrador también falló: {_admin_exc}")
+                        raise _stream_exc
 
     logger.debug(
         f"DEBUG (agent.py - call_model_node): Respuesta cruda del LLM acumulada."

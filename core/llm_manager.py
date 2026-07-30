@@ -715,6 +715,31 @@ async def get_llm_for_user(
 
             api_key = _sanitize_ascii(api_key) if api_key else None
 
+            # Si el proveedor requiere API Key y no existe ninguna disponible, caer al modelo de administrador
+            providers_requiring_key = [
+                "gemini",
+                "google",
+                "google_ai_studio",
+                "openai",
+                "openrouter",
+                "anthropic",
+                "groq",
+                "deepseek",
+                "mistral",
+                "cerebras",
+                "kilocode",
+                "ollama-cloud",
+            ]
+            if not api_key and provider_target.lower() in providers_requiring_key:
+                logger.warning(
+                    f"⚠️ El modelo configurado por el usuario '{model_target}' (proveedor '{provider_target}') "
+                    f"requiere API Key pero no se encontró ninguna disponible. Usando automáticamente el modelo configurado por el administrador."
+                )
+                admin_llm = _get_global_llm_for_purpose(purpose)
+                if admin_llm:
+                    _llm_cache[cache_key] = (admin_llm, time.time())
+                    return admin_llm
+
             # 3. Construir instancia personalizada
             llm_kwargs = {
                 "model_name": model_target,
@@ -957,20 +982,18 @@ async def get_llm_for_user(
 
     except Exception as e:
         logger.error(
-            f"❌ Error al obtener LLM personalizado para {account_id}: {e}",
+            f"❌ Error al obtener LLM personalizado para {account_id}: {e}. Usando modelo global de administrador.",
             exc_info=True,
         )
-        return get_main_llm()  # Fallback a global en caso de error
+        return _get_global_llm_for_purpose(purpose)
 
 
 async def get_configured_fallback_llm(
     account_id: Optional[str] = None, failed_purpose: str = "main"
 ) -> Optional[ChatLiteLLM]:
     """
-    Devuelve un fallback respetando la configuración efectiva del usuario.
-
-    Nunca fuerza Gemini ni otro proveedor no configurado; solo reutiliza otros
-    LLMs ya disponibles en la configuración del usuario o en la global.
+    Devuelve un fallback respetando la configuración del sistema.
+    Si el modelo del usuario falla o no está disponible, cae automáticamente al modelo de administrador.
     """
     primary_llm = (
         await get_llm_for_user(account_id, purpose=failed_purpose)
@@ -996,11 +1019,21 @@ async def get_configured_fallback_llm(
         candidate_llm = _get_global_llm_for_purpose(purpose)
         if _is_distinct_llm(primary_llm, candidate_llm):
             logger.info(
-                "🔄 Usando fallback global configurado | from=%s | to=%s",
+                "🔄 Usando fallback global de administrador | from=%s | to=%s",
                 failed_purpose,
                 purpose,
             )
             return candidate_llm
+
+    # Fallback final al modelo de administrador correspondiente o al principal global
+    admin_fallback = _get_global_llm_for_purpose(failed_purpose) or get_main_llm()
+    if admin_fallback:
+        logger.info(
+            "🔄 Usando modelo de administrador como fallback final | account_id=%s | purpose=%s",
+            account_id,
+            failed_purpose,
+        )
+        return admin_fallback
 
     logger.warning(
         "⚠️ No hay un fallback LLM alternativo configurado | account_id=%s | failed_purpose=%s",

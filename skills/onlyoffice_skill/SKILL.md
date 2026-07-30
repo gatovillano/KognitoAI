@@ -1,3 +1,9 @@
+---
+name: onlyoffice
+description: Use when viewing, editing, or converting documents, spreadsheets, or
+  presentations via the OnlyOffice API or local pipeline.
+---
+
 # ONLYOFFICE_SKILL: Editor de Documentos en la Plataforma KAI
 
 > ⚠️ **ANTES DE USAR ESTE SKILL, LEE LA SECCIÓN "¿QUÉ HERRAMIENTA USAR?"**

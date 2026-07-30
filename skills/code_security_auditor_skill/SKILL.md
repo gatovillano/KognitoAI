@@ -1,3 +1,9 @@
+---
+name: code-security-auditor
+description: Use when auditing source code for security vulnerabilities, dangerous
+  patterns, and coding best practices.
+---
+
 # Skill: Auditoría de Código
 
 Audita código fuente en busca de vulnerabilidades de seguridad, patrones peligrosos y malas prácticas de programación.
