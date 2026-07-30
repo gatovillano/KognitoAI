@@ -169,7 +169,7 @@ async def setup_initial_admin(request_data: InitialSetupRequest, db: AsyncSessio
 @limiter.limit("5/minute")
 async def register_user(request: Request, register_data: RegisterRequest, db: AsyncSession = Depends(get_db_session)):
     """Registra una nueva cuenta de usuario con email y contraseña."""
-    existing_account_result = await db.execute(select(Account).where(Account.email == request.email))
+    existing_account_result = await db.execute(select(Account).where(Account.email == register_data.email))
     if existing_account_result.scalars().first():
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ya existe una cuenta con este correo electrónico.")
 
