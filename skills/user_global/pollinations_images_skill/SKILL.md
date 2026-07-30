@@ -1,19 +1,10 @@
 ---
 name: pollinations-images
-description: |
-  Generación de imágenes usando la API gratuita de Pollinations.ai.
-  Soporta generación individual, batch, y obtención de URLs sin descargar.
-  No requiere API key para uso básico (con rate limit).
-license: MIT
-compatibility: Python 3.10+, requests
-metadata:
-  author: KognitoAI Team
-  version: "1.0.0"
-  category: image-generation
-allowed-tools: |
-  pollinations_generate_image
-  pollinations_get_image_url
-  pollinations_batch_generate
+description: 'Use when | Generación de imágenes usando la API gratuita de Pollinations.ai.
+  Soporta generación individual, batch, y obtención de URLs sin descargar. No requiere
+  API key para uso básico (con rate limit). license: MIT compatibility: Python 3.10+,
+  requests metadata: author: KognitoAI Team version: "1.0.0" category: image-generation
+  allowed-tools: | pollinations_generate_image pollinations_get_image_url pollinations_batch_generate'
 ---
 
 # Pollinations Images Skill 🌸

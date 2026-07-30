@@ -37,52 +37,42 @@ def resolve_onlyoffice_file_path(file_path: Union[str, os.PathLike[str]]) -> Pat
     if candidate.is_absolute():
         return candidate.resolve()
 
-    # 1. Intentar resolver en ONLYOFFICE_DOCS_ROOT
-    resolved_onlyoffice = (ONLYOFFICE_DOCS_ROOT / candidate).resolve()
-    try:
-        resolved_onlyoffice.relative_to(ONLYOFFICE_DOCS_ROOT)
-        if resolved_onlyoffice.exists():
-            if not resolved_onlyoffice.is_file():
-                raise ValueError(
-                    f"La ruta resuelta no es un archivo (es un directorio): {raw_path}"
-                )
-            return resolved_onlyoffice
-    except ValueError:
-        pass
+    project_root = Path(__file__).resolve().parent.parent
 
-    # 2. Intentar resolver en MEDIA_ROOT/documents (el almacenamiento externo)
-    if hasattr(settings, "media_root") and settings.media_root:
-        media_docs_root = Path(settings.media_root).resolve() / "documents"
+    # Lista completa de raíces potenciales donde se han almacenado documentos
+    candidate_roots = [
+        ONLYOFFICE_DOCS_ROOT,
+        Path(settings.media_root).resolve() / "documents" if hasattr(settings, "media_root") and settings.media_root else None,
+        Path(settings.media_root).resolve() if hasattr(settings, "media_root") and settings.media_root else None,
+        Path.home() / ".kognito" / "storage" / "onlyoffice" / "documents",
+        Path.home() / "KognitoAI" / "storage" / "onlyoffice" / "documents",
+        Path.home() / "KognitoAI" / "media" / "documents",
+        project_root / "media" / "documents" / "documents",
+        project_root / "media" / "documents",
+        Path("/run/media/gato/Almacenamiento/Nueva Fototeca/kognitoalbums/documents"),
+        Path("/run/media/gato/Almacenamiento/Nueva Fototeca/kognitoalbums"),
+    ]
+
+    for root in candidate_roots:
+        if not root:
+            continue
         try:
-            resolved_media = (media_docs_root / candidate).resolve()
-            resolved_media.relative_to(media_docs_root)
-            if resolved_media.exists():
-                if not resolved_media.is_file():
+            resolved_root = root.resolve()
+            if not resolved_root.exists():
+                continue
+            test_path = (resolved_root / candidate).resolve()
+            test_path.relative_to(resolved_root)
+            if test_path.exists():
+                if not test_path.is_file():
                     raise ValueError(
                         f"La ruta resuelta no es un archivo (es un directorio): {raw_path}"
                     )
-                return resolved_media
+                return test_path
         except ValueError:
             pass
 
-    # 3. Intentar resolver en el fallback local de desarrollo (media/documents/documents)
-    # Buscamos de manera dinámica con respecto a la ubicación del archivo
-    project_root = Path(__file__).resolve().parent.parent
-    local_fallback_root = (project_root / "media" / "documents" / "documents").resolve()
-    try:
-        resolved_local = (local_fallback_root / candidate).resolve()
-        resolved_local.relative_to(local_fallback_root)
-        if resolved_local.exists():
-            if not resolved_local.is_file():
-                raise ValueError(
-                    f"La ruta resuelta no es un archivo (es un directorio): {raw_path}"
-                )
-            return resolved_local
-    except ValueError:
-        pass
-
     # Si no existe en ningún lado, devolvemos la ruta por defecto en ONLYOFFICE_DOCS_ROOT
-    # garantizando que pase el chequeo de límites.
+    resolved_onlyoffice = (ONLYOFFICE_DOCS_ROOT / candidate).resolve()
     try:
         resolved_onlyoffice.relative_to(ONLYOFFICE_DOCS_ROOT)
     except ValueError as exc:
@@ -94,4 +84,5 @@ def resolve_onlyoffice_file_path(file_path: Union[str, os.PathLike[str]]) -> Pat
         )
 
     return resolved_onlyoffice
+
 

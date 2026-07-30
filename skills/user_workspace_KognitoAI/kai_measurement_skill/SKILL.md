@@ -1,9 +1,8 @@
 ---
 name: kai_measurement
-description: |
-  Pipeline de medición y monitoreo de métricas para el sistema KAI.
-  Integra la API de producción con herramientas de medición para 
-  evaluar alucinaciones, tasa de éxito de herramientas y rendimiento.
+description: Use when | Pipeline de medición y monitoreo de métricas para el sistema
+  KAI. Integra la API de producción con herramientas de medición para evaluar alucinaciones,
+  tasa de éxito de herramientas y rendimiento.
 ---
 
 ## Objetivo

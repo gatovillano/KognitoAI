@@ -1,21 +1,10 @@
 ---
 name: template-skill
-description: |
-  Plantilla reutilizable para crear nuevas skills siguiendo agentskills.io.
-  Copia este archivo y adapta los valores para tu skill específica.
-license: MIT
-compatibility: Python 3.10+, requires async runtime
-metadata:
-  author: KognitoAI Team
-  version: "1.0.0"
-  template: true
-  tags:
-    - template
-    - example
-  category: development-tools
-allowed-tools: |
-  filesystem__read_file
-  filesystem__write_file
+description: 'Use when | Plantilla reutilizable para crear nuevas skills siguiendo
+  agentskills.io. Copia este archivo y adapta los valores para tu skill específica.
+  license: MIT compatibility: Python 3.10+, requires async runtime metadata: author:
+  KognitoAI Team version: "1.0.0" template: true tags: - template - example category:
+  development-tools allowed-tools: | filesystem__read_file filesystem__write_file'
 ---
 
 # Template Skill

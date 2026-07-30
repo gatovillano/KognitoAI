@@ -1,23 +1,10 @@
 ---
 name: secure-email-recovery
-description: |
-  Skill empresarial para recuperación segura de correos electrónicos.
-  Soporta múltiples proveedores (Disroot, Gmail, Outlook, Yahoo, IMAP genérico),
-  autenticación OAuth2 y contraseña, caché inteligente, reintentos automáticos
-  y manejo de errores de nivel producción.
-version: "1.0.0"
-author: "KognitoAI"
-license: MIT
-tags:
-  - email
-  - imap
-  - security
-  - oauth2
-  - recovery
-  - disroot
-  - gmail
-  - outlook
-category: communication
+description: 'Use when | Skill empresarial para recuperación segura de correos electrónicos.
+  Soporta múltiples proveedores (Disroot, Gmail, Outlook, Yahoo, IMAP genérico), autenticación
+  OAuth2 y contraseña, caché inteligente, reintentos automáticos y manejo de errores
+  de nivel producción. version: "1.0.0" author: "KognitoAI" license: MIT tags: - email
+  - imap - security - oauth2 - recovery - disroot - gmail - outlook category: communication'
 ---
 
 ## 📋 Tabla de Contenidos

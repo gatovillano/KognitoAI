@@ -1,28 +1,14 @@
 ---
 name: retrieval-augmented-generation
-description: |
-  Recuperación y análisis de información desde bases de datos de conocimiento.
-  Implementa RAG (Retrieval Augmented Generation) para combinar búsqueda semántica
-  en pgvector con análisis inteligente. Úsalo cuando necesites información específica
-  del usuario, análisis de contexto profundo o respuestas basadas en documentos propios.
-license: MIT
-compatibility: |
-  Python 3.10+
-  Requires: PostgreSQL with pgvector extension
-  Requires: Access to knowledge graph (Neo4j)
-metadata:
-  author: KognitoAI Team
-  version: "1.0.0"
-  tags:
-    - rag
-    - retrieval
-    - semantic-search
-    - knowledge-graphs
-  category: knowledge-management
-allowed-tools: |
-  database__query
-  database__semantic_search
-  knowledge_graph__query
+description: 'Use when | Recuperación y análisis de información desde bases de datos
+  de conocimiento. Implementa RAG (Retrieval Augmented Generation) para combinar búsqueda
+  semántica en pgvector con análisis inteligente. Úsalo cuando necesites información
+  específica del usuario, análisis de contexto profundo o respuestas basadas en documentos
+  propios. license: MIT compatibility: | Python 3.10+ Requires: PostgreSQL with pgvector
+  extension Requires: Access to knowledge graph (Neo4j) metadata: author: KognitoAI
+  Team version: "1.0.0" tags: - rag - retrieval - semantic-search - knowledge-graphs
+  category: knowledge-management allowed-tools: | database__query database__semantic_search
+  knowledge_graph__query'
 ---
 
 # Retrieval-Augmented Generation (RAG)

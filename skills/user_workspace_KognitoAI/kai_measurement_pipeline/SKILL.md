@@ -1,8 +1,7 @@
 ---
 name: kai_measurement_pipeline
-description: Pipeline para medición de rendimiento real de KognitoAI
-version: 1.0.0
-author: KAI Agent
+description: 'Use when Pipeline para medición de rendimiento real de KognitoAI version:
+  1.0.0 author: KAI Agent'
 ---
 
 ## Objetivo

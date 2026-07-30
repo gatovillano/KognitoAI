@@ -1,25 +1,11 @@
 ---
 name: skill-installer
-description: |
-  Procedimiento para interpretar solicitudes de instalación de skills, resolver
-  enlaces o identificadores y decidir el flujo correcto de instalación.
-license: MIT
-compatibility: |
-  Python 3.10+
-  Compatible con el instalador interno de KognitoAI y con flujos tipo agentskills.io
-metadata:
-  author: KognitoAI Team
-  version: "1.0.0"
-  tags:
-    - installation
-    - skills
-    - resolver
-    - natural-language
-  category: core
-allowed-tools: |
-  filesystem__read_file
-  filesystem__write_file
-  terminal__execute
+description: 'Use when | Procedimiento para interpretar solicitudes de instalación
+  de skills, resolver enlaces o identificadores y decidir el flujo correcto de instalación.
+  license: MIT compatibility: | Python 3.10+ Compatible con el instalador interno
+  de KognitoAI y con flujos tipo agentskills.io metadata: author: KognitoAI Team version:
+  "1.0.0" tags: - installation - skills - resolver - natural-language category: core
+  allowed-tools: | filesystem__read_file filesystem__write_file terminal__execute'
 ---
 
 # Skill Installer

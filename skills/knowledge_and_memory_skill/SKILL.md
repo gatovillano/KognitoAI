@@ -1,32 +1,15 @@
 ---
 name: knowledge-memory-management
-description: |
-  Gestión del conocimiento y memoria del usuario. Almacena información, notas,
-  aprendizajes y relaciones entre conceptos en bases de datos vectoriales y grafos
-  de conocimiento. Úsalo cuando el agente descubra información valiosa que deba
-  persistir, cuando cree nuevas relaciones entre conceptos, o cuando necesite
-  actualizar el perfil de conocimiento del usuario.
-license: MIT
-compatibility: |
-  Python 3.10+
-  Requires: PostgreSQL with pgvector
-  Requires: Neo4j knowledge graph
-metadata:
-  author: KognitoAI Team
-  version: "1.1.0"
-  tags:
-    - memory
-    - knowledge-management
-    - semantic-storage
-    - graph-relations
-  category: knowledge-management
-allowed-tools: |
-  database__write
-  database__embeddings
-  knowledge_graph__write
-  knowledge_graph__update_relations
+description: 'Use when | Gestión del conocimiento y memoria del usuario. Almacena
+  información, notas, aprendizajes y relaciones entre conceptos en bases de datos
+  vectoriales y grafos de conocimiento. Úsalo cuando el agente descubra información
+  valiosa que deba persistir, cuando cree nuevas relaciones entre conceptos, o cuando
+  necesite actualizar el perfil de conocimiento del usuario. license: MIT compatibility:
+  | Python 3.10+ Requires: PostgreSQL with pgvector Requires: Neo4j knowledge graph
+  metadata: author: KognitoAI Team version: "1.1.0" tags: - memory - knowledge-management
+  - semantic-storage - graph-relations category: knowledge-management allowed-tools:
+  | database__write database__embeddings knowledge_graph__write knowledge_graph__update_relations'
 ---
-
 
 # Knowledge & Memory Management
 

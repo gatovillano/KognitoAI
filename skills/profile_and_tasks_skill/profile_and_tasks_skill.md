@@ -1,1 +1,0 @@
-El nombre completo del perfil de contacto a buscar.

@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>Auditoría de Código KognitoAI</title>
+  <style>
+    html {
+      color: #1a1a1a;
+      background-color: #fdfdfd;
+    }
+    body {
+      margin: 0 auto;
+      max-width: 36em;
+      padding-left: 50px;
+      padding-right: 50px;
+      padding-top: 50px;
+      padding-bottom: 50px;
+      hyphens: auto;
+      overflow-wrap: break-word;
+      text-rendering: optimizeLegibility;
+      font-kerning: normal;
+    }
+    @media (max-width: 600px) {
+      body {
+        font-size: 0.9em;
+        padding: 12px;
+      }
+      h1 {
+        font-size: 1.8em;
+      }
+    }
+    @media print {
+      html {
+        background-color: white;
+      }
+      body {
+        background-color: transparent;
+        color: black;
+        font-size: 12pt;
+      }
+      p, h2, h3 {
+        orphans: 3;
+        widows: 3;
+      }
+      h2, h3, h4 {
+        page-break-after: avoid;
+      }
+    }
+    p {
+      margin: 1em 0;
+    }
+    a {
+      color: #1a1a1a;
+    }
+    a:visited {
+      color: #1a1a1a;
+    }
+    img {
+      max-width: 100%;
+    }
+    svg {
+      height: auto;
+      max-width: 100%;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      margin-top: 1.4em;
+    }
+    h5, h6 {
+      font-size: 1em;
+      font-style: italic;
+    }
+    h6 {
+      font-weight: normal;
+    }
+    ol, ul {
+      padding-left: 1.7em;
+      margin-top: 1em;
+    }
+    li > ol, li > ul {
+      margin-top: 0;
+    }
+    blockquote {
+      margin: 1em 0 1em 1.7em;
+      padding-left: 1em;
+      border-left: 2px solid #e6e6e6;
+      color: #606060;
+    }
+    code {
+      font-family: Menlo, Monaco, Consolas, 'Lucida Console', monospace;
+      font-size: 85%;
+      margin: 0;
+      hyphens: manual;
+    }
+    pre {
+      margin: 1em 0;
+      overflow: auto;
+    }
+    pre code {
+      padding: 0;
+      overflow: visible;
+      overflow-wrap: normal;
+    }
+    .sourceCode {
+     background-color: transparent;
+     overflow: visible;
+    }
+    hr {
+      border: none;
+      border-top: 1px solid #1a1a1a;
+      height: 1px;
+      margin: 1em 0;
+    }
+    table {
+      margin: 1em 0;
+      border-collapse: collapse;
+      width: 100%;
+      overflow-x: auto;
+      display: block;
+      font-variant-numeric: lining-nums tabular-nums;
+    }
+    table caption {
+      margin-bottom: 0.75em;
+    }
+    tbody {
+      margin-top: 0.5em;
+      border-top: 1px solid #1a1a1a;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    th {
+      border-top: 1px solid #1a1a1a;
+      padding: 0.25em 0.5em 0.25em 0.5em;
+    }
+    td {
+      padding: 0.125em 0.5em 0.25em 0.5em;
+    }
+    header {
+      margin-bottom: 4em;
+      text-align: center;
+    }
+    #TOC li {
+      list-style: none;
+    }
+    #TOC ul {
+      padding-left: 1.3em;
+    }
+    #TOC > ul {
+      padding-left: 0;
+    }
+    #TOC a:not(:hover) {
+      text-decoration: none;
+    }
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+    /* CSS for syntax highlighting */
+    html { -webkit-text-size-adjust: 100%; }
+    pre > code.sourceCode { white-space: pre; position: relative; }
+    pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+    pre > code.sourceCode > span:empty { height: 1.2em; }
+    .sourceCode { overflow: visible; }
+    code.sourceCode > span { color: inherit; text-decoration: inherit; }
+    div.sourceCode { margin: 1em 0; }
+    pre.sourceCode { margin: 0; }
+    @media screen {
+    div.sourceCode { overflow: auto; }
+    }
+    @media print {
+    pre > code.sourceCode { white-space: pre-wrap; }
+    pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+    }
+    pre.numberSource code
+      { counter-reset: source-line 0; }
+    pre.numberSource code > span
+      { position: relative; left: -4em; counter-increment: source-line; }
+    pre.numberSource code > span > a:first-child::before
+      { content: counter(source-line);
+        position: relative; left: -1em; text-align: right; vertical-align: baseline;
+        border: none; display: inline-block;
+        -webkit-touch-callout: none; -webkit-user-select: none;
+        -khtml-user-select: none; -moz-user-select: none;
+        -ms-user-select: none; user-select: none;
+        padding: 0 4px; width: 4em;
+        color: #aaaaaa;
+      }
+    pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa;  padding-left: 4px; }
+    div.sourceCode
+      {   }
+    @media screen {
+    pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+    }
+    code span.al { color: #ff0000; font-weight: bold; } /* Alert */
+    code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } /* Annotation */
+    code span.at { color: #7d9029; } /* Attribute */
+    code span.bn { color: #40a070; } /* BaseN */
+    code span.bu { color: #008000; } /* BuiltIn */
+    code span.cf { color: #007020; font-weight: bold; } /* ControlFlow */
+    code span.ch { color: #4070a0; } /* Char */
+    code span.cn { color: #880000; } /* Constant */
+    code span.co { color: #60a0b0; font-style: italic; } /* Comment */
+    code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } /* CommentVar */
+    code span.do { color: #ba2121; font-style: italic; } /* Documentation */
+    code span.dt { color: #902000; } /* DataType */
+    code span.dv { color: #40a070; } /* DecVal */
+    code span.er { color: #ff0000; font-weight: bold; } /* Error */
+    code span.ex { } /* Extension */
+    code span.fl { color: #40a070; } /* Float */
+    code span.fu { color: #06287e; } /* Function */
+    code span.im { color: #008000; font-weight: bold; } /* Import */
+    code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Information */
+    code span.kw { color: #007020; font-weight: bold; } /* Keyword */
+    code span.op { color: #666666; } /* Operator */
+    code span.ot { color: #007020; } /* Other */
+    code span.pp { color: #bc7a00; } /* Preprocessor */
+    code span.sc { color: #4070a0; } /* SpecialChar */
+    code span.ss { color: #bb6688; } /* SpecialString */
+    code span.st { color: #4070a0; } /* String */
+    code span.va { color: #19177c; } /* Variable */
+    code span.vs { color: #4070a0; } /* VerbatimString */
+    code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
+  </style>
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">Auditoría de Código KognitoAI</h1>
+</header>
+<h1 id="auditoría-de-código---kognitoai">Auditoría de Código -
+KognitoAI</h1>
+<p><strong>Fecha:</strong> 2026-07-30<br />
+<strong>Agente:</strong> KogniTerm (Orquestador Principal)<br />
+<strong>Alcance:</strong> Análisis estático, seguridad, arquitectura y
+patrones<br />
+<strong>Metodología:</strong> Radon, Bandit, grep estático, revisión
+manual de archivos críticos</p>
+<hr />
+<h2 id="resumen-ejecutivo">1. Resumen Ejecutivo</h2>
+<table>
+<colgroup>
+<col style="width: 56%" />
+<col style="width: 43%" />
+</colgroup>
+<thead>
+<tr>
+<th>Métrica</th>
+<th>Valor</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Líneas de código Python</strong></td>
+<td>43,961</td>
+</tr>
+<tr>
+<td><strong>Archivos Python analizados</strong></td>
+<td>~200</td>
+</tr>
+<tr>
+<td><strong>Complejidad Ciclomática máxima</strong></td>
+<td>313 (<code>core/agent.py::call_model_node</code>)</td>
+</tr>
+<tr>
+<td><strong>Índice de Mantenibilidad mínimo</strong></td>
+<td>0.00 (Rango C - Crítico)</td>
+</tr>
+<tr>
+<td><strong>Vulnerabilidades High</strong></td>
+<td>7</td>
+</tr>
+<tr>
+<td><strong>Vulnerabilidades Medium</strong></td>
+<td>26</td>
+</tr>
+<tr>
+<td><strong>Vulnerabilidades Low</strong></td>
+<td>55</td>
+</tr>
+<tr>
+<td><strong>Vulnerabilidades previas sin corregir</strong></td>
+<td>16 (8+ meses)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Conclusión:</strong> El proyecto presenta <strong>riesgo
+crítico de mantenibilidad y seguridad</strong>. Existen módulos con
+complejidad extrema, secretos embebidos por defecto, endpoints de
+terminal sin aislamiento real y múltiples inyecciones SQL potenciales.
+Se requieren acciones inmediatas en los módulos
+<code>core/agent.py</code>, <code>api/terminal.py</code> y
+<code>core/config.py</code>.</p>
+<hr />
+<h2 id="análisis-de-complejidad-y-mantenibilidad">2. Análisis de
+Complejidad y Mantenibilidad</h2>
+<h3 id="archivos-críticos-por-complejidad">2.1 Archivos Críticos por
+Complejidad</h3>
+<table style="width:100%;">
+<colgroup>
+<col style="width: 14%" />
+<col style="width: 21%" />
+<col style="width: 8%" />
+<col style="width: 11%" />
+<col style="width: 36%" />
+<col style="width: 8%" />
+</colgroup>
+<thead>
+<tr>
+<th>Archivo</th>
+<th>CC Promedio</th>
+<th>MI</th>
+<th>Rango</th>
+<th>Función Más Compleja</th>
+<th>CC</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>core/agent.py</code></td>
+<td>18.76</td>
+<td>0.00</td>
+<td><strong>C - Crítico</strong></td>
+<td><code>call_model_node</code></td>
+<td><strong>313</strong></td>
+</tr>
+<tr>
+<td><code>core/autonomous_heartbeat.py</code></td>
+<td>12.55</td>
+<td>0.00</td>
+<td><strong>C - Crítico</strong></td>
+<td><code>run_custom_user_heartbeat</code></td>
+<td>36</td>
+</tr>
+<tr>
+<td><code>core/memory_manager.py</code></td>
+<td>12.55</td>
+<td>N/A</td>
+<td><strong>Alto</strong></td>
+<td><code>_run_semantic_search</code></td>
+<td>37</td>
+</tr>
+<tr>
+<td><code>core/llm_manager.py</code></td>
+<td>11.22</td>
+<td>N/A</td>
+<td><strong>Alto</strong></td>
+<td><code>initialize_llms</code></td>
+<td>111</td>
+</tr>
+<tr>
+<td><code>api/analysis.py</code></td>
+<td>7.69</td>
+<td>0.00</td>
+<td><strong>C - Crítico</strong></td>
+<td><code>get_all_analysis_endpoint</code></td>
+<td>119</td>
+</tr>
+</tbody>
+</table>
+<h3 id="código-smells-identificados">2.2 Código Smells
+Identificados</h3>
+<ol type="1">
+<li><strong>God Object:</strong> <code>core/agent.py</code> con 3,000+
+líneas y CC 313 en una sola función.</li>
+<li><strong>Long Method:</strong> <code>call_model_node</code> supera
+los límites aceptables de complejidad.</li>
+<li><strong>高 complejidad en lógica de negocio:</strong>
+<code>initialize_llms</code> (CC 111) mezcla configuración,
+inicialización y validación.</li>
+<li><strong>Falta de modularización:</strong> Lógica de SQL inline en
+<code>memory_manager.py</code> (10+ consultas dinámicas).</li>
+</ol>
+<hr />
+<h2 id="análisis-de-seguridad-bandit-revisión-manual">3. Análisis de
+Seguridad (Bandit + Revisión Manual)</h2>
+<h3 id="resumen-de-hallazgos-por-severidad">3.1 Resumen de Hallazgos por
+Severidad</h3>
+<table>
+<thead>
+<tr>
+<th>Severidad</th>
+<th>Cantidad</th>
+<th>Confianza Alta</th>
+<th>Confianza Media</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>High</strong></td>
+<td>7</td>
+<td>5</td>
+<td>2</td>
+</tr>
+<tr>
+<td><strong>Medium</strong></td>
+<td>26</td>
+<td>11</td>
+<td>15</td>
+</tr>
+<tr>
+<td><strong>Low</strong></td>
+<td>55</td>
+<td>0</td>
+<td>55</td>
+</tr>
+<tr>
+<td><strong>Total</strong></td>
+<td>88</td>
+<td>16</td>
+<td>72</td>
+</tr>
+</tbody>
+</table>
+<h3 id="vulnerabilidades-críticas-y-altas">3.2 Vulnerabilidades Críticas
+y Altas</h3>
+<h4
+id="vuln-001-terminal-pty---ejecución-remota-de-código-crítica">VULN-001:
+Terminal PTY - Ejecución Remota de Código (CRÍTICA)</h4>
+<ul>
+<li><p><strong>Archivo:</strong> <code>api/terminal.py</code> (líneas
+162-183, 186-209)</p></li>
+<li><p><strong>CWE:</strong> CWE-78, CWE-250</p></li>
+<li><p><strong>CVSS:</strong> 9.8</p></li>
+<li><p><strong>Estado:</strong> SIN CORREGIR (8+ meses)</p></li>
+<li><p><strong>Evidencia:</strong></p>
+<div class="sourceCode" id="cb1"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Línea 187-209</span></span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>master_fd, slave_fd <span class="op">=</span> pty.openpty()</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>pid <span class="op">=</span> os.fork()</span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span> pid <span class="op">==</span> <span class="dv">0</span>:</span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>    os.setsid()</span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a>    fcntl.ioctl(slave_fd, termios.TIOCSCTTY, <span class="dv">0</span>)</span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>    os.dup2(slave_fd, <span class="dv">0</span>)</span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>    os.dup2(slave_fd, <span class="dv">1</span>)</span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a>    os.dup2(slave_fd, <span class="dv">2</span>)</span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a>    os.close(master_fd)</span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a>    os.close(slave_fd)</span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a>    clean_env <span class="op">=</span> {...}</span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a>    os.execve(DEFAULT_SHELL, [DEFAULT_SHELL, <span class="st">&quot;--login&quot;</span>], clean_env)</span></code></pre></div></li>
+<li><p><strong>Riesgo:</strong> Cualquier usuario autenticado puede
+obtener shell interactiva completa del servidor.</p></li>
+<li><p><strong>Mitigación parcial observada:</strong> Se agregó
+<code>validate_pty_command()</code> en línea 161, pero:</p>
+<ul>
+<li>No hay allowlist estricta visible en la porción revisada.</li>
+<li>No hay sandboxing (Docker, nsjail, chroot).</li>
+<li>No hay auditoría de comandos.</li>
+<li>El fork sigue siendo un proceso hijo sin aislamiento real.</li>
+</ul></li>
+</ul>
+<h4 id="vuln-002-secretos-por-defecto-crítica">VULN-002: Secretos por
+Defecto (CRÍTICA)</h4>
+<ul>
+<li><strong>Archivo:</strong> <code>core/config.py</code></li>
+<li><strong>CWE:</strong> CWE-798</li>
+<li><strong>Estado:</strong> SIN CORREGIR (8+ meses)</li>
+<li><strong>Hallazgo Bandit:</strong> Valores por defecto inseguros para
+<code>JWT_SECRET_KEY</code>, <code>ADMIN_SECRET</code>,
+<code>DB_ENCRYPTION_KEY</code>.</li>
+<li><strong>Riesgo:</strong> Despliegues con secretos conocidos permiten
+falsificación de tokens y acceso administrativo.</li>
+</ul>
+<h4 id="vuln-003-uso-de-md5-para-seguridad-alta">VULN-003: Uso de MD5
+para Seguridad (ALTA)</h4>
+<ul>
+<li><p><strong>Archivos:</strong> <code>api/onlyoffice.py</code> (líneas
+577, 657), <code>core/agent.py</code> (líneas 1152, 2929),
+<code>core/deep_researcher_utils.py</code> (línea 360),
+<code>core/tts_manager.py</code> (línea 71)</p></li>
+<li><p><strong>CWE:</strong> CWE-327</p></li>
+<li><p><strong>Bandit:</strong> B324 (Confidence: High)</p></li>
+<li><p><strong>Riesgo:</strong> Colisiones MD5 permiten predecir claves
+de documento y hashes de caché.</p></li>
+<li><p><strong>Ejemplo:</strong></p>
+<div class="sourceCode" id="cb2"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="co"># api/onlyoffice.py:577</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>key <span class="op">=</span> md5(<span class="ss">f&quot;</span><span class="sc">{</span>doc<span class="sc">.</span><span class="bu">id</span><span class="sc">}</span><span class="ss">-</span><span class="sc">{</span>doc<span class="sc">.</span>updated_at<span class="sc">.</span>isoformat()<span class="sc">}</span><span class="ss">&quot;</span>.encode()).hexdigest()</span></code></pre></div></li>
+</ul>
+<h4 id="vuln-004-ssl-verification-deshabilitada-alta">VULN-004: SSL
+Verification Deshabilitada (ALTA)</h4>
+<ul>
+<li><p><strong>Archivo:</strong> <code>api/onlyoffice.py</code> (línea
+1159)</p></li>
+<li><p><strong>CWE:</strong> CWE-295</p></li>
+<li><p><strong>Bandit:</strong> B501 (Confidence: High)</p></li>
+<li><p><strong>Hallazgo:</strong></p>
+<div class="sourceCode" id="cb3"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="cf">async</span> <span class="cf">with</span> httpx.AsyncClient(verify<span class="op">=</span><span class="va">False</span>, timeout<span class="op">=</span><span class="fl">300.0</span>) <span class="im">as</span> client:</span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>    resp <span class="op">=</span> <span class="cf">await</span> client.get(download_url)</span></code></pre></div></li>
+<li><p><strong>Riesgo:</strong> Ataques MITM al descargar documentos de
+OnlyOffice.</p></li>
+</ul>
+<h4 id="vuln-005-inyección-sql-potencial-media-alta">VULN-005: Inyección
+SQL Potencial (MEDIA-ALTA)</h4>
+<ul>
+<li><p><strong>Archivos:</strong> <code>api/chat.py</code>,
+<code>api/knowledge_graph.py</code>, <code>core/memory_manager.py</code>
+(10 ocurrencias)</p></li>
+<li><p><strong>CWE:</strong> CWE-89</p></li>
+<li><p><strong>Bandit:</strong> B608 (Confidence: Low-Medium)</p></li>
+<li><p><strong>Hallazgo:</strong> Construcción dinámica de consultas SQL
+con f-strings en <code>core/memory_manager.py</code>:</p>
+<div class="sourceCode" id="cb4"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="co"># core/memory_manager.py:897</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>update_query <span class="op">=</span> <span class="ss">f&quot;&quot;&quot;</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a><span class="ss">    UPDATE langchain_pg_embedding</span></span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a><span class="ss">    SET </span><span class="sc">{</span><span class="st">&quot;, &quot;</span><span class="sc">.</span>join(update_clauses)<span class="sc">}</span></span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a><span class="ss">    WHERE </span><span class="sc">{</span><span class="st">&quot; AND &quot;</span><span class="sc">.</span>join(where_clauses)<span class="sc">}</span></span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a><span class="ss">&quot;&quot;&quot;</span></span></code></pre></div></li>
+<li><p><strong>Riesgo:</strong> Si <code>update_clauses</code> o
+<code>where_clauses</code> contienen entrada de usuario sin sanitizar,
+hay inyección SQL.</p></li>
+</ul>
+<h4 id="vuln-006-xml-external-entity-xxe-media">VULN-006: XML External
+Entity (XXE) (MEDIA)</h4>
+<ul>
+<li><p><strong>Archivo:</strong> <code>api/caldav.py</code> (línea
+264)</p></li>
+<li><p><strong>CWE:</strong> CWE-20</p></li>
+<li><p><strong>Bandit:</strong> B314 (Confidence: High)</p></li>
+<li><p><strong>Hallazgo:</strong></p>
+<div class="sourceCode" id="cb5"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a>root_el <span class="op">=</span> ET.fromstring(body)</span></code></pre></div></li>
+<li><p><strong>Riesgo:</strong> Parsing de XML sin defusedxml permite
+XXE.</p></li>
+</ul>
+<h4 id="vuln-007-binding-a-todas-las-interfaces-media">VULN-007: Binding
+a Todas las Interfaces (MEDIA)</h4>
+<ul>
+<li><p><strong>Archivo:</strong> <code>api/main.py</code> (línea
+553)</p></li>
+<li><p><strong>CWE:</strong> CWE-605</p></li>
+<li><p><strong>Bandit:</strong> B104 (Confidence: Medium)</p></li>
+<li><p><strong>Hallazgo:</strong></p>
+<div class="sourceCode" id="cb6"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a>uvicorn.run(<span class="st">&quot;api.main:app&quot;</span>, host<span class="op">=</span><span class="st">&quot;0.0.0.0&quot;</span>, port<span class="op">=</span><span class="dv">8000</span>, <span class="bu">reload</span><span class="op">=</span><span class="va">True</span>)</span></code></pre></div></li>
+<li><p><strong>Riesgo:</strong> Exposición innecesaria en modo
+desarrollo.</p></li>
+</ul>
+<h4 id="vuln-008-directorio-temporal-hardcodeado-media">VULN-008:
+Directorio Temporal Hardcodeado (MEDIA)</h4>
+<ul>
+<li><strong>Archivos:</strong> <code>api/main.py</code>,
+<code>core/config.py</code>, <code>core/tts_manager.py</code>,
+<code>api/terminal.py</code></li>
+<li><strong>CWE:</strong> CWE-377</li>
+<li><strong>Bandit:</strong> B108 (Confidence: Medium)</li>
+<li><strong>Hallazgo:</strong> Uso de <code>/tmp</code> sin
+<code>tempfile.mkdtemp()</code> ni permisos restrictivos.</li>
+</ul>
+<h4 id="vuln-009-request-sin-timeout-media">VULN-009: Request sin
+Timeout (MEDIA)</h4>
+<ul>
+<li><p><strong>Archivo:</strong> <code>api/telegram.py</code> (línea
+47)</p></li>
+<li><p><strong>CWE:</strong> CWE-400</p></li>
+<li><p><strong>Bandit:</strong> B113 (Confidence: Low)</p></li>
+<li><p><strong>Hallazgo:</strong></p>
+<div class="sourceCode" id="cb7"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a>response <span class="op">=</span> requests.post(telegram_api_url, json<span class="op">=</span>payload)</span></code></pre></div></li>
+</ul>
+<h4 id="vuln-010-hugging-face-sin-revision-pinning-media">VULN-010:
+Hugging Face sin Revision Pinning (MEDIA)</h4>
+<ul>
+<li><p><strong>Archivo:</strong> <code>core/reranker.py</code> (líneas
+59-60)</p></li>
+<li><p><strong>CWE:</strong> CWE-494</p></li>
+<li><p><strong>Bandit:</strong> B615 (Confidence: High)</p></li>
+<li><p><strong>Hallazgo:</strong></p>
+<div class="sourceCode" id="cb8"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="va">self</span>._tokenizer <span class="op">=</span> AutoTokenizer.from_pretrained(<span class="va">self</span>.model_name)</span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="va">self</span>._model <span class="op">=</span> AutoModelForSequenceClassification.from_pretrained(<span class="va">self</span>.model_name)</span></code></pre></div></li>
+</ul>
+<h3 id="hallazgos-adicionales-de-seguridad">3.3 Hallazgos Adicionales de
+Seguridad</h3>
+<ul>
+<li><strong>Comandos peligrosos en PATH:</strong>
+<code>core/agent.py</code> y <code>core/autonomous_heartbeat.py</code>
+contienen lógica de ejecución de comandos.</li>
+<li><strong>Falta de rate limiting</strong> en endpoints sensibles
+(terminal, OnlyOffice callback).</li>
+<li><strong>Falta de CORS estricto</strong> en configuración de
+FastAPI.</li>
+<li><strong>Logging de información sensible</strong> en
+<code>core/config.py</code> (W1203: f-strings en logging).</li>
+</ul>
+<hr />
+<h2 id="análisis-de-patrones-y-arquitectura">4. Análisis de Patrones y
+Arquitectura</h2>
+<h3 id="duplicación-de-código">4.1 Duplicación de Código</h3>
+<p><strong>OnlyOffice Config Generation:</strong> -
+<code>api/onlyoffice.py</code> líneas 565-615 y 646-695:
+<strong>Duplicación del 90%</strong> en generación de configuración
+OnlyOffice. - <strong>Impacto:</strong> Mantenimiento doble, riesgo de
+inconsistencia.</p>
+<p><strong>SQL Query Builders:</strong> -
+<code>core/memory_manager.py</code> tiene <strong>10+ patrones
+similares</strong> de construcción de consultas dinámicas.</p>
+<h3 id="god-objects-y-clases-monolíticas">4.2 God Objects y Clases
+Monolíticas</h3>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 22%" />
+<col style="width: 52%" />
+</colgroup>
+<thead>
+<tr>
+<th>Archivo</th>
+<th>Líneas</th>
+<th>Responsabilidades</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>core/agent.py</code></td>
+<td>3,000+</td>
+<td>Orquestación LLM, memoria, tools, heartbeat, sanitización</td>
+</tr>
+<tr>
+<td><code>core/config.py</code></td>
+<td>1,500+</td>
+<td>Configuración, validación, logging, TTS, secretos</td>
+</tr>
+<tr>
+<td><code>core/memory_manager.py</code></td>
+<td>2,500+</td>
+<td>CRUD memoria, búsqueda semántica, metadata, topics</td>
+</tr>
+</tbody>
+</table>
+<h3 id="code-smells-adicionales">4.3 Code Smells Adicionales</h3>
+<ol type="1">
+<li><strong>Feature Envy:</strong> Lógica deSQL en
+<code>memory_manager.py</code> que debería estar en un repositorio
+dedicado.</li>
+<li><strong>Data Clumps:</strong> Configuración de OnlyOffice repetida
+en múltiples funciones.</li>
+<li><strong>Magic Strings:</strong> Rutas hardcodeadas
+(<code>/api/onlyoffice/download/</code>,
+<code>/tmp/pollinations_images</code>).</li>
+<li><strong>Primitive Obsession:</strong> Uso de strings para IDs de
+documento en lugar de UUIDs tipados.</li>
+</ol>
+<hr />
+<h2 id="auditoría-de-dependencias-y-configuración">5. Auditoría de
+Dependencias y Configuración</h2>
+<h3 id="dependencias-críticas">5.1 Dependencias Críticas</h3>
+<ul>
+<li><strong>FastAPI:</strong> Framework principal, requiere
+actualización de seguridad.</li>
+<li><strong>LangChain:</strong> Uso intensivo en
+<code>core/agent.py</code> y <code>core/llm_manager.py</code>.</li>
+<li><strong>PostgreSQL + pgvector:</strong> Dependencia crítica para
+memoria semántica.</li>
+<li><strong>Neo4j:</strong> Knowledge graph, sin evidencia de auditoría
+de Cypher injection.</li>
+</ul>
+<h3 id="configuración-de-seguridad">5.2 Configuración de Seguridad</h3>
+<ul>
+<li><strong>JWT:</strong> Sin evidencia de validación de algoritmo en
+decodificación.</li>
+<li><strong>CORS:</strong> Configuración no revisada en detalle.</li>
+<li><strong>Rate Limiting:</strong> No implementado en endpoints
+críticos.</li>
+</ul>
+<hr />
+<h2 id="recomendaciones-prioritarias">6. Recomendaciones
+Prioritarias</h2>
+<h3 id="acciones-inmediatas-p0---esta-semana">6.1 Acciones Inmediatas
+(P0 - Esta Semana)</h3>
+<table>
+<colgroup>
+<col style="width: 10%" />
+<col style="width: 26%" />
+<col style="width: 30%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th>#</th>
+<th>Acción</th>
+<th>Archivo</th>
+<th>Esfuerzo</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Reemplazar MD5 por SHA-256 en <code>onlyoffice.py</code></td>
+<td><code>api/onlyoffice.py</code></td>
+<td>Bajo</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Habilitar <code>verify=True</code> en httpx</td>
+<td><code>api/onlyoffice.py:1159</code></td>
+<td>Bajo</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Agregar <code>timeout</code> a requests.post</td>
+<td><code>api/telegram.py:47</code></td>
+<td>Bajo</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Implementar allowlist estricta en terminal PTY</td>
+<td><code>api/terminal.py</code></td>
+<td>Alto</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Forzar cambio de secretos por defecto</td>
+<td><code>core/config.py</code></td>
+<td>Bajo</td>
+</tr>
+<tr>
+<td>6</td>
+<td>Agregar defusedxml en CalDAV</td>
+<td><code>api/caldav.py</code></td>
+<td>Bajo</td>
+</tr>
+</tbody>
+</table>
+<h3 id="acciones-a-corto-plazo-p1---próximas-2-semanas">6.2 Acciones a
+Corto Plazo (P1 - Próximas 2 Semanas)</h3>
+<table>
+<colgroup>
+<col style="width: 10%" />
+<col style="width: 26%" />
+<col style="width: 30%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th>#</th>
+<th>Acción</th>
+<th>Archivo</th>
+<th>Esfuerzo</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>7</td>
+<td>Refactorizar <code>call_model_node</code> (CC 313)</td>
+<td><code>core/agent.py</code></td>
+<td>Alto</td>
+</tr>
+<tr>
+<td>8</td>
+<td>Extraer configuración OnlyOffice a función única</td>
+<td><code>api/onlyoffice.py</code></td>
+<td>Medio</td>
+</tr>
+<tr>
+<td>9</td>
+<td>Implementar prepared statements en
+<code>memory_manager.py</code></td>
+<td><code>core/memory_manager.py</code></td>
+<td>Alto</td>
+</tr>
+<tr>
+<td>10</td>
+<td>Agregar rate limiting en terminal y OnlyOffice</td>
+<td><code>api/terminal.py</code>, <code>api/onlyoffice.py</code></td>
+<td>Medio</td>
+</tr>
+<tr>
+<td>11</td>
+<td>Implementar logging estructurado sin f-strings</td>
+<td><code>core/config.py</code></td>
+<td>Bajo</td>
+</tr>
+<tr>
+<td>12</td>
+<td>Agregar tests de seguridad para terminal PTY</td>
+<td><code>tests/</code></td>
+<td>Medio</td>
+</tr>
+</tbody>
+</table>
+<h3 id="acciones-estratégicas-p2---próximo-mes">6.3 Acciones
+Estratégicas (P2 - Próximo Mes)</h3>
+<table style="width:100%;">
+<colgroup>
+<col style="width: 14%" />
+<col style="width: 38%" />
+<col style="width: 47%" />
+</colgroup>
+<thead>
+<tr>
+<th>#</th>
+<th>Acción</th>
+<th>Esfuerzo</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>13</td>
+<td>Dividir <code>core/agent.py</code> en módulos especializados</td>
+<td>Alto</td>
+</tr>
+<tr>
+<td>14</td>
+<td>Implementar CI/CD con análisis estático obligatorio</td>
+<td>Medio</td>
+</tr>
+<tr>
+<td>15</td>
+<td>Auditoría de dependencias (pip-audit, npm audit)</td>
+<td>Medio</td>
+</tr>
+<tr>
+<td>16</td>
+<td>Implementar sandboxing para terminal (Docker, nsjail)</td>
+<td>Alto</td>
+</tr>
+<tr>
+<td>17</td>
+<td>Establecer política de secretos (HashiCorp Vault, env vars)</td>
+<td>Medio</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="módulos-recomendados-para-reestructuración">7. Módulos
+Recomendados para Reestructuración</h2>
+<h3 id="coreagent.py">7.1 <code>core/agent.py</code></h3>
+<ul>
+<li><strong>Extraer:</strong> <code>LLMOrchestrator</code>,
+<code>MemoryManager</code>, <code>ToolRegistry</code>,
+<code>HeartbeatManager</code></li>
+<li><strong>Objetivo:</strong> Reducir CC de 313 a &lt;50 por
+función.</li>
+</ul>
+<h3 id="corememory_manager.py">7.2
+<code>core/memory_manager.py</code></h3>
+<ul>
+<li><strong>Extraer:</strong> <code>SQLQueryBuilder</code>,
+<code>SemanticSearchService</code>, <code>MetadataService</code></li>
+<li><strong>Objetivo:</strong> Eliminar SQL inline y centralizar acceso
+a datos.</li>
+</ul>
+<h3 id="apionlyoffice.py">7.3 <code>api/onlyoffice.py</code></h3>
+<ul>
+<li><strong>Extraer:</strong> <code>OnlyOfficeConfigBuilder</code>,
+<code>OnlyOfficeJWTService</code></li>
+<li><strong>Objetivo:</strong> Eliminar duplicación del 90% en
+generación de config.</li>
+</ul>
+<hr />
+<h2 id="próximos-pasos">8. Próximos Pasos</h2>
+<ol type="1">
+<li><strong>Validar</strong> con el equipo las recomendaciones P0.</li>
+<li><strong>Crear issues</strong> en el tracker para cada vulnerabilidad
+High.</li>
+<li><strong>Asignar</strong> responsables y fechas límite.</li>
+<li><strong>Implementar</strong> fixes P0 en sprint actual.</li>
+<li><strong>Planificar</strong> refactor P1 para próximo sprint.</li>
+</ol>
+<hr />
+<h2 id="anexos">9. Anexos</h2>
+<h3 id="a.-herramientas-utilizadas">A. Herramientas Utilizadas</h3>
+<ul>
+<li><code>radon</code> (complejidad, mantenibilidad, raw, halstead)</li>
+<li><code>bandit</code> (seguridad estática)</li>
+<li><code>grep</code> / <code>find</code> (detección de patrones)</li>
+<li><code>read_file_tool</code> (revisión manual)</li>
+</ul>
+<h3 id="b.-archivos-críticos-revisados">B. Archivos Críticos
+Revisados</h3>
+<ul>
+<li><code>api/terminal.py</code></li>
+<li><code>api/onlyoffice.py</code></li>
+<li><code>core/agent.py</code></li>
+<li><code>core/config.py</code></li>
+<li><code>core/memory_manager.py</code></li>
+<li><code>api/main.py</code></li>
+<li><code>api/chat.py</code></li>
+<li><code>api/knowledge_graph.py</code></li>
+</ul>
+<h3 id="c.-referencias">C. Referencias</h3>
+<ul>
+<li>CWE-78: OS Command Injection</li>
+<li>CWE-89: SQL Injection</li>
+<li>CWE-295: Improper Certificate Validation</li>
+<li>CWE-327: Use of a Broken or Risky Cryptographic Algorithm</li>
+<li>CWE-798: Use of Hard-coded Credentials</li>
+</ul>
+</body>
+</html>
