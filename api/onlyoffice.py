@@ -612,6 +612,10 @@ async def get_onlyoffice_config(
     jwt_enabled = os.getenv("ONLYOFFICE_JWT_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
     if jwt_secret and jwt_enabled:
         token = jwt.encode(config, jwt_secret, algorithm="HS256")
+        token_str = token if isinstance(token, str) else token.decode("utf-8")
+        config["document"]["url"] = f"{file_url}?token={token_str}"
+        config["editorConfig"]["callbackUrl"] = f"{callback_url}?token={token_str}"
+        token = jwt.encode(config, jwt_secret, algorithm="HS256")
         config["token"] = token if isinstance(token, str) else token.decode("utf-8")
 
     logger.info(
@@ -691,6 +695,10 @@ async def get_onlyoffice_public_config(
     jwt_secret = os.getenv("ONLYOFFICE_JWT_SECRET")
     jwt_enabled = os.getenv("ONLYOFFICE_JWT_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
     if jwt_secret and jwt_enabled:
+        token_value = jwt.encode(config, jwt_secret, algorithm="HS256")
+        token_str = token_value if isinstance(token_value, str) else token_value.decode("utf-8")
+        config["document"]["url"] = f"{file_url}?token={token_str}"
+        config["editorConfig"]["callbackUrl"] = f"{callback_url}?token={token_str}"
         token_value = jwt.encode(config, jwt_secret, algorithm="HS256")
         config["token"] = token_value if isinstance(token_value, str) else token_value.decode("utf-8")
 
@@ -948,15 +956,59 @@ def get_document_type(ext: str) -> str:
     if ext in ['ppt', 'pptx', 'odp']: return 'slide'
     return 'word'
 
+async def _get_document_by_id_or_key(
+    document_id_str: str,
+    decoded_jwt_payload: Optional[dict],
+    db: AsyncSession,
+) -> Optional[Document]:
+    """Resuelve un Documento por UUID directo, token JWT o clave MD5."""
+    clean_id = str(document_id_str).strip()
+    
+    # 1. Intentar por UUID directo
+    try:
+        doc_uuid = uuid.UUID(clean_id)
+        doc = await db.get(Document, doc_uuid)
+        if doc:
+            return doc
+    except (ValueError, TypeError, AttributeError):
+        pass
+
+    # 2. Extraer UUID desde la URL contenida en el payload JWT decodificado
+    if decoded_jwt_payload and isinstance(decoded_jwt_payload, dict):
+        doc_config = decoded_jwt_payload.get("document", {})
+        doc_url = doc_config.get("url", "")
+        import re
+        match = re.search(r"/download/([a-f0-9\-]{36})", doc_url, re.IGNORECASE)
+        if match:
+            try:
+                extracted_uuid = uuid.UUID(match.group(1))
+                doc = await db.get(Document, extracted_uuid)
+                if doc:
+                    return doc
+            except ValueError:
+                pass
+
+    # 3. Buscar por clave MD5 (key) en la base de datos
+    from hashlib import md5
+    stmt = select(Document)
+    res = await db.execute(stmt)
+    all_docs = res.scalars().all()
+    for doc in all_docs:
+        if doc.updated_at:
+            key = md5(f"{doc.id}-{doc.updated_at.isoformat()}".encode()).hexdigest()
+            if key == clean_id:
+                return doc
+
+    return None
+
 @router.get("/download/{document_id}")
 async def download_document(
-    document_id: uuid.UUID,
+    document_id: str,
     request: Request,
     inline: bool = Query(False, description="Servir el archivo inline para previsualización"),
-    db = Depends(get_db_session)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """Permite a OnlyOffice descargar el archivo actual."""
-    # ── Validación de Acceso (JWT) ──────────────────────────────────────────
     jwt_secret = os.getenv("ONLYOFFICE_JWT_SECRET")
     jwt_enabled = os.getenv("ONLYOFFICE_JWT_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
     
@@ -967,10 +1019,11 @@ async def download_document(
             token = auth_header.replace("Bearer ", "").strip()
             
     is_authenticated = False
+    decoded_payload = None
     
     if jwt_enabled and jwt_secret and token:
         try:
-            jwt.decode(token, jwt_secret, algorithms=["HS256"], leeway=30, options={"verify_exp": True})
+            decoded_payload = jwt.decode(token, jwt_secret, algorithms=["HS256"], leeway=30, options={"verify_exp": True})
             is_authenticated = True
             logger.debug(f"Acceso a descarga de documento {document_id} verificado mediante JWT de OnlyOffice.")
         except Exception:
@@ -992,7 +1045,7 @@ async def download_document(
             detail="Acceso denegado. Se requiere un token JWT válido de OnlyOffice o de usuario."
         )
 
-    doc = await db.get(Document, document_id)
+    doc = await _get_document_by_id_or_key(document_id, decoded_payload, db)
     if not doc:
         raise HTTPException(status_code=404, detail="Documento no encontrado")
     
@@ -1034,13 +1087,13 @@ async def download_document(
 
 
 
-@router.post("/downloadfile/{document_id}")
+@router.api_route("/downloadfile/{document_id}", methods=["GET", "POST"])
 async def download_file_for_onlyoffice(
-    document_id: uuid.UUID,
+    document_id: str,
     request: Request,
-    db = Depends(get_db_session),
+    db: AsyncSession = Depends(get_db_session),
 ):
-    """Endpoint para OnlyOffice Document Server (POST /downloadfile/{id}).
+    """Endpoint para OnlyOffice Document Server (GET/POST /downloadfile/{id_or_key}).
 
     El DS llama a este endpoint para obtener el archivo durante la edición.
     Usa la misma lógica de autenticación y resolución de ruta que /download/.
@@ -1055,10 +1108,11 @@ async def download_file_for_onlyoffice(
             token = auth_header.replace("Bearer ", "").strip()
 
     is_authenticated = False
+    decoded_payload = None
 
     if jwt_enabled and jwt_secret and token:
         try:
-            jwt.decode(token, jwt_secret, algorithms=["HS256"], leeway=30, options={"verify_exp": True})
+            decoded_payload = jwt.decode(token, jwt_secret, algorithms=["HS256"], leeway=30, options={"verify_exp": True})
             is_authenticated = True
         except Exception:
             pass
@@ -1081,7 +1135,7 @@ async def download_file_for_onlyoffice(
             detail="Acceso denegado. Se requiere un token JWT válido.",
         )
 
-    doc = await db.get(Document, document_id)
+    doc = await _get_document_by_id_or_key(document_id, decoded_payload, db)
     if not doc:
         raise HTTPException(status_code=404, detail="Documento no encontrado")
 
@@ -1125,6 +1179,8 @@ async def onlyoffice_callback(document_id: uuid.UUID, request: Request):
     
     if jwt_enabled and jwt_secret:
         token = body.get("token")
+        if not token:
+            token = request.query_params.get("token")
         if not token:
             auth_header = request.headers.get("Authorization")
             if auth_header and auth_header.startswith("Bearer "):

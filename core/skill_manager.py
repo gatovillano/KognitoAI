@@ -194,12 +194,16 @@ class SkillManager:
                     md_content = self._read_markdown_content(native_path, skill_id)
                     if md_content:
                         parsed = self.parse_skill_markdown(md_content)
+                        has_scripts = os.path.exists(os.path.join(native_path, "scripts"))
+                        skill_type = parsed.get("metadata", {}).get("type") or ("tool" if has_scripts else "procedural")
                         skill_mds.append({
                             "id": skill_id,
                             "name": parsed["name"] or skill_id,
                             "description": parsed["description"],
                             "instructions": parsed["instructions"],
-                            "markdown": parsed["instructions"]
+                            "markdown": parsed["instructions"],
+                            "type": skill_type,
+                            "has_scripts": has_scripts
                         })
                         continue
                 
@@ -213,12 +217,16 @@ class SkillManager:
                             md_content = self._read_markdown_content(scope_path, skill_id)
                             if md_content:
                                 parsed = self.parse_skill_markdown(md_content)
+                                has_scripts = os.path.exists(os.path.join(scope_path, "scripts"))
+                                skill_type = parsed.get("metadata", {}).get("type") or ("tool" if has_scripts else "procedural")
                                 skill_mds.append({
                                     "id": skill_id,
                                     "name": parsed["name"] or skill_id,
                                     "description": parsed["description"],
                                     "instructions": parsed["instructions"],
-                                    "markdown": parsed["instructions"]
+                                    "markdown": parsed["instructions"],
+                                    "type": skill_type,
+                                    "has_scripts": has_scripts
                                 })
                                 found = True
                                 break
@@ -251,17 +259,34 @@ class SkillManager:
         import numpy as _np2
         self._skill_md_embeddings_dict[cache_key] = _np2.array(embeddings)
 
-    async def search_skills_semantic(self, query: str, top_k: int = 3, account_id: Optional[str] = None, workspace_name: Optional[str] = None) -> List[Dict[str, Any]]:
+    async def search_skills_semantic(self, query: str, top_k: int = 3, account_id: Optional[str] = None, workspace_name: Optional[str] = None, skill_type: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Realiza búsqueda semántica sobre todas las skills relevantes.
+        Permite filtrar opcionalmente por skill_type ('procedural' o 'tool').
         """
         await self._ensure_skill_md_embeddings(account_id, workspace_name)
         skill_mds = await self._load_skill_markdowns(account_id, workspace_name)
+        
+        if skill_type:
+            skill_mds = [s for s in skill_mds if s.get("type") == skill_type]
+
+        if not skill_mds:
+            return []
+
         cache_key = (account_id, workspace_name)
         embeddings = self._skill_md_embeddings_dict.get(cache_key)
         
-        if not skill_mds or embeddings is None or embeddings.shape[0] == 0:
+        if embeddings is None or embeddings.shape[0] == 0:
             return []
+
+        # Si filtramos por skill_type, re-calculamos/filtramos los índices sobre la lista resultante
+        all_mds = await self._load_skill_markdowns(account_id, workspace_name)
+        if skill_type:
+            valid_indices = [i for i, s in enumerate(all_mds) if s.get("type") == skill_type]
+            if not valid_indices:
+                return []
+            skill_mds = [all_mds[i] for i in valid_indices]
+            embeddings = embeddings[valid_indices]
             
         _aembed_q, _ = _get_embed_fns()
         query_emb = await _aembed_q(query)
@@ -531,9 +556,12 @@ class SkillManager:
         for category in native_categories:
             category_path = os.path.join(self.skills_dir, category)
             description = self._read_markdown_description(category_path, category)
+            has_scripts = os.path.exists(os.path.join(category_path, "scripts"))
             metadata.append({
                 "id": category,
-                "description": description or "Sin descripción disponible."
+                "description": description or "Sin descripción disponible.",
+                "type": "tool" if has_scripts else "procedural",
+                "has_scripts": has_scripts
             })
 
         # 3. Ahora buscamos en user_global, user_account_*, y user_workspace_*
@@ -553,9 +581,12 @@ class SkillManager:
                     skill_path = os.path.join(scope_dir, skill_folder)
                     if os.path.isdir(skill_path) and not skill_folder.startswith("__"):
                         description = self._read_markdown_description(skill_path, skill_folder)
+                        has_scripts = os.path.exists(os.path.join(skill_path, "scripts"))
                         metadata.append({
                             "id": skill_folder,
-                            "description": description or "Sin descripción disponible."
+                            "description": description or "Sin descripción disponible.",
+                            "type": "tool" if has_scripts else "procedural",
+                            "has_scripts": has_scripts
                         })
         return metadata
 

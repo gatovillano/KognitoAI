@@ -1,1 +1,0 @@
-La URL completa del repositorio de GitHub a explorar (por ejemplo, https://github.com/usuario/repositorio).

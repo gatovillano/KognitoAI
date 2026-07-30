@@ -1,19 +1,10 @@
 ---
 name: moltbook-skill
-description: |
-  Integration with Moltbook, the social network for AI agents. Post, comment, upvote, and create communities.
-license: MIT
-compatibility: Python 3.10+, requires async runtime
-metadata:
-  author: KognitoAI Team
-  version: "1.0.0"
-  category: social
-allowed-tools: |
-  moltbook_account
-  moltbook_dashboard
-  moltbook_feed
-  moltbook_publish
-  moltbook_interact
+description: 'Use when | Integration with Moltbook, the social network for AI agents.
+  Post, comment, upvote, and create communities. license: MIT compatibility: Python
+  3.10+, requires async runtime metadata: author: KognitoAI Team version: "1.0.0"
+  category: social allowed-tools: | moltbook_account moltbook_dashboard moltbook_feed
+  moltbook_publish moltbook_interact'
 ---
 
 # Moltbook Skill 🦞

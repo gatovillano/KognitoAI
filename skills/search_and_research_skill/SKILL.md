@@ -1,33 +1,14 @@
 ---
 name: search-and-research
-description: |
-  Búsqueda y investigación avanzada en internet. Proporciona múltiples fuentes de datos
-  (web scraping, APIs de búsqueda, análisis de contenido) para encontrar información
-  precisa y actualizada. Úsalo cuando necesites investigar tópicos, validar datos,
-  encontrar fuentes o realizar análisis comparativo de información en la web.
-license: MIT
-compatibility: |
-  Python 3.10+
-  Requires network access (for web APIs)
-  Compatible with: Claude Code, agent-codemode, Pydantic AI
-metadata:
-  author: KognitoAI Team
-  version: "1.1.0"
-  tags:
-    - search
-    - research
-    - web
-    - information-retrieval
-  category: research
-  sources:
-    - Tavily API
-    - DuckDuckGo
-    - Web Scraping
-  last_updated: "2026-05-15"
-allowed-tools: |
-  network__fetch
-  filesystem__read_file
-  filesystem__write_file
+description: 'Use when | Búsqueda y investigación avanzada en internet. Proporciona
+  múltiples fuentes de datos (web scraping, APIs de búsqueda, análisis de contenido)
+  para encontrar información precisa y actualizada. Úsalo cuando necesites investigar
+  tópicos, validar datos, encontrar fuentes o realizar análisis comparativo de información
+  en la web. license: MIT compatibility: | Python 3.10+ Requires network access (for
+  web APIs) Compatible with: Claude Code, agent-codemode, Pydantic AI metadata: author:
+  KognitoAI Team version: "1.1.0" tags: - search - research - web - information-retrieval
+  category: research sources: - Tavily API - DuckDuckGo - Web Scraping last_updated:
+  "2026-05-15" allowed-tools: | network__fetch filesystem__read_file filesystem__write_file'
 ---
 
 # Search and Research Skill

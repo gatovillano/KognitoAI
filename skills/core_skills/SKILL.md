@@ -1,22 +1,9 @@
 ---
-
-## Ejemplo de skill puramente procedimental (solo SKILL.md)
-
-No todas las skills requieren scripts ejecutables. Puedes crear una skill que sea únicamente un SKILL.md con instrucciones procedimentales extremadamente detalladas para que KAI orqueste herramientas, skills y decisiones paso a paso para lograr un objetivo complejo.
-
-**Estructura:**
-
-```
-skills/
-  user_global/
-     onboarding_experto_skill/
-        SKILL.md
-        __init__.py
-```
-
-**Ejemplo de SKILL.md:**
-```
+name: core-skills
+description: Use when accessing core system capabilities, managing registered skills,
+  or editing skill definitions.
 ---
+
 name: onboarding-experto
 description: |
   Procedimiento experto para onboarding de un nuevo usuario en KAI OS, combinando varias herramientas y skills.
@@ -83,10 +70,18 @@ skills/
 
 **Reglas:**
 - El archivo de especificación y ayuda siempre se llama `SKILL.md` (no otro nombre).
+- **Formato OBLIGATORIO de SKILL.md:** Debe comenzar con YAML frontmatter delimitado por `---`:
+  ```yaml
+  ---
+  name: nombre-de-la-skill
+  description: Descripción clara y detallada de cuándo y cómo el agente debe usar esta habilidad.
+  ---
+  ```
 - Puede haber múltiples scripts Python en la carpeta `scripts/`.
 - Si la skill es compleja, debe incluir un orquestador (ej: `orquestador.py`) que coordine los módulos internos.
 - El orquestador debe exponer una clase principal que herede de `BaseTool` y reciba como dependencias los sub-módulos.
 - La documentación en SKILL.md debe ser procedimental, exhaustiva y contener:
+    - YAML Frontmatter (`name` y `description`)
     - Cuándo usar la skill
     - Ejemplos de uso
     - Descripción de cada script y su función

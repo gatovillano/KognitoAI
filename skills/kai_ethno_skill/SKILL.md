@@ -1,6 +1,7 @@
 ---
 name: kai_ethno_skill
-description: Skill especializada para investigación etnográfica, antropología digital, análisis del discurso y revisiones de literatura académica.
+description: Use when Skill especializada para investigación etnográfica, antropología
+  digital, análisis del discurso y revisiones de literatura académica.
 ---
 
 # KAI-Ethno: Investigación Antropológica Aumentada

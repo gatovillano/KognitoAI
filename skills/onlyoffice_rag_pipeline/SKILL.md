@@ -1,8 +1,7 @@
 ---
 name: onlyoffice-rag-pipeline
-description: |
-  Pipeline para integrar documentos de OnlyOffice con el sistema RAG de KAI.
-  Procesa documentos, genera embeddings y los almacena en el conocimiento.
+description: Use when | Pipeline para integrar documentos de OnlyOffice con el sistema
+  RAG de KAI. Procesa documentos, genera embeddings y los almacena en el conocimiento.
 ---
 
 ## Objetivo

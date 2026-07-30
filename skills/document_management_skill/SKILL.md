@@ -1,3 +1,9 @@
+---
+name: document-management
+description: Use when creating, editing, updating metadata, or generating professional
+  PDF documents.
+---
+
 # Document Management Skill
 
 Herramienta para generar PDFs de calidad profesional.

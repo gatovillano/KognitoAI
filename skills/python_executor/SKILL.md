@@ -1,16 +1,10 @@
 ---
 name: python_executor
-version: 1.0.0
-author: "KogniTerm Core"
-description: "Ejecución interactiva de código Python con kernel de Jupyter y mantenimiento de estado"
-category: "code"
-tags: ["python", "execution", "jupyter", "interactive", "sandbox", "code-runner"]
-dependencies: ["jupyter_client"]
-required_permissions: ["execution"]
-security_level: "high"
-allowlist: false
-auto_approve: false
-sandbox_required: true
+description: 'Use when "Ejecución interactiva de código Python con kernel de Jupyter
+  y mantenimiento de estado" category: "code" tags: ["python", "execution", "jupyter",
+  "interactive", "sandbox", "code-runner"] dependencies: ["jupyter_client"] required_permissions:
+  ["execution"] security_level: "high" allowlist: false auto_approve: false sandbox_required:
+  true'
 ---
 
 # Instrucciones para el LLM

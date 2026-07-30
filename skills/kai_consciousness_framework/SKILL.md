@@ -1,3 +1,9 @@
+---
+name: kai-consciousness-framework
+description: Use when orchestrating multi-perspective cognitive reasoning, consciousness
+  research, and archetypal analysis in KAI.
+---
+
 # KAI Consciousness Framework
 
 Framework modular de inteligencia cognitiva para KAI que integra tres componentes especializados en un sistema cohesionado.
