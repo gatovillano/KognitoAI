@@ -98,13 +98,12 @@ def pre_upgrade():
     Pre-upgrade hook:
       1. Detect active extensions.
       2. Persist their names to ~/.kognito/config/active_extensions.json.
-      3. Run each extension's install.py --uninstall to restore a clean repo state.
+      (No destructive uninstall is performed, keeping all extension files and code intact).
     """
     active = get_installed_extensions()
 
     if not active:
         print("  ✓ No se detectaron extensiones activas. Continuando con la actualización.")
-        # Remove any stale state file
         if os.path.exists(STATE_FILE):
             try:
                 os.remove(STATE_FILE)
@@ -118,41 +117,17 @@ def pre_upgrade():
     os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(active, f)
-    print(f"  💾 Estado guardado en: {STATE_FILE}")
-
-    python_bin = get_python_bin()
-
-    for ext in active:
-        ext_install_py = find_ext_install_py(ext)
-        if not ext_install_py:
-            print(f"  ⚠️  No se encontró install.py para {ext}. Omitiendo desinstalación.")
-            continue
-
-        print(f"  🔄 Desinstalando temporalmente: {ext} ...")
-        try:
-            result = subprocess.run(
-                [python_bin, ext_install_py, "--uninstall", "--no-build"],
-                cwd=REPO_DIR,
-                env=dict(os.environ, PYTHONPATH=REPO_DIR, KOGNITO_SKIP_BUILD="1"),
-                check=False,
-            )
-            if result.returncode == 0:
-                print(f"  ✓ {ext} desinstalada temporalmente.")
-            else:
-                print(f"  ⚠️  {ext}: el desinstalador terminó con código {result.returncode}. Continuando.")
-        except Exception as e:
-            print(f"  ❌ Error al desinstalar {ext}: {e}")
+    print(f"  💾 Estado de extensiones resguardado en: {STATE_FILE}")
 
 
 def post_upgrade():
     """
     Post-upgrade hook:
       1. Read the persisted state file.
-      2. Re-run each extension's install.py.
+      2. Ensure component files and DB schema sync for active extensions are in place (passing --no-build).
       3. Remove the state file.
     """
     if not os.path.exists(STATE_FILE):
-        # Nothing to reinstall
         return
 
     try:
@@ -169,17 +144,17 @@ def post_upgrade():
             pass
         return
 
-    print(f"  🧩 Reinstalando extensiones previamente activas: {', '.join(active)}")
+    print(f"  🧩 Sincronizando componentes para extensiones activas: {', '.join(active)}")
 
     python_bin = get_python_bin()
 
     for ext in active:
         ext_install_py = find_ext_install_py(ext)
         if not ext_install_py:
-            print(f"  ❌ No se encontró install.py para {ext}. Omitiendo.")
+            print(f"  ⚠️ No se encontró install.py para {ext}. Omitiendo.")
             continue
 
-        print(f"  ⚙️  Reinstalando: {ext} ...")
+        print(f"  ⚙️  Sincronizando componentes: {ext} ...")
         try:
             result = subprocess.run(
                 [python_bin, ext_install_py, "--no-build"],
@@ -188,11 +163,11 @@ def post_upgrade():
                 check=False,
             )
             if result.returncode == 0:
-                print(f"  ✓ {ext} reinstalada con éxito.")
+                print(f"  ✓ {ext} sincronizada con éxito.")
             else:
-                print(f"  ⚠️  {ext}: el instalador terminó con código {result.returncode}. Verifica manualmente.")
+                print(f"  ⚠️  {ext}: la sincronización terminó con código {result.returncode}.")
         except Exception as e:
-            print(f"  ❌ Error al reinstalar {ext}: {e}")
+            print(f"  ❌ Error al sincronizar {ext}: {e}")
 
     # Clean up state file
     try:
