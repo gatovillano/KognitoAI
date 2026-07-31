@@ -530,7 +530,7 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed 
               </Link>
             )}
 
-            {settings?.installed_extensions?.includes('kognito_chat') && (
+            {(settings?.installed_extensions?.includes('kognito_chat') || settings?.installed_extensions?.includes('kognichat')) && (
               <Link href="/kognito-chat" passHref onClick={onLinkClick} title="KognitoChat" className="w-full block">
                 <Button
                   variant={pathname?.startsWith('/kognito-chat') ? 'secondary' : 'ghost'}
