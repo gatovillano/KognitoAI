@@ -21,9 +21,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
-from core.database import SessionLocal, Account
+from core.database import get_db_session, Account
 from core.api_key_model import ApiKey
-from core.llm_manager import get_main_llm, get_llm_for_user
+from core.llm_manager import get_main_llm, get_llm_for_user, get_fast_llm, get_fallback_llm
 from core.prompts import KAI_SYSTEM_PROMPT
 from utils.security import oauth2_scheme_optional
 
@@ -120,7 +120,7 @@ def verify_api_key(plain_key: str, hashed_key: str) -> bool:
 @router.get("/api-keys", response_model=ApiKeyListResponse, summary="Listar API Keys")
 async def list_api_keys(
     account_id: str = Depends(oauth2_scheme_optional),
-    db: AsyncSession = Depends(SessionLocal)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """Lista todas las API Keys del usuario autenticado"""
     if not account_id:
@@ -154,7 +154,7 @@ async def list_api_keys(
 async def create_api_key(
     key_data: ApiKeyCreate,
     account_id: str = Depends(oauth2_scheme_optional),
-    db: AsyncSession = Depends(SessionLocal)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """Crea una nueva API Key"""
     if not account_id:
@@ -197,7 +197,7 @@ async def create_api_key(
 async def revoke_api_key(
     key_id: str,
     account_id: str = Depends(oauth2_scheme_optional),
-    db: AsyncSession = Depends(SessionLocal)
+    db: AsyncSession = Depends(get_db_session)
 ):
     """Revoca una API Key"""
     if not account_id:
@@ -224,7 +224,7 @@ async def revoke_api_key(
 async def get_account_id_from_api_key(
     request: Request,
     token: Optional[str] = Depends(oauth2_scheme_optional),
-    db: AsyncSession = Depends(SessionLocal)
+    db: AsyncSession = Depends(get_db_session)
 ) -> str:
     """
     Obtiene el account_id desde:
@@ -366,7 +366,19 @@ async def chat_completions(
         )
         
     try:
-        response = await llm.ainvoke(langchain_messages)
+        try:
+            response = await llm.ainvoke(langchain_messages)
+        except Exception as primary_err:
+            logger.warning(f"Primary LLM for account {account_id} failed ({primary_err}). Attempting fallback to default system LLM...")
+            try:
+                from langchain_community.chat_models import ChatLiteLLM
+                fallback_model = settings.llm_model if settings.llm_model and "poolside" not in settings.llm_model else "gemini/gemini-2.0-flash"
+                fallback_llm = ChatLiteLLM(model=fallback_model)
+                response = await fallback_llm.ainvoke(langchain_messages)
+            except Exception as fallback_err:
+                logger.error(f"Fallback LLM failed: {fallback_err}")
+                raise primary_err
+
         content = response.content if hasattr(response, "content") else str(response)
         
         return ChatCompletionResponse(
