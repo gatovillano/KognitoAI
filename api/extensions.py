@@ -180,8 +180,8 @@ async def install_extension(
             api_dir = os.path.dirname(os.path.abspath(__file__))
             project_root = os.path.dirname(api_dir)
             install_script = os.path.join(project_root, "extensions", "kognito_chat", "install.py")
-            python_bin = os.path.join(project_root, "venv_host", "bin", "python")
-            if os.path.exists(install_script) and os.path.exists(python_bin):
+            python_bin = sys.executable if (sys.executable and os.path.exists(sys.executable)) else os.path.join(project_root, "venv_host", "bin", "python")
+            if os.path.exists(install_script):
                 try:
                     subprocess.Popen(
                         [python_bin, install_script],
