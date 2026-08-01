@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 class ManageTasksInput(BaseModel):
     """Esquema de entrada para la herramienta de gestión de tareas."""
-    action: str = Field(..., description="Acción a realizar: 'create', 'update', 'complete', 'delete'")
+    action: str = Field(..., description="Acción a realizar: 'create', 'update', 'complete', 'delete', 'list'")
     description: Optional[str] = Field(None, description="Descripción de la tarea (requerido para 'create' y 'update').")
     task_id: Optional[str] = Field(None, description="ID de la tarea (requerido para 'update', 'complete', 'delete').")
     start_time: Optional[str] = Field(None, description="Fecha/hora de inicio en lenguaje natural (ej: 'mañana a las 9am').")
@@ -28,9 +28,9 @@ class ManageTasksInput(BaseModel):
 class ManageTasksTool(BaseTool):
     name: str = "manage_tasks"
     description: str = (
-        "🛠️ GESTOR DE TAREAS - Usa esta herramienta para crear, actualizar, completar o eliminar tareas de la agenda. "
+        "🛠️ GESTOR DE TAREAS - Usa esta herramienta para crear, listar, actualizar, completar o eliminar tareas de la agenda. "
         "Las tareas son diferentes de los eventos; son elementos de acción con estado (pendiente/hecho). "
-        "Puedes fijar tanto el día como la hora de inicio y vencimiento."
+        "Puedes listar las tareas para obtener sus IDs y fechas, o fijar tanto el día como la hora de inicio y vencimiento."
     )
     args_schema: Type[BaseModel] = ManageTasksInput
     account_id: str = Field(..., description="Inyectado automáticamente.")
@@ -92,6 +92,44 @@ class ManageTasksTool(BaseTool):
                     if e_date:
                         res += f" Vencimiento: {e_date.astimezone(user_tz).strftime('%Y-%m-%d %H:%M')}."
                     return res
+
+                elif action == 'list':
+                    tasks = await tasks_manager.list_tasks(
+                        account_id=self.account_id,
+                        workspace_id=workspace_id,
+                        status=status
+                    )
+                    if not tasks:
+                        return "📋 No se encontraron tareas."
+
+                    lines = [f"📋 Tareas encontradas ({len(tasks)}):"]
+                    for t in tasks:
+                        t_id = t.get("id")
+                        desc_str = t.get("description", "Sin descripción")
+                        st = t.get("status", "Pendiente")
+                        comp = "✅ Completa" if t.get("is_completed") else f"⏳ {st}"
+
+                        dates_str = []
+                        if t.get("start_date"):
+                            val = t.get("start_date")
+                            try:
+                                dt = datetime.fromisoformat(val)
+                                dates_str.append(f"Inicio: {dt.astimezone(user_tz).strftime('%Y-%m-%d %H:%M')}")
+                            except Exception:
+                                dates_str.append(f"Inicio: {val}")
+                        
+                        venc_val = t.get("end_date") or t.get("due_date")
+                        if venc_val:
+                            try:
+                                dt = datetime.fromisoformat(venc_val)
+                                dates_str.append(f"Vencimiento: {dt.astimezone(user_tz).strftime('%Y-%m-%d %H:%M')}")
+                            except Exception:
+                                dates_str.append(f"Vencimiento: {venc_val}")
+
+                        date_info = f" ({', '.join(dates_str)})" if dates_str else ""
+                        lines.append(f"- ID: {t_id} | [{comp}] {desc_str}{date_info}")
+
+                    return "\n".join(lines)
 
                 elif action == 'update':
                     if not task_id:

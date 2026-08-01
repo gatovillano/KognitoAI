@@ -815,11 +815,41 @@ class CreatePDFTool(BaseTool):
                     if not display_filename.lower().endswith(".pdf"):
                         display_filename = f"{display_filename}.pdf"
                     
+                    AGENT_PDF_FOLDER_NAME = "🤖 Documentos PDF (Agente)"
+
                     async with SessionLocal() as db:
+                        from sqlalchemy import select
+                        from core.database import DocumentFolder
+
+                        # Find or create dedicated folder for agent-generated PDFs
+                        stmt = select(DocumentFolder).where(
+                            DocumentFolder.account_id == acc_id,
+                            DocumentFolder.name == AGENT_PDF_FOLDER_NAME,
+                            DocumentFolder.parent_id == None
+                        )
+                        if wsp_id:
+                            stmt = stmt.where(DocumentFolder.workspace_id == wsp_id)
+                        else:
+                            stmt = stmt.where(DocumentFolder.workspace_id == None)
+
+                        res = await db.execute(stmt)
+                        agent_folder = res.scalars().first()
+
+                        if not agent_folder:
+                            agent_folder = DocumentFolder(
+                                account_id=acc_id,
+                                workspace_id=wsp_id,
+                                parent_id=None,
+                                name=AGENT_PDF_FOLDER_NAME
+                            )
+                            db.add(agent_folder)
+                            await db.commit()
+                            await db.refresh(agent_folder)
+
                         new_doc = Document(
                             account_id=acc_id,
                             workspace_id=wsp_id,
-                            folder_id=None,
+                            folder_id=agent_folder.id,
                             filename=display_filename,
                             extension="pdf",
                             file_path=os.path.join(self.account_id, onlyoffice_unique_filename)
@@ -829,7 +859,7 @@ class CreatePDFTool(BaseTool):
                         await db.refresh(new_doc)
                         onlyoffice_saved = True
                         onlyoffice_doc_id = str(new_doc.id)
-                        logger.info(f"PDF automatically saved to OnlyOffice documents cloud. ID: {new_doc.id}")
+                        logger.info(f"PDF automatically saved to OnlyOffice documents cloud in folder '{AGENT_PDF_FOLDER_NAME}'. ID: {new_doc.id}")
                 except Exception as oo_err:
                     logger.error(f"Error automatically saving PDF to OnlyOffice documents cloud: {oo_err}", exc_info=True)
 

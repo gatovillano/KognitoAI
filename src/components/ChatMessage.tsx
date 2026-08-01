@@ -566,8 +566,8 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
                 )}
 
 
-                    {/* Embedded PTY terminal if the tool provided a session */}
-                    {msg.pty_session && (
+                    {/* Embedded PTY terminal if the tool provided a session and wasn't already rendered inside ToolCallBlock */}
+                    {msg.pty_session && (!msg.content_parts || !msg.content_parts.some(p => p.type === 'tool_call' && p.pty_session)) && (
                       <div className="mb-4">
                         <PtyTerminalEmbedded
                           accountId={(user?.account_id || user?.id) as string}

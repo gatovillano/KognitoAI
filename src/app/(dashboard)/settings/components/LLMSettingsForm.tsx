@@ -24,6 +24,7 @@ const LLM_PROVIDERS = [
   { id: 'openai-compatible', name: '🖥️ Local AI / OpenAI Compatible', env_key: null },
   { id: 'mistral', name: 'Mistral AI', env_key: 'MISTRAL_API_KEY' },
   { id: 'kilocode', name: '🚀 Kilocode Gateway', env_key: 'KILOCODE_API_KEY' },
+  { id: 'nvidia', name: '🟢 NVIDIA AI Catalog', env_key: 'NVIDIA_API_KEY' },
 ];
 
 const MODELS_BY_PROVIDER: Record<string, string[]> = {
@@ -42,6 +43,13 @@ const MODELS_BY_PROVIDER: Record<string, string[]> = {
   'openai-compatible': [],
   mistral: ['mistral/mistral-large-latest', 'mistral/mistral-small-latest'],
   kilocode: [],
+  nvidia: [
+    'nvidia/meta/llama-3.3-70b-instruct',
+    'nvidia/nvidia/llama-3.1-nemotron-70b-instruct',
+    'nvidia/mistralai/mistral-large-2-instruct',
+    'nvidia/deepseek-ai/deepseek-r1',
+    'nvidia/qwen/qwen2.5-72b-instruct',
+  ],
 };
 
 const TTS_PROVIDERS = [
@@ -231,14 +239,18 @@ export const LLMSettingsForm: React.FC = () => {
     const isGemini = currentProvider === 'gemini' || id.startsWith('gemini/');
     const isOpenRouter = currentProvider === 'openrouter' || id.startsWith('openrouter/');
     const isKilocode = currentProvider === 'kilocode' || id.startsWith('kilocode/');
+    const isNVIDIA = currentProvider === 'nvidia' || id.startsWith('nvidia/');
 
-    if (isOpenRouter || isGemini || isKilocode) {
+    if (isOpenRouter || isGemini || isKilocode || isNVIDIA) {
       let badgeColor = "bg-blue-500/10 text-blue-500 border-blue-500/20";
-      let badgeText = isKilocode ? "KiloCode" : "OpenRouter";
-      let borderColor = "border-blue-500";
-      let bgColor = "bg-blue-500/5";
+      let badgeText = isKilocode ? "KiloCode" : isNVIDIA ? "NVIDIA" : "OpenRouter";
+      let borderColor = isNVIDIA ? "border-emerald-500" : "border-blue-500";
+      let bgColor = isNVIDIA ? "bg-emerald-500/5" : "bg-blue-500/5";
 
-      if (isGemini) {
+      if (isNVIDIA) {
+        badgeText = "NVIDIA";
+        badgeColor = "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
+      } else if (isGemini) {
         badgeText = "Google";
         badgeColor = "bg-red-500/10 text-red-500 border-red-500/20";
         borderColor = "border-red-500";

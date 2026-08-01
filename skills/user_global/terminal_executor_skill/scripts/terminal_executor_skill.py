@@ -316,7 +316,7 @@ class TerminalExecutor(BaseTool):
                 return (
                     f'<div class="pty-session-placeholder" '
                     f'data-session-id="{session_id}" data-cmd="{safe_cmd}"></div>\n'
-                    f'\nSalida de la terminal:\n{clean}'
+                    f'Comando ejecutado en la terminal PTY interactiva.\n{clean}'
                 )
             except Exception as e:
                 logger.exception(f"Error creando sesión PTY interactiva: {e}")

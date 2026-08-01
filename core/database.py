@@ -1320,6 +1320,33 @@ class OnlyOfficeDocumentShare(Base):
     )
 
 
+class OnlyOfficeFolderShare(Base):
+    """
+    Permite compartir carpetas de OnlyOffice con enlaces publicos o con cuentas especificas.
+    """
+    __tablename__ = "onlyoffice_folder_shares"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    folder_id = Column(UUID(as_uuid=True), ForeignKey("onlyoffice_folders.id", ondelete='CASCADE'), nullable=False, index=True)
+    owner_account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id", ondelete='CASCADE'), nullable=False, index=True)
+    shared_with_account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id", ondelete='CASCADE'), nullable=True, index=True)
+
+    is_public = Column(Boolean, default=False, nullable=False, index=True)
+    can_edit = Column(Boolean, default=True, nullable=False)
+    token = Column(String(64), unique=True, nullable=True, index=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"), nullable=False)
+
+    folder = relationship("DocumentFolder", backref=backref("share_entries", cascade="all, delete-orphan"))
+    owner_account = relationship("Account", foreign_keys=[owner_account_id])
+    shared_with_account = relationship("Account", foreign_keys=[shared_with_account_id])
+
+    __table_args__ = (
+        UniqueConstraint('folder_id', 'shared_with_account_id', name='_onlyoffice_folder_private_share_uc'),
+    )
+
+
+
 class OnlyOfficeDocumentChat(Base):
     """
     Mapea un documento de OnlyOffice a un hilo persistente para chat colaborativo.

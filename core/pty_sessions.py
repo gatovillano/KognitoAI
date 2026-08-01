@@ -111,9 +111,8 @@ async def create_session(
     }
     _sessions[session_id] = session
 
-    # Notificar inicio de stream y disponibilidad de la terminal
+    # Notificar inicio de la terminal para estado de herramientas
     try:
-        await send_personal_message(account_id, {"type": "stream_start", "taskId": session_id})
         await send_personal_message(
             account_id,
             {
@@ -158,13 +157,7 @@ async def _reader_loop(session_id: str) -> None:
             if current_session:
                 current_session.setdefault("accumulated_output", []).append(text)
 
-            # 1) Enviar a la UI de chat como stream_chunk (para que CommonChat lo recoja)
-            try:
-                await send_personal_message(account_id, {"type": "stream_chunk", "chunk": text, "taskId": task_id})
-            except Exception:
-                logger.exception("Error enviando stream_chunk")
-
-            # 2) Enviar a clientes terminales conectados (tipo conexión: 'terminal')
+            # Enviar a clientes terminales conectados (tipo conexión: 'terminal')
             try:
                 await send_personal_message(account_id, {"type": "output", "data": text}, connection_type="terminal")
             except Exception:
@@ -182,15 +175,6 @@ async def _reader_loop(session_id: str) -> None:
                 session["proc"].wait(timeout=1)
             except Exception:
                 returncode = None
-
-        # Enviar eventos de cierre
-        try:
-            await send_personal_message(
-                account_id,
-                {"type": "stream_end", "taskId": task_id, "text": ""},
-            )
-        except Exception:
-            logger.exception("Error enviando stream_end")
 
         try:
             await send_personal_message(

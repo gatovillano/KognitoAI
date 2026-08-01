@@ -169,6 +169,7 @@ export default function DocumentsPage() {
 
   const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
   const [shareTargetDoc, setShareTargetDoc] = useState<OnlyOfficeDoc | null>(null);
+  const [shareTargetFolder, setShareTargetFolder] = useState<OnlyOfficeFolder | null>(null);
   const [shareLinks, setShareLinks] = useState<DocumentShareLink[]>([]);
   const [isLoadingShareLinks, setIsLoadingShareLinks] = useState(false);
   const [isCreatingShare, setIsCreatingShare] = useState(false);
@@ -661,21 +662,44 @@ export default function DocumentsPage() {
     }
   };
 
-  const openShareDialog = async (doc: OnlyOfficeDoc) => {
-    setShareTargetDoc(doc);
+  const fetchFolderShareLinks = async (folderId: string) => {
+    setIsLoadingShareLinks(true);
+    try {
+      const response = await apiClient.get(`/api/onlyoffice/folders/${folderId}/share-links`);
+      setShareLinks(Array.isArray(response.data) ? response.data : []);
+    } catch (error) {
+      console.error('Error fetching folder share links:', error);
+      toast.error('No se pudieron cargar los enlaces de comparticion de la carpeta');
+      setShareLinks([]);
+    } finally {
+      setIsLoadingShareLinks(false);
+    }
+  };
+
+  const openShareDialog = async (doc?: OnlyOfficeDoc | null, folder?: OnlyOfficeFolder | null) => {
+    setShareTargetDoc(doc || null);
+    setShareTargetFolder(folder || null);
     setPrivateSearch('');
     setPrivateSuggestions([]);
     setSelectedPrivateUser(null);
     setShareCanEdit(true);
     setIsShareDialogOpen(true);
-    await fetchDocumentShareLinks(doc.id);
+    if (folder) {
+      await fetchFolderShareLinks(folder.id);
+    } else if (doc) {
+      await fetchDocumentShareLinks(doc.id);
+    }
   };
 
   const handleCreatePublicShare = async () => {
-    if (!shareTargetDoc) return;
+    if (!shareTargetDoc && !shareTargetFolder) return;
     setIsCreatingShare(true);
     try {
-      const response = await apiClient.post(`/api/onlyoffice/${shareTargetDoc.id}/share-links`, {
+      const endpoint = shareTargetFolder
+        ? `/api/onlyoffice/folders/${shareTargetFolder.id}/share-links`
+        : `/api/onlyoffice/${shareTargetDoc!.id}/share-links`;
+
+      const response = await apiClient.post(endpoint, {
         scope: 'public',
         can_edit: shareCanEdit,
       });
@@ -689,7 +713,12 @@ export default function DocumentsPage() {
       } else {
         toast.success('Enlace publico creado');
       }
-      await fetchDocumentShareLinks(shareTargetDoc.id);
+
+      if (shareTargetFolder) {
+        await fetchFolderShareLinks(shareTargetFolder.id);
+      } else if (shareTargetDoc) {
+        await fetchDocumentShareLinks(shareTargetDoc.id);
+      }
     } catch (error) {
       console.error('Error creating public share:', error);
       toast.error('No se pudo crear el enlace publico');
@@ -699,33 +728,51 @@ export default function DocumentsPage() {
   };
 
   const handleCreatePrivateShare = async () => {
-    if (!shareTargetDoc || !selectedPrivateUser?.account_id) return;
+    if ((!shareTargetDoc && !shareTargetFolder) || !selectedPrivateUser?.account_id) return;
     setIsCreatingShare(true);
     try {
-      await apiClient.post(`/api/onlyoffice/${shareTargetDoc.id}/share-links`, {
+      const endpoint = shareTargetFolder
+        ? `/api/onlyoffice/folders/${shareTargetFolder.id}/share-links`
+        : `/api/onlyoffice/${shareTargetDoc!.id}/share-links`;
+
+      await apiClient.post(endpoint, {
         scope: 'private',
         target_account_id: selectedPrivateUser.account_id,
         can_edit: shareCanEdit,
       });
-      toast.success('Documento compartido con la cuenta seleccionada');
+      toast.success('Compartido con la cuenta seleccionada');
       setPrivateSearch('');
       setPrivateSuggestions([]);
       setSelectedPrivateUser(null);
-      await fetchDocumentShareLinks(shareTargetDoc.id);
+
+      if (shareTargetFolder) {
+        await fetchFolderShareLinks(shareTargetFolder.id);
+      } else if (shareTargetDoc) {
+        await fetchDocumentShareLinks(shareTargetDoc.id);
+      }
     } catch (error) {
       console.error('Error creating private share:', error);
-      toast.error('No se pudo compartir el documento de forma privada');
+      toast.error('No se pudo compartir de forma privada');
     } finally {
       setIsCreatingShare(false);
     }
   };
 
   const handleDeleteShareLink = async (shareId: string) => {
-    if (!shareTargetDoc) return;
+    if (!shareTargetDoc && !shareTargetFolder) return;
     try {
-      await apiClient.delete(`/api/onlyoffice/share-links/${shareId}`);
+      const endpoint = shareTargetFolder
+        ? `/api/onlyoffice/folders/share-links/${shareId}`
+        : `/api/onlyoffice/share-links/${shareId}`;
+
+      await apiClient.delete(endpoint);
       toast.success('Comparticion eliminada');
-      await fetchDocumentShareLinks(shareTargetDoc.id);
+
+      if (shareTargetFolder) {
+        await fetchFolderShareLinks(shareTargetFolder.id);
+      } else if (shareTargetDoc) {
+        await fetchDocumentShareLinks(shareTargetDoc.id);
+      }
     } catch (error) {
       console.error('Error deleting share link:', error);
       toast.error('No se pudo eliminar la comparticion');
@@ -1316,18 +1363,29 @@ export default function DocumentsPage() {
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
-            className="flex items-center gap-2 mb-4 p-2 bg-primary/5 rounded-2xl border border-primary/10 overflow-x-auto"
+            className="flex flex-wrap items-center gap-2 mb-4 p-2.5 bg-primary/5 rounded-2xl border border-primary/10 w-full shadow-sm"
           >
             <div className="flex items-center gap-2 px-3 text-sm font-semibold text-primary/80 whitespace-nowrap">
               <Layers className="h-4 w-4" />
               {selectedDocs.length + selectedFolders.length} seleccionados
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                className="h-6 w-6 rounded-full hover:bg-primary/10 p-0 text-muted-foreground hover:text-foreground ml-1"
+                onClick={deselectAll}
+                title="Deseleccionar todos"
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
             </div>
-            <Button variant="secondary" size="sm" onClick={() => { setItemToMove(null); setSelectedTargetFolderForMove("null"); setIsMoveItemDialogOpen(true); fetchAllFolders(); }} className="gap-2">
-              <FolderOutput className="h-4 w-4" /> Mover
-            </Button>
-            <Button variant="destructive" size="sm" onClick={() => setBulkDeleteConfirmOpen(true)} className="gap-2 ml-auto">
-              <Trash2 className="h-4 w-4" /> Eliminar
-            </Button>
+            <div className="flex items-center gap-2 ml-auto">
+              <Button variant="secondary" size="sm" onClick={() => { setItemToMove(null); setSelectedTargetFolderForMove("null"); setIsMoveItemDialogOpen(true); fetchAllFolders(); }} className="gap-2">
+                <FolderOutput className="h-4 w-4" /> Mover
+              </Button>
+              <Button variant="destructive" size="sm" onClick={() => setBulkDeleteConfirmOpen(true)} className="gap-2">
+                <Trash2 className="h-4 w-4" /> Eliminar
+              </Button>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -1465,6 +1523,16 @@ export default function DocumentsPage() {
                               >
                                 <Briefcase className="h-4 w-4" />
                                 <span>Asociar Workspace</span>
+                              </DropdownMenuItem>
+                              <DropdownMenuItem 
+                                onClick={(e) => { 
+                                  e.stopPropagation(); 
+                                  openShareDialog(null, folder);
+                                }} 
+                                className="gap-2 cursor-pointer focus:bg-muted"
+                              >
+                                <Share2 className="h-4 w-4" />
+                                <span>Compartir</span>
                               </DropdownMenuItem>
                               <div className="h-px bg-border/40 my-1" />
                               <DropdownMenuItem 
@@ -1665,6 +1733,16 @@ export default function DocumentsPage() {
                                 <Layers className="h-4 w-4 text-emerald-500" />
                                 <span className="font-medium text-emerald-500">Vectorizar (RAG)</span>
                               </DropdownMenuItem>
+                              <DropdownMenuItem 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openShareDialog(doc, null);
+                                }}
+                                className="gap-2 cursor-pointer py-2 px-3"
+                              >
+                                <Share2 className="h-4 w-4 text-primary" />
+                                <span className="font-medium">Compartir</span>
+                              </DropdownMenuItem>
                               <div className="h-px bg-border/40 my-1" />
                               <DropdownMenuItem 
                                 onClick={() => handleDelete(doc.id, doc.filename)} 
@@ -1860,6 +1938,16 @@ export default function DocumentsPage() {
                           <Briefcase className="h-4 w-4" />
                           <span>Asociar Workspace</span>
                         </DropdownMenuItem>
+                        <DropdownMenuItem 
+                          onClick={(e) => { 
+                            e.stopPropagation(); 
+                            openShareDialog(null, folder);
+                          }} 
+                          className="gap-2 cursor-pointer"
+                        >
+                          <Share2 className="h-4 w-4" />
+                          <span>Compartir</span>
+                        </DropdownMenuItem>
                         <div className="h-px bg-border/40 my-1" />
                         <DropdownMenuItem 
                           onClick={(e) => { e.stopPropagation(); handleDeleteFolder(folder.id, folder.name); }} 
@@ -1995,6 +2083,16 @@ export default function DocumentsPage() {
                           >
                             <Layers className="h-4 w-4 text-emerald-500" />
                             <span className="font-medium text-emerald-500">Vectorizar (RAG)</span>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openShareDialog(doc, null);
+                            }}
+                            className="gap-2 cursor-pointer py-2 px-3"
+                          >
+                            <Share2 className="h-4 w-4 text-primary" />
+                            <span className="font-medium">Compartir</span>
                           </DropdownMenuItem>
                           <div className="h-px bg-border/40 my-1" />
                           <DropdownMenuItem 
@@ -2293,7 +2391,7 @@ export default function DocumentsPage() {
               <div className="p-2 rounded-xl bg-primary/10 text-primary">
                 <Share2 className="h-6 w-6" />
               </div>
-              Compartir Documento
+              Compartir {shareTargetFolder ? `Carpeta "${shareTargetFolder.name}"` : shareTargetDoc ? `Documento "${shareTargetDoc.filename}"` : ''}
             </DialogTitle>
           </DialogHeader>
 
@@ -2301,7 +2399,7 @@ export default function DocumentsPage() {
             <div className="rounded-2xl border p-4 space-y-3">
               <p className="text-sm font-semibold">Enlace publico</p>
               <p className="text-xs text-muted-foreground">
-                Crea un enlace para abrir el documento sin seleccionar una cuenta especifica.
+                Crea un enlace para abrir {shareTargetFolder ? 'la carpeta y sus archivos' : 'el documento'} sin seleccionar una cuenta especifica.
               </p>
               <div className="flex items-center space-x-2">
                 <Checkbox
