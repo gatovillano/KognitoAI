@@ -1,6 +1,6 @@
 // src/hooks/useStreamingChat.ts
 import { useState, useCallback, useRef, useEffect } from 'react';
-import * as SecureStore from 'expo-secure-store';
+import { storage } from '../utils/storage';
 import { API_URL } from '../api/config';
 
 interface StreamingChatOptions {
@@ -165,7 +165,7 @@ export const useStreamingChat = (options: StreamingChatOptions = {}) => {
     reasoningBuffer.current = '';
 
     try {
-      const token = await SecureStore.getItemAsync('userToken');
+      const token = await storage.getItem('userToken');
       if (!token) throw new Error('No auth token found');
 
       await connectWebSocket(request.account_id, token);
