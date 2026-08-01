@@ -6,12 +6,12 @@ Permite realizar un seguimiento del tráfico en la web de presentación y el sof
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Any
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select, func, text, desc, case
+from sqlalchemy import select, func, text, desc, case, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import AnalyticsEvent, Account
@@ -103,6 +103,16 @@ async def track_event(
         except Exception as e:
             # Si el token es inválido o expira, no fallamos el trackeo, simplemente lo registramos de forma anónima
             logger.debug(f"Error decodificando token en track_event: {e}")
+
+    if user_id:
+        try:
+            await db.execute(
+                update(Account)
+                .where(Account.id == user_id)
+                .values(last_active_at=datetime.now(timezone.utc))
+            )
+        except Exception as e:
+            logger.debug(f"Error actualizando last_active_at en track_event: {e}")
 
     # Obtener IP y User-Agent
     ip_address = request.client.host if request.client else "unknown"
@@ -347,3 +357,92 @@ async def get_analytics_summary(
             status_code=500, 
             detail=f"Error obteniendo métricas del sistema: {str(e)}"
         )
+
+
+def map_path_to_feature(path: str) -> str:
+    if not path:
+        return "Navegación General"
+    path_lower = path.lower()
+    if path_lower.startswith("/chat") or path_lower.startswith("/c/"):
+        return "Asistente de Chat"
+    elif path_lower.startswith("/notes") or path_lower.startswith("/notas"):
+        return "Gestor de Notas"
+    elif path_lower.startswith("/forms") or path_lower.startswith("/formularios"):
+        return "Formularios Dinámicos"
+    elif path_lower.startswith("/mindmap"):
+        return "Mapas Mentales"
+    elif path_lower.startswith("/knowledge-graph") or path_lower.startswith("/grafo"):
+        return "Grafo de Conocimiento"
+    elif path_lower.startswith("/settings") or path_lower.startswith("/perfil"):
+        return "Configuración y Perfil"
+    elif path_lower.startswith("/presentacion"):
+        return "Web de Presentación"
+    return "Navegación General"
+
+
+@router.get("/admin/analytics/users", summary="Obtener analíticas de uso por usuario (solo admin)")
+async def get_admin_user_analytics(
+    admin_account: Account = Depends(get_current_admin_account),
+    db: AsyncSession = Depends(get_db_session)
+):
+    result = await db.execute(select(Account))
+    accounts = result.scalars().all()
+    
+    now = datetime.now(timezone.utc)
+    user_stats = []
+    for acc in accounts:
+        events_stmt = select(
+            AnalyticsEvent.path,
+            func.count(AnalyticsEvent.id).label("count")
+        ).where(
+            AnalyticsEvent.account_id == acc.id
+        ).group_by(
+            AnalyticsEvent.path
+        ).order_by(
+            desc("count")
+        )
+        
+        events_res = await db.execute(events_stmt)
+        rows = events_res.all()
+        
+        total_events = sum(r.count for r in rows)
+        feature_counts = {}
+        for r in rows:
+            feat = map_path_to_feature(r.path)
+            feature_counts[feat] = feature_counts.get(feat, 0) + r.count
+            
+        top_features = [
+            {
+                "name": feat,
+                "count": count,
+                "percentage": round((count / total_events) * 100) if total_events > 0 else 0
+            }
+            for feat, count in sorted(feature_counts.items(), key=lambda x: x[1], reverse=True)[:4]
+        ]
+        
+        status_label = "never"
+        if acc.last_active_at:
+            last_act = acc.last_active_at if acc.last_active_at.tzinfo else acc.last_active_at.replace(tzinfo=timezone.utc)
+            delta = (now - last_act).total_seconds()
+            if delta < 900:  # 15 min
+                status_label = "online"
+            elif delta < 86400:  # 24h
+                status_label = "active"
+            else:
+                status_label = "inactive"
+                
+        user_stats.append({
+            "account_id": str(acc.id),
+            "name": acc.name or acc.username or "Usuario",
+            "email": acc.email,
+            "username": acc.username,
+            "is_admin": bool(acc.is_admin),
+            "last_login_at": acc.last_login_at.isoformat() if acc.last_login_at else None,
+            "last_active_at": acc.last_active_at.isoformat() if acc.last_active_at else None,
+            "total_events": total_events,
+            "status": status_label,
+            "top_features": top_features
+        })
+        
+    return {"users": user_stats}
+
