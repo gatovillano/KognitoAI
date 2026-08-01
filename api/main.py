@@ -125,7 +125,10 @@ allowed_origins = [
     "https://apibase.cuerpolibre.cl",
     "https://kognitoai.digital",
     "https://kognitoai.cloud",
+    "https://webapp.kognitoai.cloud",
     "http://localhost:8081",
+    "http://localhost:8885",
+    "http://127.0.0.1:8885",
 ]
 
 # Incorporar orígenes desde el .env si existen

@@ -369,12 +369,15 @@ async def chat_completions(
         try:
             response = await llm.ainvoke(langchain_messages)
         except Exception as primary_err:
-            logger.warning(f"Primary LLM for account {account_id} failed ({primary_err}). Attempting fallback to default system LLM...")
+            logger.warning(f"Primary LLM for account {account_id} failed ({primary_err}). Attempting fallback to system LLM...")
             try:
-                from langchain_community.chat_models import ChatLiteLLM
-                fallback_model = settings.llm_model if settings.llm_model and "poolside" not in settings.llm_model else "gemini/gemini-2.0-flash"
-                fallback_llm = ChatLiteLLM(model=fallback_model)
-                response = await fallback_llm.ainvoke(langchain_messages)
+                system_fallback = get_fast_llm() or get_main_llm()
+                if system_fallback:
+                    response = await system_fallback.ainvoke(langchain_messages)
+                else:
+                    from langchain_community.chat_models import ChatLiteLLM
+                    fallback_llm = ChatLiteLLM(model="gemini/gemini-2.0-flash", api_key=settings.google_api_key)
+                    response = await fallback_llm.ainvoke(langchain_messages)
             except Exception as fallback_err:
                 logger.error(f"Fallback LLM failed: {fallback_err}")
                 raise primary_err
