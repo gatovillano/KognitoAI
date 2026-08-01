@@ -156,6 +156,8 @@ class Account(Base):
     # Nuevos campos para configuración de usuario
     phone = Column(String(255), nullable=True, comment="Número de teléfono del usuario.")
     bio = Column(Text, nullable=True, comment="Biografía o descripción personal del usuario.")
+    last_login_at = Column(DateTime(timezone=True), nullable=True, comment="Fecha y hora de inicio de sesión")
+    last_active_at = Column(DateTime(timezone=True), nullable=True, comment="Fecha y hora de última actividad")
     
     # Toggles para módulos
     profiles_enabled = Column(Boolean, default=False, nullable=False, comment="Indica si el módulo de perfiles está habilitado para la cuenta.")
