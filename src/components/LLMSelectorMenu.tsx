@@ -21,6 +21,7 @@ const LLM_PROVIDERS = [
   { id: 'openai-compatible', name: '🖥️ Local AI / Compatible', icon: '🖥️' },
   { id: 'mistral', name: 'Mistral AI', icon: '🌪️' },
   { id: 'kilocode', name: '🚀 Kilocode Gateway', icon: '🚀' },
+  { id: 'nvidia', name: 'NVIDIA AI Catalog', icon: '🟢' },
 ];
 
 const MODELS_BY_PROVIDER: Record<string, string[]> = {
@@ -39,6 +40,13 @@ const MODELS_BY_PROVIDER: Record<string, string[]> = {
   'openai-compatible': [],
   mistral: ['mistral/mistral-large-latest', 'mistral/mistral-small-latest'],
   kilocode: [],
+  nvidia: [
+    'nvidia/meta/llama-3.3-70b-instruct',
+    'nvidia/nvidia/llama-3.1-nemotron-70b-instruct',
+    'nvidia/mistralai/mistral-large-2-instruct',
+    'nvidia/deepseek-ai/deepseek-r1',
+    'nvidia/qwen/qwen2.5-72b-instruct',
+  ],
 };
 
 export const LLMSelectorMenu: React.FC = () => {
@@ -133,11 +141,15 @@ export const LLMSelectorMenu: React.FC = () => {
     const isGemini = currentProvider === 'gemini' || id.startsWith('gemini/');
     const isOpenRouter = currentProvider === 'openrouter' || id.startsWith('openrouter/');
     const isKilocode = currentProvider === 'kilocode' || id.startsWith('kilocode/');
+    const isNVIDIA = currentProvider === 'nvidia' || id.startsWith('nvidia/');
 
     let badgeColor = "bg-blue-500/10 text-blue-500 border-blue-500/20";
-    let badgeText = isKilocode ? "KiloCode" : isOpenRouter ? "OpenRouter" : "";
+    let badgeText = isKilocode ? "KiloCode" : isNVIDIA ? "NVIDIA" : isOpenRouter ? "OpenRouter" : "";
 
-    if (isGemini) {
+    if (isNVIDIA) {
+      badgeText = "NVIDIA";
+      badgeColor = "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
+    } else if (isGemini) {
       badgeText = "Google";
       badgeColor = "bg-red-500/10 text-red-500 border-red-500/20";
     } else if (id.toLowerCase().includes('free')) {

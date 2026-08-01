@@ -91,8 +91,10 @@ def _register_custom_providers():
             litellm.provider_list.append("kilocode")
         if "llm7" not in litellm.provider_list:
             litellm.provider_list.append("llm7")
+        if "nvidia" not in litellm.provider_list:
+            litellm.provider_list.append("nvidia")
 
-        # Mapear dinámicamente modelos de kilocode y llm7 a la lógica de openai
+        # Mapear dinámicamente modelos de kilocode, llm7 y nvidia a la lógica de openai
         # LiteLLM usa esto para determinar qué clase de cliente instanciar
         litellm.custom_provider_map = getattr(litellm, "custom_provider_map", [])
 
@@ -103,6 +105,10 @@ def _register_custom_providers():
         llm7_map = {"provider": "llm7", "custom_handler": "openai"}
         if llm7_map not in litellm.custom_provider_map:
             litellm.custom_provider_map.append(llm7_map)
+
+        nvidia_map = {"provider": "nvidia", "custom_handler": "openai"}
+        if nvidia_map not in litellm.custom_provider_map:
+            litellm.custom_provider_map.append(nvidia_map)
 
         logger.info("📡 Proveedores KiloCode y LLM7 registrados globalmente en LiteLLM")
     except Exception as e:
@@ -135,6 +141,10 @@ def detect_provider_from_model(model_name: str) -> str:
     # Modelos de Anthropic
     if any(x in model_lower for x in ["claude", "anthropic"]):
         return "anthropic"
+
+    # Modelos de NVIDIA
+    if any(x in model_lower for x in ["nvidia", "nemotron"]) or model_lower.startswith("nvidia/"):
+        return "nvidia"
 
     # Modelos de Groq
     if any(x in model_lower for x in ["groq", "llama-", "mixtral", "gemma-"]):
@@ -622,6 +632,17 @@ async def get_llm_for_user(
                 )
                 provider_target = "kilocode"
 
+            # Auto-detección de proveedor NVIDIA por prefijo de modelo
+            if (
+                model_target
+                and model_target.startswith("nvidia/")
+                and provider_target != "nvidia"
+            ):
+                logger.info(
+                    f"Detectado modelo NVIDIA: {model_target}. Forzando provider a 'nvidia'."
+                )
+                provider_target = "nvidia"
+
             # Si el usuario no tiene proveedor configurado, detectarlo del nombre del modelo
             if not provider_target and model_target:
                 provider_target = detect_provider_from_model(model_target)
@@ -696,6 +717,13 @@ async def get_llm_for_user(
                 if settings.kilocode_api_key:
                     api_key = settings.kilocode_api_key
 
+            # Fallback para NVIDIA
+            if not api_key and provider_target.lower() == "nvidia":
+                if settings.nvidia_api_key:
+                    api_key = settings.nvidia_api_key
+                elif os.getenv("NVIDIA_API_KEY"):
+                    api_key = os.getenv("NVIDIA_API_KEY")
+
             # Fallbacks genéricos para otros proveedores desde variables de entorno
             if not api_key:
                 if provider_target.lower() == "openai":
@@ -728,6 +756,7 @@ async def get_llm_for_user(
                 "mistral",
                 "cerebras",
                 "kilocode",
+                "nvidia",
                 "ollama-cloud",
             ]
             if not api_key and provider_target.lower() in providers_requiring_key:
@@ -932,6 +961,38 @@ async def get_llm_for_user(
 
                 logger.info(
                     f"🚀 Kilocode Gateway configurado: {llm_kwargs['model_name']} en {llm_kwargs['api_base']}"
+                )
+
+            elif provider_target.lower() == "nvidia":
+                # NVIDIA AI Catalog / NIM API (OpenAI-compatible)
+                llm_kwargs["api_base"] = account.llm_api_base or "https://integrate.api.nvidia.com/v1"
+
+                if api_key:
+                    llm_kwargs["api_key"] = api_key
+
+                actual_model = model_target
+                if actual_model.startswith("nvidia/"):
+                    actual_model = actual_model[len("nvidia/") :]
+
+                # Para LiteLLM, el modelo usa prefijo 'openai/' con el endpoint de NVIDIA
+                llm_kwargs["model_name"] = f"openai/{actual_model}"
+                llm_kwargs["custom_llm_provider"] = "openai"
+
+                if "provider" in llm_kwargs:
+                    del llm_kwargs["provider"]
+
+                # Habilitar/forzar extra_body razonamiento si está activo globalmente o en modelos R1/Nemotron/Reasoning
+                if "extra_body" not in llm_kwargs:
+                    llm_kwargs["extra_body"] = {}
+
+                reasoning_models = ["-r1", "r1", "reasoning", "thinking", "nemotron"]
+                is_reasoning = any(x in actual_model.lower() for x in reasoning_models)
+                if is_reasoning or settings.global_force_reasoning:
+                    llm_kwargs["extra_body"]["include_reasoning"] = True
+                    logger.info(f"🧠 Razonamiento habilitado para NVIDIA: {actual_model} (Force: {settings.global_force_reasoning})")
+
+                logger.info(
+                    f"🟢 NVIDIA AI Catalog configurado: {llm_kwargs['model_name']} en {llm_kwargs['api_base']}"
                 )
 
             elif account.llm_api_base and ("http" in account.llm_api_base):

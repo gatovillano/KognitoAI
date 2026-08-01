@@ -141,3 +141,40 @@ async def test_create_pdf_e2e():
             os.remove(file_path)
         except OSError:
             pass
+
+@pytest.mark.asyncio
+async def test_create_pdf_saves_to_agent_folder():
+    import uuid
+    from unittest.mock import AsyncMock
+    
+    tool = CreatePDFTool()
+    tool.account_id = str(uuid.uuid4())
+    
+    mock_folder = MagicMock()
+    mock_folder.id = uuid.uuid4()
+    mock_folder.name = "🤖 Documentos PDF (Agente)"
+    
+    mock_db = AsyncMock()
+    mock_res = MagicMock()
+    mock_res.scalars.return_value.first.return_value = mock_folder
+    mock_db.execute.return_value = mock_res
+    
+    with patch("skills.document_management_skill.scripts.create_pdf_tool.HTML") as mock_html, \
+         patch("core.database.SessionLocal") as mock_session_cls, \
+         patch("shutil.copy2"):
+        
+        mock_html_inst = MagicMock()
+        mock_html.return_value = mock_html_inst
+        mock_session_cls.return_value.__aenter__.return_value = mock_db
+        
+        result = await tool._arun(
+            content="<h1>Test Agent Folder</h1>",
+            is_html=True,
+            title="Test Agent Folder PDF"
+        )
+        
+        assert "pdf generado exitosamente" in result["context_for_llm"].lower() or "generado exitosamente" in result["context_for_llm"].lower()
+        assert mock_db.add.called
+        added_doc = mock_db.add.call_args_list[-1][0][0]
+        assert str(added_doc.folder_id) == str(mock_folder.id)
+

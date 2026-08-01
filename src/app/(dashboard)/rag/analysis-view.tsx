@@ -8,9 +8,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
     Loader2, Info, Filter, ChevronDown, Search, BarChart3, FileText, FolderKanban,
-    Lightbulb, Code, Calendar, Eye, Plus,
+    Code, Calendar, Eye, Plus,
     CheckCircle, Clock, XCircle, ArrowLeft, StickyNote, TrendingDown, Users,
-    Activity, Target, PieChart, RefreshCcw, Zap, Network
+    Activity, Target, PieChart, RefreshCcw, Network
 } from 'lucide-react';
 import { toast } from 'sonner';
 import apiClient from '@/lib/api';
@@ -45,11 +45,6 @@ const getAnalysisIcon = (type: string) => {
             return <FileText className="h-5 w-5 text-blue-500" />;
         case 'collection':
             return <FolderKanban className="h-5 w-5 text-green-500" />;
-        case 'insight':
-        case 'proactive_insight_manual':
-            return <Lightbulb className="h-5 w-5 text-yellow-500" />;
-        case 'neural_insight':
-            return <Zap className="h-5 w-5 text-purple-500" />;
         case 'code':
             return <Code className="h-5 w-5 text-orange-500" />;
         case 'semantic':
@@ -74,9 +69,6 @@ const getAnalysisTypeLabel = (type: string, mode?: string) => {
     switch (type) {
         case 'document': return 'Documento';
         case 'collection': return 'Colección';
-        case 'insight':
-        case 'proactive_insight_manual': return 'Insight';
-        case 'neural_insight': return 'Neural Insight';
         case 'code': return 'Código';
         case 'semantic': return 'Semántico';
         case 'semantic_summary': return 'Resumen Semántico';
@@ -95,9 +87,6 @@ const getAnalysisTypeBadgeColor = (type: string, mode?: string) => {
     switch (type) {
         case 'document': return 'bg-blue-100 text-blue-800 border-blue-200';
         case 'collection': return 'bg-green-100 text-green-800 border-green-200';
-        case 'insight':
-        case 'proactive_insight_manual': return 'bg-yellow-100 text-yellow-800 border-yellow-200';
-        case 'neural_insight': return 'bg-purple-100 text-purple-800 border-purple-200';
         case 'code': return 'bg-orange-100 text-orange-800 border-orange-200';
         case 'semantic':
         case 'semantic_summary': return 'bg-indigo-100 text-indigo-800 border-indigo-200';
@@ -161,7 +150,8 @@ export function AnalysisView() {
                 (item) =>
                     item.type !== 'insight' &&
                     item.type !== 'proactive_insight_manual' &&
-                    item.type !== 'proactive_insight'
+                    item.type !== 'proactive_insight' &&
+                    item.type !== 'neural_insight'
             );
             if (reset) {
                 setAnalyses(filteredAnalysis);
@@ -334,7 +324,6 @@ export function AnalysisView() {
 
     const analysisTypes = [
         { value: null, label: 'Todos los tipos' },
-        { value: 'neural_insight', label: 'Neural Insights' },
         { value: 'deep_research', label: 'Investigación Profunda' },
         { value: 'document', label: 'Documentos' },
         { value: 'collection', label: 'Colecciones' },

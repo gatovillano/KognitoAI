@@ -23,6 +23,7 @@ from core.database import (
     ChatThread,
     SharedConversationLink,
     OnlyOfficeDocumentShare,
+    OnlyOfficeFolderShare,
     OnlyOfficeDocumentChat,
 )
 from core.dependencies import get_db_session
@@ -74,8 +75,94 @@ class CreateDocumentShareRequest(BaseModel):
     can_edit: bool = True
 
 
+class CreateFolderShareRequest(BaseModel):
+    scope: str
+    target_account_id: Optional[str] = None
+    can_edit: bool = True
+
+
 class DeleteDocumentShareResponse(BaseModel):
     message: str
+
+
+async def _is_folder_publicly_shared_with_token(
+    folder_id: Optional[uuid.UUID],
+    db: AsyncSession,
+    token: str
+) -> tuple[bool, bool]:
+    if not folder_id or not token:
+        return False, False
+
+    curr_id: Optional[uuid.UUID] = folder_id
+    depth = 0
+    while curr_id and depth < 30:
+        public_stmt = select(OnlyOfficeFolderShare).where(
+            OnlyOfficeFolderShare.folder_id == curr_id,
+            OnlyOfficeFolderShare.is_public == True,
+            OnlyOfficeFolderShare.token == token,
+        )
+        public_share = (await db.execute(public_stmt)).scalars().first()
+        if public_share:
+            return True, public_share.can_edit
+
+        folder = await db.get(DocumentFolder, curr_id)
+        if not folder or not folder.parent_id:
+            break
+        curr_id = folder.parent_id
+        depth += 1
+
+    return False, False
+
+
+async def _can_access_folder(
+    folder: DocumentFolder,
+    current_account_id: str,
+    db: AsyncSession,
+    token: Optional[str] = None
+) -> bool:
+    if str(folder.account_id) == current_account_id:
+        return True
+
+    if folder.workspace_id:
+        try:
+            if await check_workspace_permission(
+                current_account_id,
+                str(folder.workspace_id),
+                db,
+                required_roles=["owner", "editor", "viewer"],
+            ):
+                return True
+        except Exception:
+            pass
+
+    curr_id: Optional[uuid.UUID] = folder.id
+    depth = 0
+    while curr_id and depth < 30:
+        share_stmt = select(OnlyOfficeFolderShare).where(
+            OnlyOfficeFolderShare.folder_id == curr_id,
+            OnlyOfficeFolderShare.shared_with_account_id == uuid.UUID(current_account_id),
+        )
+        share_row = (await db.execute(share_stmt)).scalars().first()
+        if share_row:
+            return True
+
+        if token:
+            pub_stmt = select(OnlyOfficeFolderShare).where(
+                OnlyOfficeFolderShare.folder_id == curr_id,
+                OnlyOfficeFolderShare.is_public == True,
+                OnlyOfficeFolderShare.token == token,
+            )
+            pub_row = (await db.execute(pub_stmt)).scalars().first()
+            if pub_row:
+                return True
+
+        f_obj = await db.get(DocumentFolder, curr_id)
+        if not f_obj or not f_obj.parent_id:
+            break
+        curr_id = f_obj.parent_id
+        depth += 1
+
+    return False
 
 
 async def _can_access_document(
@@ -116,6 +203,11 @@ async def _can_access_document(
         public_share = (await db.execute(public_stmt)).scalars().first()
         if public_share:
             return True
+
+        if doc.folder_id:
+            is_folder_shared, _ = await _is_folder_publicly_shared_with_token(doc.folder_id, db, token)
+            if is_folder_shared:
+                return True
 
     return False
 
@@ -856,6 +948,403 @@ async def delete_document_share_link(
     await db.delete(share_entry)
     await db.commit()
     return {"message": "Comparticion eliminada"}
+
+
+# --- ENDPOINTS DE COMPARTICIÓN DE CARPETAS ---
+
+@router.post("/folders/{folder_id}/share-links")
+async def create_folder_share_link(
+    folder_id: uuid.UUID,
+    request: CreateFolderShareRequest,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Crea un enlace de compartición público o una compartición privada para una carpeta."""
+    folder = await db.get(DocumentFolder, folder_id)
+    if not folder:
+        raise HTTPException(status_code=404, detail="Carpeta no encontrada")
+    if str(folder.account_id) != current_account_id:
+        raise HTTPException(status_code=403, detail="Solo el propietario puede compartir esta carpeta")
+
+    scope = (request.scope or "").strip().lower()
+    if scope not in {"public", "private"}:
+        raise HTTPException(status_code=400, detail="scope debe ser 'public' o 'private'")
+
+    if scope == "public":
+        token = secrets.token_urlsafe(32)
+        share_entry = OnlyOfficeFolderShare(
+            folder_id=folder.id,
+            owner_account_id=folder.account_id,
+            is_public=True,
+            can_edit=request.can_edit,
+            token=token,
+        )
+        db.add(share_entry)
+        await db.commit()
+        await db.refresh(share_entry)
+        return {
+            "id": str(share_entry.id),
+            "scope": "public",
+            "token": share_entry.token,
+            "share_url": f"/share/folder/{share_entry.token}",
+            "can_edit": share_entry.can_edit,
+            "created_at": share_entry.created_at.isoformat() if share_entry.created_at else None,
+        }
+
+    if not request.target_account_id:
+        raise HTTPException(status_code=400, detail="target_account_id es obligatorio para comparticion privada")
+
+    try:
+        target_uuid = uuid.UUID(request.target_account_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="target_account_id invalido")
+
+    if str(target_uuid) == current_account_id:
+        raise HTTPException(status_code=400, detail="No puedes compartir la carpeta contigo mismo")
+
+    target_account = await db.get(Account, target_uuid)
+    if not target_account:
+        raise HTTPException(status_code=404, detail="Cuenta destino no encontrada")
+
+    existing_stmt = select(OnlyOfficeFolderShare).where(
+        OnlyOfficeFolderShare.folder_id == folder.id,
+        OnlyOfficeFolderShare.shared_with_account_id == target_uuid,
+    )
+    existing = (await db.execute(existing_stmt)).scalars().first()
+    if existing:
+        return {
+            "id": str(existing.id),
+            "scope": "private",
+            "target_account_id": str(target_uuid),
+            "can_edit": existing.can_edit,
+            "created_at": existing.created_at.isoformat() if existing.created_at else None,
+        }
+
+    share_entry = OnlyOfficeFolderShare(
+        folder_id=folder.id,
+        owner_account_id=folder.account_id,
+        shared_with_account_id=target_uuid,
+        is_public=False,
+        can_edit=request.can_edit,
+    )
+    db.add(share_entry)
+    await db.commit()
+    await db.refresh(share_entry)
+
+    return {
+        "id": str(share_entry.id),
+        "scope": "private",
+        "target_account_id": str(target_uuid),
+        "can_edit": share_entry.can_edit,
+        "created_at": share_entry.created_at.isoformat() if share_entry.created_at else None,
+    }
+
+
+@router.get("/folders/{folder_id}/share-links")
+async def list_folder_share_links(
+    folder_id: uuid.UUID,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Lista los enlaces y permisos de compartición de una carpeta."""
+    folder = await db.get(DocumentFolder, folder_id)
+    if not folder:
+        raise HTTPException(status_code=404, detail="Carpeta no encontrada")
+    if str(folder.account_id) != current_account_id:
+        raise HTTPException(status_code=403, detail="Solo el propietario puede ver los enlaces de comparticion")
+
+    stmt = select(OnlyOfficeFolderShare).where(
+        OnlyOfficeFolderShare.folder_id == folder.id
+    ).order_by(OnlyOfficeFolderShare.created_at.desc())
+    entries = (await db.execute(stmt)).scalars().all()
+
+    account_ids = [e.shared_with_account_id for e in entries if e.shared_with_account_id]
+    account_map = {}
+    if account_ids:
+        account_rows = (await db.execute(select(Account).where(Account.id.in_(account_ids)))).scalars().all()
+        account_map = {acc.id: acc for acc in account_rows}
+
+    response = []
+    for entry in entries:
+        shared_user = account_map.get(entry.shared_with_account_id)
+        response.append({
+            "id": str(entry.id),
+            "scope": "public" if entry.is_public else "private",
+            "can_edit": entry.can_edit,
+            "token": entry.token,
+            "share_url": f"/share/folder/{entry.token}" if entry.is_public and entry.token else None,
+            "target_account_id": str(entry.shared_with_account_id) if entry.shared_with_account_id else None,
+            "target_email": shared_user.email if shared_user else None,
+            "target_username": shared_user.username if shared_user else None,
+            "target_name": shared_user.name if shared_user else None,
+            "created_at": entry.created_at.isoformat() if entry.created_at else None,
+        })
+
+    return response
+
+
+@router.delete("/folders/share-links/{share_id}", response_model=DeleteDocumentShareResponse)
+async def delete_folder_share_link(
+    share_id: uuid.UUID,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Elimina un permiso o enlace de compartición de carpeta."""
+    share_entry = await db.get(OnlyOfficeFolderShare, share_id)
+    if not share_entry:
+        raise HTTPException(status_code=404, detail="Comparticion no encontrada")
+
+    folder = await db.get(DocumentFolder, share_entry.folder_id)
+    if not folder:
+        raise HTTPException(status_code=404, detail="Carpeta no encontrada")
+    if str(folder.account_id) != current_account_id:
+        raise HTTPException(status_code=403, detail="Solo el propietario puede eliminar comparticiones")
+
+    await db.delete(share_entry)
+    await db.commit()
+    return {"message": "Comparticion eliminada"}
+
+
+# --- ENDPOINTS PÚBLICOS PARA ACCESO A CARPETAS COMPARTIDAS ---
+
+@router.get("/share/folder/{token}")
+async def access_shared_folder_public(
+    token: str,
+    subfolder_id: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Acceso público a una carpeta compartida por token."""
+    share_stmt = select(OnlyOfficeFolderShare).where(
+        OnlyOfficeFolderShare.token == token,
+        OnlyOfficeFolderShare.is_public == True,
+    )
+    share_entry = (await db.execute(share_stmt)).scalars().first()
+    if not share_entry:
+        raise HTTPException(status_code=404, detail="Enlace de carpeta compartida no encontrado o no público")
+
+    root_folder = await db.get(DocumentFolder, share_entry.folder_id)
+    if not root_folder:
+        raise HTTPException(status_code=404, detail="Carpeta raíz no encontrada")
+
+    target_folder = root_folder
+    if subfolder_id:
+        try:
+            sub_uuid = uuid.UUID(subfolder_id)
+            sub_folder = await db.get(DocumentFolder, sub_uuid)
+            if sub_folder:
+                is_descendant = False
+                curr: Optional[uuid.UUID] = sub_folder.id
+                d = 0
+                while curr and d < 30:
+                    if curr == root_folder.id:
+                        is_descendant = True
+                        break
+                    f = await db.get(DocumentFolder, curr)
+                    if not f or not f.parent_id:
+                        break
+                    curr = f.parent_id
+                    d += 1
+
+                if is_descendant:
+                    target_folder = sub_folder
+        except ValueError:
+            pass
+
+    subfolders_stmt = select(DocumentFolder).where(
+        DocumentFolder.parent_id == target_folder.id
+    ).order_by(DocumentFolder.name.asc())
+    subfolders = (await db.execute(subfolders_stmt)).scalars().all()
+
+    docs_stmt = select(Document).where(
+        Document.folder_id == target_folder.id
+    ).order_by(Document.filename.asc())
+    documents = (await db.execute(docs_stmt)).scalars().all()
+
+    breadcrumbs = []
+    curr_b: Optional[uuid.UUID] = target_folder.id
+    d = 0
+    while curr_b and d < 30:
+        f_b = await db.get(DocumentFolder, curr_b)
+        if not f_b:
+            break
+        breadcrumbs.append({"id": str(f_b.id), "name": f_b.name})
+        if f_b.id == root_folder.id:
+            break
+        curr_b = f_b.parent_id
+        d += 1
+    breadcrumbs.reverse()
+
+    return {
+        "root_folder": {
+            "id": str(root_folder.id),
+            "name": root_folder.name,
+        },
+        "current_folder": {
+            "id": str(target_folder.id),
+            "name": target_folder.name,
+            "parent_id": str(target_folder.parent_id) if target_folder.parent_id else None,
+        },
+        "can_edit": share_entry.can_edit,
+        "breadcrumbs": breadcrumbs,
+        "subfolders": [
+            {
+                "id": str(sf.id),
+                "name": sf.name,
+                "created_at": sf.created_at.isoformat() if sf.created_at else None,
+            }
+            for sf in subfolders
+        ],
+        "documents": [
+            {
+                "id": str(doc.id),
+                "filename": doc.filename,
+                "extension": doc.extension,
+                "created_at": doc.created_at.isoformat() if doc.created_at else None,
+                "updated_at": doc.updated_at.isoformat() if doc.updated_at else None,
+            }
+            for doc in documents
+        ],
+    }
+
+
+@router.get("/share/folder/{token}/document/{document_id}/config")
+async def get_shared_folder_document_config(
+    token: str,
+    document_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Obtiene la configuración de OnlyOffice para un documento dentro de una carpeta compartida públicamente."""
+    share_stmt = select(OnlyOfficeFolderShare).where(
+        OnlyOfficeFolderShare.token == token,
+        OnlyOfficeFolderShare.is_public == True,
+    )
+    share_entry = (await db.execute(share_stmt)).scalars().first()
+    if not share_entry:
+        raise HTTPException(status_code=404, detail="Enlace de carpeta no encontrado o no público")
+
+    doc = await db.get(Document, document_id)
+    if not doc or not doc.folder_id:
+        raise HTTPException(status_code=404, detail="Documento no encontrado")
+
+    is_shared, can_edit = await _is_folder_publicly_shared_with_token(doc.folder_id, db, token)
+    if not is_shared:
+        raise HTTPException(status_code=403, detail="El documento no pertenece a esta carpeta compartida")
+
+    file_path = resolve_onlyoffice_file_path(doc.file_path)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="El archivo físico del documento no existe en el servidor")
+
+    onlyoffice_api_url = os.getenv("ONLYOFFICE_URL", "/onlyoffice")
+    onlyoffice_internal_backend = os.getenv(
+        "ONLYOFFICE_INTERNAL_BACKEND",
+        settings.internal_api_server_url,
+    )
+    backend_url = onlyoffice_internal_backend.rstrip('/')
+
+    file_url = f"{backend_url}/api/onlyoffice/share/folder/{token}/document/{doc.id}/download"
+    callback_url = f"{backend_url}/api/onlyoffice/office-callback/{doc.id}"
+
+    from hashlib import md5
+    key = md5(f"{doc.id}-{doc.updated_at.isoformat()}".encode()).hexdigest()
+
+    editor_mode = "edit" if can_edit else "view"
+    doc_type = get_document_type(doc.extension)
+
+    config = {
+        "document": {
+            "fileType": doc.extension,
+            "key": key,
+            "title": doc.filename,
+            "url": file_url,
+            "permissions": {
+                "chat": False,
+                "download": True,
+                "edit": can_edit,
+                "print": True,
+                "review": can_edit,
+                "comment": can_edit,
+                "copy": True,
+                "modifyFilter": can_edit,
+                "modifyContentControl": can_edit,
+                "fillForms": can_edit,
+            },
+        },
+        "documentType": doc_type,
+        "editorConfig": {
+            "mode": editor_mode,
+            "lang": "es",
+            "callbackUrl": callback_url,
+            "user": {
+                "id": "public-folder-guest",
+                "name": "Invitado público",
+            },
+            "customization": {
+                "forcesave": True,
+                "chat": False,
+                "comments": can_edit,
+                "compactHeader": False,
+                "compactToolbar": False,
+                "editRights": can_edit,
+                "help": False,
+                "toolbarNoTabs": False,
+                "zoom": 100,
+            },
+        },
+        "width": "100%",
+        "height": "100%",
+    }
+
+    jwt_secret = os.getenv("ONLYOFFICE_JWT_SECRET")
+    jwt_enabled = os.getenv("ONLYOFFICE_JWT_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+    if jwt_secret and jwt_enabled:
+        token_value = jwt.encode(config, jwt_secret, algorithm="HS256")
+        token_str = token_value if isinstance(token_value, str) else token_value.decode("utf-8")
+        config["document"]["url"] = f"{file_url}?token={token_str}"
+        config["editorConfig"]["callbackUrl"] = f"{callback_url}?token={token_str}"
+        token_value = jwt.encode(config, jwt_secret, algorithm="HS256")
+        config["token"] = token_value if isinstance(token_value, str) else token_value.decode("utf-8")
+
+    return {"config": config, "onlyoffice_url": onlyoffice_api_url}
+
+
+@router.get("/share/folder/{token}/document/{document_id}/download")
+async def download_shared_folder_document(
+    token: str,
+    document_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Descarga de un archivo contenido dentro de una carpeta compartida públicamente."""
+    share_stmt = select(OnlyOfficeFolderShare).where(
+        OnlyOfficeFolderShare.token == token,
+        OnlyOfficeFolderShare.is_public == True,
+    )
+    share_entry = (await db.execute(share_stmt)).scalars().first()
+    if not share_entry:
+        raise HTTPException(status_code=404, detail="Enlace de carpeta no encontrado")
+
+    doc = await db.get(Document, document_id)
+    if not doc or not doc.folder_id:
+        raise HTTPException(status_code=404, detail="Documento no encontrado")
+
+    is_shared, _ = await _is_folder_publicly_shared_with_token(doc.folder_id, db, token)
+    if not is_shared:
+        raise HTTPException(status_code=403, detail="El documento no pertenece a esta carpeta compartida")
+
+    file_path = resolve_onlyoffice_file_path(doc.file_path)
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Archivo no encontrado en el servidor")
+
+    media_type, _ = mimetypes.guess_type(str(file_path))
+    if not media_type:
+        media_type = "application/octet-stream"
+
+    return FileResponse(
+        path=str(file_path),
+        filename=doc.filename,
+        media_type=media_type,
+    )
 
 
 @router.get("/{document_id}/chat-link")

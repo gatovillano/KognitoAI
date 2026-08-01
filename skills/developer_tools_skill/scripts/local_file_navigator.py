@@ -15,6 +15,7 @@ class InputSchema(BaseModel):
     pattern: Optional[str] = Field(default=None, description="Patrón de búsqueda glob (para 'search')")
     recursive: Optional[bool] = Field(default=False, description="Búsqueda recursiva")
     max_results: Optional[int] = Field(default=50, description="Máximo de resultados")
+    max_chars: Optional[int] = Field(default=None, description="Máximo número de caracteres a leer (para 'read'). Si es None, lee el archivo completo sin truncar.")
     account_id: Optional[str] = Field(default=None, description="ID de la cuenta del usuario para obtener la configuración SSH guardada.")
 
 
@@ -119,20 +120,20 @@ class LocalFileNavigator(BaseTool):
 
     def _run(self, action: str, path: Optional[str] = None, file_name: Optional[str] = None,
              pattern: Optional[str] = None, recursive: bool = False, max_results: int = 50,
-             account_id: Optional[str] = None) -> str:
+             max_chars: Optional[int] = None, account_id: Optional[str] = None) -> str:
         try:
             ssh_config = self._get_ssh_config(account_id)
 
             if ssh_config:
-                return self._run_ssh(action, path or ".", file_name, pattern, recursive, max_results, ssh_config)
+                return self._run_ssh(action, path or ".", file_name, pattern, recursive, max_results, max_chars, ssh_config)
             else:
-                return self._run_local(action, path or ".", file_name, pattern, recursive, max_results)
+                return self._run_local(action, path or ".", file_name, pattern, recursive, max_results, max_chars)
         except Exception as e:
             return f"❌ Error ejecutando '{action}': {str(e)}"
 
     # ───────────────────────── SSH MODE ─────────────────────────
 
-    def _run_ssh(self, action, path, file_name, pattern, recursive, max_results, config):
+    def _run_ssh(self, action, path, file_name, pattern, recursive, max_results, max_chars, config):
         """Ejecuta la acción de forma remota vía SSH."""
         client = self._get_ssh_client(config)
         sftp = client.open_sftp()
@@ -144,7 +145,7 @@ class LocalFileNavigator(BaseTool):
             if action == 'list':
                 return self._ssh_list(sftp, safe_path)
             elif action == 'read':
-                return self._ssh_read(sftp, safe_path, file_name)
+                return self._ssh_read(sftp, safe_path, file_name, max_chars)
             elif action == 'info':
                 return self._ssh_info(sftp, safe_path)
             elif action == 'search':
@@ -181,7 +182,7 @@ class LocalFileNavigator(BaseTool):
         except Exception as e:
             return f"❌ Error listando directorio SSH: {e}"
 
-    def _ssh_read(self, sftp, base_path: str, file_name: Optional[str]) -> str:
+    def _ssh_read(self, sftp, base_path: str, file_name: Optional[str], max_chars: Optional[int] = None) -> str:
         if not file_name:
             return "❌ Debes especificar 'file_name' para 'read'."
         full_path = os.path.join(base_path, file_name)
@@ -194,9 +195,14 @@ class LocalFileNavigator(BaseTool):
 
         try:
             with sftp.open(full_path, 'r') as f:
-                content = f.read(15000).decode('utf-8', errors='ignore')
-            if len(content) >= 15000:
-                content += "\n... [contenido truncado] ..."
+                if max_chars and max_chars > 0:
+                    raw_data = f.read(max_chars)
+                    content = raw_data.decode('utf-8', errors='ignore') if isinstance(raw_data, bytes) else raw_data
+                    if len(content) >= max_chars:
+                        content += "\n... [contenido truncado] ..."
+                else:
+                    raw_data = f.read()
+                    content = raw_data.decode('utf-8', errors='ignore') if isinstance(raw_data, bytes) else raw_data
             return f"📖 Contenido remoto de: {full_path}\n\n{content}"
         except Exception as e:
             return f"❌ Error leyendo archivo SSH: {e}"
@@ -237,14 +243,14 @@ class LocalFileNavigator(BaseTool):
 
     # ─────────────────────── LOCAL MODE ──────────────────────────
 
-    def _run_local(self, action, path, file_name, pattern, recursive, max_results):
+    def _run_local(self, action, path, file_name, pattern, recursive, max_results, max_chars):
         """Ejecuta la acción de forma local en el sistema de archivos."""
         base_path = Path(path) if path else Path.cwd()
 
         if action == 'list':
             return self._list_directory(base_path)
         elif action == 'read':
-            return self._read_file(base_path, file_name)
+            return self._read_file(base_path, file_name, max_chars)
         elif action == 'info':
             return self._get_info(base_path)
         elif action == 'search':
@@ -276,7 +282,7 @@ class LocalFileNavigator(BaseTool):
         except PermissionError:
             return f"❌ Permiso denegado para '{path}'"
 
-    def _read_file(self, base_path: Path, file_name: Optional[str]) -> str:
+    def _read_file(self, base_path: Path, file_name: Optional[str], max_chars: Optional[int] = None) -> str:
         if not file_name:
             return "❌ Debes especificar 'file_name' para 'read'."
         file_path = base_path / file_name
@@ -299,9 +305,12 @@ class LocalFileNavigator(BaseTool):
                     return f"⚠️ El archivo '{file_name}' parece ser binario y no se puede mostrar como texto plano."
 
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                content = f.read(15000)
-            if len(content) >= 15000:
-                content += "\n... [contenido truncado] ..."
+                if max_chars and max_chars > 0:
+                    content = f.read(max_chars)
+                    if len(content) >= max_chars:
+                        content += "\n... [contenido truncado] ..."
+                else:
+                    content = f.read()
             return f"📖 Contenido de: {file_path.absolute()}\n\n{content}"
         except Exception as e:
             return f"❌ Error leyendo archivo: {e}"

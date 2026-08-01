@@ -197,6 +197,8 @@ class Config:
         self.kilocode_api_key: Optional[str] = get_secret("kilocode_api_key", "KILOCODE_API_KEY")
         # ¡NUEVA LÍNEA! Clave de API para LLM7.io.
         self.llm7_api_key: Optional[str] = get_secret("llm7_api_key", "LLM7_API_KEY")
+        # Clave de API para NVIDIA AI Catalog / NIM.
+        self.nvidia_api_key: Optional[str] = get_secret("nvidia_api_key", "NVIDIA_API_KEY")
 
         # ¡NUEVA LÍNEA! La URL de nuestro servidor API para que los clientes sepan a dónde llamar.
         self.api_server_url: str = os.getenv("API_SERVER_URL", "https://apibase.cuerpolibre.cl")
