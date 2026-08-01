@@ -1,6 +1,6 @@
 // src/context/AuthContext.tsx
 import React, { createContext, useState, useContext, useEffect } from 'react';
-import * as SecureStore from 'expo-secure-store';
+import { storage } from '../utils/storage';
 import api from '../api/config';
 import { jwtDecode } from 'jwt-decode';
 
@@ -28,8 +28,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         async function loadStorageData() {
             try {
                 const [storagedToken, storagedTheme] = await Promise.all([
-                    SecureStore.getItemAsync('userToken'),
-                    SecureStore.getItemAsync('theme')
+                    storage.getItem('userToken'),
+                    storage.getItem('theme')
                 ]);
 
                 if (storagedToken) {
@@ -40,13 +40,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
                         if (hoursUntilExpiry <= 0) {
                             // Token ya expirado — limpiar y mostrar login
-                            await SecureStore.deleteItemAsync('userToken');
+                            await storage.deleteItem('userToken');
                         } else if (hoursUntilExpiry < 24) {
                             // Token expira en menos de 24h — refrescar proactivamente
                             try {
                                 const refreshResponse = await api.post('/auth/refresh-token');
                                 const newToken = refreshResponse.data.access_token;
-                                await SecureStore.setItemAsync('userToken', newToken);
+                                await storage.setItem('userToken', newToken);
                                 const newPayload: any = jwtDecode(newToken);
                                 setUser({ token: newToken, id: newPayload.sub });
                             } catch {
@@ -81,7 +81,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         const refreshInterval = setInterval(async () => {
             try {
-                const currentToken = await SecureStore.getItemAsync('userToken');
+                const currentToken = await storage.getItem('userToken');
                 if (!currentToken) {
                     // El interceptor eliminó el token → sesión terminada
                     setUser(null);
@@ -90,12 +90,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
                 const refreshResponse = await api.post('/auth/refresh-token');
                 const newToken = refreshResponse.data.access_token;
-                await SecureStore.setItemAsync('userToken', newToken);
+                await storage.setItem('userToken', newToken);
                 const newPayload: any = jwtDecode(newToken);
                 setUser((prev: any) => ({ ...prev, token: newToken, id: newPayload.sub }));
             } catch {
                 // Si el token ya no existe en SecureStore, cerrar sesión
-                const tokenStillExists = await SecureStore.getItemAsync('userToken');
+                const tokenStillExists = await storage.getItem('userToken');
                 if (!tokenStillExists) {
                     setUser(null);
                 }
@@ -108,7 +108,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const toggleTheme = async () => {
         const newMode = !isDarkMode;
         setIsDarkMode(newMode);
-        await SecureStore.setItemAsync('theme', newMode ? 'dark' : 'light');
+        await storage.setItem('theme', newMode ? 'dark' : 'light');
     };
 
     async function signIn(email: string, password: string) {
@@ -116,7 +116,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const { access_token } = response.data;
         const payload: any = jwtDecode(access_token);
         setUser({ token: access_token, id: payload.sub });
-        await SecureStore.setItemAsync('userToken', access_token);
+        await storage.setItem('userToken', access_token);
     }
 
     async function requestCode(identifier: string) {
@@ -128,11 +128,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const { access_token } = response.data;
         const payload: any = jwtDecode(access_token);
         setUser({ token: access_token, id: payload.sub });
-        await SecureStore.setItemAsync('userToken', access_token);
+        await storage.setItem('userToken', access_token);
     }
 
     function signOut() {
-        SecureStore.deleteItemAsync('userToken').then(() => {
+        storage.deleteItem('userToken').then(() => {
             setUser(null);
         });
     }

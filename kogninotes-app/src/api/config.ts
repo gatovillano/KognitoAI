@@ -1,6 +1,6 @@
 // src/api/config.ts
 import axios from 'axios';
-import * as SecureStore from 'expo-secure-store';
+import { storage } from '../utils/storage';
 
 // Cambia esta URL por la IP de tu servidor o dominio
 export const API_URL = 'https://apibase.cuerpolibre.cl/api';
@@ -14,7 +14,7 @@ const api = axios.create({
 
 // Interceptor para añadir el token a las peticiones
 api.interceptors.request.use(async (config) => {
-    const token = await SecureStore.getItemAsync('userToken');
+    const token = await storage.getItem('userToken');
     if (token) {
         config.headers.Authorization = `Bearer ${token}`;
     }
@@ -62,7 +62,7 @@ api.interceptors.response.use(
             isRefreshing = true;
 
             try {
-                const currentToken = await SecureStore.getItemAsync('userToken');
+                const currentToken = await storage.getItem('userToken');
                 if (!currentToken) throw new Error('No hay token almacenado');
 
                 // Llamar al endpoint de refresh con el token actual
@@ -73,7 +73,7 @@ api.interceptors.response.use(
                 );
 
                 const newToken = refreshResponse.data.access_token;
-                await SecureStore.setItemAsync('userToken', newToken);
+                await storage.setItem('userToken', newToken);
 
                 isRefreshing = false;
                 onTokenRefreshed(newToken);
@@ -85,7 +85,7 @@ api.interceptors.response.use(
                 // Si el refresh falla, limpiar token y forzar logout
                 isRefreshing = false;
                 refreshSubscribers = [];
-                await SecureStore.deleteItemAsync('userToken');
+                await storage.deleteItem('userToken');
                 return Promise.reject(refreshError);
             }
         }
