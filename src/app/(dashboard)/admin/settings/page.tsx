@@ -25,6 +25,7 @@ const LLM_PROVIDERS = [
   { id: 'openai-compatible', name: '🖥️ Local AI / OpenAI Compatible', env_key: null },
   { id: 'mistral', name: 'Mistral AI', env_key: 'MISTRAL_API_KEY' },
   { id: 'kilocode', name: '🚀 Kilocode Gateway', env_key: 'KILOCODE_API_KEY' },
+  { id: 'nvidia', name: '🟢 NVIDIA AI Catalog', env_key: 'NVIDIA_API_KEY' },
 ];
 
 const MODELS_BY_PROVIDER: Record<string, string[]> = {
@@ -43,6 +44,13 @@ const MODELS_BY_PROVIDER: Record<string, string[]> = {
   'openai-compatible': [],
   mistral: ['mistral/mistral-large-latest', 'mistral/mistral-small-latest'],
   kilocode: [],
+  nvidia: [
+    'nvidia/meta/llama-3.3-70b-instruct',
+    'nvidia/nvidia/llama-3.1-nemotron-70b-instruct',
+    'nvidia/mistralai/mistral-large-2-instruct',
+    'nvidia/deepseek-ai/deepseek-r1',
+    'nvidia/qwen/qwen2.5-72b-instruct',
+  ],
 };
 
 interface GlobalSecret {

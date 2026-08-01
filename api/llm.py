@@ -563,6 +563,53 @@ async def get_provider_models(
                 models = []
                 logger.info(f"No se pudieron obtener modelos de Kilocode Gateway, lista vacía.")
 
+        elif provider == "nvidia":
+            # NVIDIA AI Catalog / NIM API
+            api_key = (user_api_key or os.getenv("NVIDIA_API_KEY") or settings.nvidia_api_key or "").strip()
+            if api_key and not api_key.isascii():
+                api_key = api_key.encode('ascii', 'ignore').decode('ascii')
+            
+            nvidia_base = (user_api_base or "https://integrate.api.nvidia.com/v1").rstrip("/")
+            endpoint = f"{nvidia_base}/models" if not nvidia_base.endswith("/models") else nvidia_base
+            
+            if api_key:
+                try:
+                    async with httpx.AsyncClient() as client:
+                        headers = {
+                            "Authorization": f"Bearer {api_key}",
+                            "accept": "application/json"
+                        }
+                        response = await client.get(endpoint, headers=headers, timeout=15.0)
+                        if response.status_code == 200:
+                            data = response.json()
+                            raw_models = data.get("data", [])
+                            for m in raw_models:
+                                model_id = m.get("id", "")
+                                if not model_id:
+                                    continue
+                                full_id = model_id if model_id.startswith("nvidia/") else f"nvidia/{model_id}"
+                                models.append({
+                                    "id": full_id,
+                                    "name": model_id,
+                                    "description": m.get("owner", "NVIDIA"),
+                                    "context_length": m.get("max_tokens") or m.get("context_length"),
+                                })
+                            logger.info(f"Obtenidos {len(models)} modelos de NVIDIA desde {endpoint}")
+                        else:
+                            logger.warning(f"NVIDIA API ({endpoint}) respondió con error {response.status_code}")
+                except Exception as e:
+                    logger.warning("Error al conectar con NVIDIA API (%s): %s", endpoint, str(e))
+            
+            if not models:
+                models = [
+                    {"id": "nvidia/meta/llama-3.3-70b-instruct", "name": "meta/llama-3.3-70b-instruct"},
+                    {"id": "nvidia/nvidia/llama-3.1-nemotron-70b-instruct", "name": "nvidia/llama-3.1-nemotron-70b-instruct"},
+                    {"id": "nvidia/mistralai/mistral-large-2-instruct", "name": "mistralai/mistral-large-2-instruct"},
+                    {"id": "nvidia/deepseek-ai/deepseek-r1", "name": "deepseek-ai/deepseek-r1"},
+                    {"id": "nvidia/qwen/qwen2.5-72b-instruct", "name": "qwen/qwen2.5-72b-instruct"},
+                ]
+                logger.info("Usando modelos por defecto para NVIDIA Catalog.")
+
         else:
             logger.warning(f"Proveedor '{provider}' no reconocido.")
             models = []

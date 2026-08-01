@@ -8,6 +8,8 @@ description: Use when creating, editing, updating metadata, or generating profes
 
 Herramienta para generar PDFs de calidad profesional.
 
+Los documentos PDF generados con esta herramienta se guardan automáticamente en la nube de Documentos (OnlyOffice) dentro de una carpeta dedicada y identificada visualmente: **`🤖 Documentos PDF (Agente)`**.
+
 ## Parámetros de Diseño Dinámico
 
 Al usar `create_pdf_tool`, puedes configurar la apariencia de la página usando los siguientes parámetros opcionales:
