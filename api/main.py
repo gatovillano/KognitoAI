@@ -139,6 +139,8 @@ if hasattr(settings, 'cors_allowed_origins') and settings.cors_allowed_origins:
             if origin not in allowed_origins:
                 allowed_origins.append(origin)
 
+logger.info(f"CORS allowed_origins: {allowed_origins}")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
