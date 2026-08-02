@@ -70,6 +70,21 @@ class BibliomancerAgent:
     async def close(self):
         if self.session and not self.session.closed:
             await self.session.close()
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.close()
+
+    def __del__(self):
+        if self.session and not self.session.closed:
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    loop.create_task(self.session.close())
+            except Exception:
+                pass
     
     def _interpret_query(self, state: BibliomancerState) -> Dict[str, Any]:
         """Interpreta la consulta de búsqueda y extrae términos clave"""

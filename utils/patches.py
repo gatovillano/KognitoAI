@@ -46,10 +46,10 @@ def patch_postgres_chat_history_del():
     Este error ocurre si la inicialización (__init__) falla antes de crear el cursor,
     y el recolector de basura intenta limpiar el objeto.
     """
-    original_del = PostgresChatMessageHistory.__del__
+    original_del = getattr(PostgresChatMessageHistory, '__del__', None)
 
     def safe_del(self):
-        if hasattr(self, 'cursor') and self.cursor:
+        if hasattr(self, 'cursor') and self.cursor and original_del is not None:
             try:
                 original_del(self)
                 return
@@ -58,6 +58,9 @@ def patch_postgres_chat_history_del():
 
         close_postgres_chat_message_history(self, logger=logger)
 
-    PostgresChatMessageHistory.__del__ = safe_del
+    try:
+        setattr(PostgresChatMessageHistory, '__del__', safe_del)
+    except Exception:
+        pass
     print("✅ Patched PostgresChatMessageHistory.__del__ for safety.")
     logger.info("✅ Patched PostgresChatMessageHistory.__del__ for safety.")

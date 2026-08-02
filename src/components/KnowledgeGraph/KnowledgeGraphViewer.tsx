@@ -112,6 +112,8 @@ const KnowledgeGraphViewerInner = ({ graphData, onNodeSelect, selectedWorkspace 
     return { nodes: flowNodes, edges: flowEdges };
   }, [nodeColors]);
 
+  const hasInitialFittedRef = React.useRef(false);
+
   useEffect(() => {
     if (graphData) {
       console.log("🔵 KnowledgeGraphViewer: graphData recibido en useEffect:", graphData);
@@ -122,10 +124,13 @@ const KnowledgeGraphViewerInner = ({ graphData, onNodeSelect, selectedWorkspace 
       setNodes(newNodes);
       setEdges(newEdges);
       setIsLoading(false);
-      setTimeout(() => {
-        fitView();
-        console.log("🟢 KnowledgeGraphViewer: fitView ejecutado.");
-      }, 100);
+      if (!hasInitialFittedRef.current) {
+        hasInitialFittedRef.current = true;
+        setTimeout(() => {
+          fitView();
+          console.log("🟢 KnowledgeGraphViewer: fitView ejecutado.");
+        }, 100);
+      }
     } else {
       console.log("🟡 KnowledgeGraphViewer: graphData es nulo o indefinido en useEffect.");
       setNodes([]);

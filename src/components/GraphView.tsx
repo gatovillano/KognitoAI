@@ -3,7 +3,7 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 
 import { useRouter } from 'next/navigation';
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -188,7 +188,18 @@ const useKnowledgeGraph = (maxNodes: number, maxHops: number, selectedDataset: s
     }
 
     console.log("🔍 Final: Enviando al display", filteredNodes.length, "nodos y", filteredEdges.length, "edges");
-    setDisplayGraphData({ nodes: filteredNodes, edges: filteredEdges });
+    setDisplayGraphData(prev => {
+      if (
+        prev &&
+        prev.nodes.length === filteredNodes.length &&
+        prev.edges.length === filteredEdges.length &&
+        prev.nodes.every((n, i) => n.id === filteredNodes[i]?.id) &&
+        prev.edges.every((e, i) => e.id === filteredEdges[i]?.id)
+      ) {
+        return prev;
+      }
+      return { nodes: filteredNodes, edges: filteredEdges };
+    });
   }, [originalGraphData, filters, focusedNodeId]);
 
   const loadGraphData = useCallback(async (forceReload: boolean = false) => {
@@ -361,6 +372,38 @@ const useKnowledgeGraph = (maxNodes: number, maxHops: number, selectedDataset: s
   }, [processingMode, maxNodes, maxHops, selectedDataset]);
 
 
+  const effectiveMetadata = useMemo<GraphMetadata | null>(() => {
+    if (!originalGraphData || !originalGraphData.nodes || originalGraphData.nodes.length === 0) {
+      return metadata;
+    }
+
+    const nodeTypeCounts: Record<string, number> = {};
+    originalGraphData.nodes.forEach(node => {
+      const type = node.type || 'Desconocido';
+      nodeTypeCounts[type] = (nodeTypeCounts[type] || 0) + 1;
+    });
+
+    const nodeTypes = Object.entries(nodeTypeCounts)
+      .map(([type, count]) => ({ type, count }))
+      .sort((a, b) => b.count - a.count);
+
+    const edgeTypeCounts: Record<string, number> = {};
+    (originalGraphData.edges || []).forEach(edge => {
+      const type = edge.type || edge.label || 'RELACIONADO';
+      edgeTypeCounts[type] = (edgeTypeCounts[type] || 0) + 1;
+    });
+
+    const edgeTypes = Object.entries(edgeTypeCounts)
+      .map(([type, count]) => ({ type, count }))
+      .sort((a, b) => b.count - a.count);
+
+    return {
+      nodeTypes,
+      edgeTypes,
+      datasets: metadata?.datasets || []
+    };
+  }, [originalGraphData, metadata]);
+
   const resetGraphFilter = useCallback(() => {
     setFocusedNodeId(null);
   }, []);
@@ -371,7 +414,7 @@ const useKnowledgeGraph = (maxNodes: number, maxHops: number, selectedDataset: s
 
   return {
     graphData: displayGraphData, // Return displayGraphData
-    metadata,
+    metadata: effectiveMetadata,
     isLoading,
     error,
     processingStatus,
@@ -878,7 +921,7 @@ export function GraphView() {
   };
 
   return (
-    <div className="p-4 sm:p-6 w-full mx-auto flex flex-col h-screen overflow-hidden">
+    <div className="p-2 sm:p-4 w-full flex flex-col h-[calc(100vh-10rem)] overflow-hidden">
       <div className="flex items-center gap-2 mb-4">
         <h2 className="text-3xl font-bold tracking-tight">
           Grafos de Conocimiento
@@ -1200,8 +1243,8 @@ export function GraphView() {
                   metadata={metadata}
                   filters={filters}
                   onFiltersChange={setFilters}
-                  totalNodes={metadata?.nodeTypes.reduce((acc, t) => acc + t.count, 0) || 0}
-                  totalEdges={metadata?.edgeTypes.reduce((acc, t) => acc + t.count, 0) || 0}
+                  totalNodes={metadata?.nodeTypes.reduce((acc: number, t: { count: number }) => acc + t.count, 0) || 0}
+                  totalEdges={metadata?.edgeTypes.reduce((acc: number, t: { count: number }) => acc + t.count, 0) || 0}
                   filteredNodes={graphData?.nodes.length || 0}
                   filteredEdges={graphData?.edges.length || 0}
                   getNodeColor={getNodeColor}

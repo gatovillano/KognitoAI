@@ -433,14 +433,14 @@ app.include_router(extensions_router)
 try:
     from extensions.fediverso.backend.router import router as fediverso_router
     app.include_router(fediverso_router)
-except ImportError:
-    pass
+except Exception as e:
+    logger.warning(f"No se pudo cargar el router de fediverso: {e}")
 
 try:
     from extensions.kognito_chat.backend.router import router as kognito_chat_router
     app.include_router(kognito_chat_router)
-except ImportError:
-    pass
+except Exception as e:
+    logger.warning(f"No se pudo cargar el router de kognito_chat: {e}")
 
 
 

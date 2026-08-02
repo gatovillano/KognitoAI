@@ -25,6 +25,7 @@ from core.config import settings
 
 # Configuración del logger para este módulo.
 from utils.db_session import DBSession
+from utils.postgres_chat_history import get_postgres_history_connection_url
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +85,7 @@ class ConversationHistoryAnalyzerTool(BaseTool):
                     logger.error(f"Configuración de base de datos faltante para la cuenta '{self.account_id}'.")
 
                     return None
-                db_sync_url = settings.database_url.replace("+psycopg", "")
+                db_sync_url = get_postgres_history_connection_url(settings.database_url)
                 for thread in threads:
                     history = PostgresChatMessageHistory(
                         connection_string=db_sync_url,

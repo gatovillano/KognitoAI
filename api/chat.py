@@ -36,6 +36,7 @@ from utils.audio_transcriber import (
     AudioTranscriptionError,
     InvalidAudioFileError,
 )
+from utils.postgres_chat_history import get_postgres_history_connection_url
 from core.tts_manager import (
     generate_speech_streaming,
     get_tts_client,
@@ -457,7 +458,7 @@ async def get_messages_for_thread(
         if not thread:
             raise HTTPException(status_code=404, detail="Hilo de chat no encontrado.")
 
-        db_sync_url = settings.database_url.replace("+psycopg", "")
+        db_sync_url = get_postgres_history_connection_url(settings.database_url)
 
         # Robustez: Intentar inicializar el historial con reintentos
         chat_message_history = None
@@ -1497,7 +1498,7 @@ async def save_system_message(
                 detail="Hilo de chat no encontrado.",
             )
 
-        db_sync_url = settings.database_url.replace("+psycopg", "")
+        db_sync_url = get_postgres_history_connection_url(settings.database_url)
         chat_message_history = PostgresChatMessageHistory(
             connection_string=db_sync_url,
             session_id=thread_id,
@@ -1828,7 +1829,7 @@ async def create_and_run_agent_streaming(
         # --- Preparación Inicial ---
         # Optimization: Usar grafo cacheado en lugar de recrearlo
         agent_app = get_langgraph_agent()
-        db_sync_url = settings.database_url.replace("+psycopg", "")
+        db_sync_url = get_postgres_history_connection_url(settings.database_url)
 
         # Robustez: Intentar inicializar el historial con reintentos en caso de fallo de conexión
         chat_message_history = None

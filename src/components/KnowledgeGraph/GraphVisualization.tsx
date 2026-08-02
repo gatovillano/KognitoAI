@@ -35,6 +35,11 @@ interface VisGraphNode {
   size?: number;
   type?: string;
   properties?: any; // Mantenemos properties por si acaso
+  borderWidth?: number;
+  shadow?: any;
+  font?: any;
+  x?: number;
+  y?: number;
 }
 
 interface VisGraphEdge {
@@ -83,6 +88,8 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
   const nodesDatasetRef = useRef<DataSet<VisGraphNode> | null>(null);
   const edgesDatasetRef = useRef<DataSet<VisGraphEdge> | null>(null);
   const focusedNodeIdRef = useRef<string | number | null>(focusedNodeId);
+  const isInitialLoadRef = useRef<boolean>(true);
+  const lastFocusedNodeIdRef = useRef<string | number | null>(null);
 
   useEffect(() => {
     focusedNodeIdRef.current = focusedNodeId;
@@ -127,8 +134,6 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
       const nodeType = node.type || 'Desconocido';
       const nodeColor = getNodeColor(nodeType);
 
-      console.log(`Node ID: ${node.id}, Type: ${nodeType}, Label: ${fullLabel}, Assigned Color: ${nodeColor}`);
-
       let x: number | undefined;
       let y: number | undefined;
       // Recuperar posiciones guardadas si existen
@@ -145,7 +150,7 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
         console.warn("No se pudieron cargar las posiciones del grafo desde localStorage", e);
       }
 
-      return {
+      const nodeObj: VisGraphNode = {
         id: node.id,
         label: truncatedLabel,
         title: description.length > 100 ? `${truncateText(description, 100)}\n\nClic para ver detalles completos` : description,
@@ -163,10 +168,15 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
           color: '#000000',
           size: truncatedLabel.length > 20 ? 12 : 14,
           bold: isSaved
-        },
-        x: x,
-        y: y
+        }
       };
+
+      if (x !== undefined && y !== undefined) {
+        nodeObj.x = x;
+        nodeObj.y = y;
+      }
+
+      return nodeObj;
     });
   }, [savedNodeIds]);
 
@@ -334,8 +344,11 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
       // Detener física después del cálculo estático bloqueante
       networkRef.current.on("stabilizationIterationsDone", () => {
         networkRef.current?.setOptions({ physics: { enabled: false } });
-        if (focusedNodeIdRef.current === null) {
-          networkRef.current?.fit();
+        if (isInitialLoadRef.current) {
+          isInitialLoadRef.current = false;
+          if (focusedNodeIdRef.current === null) {
+            networkRef.current?.fit();
+          }
         }
       });
     }
@@ -362,7 +375,7 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
       // Edges a agregar
       const edgesToAdd = visEdges.filter(edge => !currentEdgeIds.has(edge.id));
 
-      // Nodos a actualizar
+      // Nodos a actualizar (solo actualizar si realmente cambió alguna propiedad relevante)
       const nodesToUpdate = visNodes.filter(node => currentNodeIds.has(node.id));
       // Edges a actualizar
       const edgesToUpdate = visEdges.filter(edge => currentEdgeIds.has(edge.id));
@@ -380,11 +393,6 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
         networkRef.current?.setOptions({ physics: { enabled: true } });
         networkRef.current?.stabilize(150); // Fuerza la estabilización bloqueante de manera invisible
       }
-
-      // Para cambios significativos (como filtros), reorganización ultra-rápida
-      // Eliminado: networkRef.current.fit(); // Ajustar la vista para que todos los nodos sean visibles
-      // La llamada a fit() se realizará explícitamente a través del botón "Vista Completa".
-      // Si se necesita un ajuste inicial, se puede considerar añadirlo solo en la primera carga.
     }
 
   }, [nodes, edges, isLoading, error, onNodeClick, onNodeDoubleClick, onEdgeClick, convertNodesToVis]);
@@ -398,8 +406,14 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
     const allEdges = edgesDatasetRef.current.get();
 
     if (focusedNodeId === null) {
-      nodesDatasetRef.current.update(allNodes.map(node => ({ id: node.id, hidden: false })));
-      edgesDatasetRef.current.update(allEdges.map(edge => ({ id: edge.id, hidden: false })));
+      const needsUpdateNodes = allNodes.filter(n => n.hidden);
+      const needsUpdateEdges = allEdges.filter(e => e.hidden);
+      if (needsUpdateNodes.length > 0) {
+        nodesDatasetRef.current.update(needsUpdateNodes.map(node => ({ id: node.id, hidden: false })));
+      }
+      if (needsUpdateEdges.length > 0) {
+        edgesDatasetRef.current.update(needsUpdateEdges.map(edge => ({ id: edge.id, hidden: false })));
+      }
       return;
     }
 
@@ -424,16 +438,23 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
       }
     });
 
-    nodesDatasetRef.current.update(allNodes.map(node => ({
-      id: node.id,
-      hidden: !visibleNodeIds.has(String(node.id))
-    })));
+    const nodesToUpdate = allNodes
+      .filter(node => Boolean(node.hidden) !== !visibleNodeIds.has(String(node.id)))
+      .map(node => ({ id: node.id, hidden: !visibleNodeIds.has(String(node.id)) }));
 
-    edgesDatasetRef.current.update(allEdges.map(edge => ({
-      id: edge.id,
-      hidden: edge.id === undefined || edge.id === null ? true : !visibleEdgeIds.has(String(edge.id))
-    })));
-  }, [focusedNodeId, nodes, edges]);
+    const edgesToUpdate = allEdges
+      .filter(edge => {
+        const isHidden = edge.id === undefined || edge.id === null ? true : !visibleEdgeIds.has(String(edge.id));
+        return Boolean(edge.hidden) !== isHidden;
+      })
+      .map(edge => ({
+        id: edge.id,
+        hidden: edge.id === undefined || edge.id === null ? true : !visibleEdgeIds.has(String(edge.id))
+      }));
+
+    if (nodesToUpdate.length > 0) nodesDatasetRef.current.update(nodesToUpdate);
+    if (edgesToUpdate.length > 0) edgesDatasetRef.current.update(edgesToUpdate);
+  }, [focusedNodeId]);
 
   useImperativeHandle(ref, () => ({
     fitView: () => {
@@ -457,8 +478,14 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
 
   useEffect(() => {
     if (focusedNodeId === null || !networkRef.current || !nodesDatasetRef.current) {
+      lastFocusedNodeIdRef.current = focusedNodeId;
       return;
     }
+
+    if (lastFocusedNodeIdRef.current === focusedNodeId) {
+      return; // Prevenir enfoque repetido en el mismo nodo cuando hay re-renders
+    }
+    lastFocusedNodeIdRef.current = focusedNodeId;
 
     const resolvedNodeId = resolveDatasetNodeId(focusedNodeId);
     if (resolvedNodeId === null) {
@@ -473,7 +500,7 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
         easingFunction: 'easeInOutQuad'
       }
     });
-  }, [focusedNodeId, nodes, edges, resolveDatasetNodeId]);
+  }, [focusedNodeId, resolveDatasetNodeId]);
 
   // Cleanup effect
   useEffect(() => {

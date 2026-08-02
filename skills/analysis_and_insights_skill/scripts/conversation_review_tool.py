@@ -24,6 +24,7 @@ from core.config import settings
 from core.database import ChatThread, SessionLocal
 from core.llm_manager import get_fast_llm, get_llm_for_user
 from utils.db_session import DBSession
+from utils.postgres_chat_history import get_postgres_history_connection_url
 
 logger = logging.getLogger(__name__)
 
@@ -224,8 +225,8 @@ class ConversationReviewTool(BaseTool):
             logger.error("ConversationReviewTool: DATABASE_URL no configurado.")
             return []
 
-        # PostgresChatMessageHistory requiere URL síncrona (psycopg2)
-        db_sync_url = settings.database_url.replace("+psycopg", "").replace("+asyncpg", "")
+        # PostgresChatMessageHistory requiere URL síncrona
+        db_sync_url = get_postgres_history_connection_url(settings.database_url)
 
         threads_content: List[Dict[str, Any]] = []
 

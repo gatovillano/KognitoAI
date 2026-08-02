@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.database import ChatThread, SharedConversationLink, get_db_session
 from core.config import settings
 from utils.security import get_current_account_id
+from utils.postgres_chat_history import get_postgres_history_connection_url
 from langchain_community.chat_message_histories import PostgresChatMessageHistory
 from langchain_core.messages import HumanMessage, AIMessage
 from .chat import Message, PaginatedChatMessagesResponse, Source, create_and_run_agent_streaming
@@ -299,7 +300,7 @@ async def get_shared_chat_messages(
             raise HTTPException(status_code=404, detail="Chat thread not found.")
 
         # Fetch messages from LangChain history
-        db_sync_url = settings.database_url.replace("+psycopg", "")
+        db_sync_url = get_postgres_history_connection_url(settings.database_url)
         chat_message_history = None
         for attempt in range(3):
             try:

@@ -4,7 +4,10 @@ import logging
 import time
 import asyncio
 import os
-import torch  # Importar torch
+try:
+    import torch
+except ImportError:
+    torch = None
 from collections import deque
 from threading import Lock
 from typing import Optional, Dict, Any, List, Union
@@ -1147,7 +1150,7 @@ async def initialize_llms():
     global _main_agent_llm_instance, _fast_task_llm_instance, _vision_llm_instance
 
     # Detectar si hay una GPU disponible
-    use_gpu = torch.cuda.is_available()
+    use_gpu = torch.cuda.is_available() if torch is not None else False
     if use_gpu:
         logger.info("✅ GPU detectada. Los modelos se cargarán en la GPU (cuda).")
     else:
