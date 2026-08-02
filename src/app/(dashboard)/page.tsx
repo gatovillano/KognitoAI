@@ -21,7 +21,7 @@ import { toast } from 'sonner';
 
 import apiClient from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
-import { EmptyChat } from '@/components/EmptyChat';
+import { CommonChat } from '@/components/CommonChat';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
@@ -34,30 +34,12 @@ export default function DashboardPage() {
   const { user } = useAuth();
   const router = useRouter();
 
-  // Chat States
-  const [chatInput, setChatInput] = useState('');
-  const [isResponding, setIsResponding] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
-  const [isKnowledgeAnalysisActive, setIsKnowledgeAnalysisActive] = useState(false);
-  const [isWebSearchActive, setIsWebSearchActive] = useState(false);
-  const [isComprehensiveAnalysisActive, setIsComprehensiveAnalysisActive] = useState(false);
-  const [isUploadingFile, setIsUploadingFile] = useState(false);
-  const [isProcessingAudio, setIsProcessingAudio] = useState(false);
-  const [isDeepResearchActive, setIsDeepResearchActive] = useState(false);
-  const [workspaceId, setWorkspaceId] = useState<string | undefined>(undefined);
-  const [selectedContext, setSelectedContext] = useState<any[]>([]);
-
   // Dashboard Data States
   const [dashboardData, setDashboardData] = useState<DashboardInsightsResponse | null>(null);
   const [isLoadingDashboard, setIsLoadingDashboard] = useState(true);
   const [isInfoSheetOpen, setIsInfoSheetOpen] = useState(false);
   const [selectedKeyTopic, setSelectedKeyTopic] = useState<KeyTopic | null>(null);
   const [isKeyTopicDetailDialogOpen, setIsKeyTopicDetailDialogOpen] = useState(false);
-
-  const textAreaRef = useRef<HTMLTextAreaElement>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioStreamRef = useRef<MediaStream | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
 
   // Fetch Dashboard Data
   const fetchDashboardData = useCallback(async () => {
@@ -82,116 +64,6 @@ export default function DashboardPage() {
   const handleRefreshDashboard = () => {
     fetchDashboardData();
     toast.success('Datos actualizados');
-  };
-
-  // Chat Handlers
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      audioStreamRef.current = stream;
-      mediaRecorderRef.current = new MediaRecorder(stream);
-      audioChunksRef.current = [];
-
-      mediaRecorderRef.current.ondataavailable = (event) => {
-        if (event.data.size > 0) audioChunksRef.current.push(event.data);
-      };
-
-      mediaRecorderRef.current.onstop = async () => {
-        await new Promise(resolve => window.setTimeout(resolve, 0));
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-
-        if (audioBlob.size <= 110) {
-          toast.error('La grabación quedó incompleta. Intenta de nuevo.');
-          setIsRecording(false);
-          audioStreamRef.current?.getTracks().forEach(track => track.stop());
-          audioStreamRef.current = null;
-          return;
-        }
-
-        const formData = new FormData();
-        formData.append('file', audioBlob, 'recording.webm');
-
-        try {
-          const response = await apiClient.post('/api/transcribe-audio', formData, {
-            headers: { 'Content-Type': 'multipart/form-data' },
-          });
-          setChatInput(response.data.transcription);
-          toast.success('Transcripción completada');
-        } catch (error) {
-          toast.error('Error al transcribir audio');
-        } finally {
-          setIsRecording(false);
-          audioStreamRef.current?.getTracks().forEach(track => track.stop());
-          audioStreamRef.current = null;
-        }
-      };
-
-      mediaRecorderRef.current.start(500);
-      setIsRecording(true);
-    } catch (error) {
-      toast.error('Error al acceder al micrófono');
-    }
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorderRef.current?.state === 'recording') {
-      mediaRecorderRef.current.requestData();
-      mediaRecorderRef.current.stop();
-    }
-  };
-
-  const handleChatSubmit = async (e?: React.FormEvent, messageTextFromInput?: string) => {
-    if (e) e.preventDefault();
-    const messageToProcess = messageTextFromInput || chatInput;
-    if (!messageToProcess.trim()) return;
-
-    setIsResponding(true);
-    try {
-      const threadResponse = await apiClient.post('/api/threads', {});
-      const newThread = threadResponse.data;
-
-      const initialMessage = messageToProcess;
-      const initialRagContext = selectedContext.length > 0 ? JSON.stringify(selectedContext) : '';
-
-      const newSearchParams = new URLSearchParams();
-      if (initialMessage) {
-        newSearchParams.set('initialMessage', initialMessage);
-      }
-      if (initialRagContext) {
-        newSearchParams.set('initialRagContext', initialRagContext);
-      }
-
-      router.push(`/chat/${newThread.id}?${newSearchParams.toString()}`);
-    } catch (error) {
-      console.error('Error al iniciar el chat:', error);
-      toast.error('Error al iniciar el chat');
-      setIsResponding(false);
-    }
-  };
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files?.length || isUploadingFile) return;
-
-    setIsUploadingFile(true);
-    try {
-      const threadResponse = await apiClient.post('/api/threads', {});
-      const newThread = threadResponse.data;
-      const formData = new FormData();
-
-      Array.from(e.target.files).forEach(file => formData.append('files', file));
-      formData.append('topic', 'General');
-
-      await apiClient.post('/api/documents/upload-document', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-
-      toast.success('Archivos subidos con éxito');
-      router.push(`/chat/${newThread.id}`);
-    } catch (error) {
-      toast.error('Error al subir archivos');
-    } finally {
-      setIsUploadingFile(false);
-    }
   };
 
   const systemStats = useMemo(() => {
@@ -330,39 +202,9 @@ export default function DashboardPage() {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.2 }}
-        className="pt-8"
+        className="pt-8 h-[650px]"
       >
-        <EmptyChat
-          onSendMessage={handleChatSubmit}
-          newMessage={chatInput}
-          setNewMessage={setChatInput}
-          isResponding={isResponding}
-          isRecording={isRecording}
-          isProcessingAudio={isProcessingAudio}
-          isUploadingFile={isUploadingFile}
-          isKnowledgeAnalysisActive={isKnowledgeAnalysisActive}
-          isWebSearchActive={isWebSearchActive}
-          isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
-          isDeepResearchActive={isDeepResearchActive}
-          onKeyDown={() => {}}
-          onToggleKnowledgeAnalysis={() => setIsKnowledgeAnalysisActive(!isKnowledgeAnalysisActive)}
-          onToggleWebSearch={() => setIsWebSearchActive(!isWebSearchActive)}
-          onToggleComprehensiveAnalysis={() => setIsComprehensiveAnalysisActive(!isComprehensiveAnalysisActive)}
-          onToggleDeepResearch={() => setIsDeepResearchActive(!isDeepResearchActive)}
-          onStartRecording={startRecording}
-          onStopRecording={stopRecording}
-          onFileUpload={handleFileUpload}
-          onRemoveContextItem={() => { }}
-          onPaste={() => { }}
-          isUploadingImages={false}
-          uploadedImagePreviews={[]}
-          onRemoveImage={() => { }}
-          onImageUpload={() => { }}
-          workspaceId={workspaceId}
-          selectedContext={selectedContext}
-          onContextSelected={setSelectedContext}
-          isVectorizingFile={false}
-        />
+        <CommonChat />
       </motion.div>
 
       {/* Dialogs & Info */}

@@ -7,12 +7,11 @@ def get_postgres_history_connection_url(database_url: Optional[str]) -> Optional
     if not database_url:
         return None
 
-    if database_url.startswith("postgresql+psycopg://"):
-        return database_url.replace("postgresql+psycopg://", "postgresql://", 1)
-    if database_url.startswith("postgresql+psycopg2://"):
-        return database_url.replace("postgresql+psycopg2://", "postgresql://", 1)
+    if "://" in database_url and (database_url.startswith("postgresql+") or database_url.startswith("postgres+")):
+        _, rest = database_url.split("://", 1)
+        return f"postgresql://{rest}"
 
-    return database_url.replace("+psycopg", "")
+    return database_url
 
 
 def close_postgres_chat_message_history(history: Any, logger: Optional[logging.Logger] = None) -> None:

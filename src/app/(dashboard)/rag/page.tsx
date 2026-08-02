@@ -503,7 +503,7 @@ export default function RagCollectionsPage() {
   };
 
   return (
-    <div className="p-4 sm:p-8 max-w-7xl mx-auto overflow-x-hidden">
+    <div className="p-4 sm:p-6 md:p-8 w-full overflow-x-hidden">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-8 sm:mb-12 gap-4">
         <div className="flex items-center gap-2">
           <h1 className="text-2xl sm:text-3xl font-bold flex items-center truncate">

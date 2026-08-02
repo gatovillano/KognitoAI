@@ -32,6 +32,7 @@ from core.websocket_manager import send_personal_message
 from core.onlyoffice_storage import ensure_onlyoffice_account_dir, build_onlyoffice_relative_path
 from core.tasks import process_upload_task, extract_titles_and_update_metadata, process_knowledge_graph
 from utils.knowledge_graph_analysis import start_knowledge_graph_analysis
+from utils.postgres_chat_history import get_postgres_history_connection_url
 from langchain_community.chat_message_histories import PostgresChatMessageHistory
 from langchain_core.messages import AIMessage
 from core.config import settings
@@ -209,7 +210,7 @@ async def upload_chat_document_endpoint(
         # Si se proporciona thread_id, inyectar un mensaje en el historial del chat
         if thread_id:
             try:
-                db_sync_url = settings.database_url.replace("+psycopg", "")
+                db_sync_url = get_postgres_history_connection_url(settings.database_url)
                 chat_message_history = PostgresChatMessageHistory(
                     connection_string=db_sync_url,
                     session_id=thread_id,
