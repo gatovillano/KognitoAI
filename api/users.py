@@ -4,6 +4,7 @@ import os
 import logging
 import uuid
 from typing import List, Optional, AsyncGenerator
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Depends, status, Query, Body
 from pydantic import BaseModel, EmailStr
@@ -55,6 +56,8 @@ async def read_users_me(current_account_id: str = Depends(get_current_account_id
     account = await db.get(Account, uuid.UUID(current_account_id))  # Asegúrate de que el ID sea un UUID
     if not account:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuario no encontrado")
+
+    account.last_active_at = datetime.now(timezone.utc)
 
     # Intentar obtener el telegram_id si existe
     telegram_identity = await db.execute(
@@ -561,35 +564,141 @@ async def delete_user_secret(
 
 
 # --- Endpoints de Administración de Usuarios (Solo para Admins) ---
-@router.put("/admin/users/{user_id}", summary="Actualizar privilegios de administrador (solo admin)")
-async def update_user_admin_status(
-    user_id: str,
-    is_admin: bool = Body(..., embed=True),
+class AdminUserCreateRequest(BaseModel):
+    name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    username: Optional[str] = None
+    password: str
+    is_admin: bool = False
+
+class AdminUserUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    username: Optional[str] = None
+    is_admin: Optional[bool] = None
+
+class DeleteUsersRequest(BaseModel):
+    account_ids: List[str]
+
+
+@router.post("/admin/users", status_code=status.HTTP_201_CREATED, summary="Crear nuevo usuario (solo admin)")
+async def create_user_by_admin(
+    request: AdminUserCreateRequest,
     admin_account: Account = Depends(get_current_admin_account),
     db: AsyncSession = Depends(get_db_session)
 ):
     """
-    Sube o baja la categoría de un usuario a administrador. Requiere privilegios de administrador.
+    Crea un nuevo usuario en el sistema. Requiere privilegios de administrador.
     """
-    logger.info(f"Admin {admin_account.id} cambiando is_admin a {is_admin} para el usuario {user_id}")
+    if request.email:
+        existing_email = await db.execute(select(Account).where(Account.email == request.email))
+        if existing_email.scalars().first():
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ya existe un usuario con este correo electrónico.")
+
+    if request.username:
+        existing_user = await db.execute(select(Account).where(Account.username == request.username))
+        if existing_user.scalars().first():
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ya existe un usuario con este nombre de usuario.")
+
+    new_account = Account(
+        email=request.email,
+        username=request.username or (request.email.split('@')[0] if request.email else None),
+        name=request.name or request.username,
+        hashed_password=get_password_hash(request.password),
+        is_admin=request.is_admin
+    )
+    db.add(new_account)
+    await db.commit()
+    await db.refresh(new_account)
+    return {"message": "Usuario creado correctamente.", "id": str(new_account.id)}
+
+
+@router.put("/admin/users/{user_id}", summary="Actualizar información o privilegios de un usuario (solo admin)")
+async def update_user_by_admin(
+    user_id: str,
+    update_data: AdminUserUpdateRequest,
+    admin_account: Account = Depends(get_current_admin_account),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Actualiza la información y/o estado de un usuario. Requiere privilegios de administrador.
+    """
+    logger.info(f"Admin {admin_account.id} actualizando el usuario {user_id}")
     
     try:
         target_user_id = uuid.UUID(user_id)
     except ValueError:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ID de usuario inválido.")
 
-    # Prevenir que el admin se quite a sí mismo el permiso si es el único o por seguridad
-    # (Opcional: podrías lanzar un error si intenta quitarse el admin a sí mismo)
-    
     user = await db.get(Account, target_user_id)
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuario no encontrado.")
 
-    user.is_admin = is_admin
+    if update_data.is_admin is not None:
+        user.is_admin = update_data.is_admin
+    if update_data.name is not None:
+        user.name = update_data.name
+    if update_data.email is not None:
+        user.email = update_data.email
+    if update_data.username is not None:
+        user.username = update_data.username
+
     await db.commit()
     await db.refresh(user)
     
-    return {"message": f"Estado de administrador actualizado para {user.name or user_id}."}
+    return {"message": f"Usuario {user.name or user_id} actualizado correctamente."}
+
+
+@router.post("/admin/users/delete", status_code=status.HTTP_200_OK, summary="Eliminar usuarios en lote (solo admin)")
+async def delete_users_bulk(
+    request: DeleteUsersRequest,
+    admin_account: Account = Depends(get_current_admin_account),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Elimina uno o varios usuarios por sus IDs de cuenta. Requiere privilegios de administrador.
+    """
+    if not request.account_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Debe proporcionar al menos un ID de cuenta.")
+
+    uuids = []
+    for aid in request.account_ids:
+        try:
+            uuids.append(uuid.UUID(aid))
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"ID de usuario inválido: {aid}")
+
+    # Evitar que un admin se elimine a sí mismo
+    if admin_account.id in uuids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No puedes eliminar tu propia cuenta de administrador.")
+
+    deleted_count = await delete_accounts_by_ids(db, uuids)
+    return {"message": f"Se eliminaron {deleted_count} usuario(s) correctamente.", "deleted_count": deleted_count}
+
+
+@router.delete("/admin/users/{user_id}", status_code=status.HTTP_200_OK, summary="Eliminar un usuario (solo admin)")
+async def delete_single_user(
+    user_id: str,
+    admin_account: Account = Depends(get_current_admin_account),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Elimina un único usuario por su ID. Requiere privilegios de administrador.
+    """
+    try:
+        target_uuid = uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ID de usuario inválido.")
+
+    if admin_account.id == target_uuid:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No puedes eliminar tu propia cuenta de administrador.")
+
+    deleted_count = await delete_accounts_by_ids(db, [target_uuid])
+    if deleted_count == 0:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuario no encontrado.")
+
+    return {"message": "Usuario eliminado correctamente."}
+
 
 @router.get("/admin/users", response_model=List[UserProfileResponse], summary="Listar todos los usuarios (solo admin)")
 async def list_all_users(
@@ -614,3 +723,4 @@ async def list_all_users(
             has_password=bool(account.hashed_password)
         ))
     return response
+

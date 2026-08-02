@@ -3964,7 +3964,7 @@ async def run_custom_user_heartbeat(
         "target_datasets": None,
     }
 
-    db_sync_url = settings.database_url.replace("+psycopg", "")
+    db_sync_url = get_postgres_history_connection_url(settings.database_url)
     chat_message_history = PostgresChatMessageHistory(
         connection_string=db_sync_url,
         session_id=thread_id,

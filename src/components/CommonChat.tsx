@@ -10,12 +10,11 @@ import { useUserSettings } from '@/contexts/UserSettingsContext';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { ArrowLeft, FolderKanban, Bot, BrainCircuit, Search, X, Folder, File as FileIcon, Share2 } from 'lucide-react';
+import { ArrowLeft, FolderKanban, Bot, BrainCircuit, Search, X, Folder, File as FileIcon, Share2, Zap, ArrowUpRight } from 'lucide-react';
 import { ChatMessage } from '@/components/ChatMessage';
 import ChatInputBar from '@/components/ChatInputBar';
 import { stripMarkdown } from '@/lib/chatUtils';
 import { BackgroundTaskIndicator } from '@/components/BackgroundTaskIndicator';
-import { EmptyChat } from '@/components/EmptyChat';
 import { useWebSocketContext } from '@/contexts/WebSocketContext';
 import { WebSocketMessage } from '@/hooks/useWebSocket'; // Importar WebSocketMessage
 import DeepResearchVisualizer from '@/components/DeepResearchVisualizer';
@@ -154,7 +153,7 @@ interface ThreadDetails {
 }
 
 interface CommonChatProps {
-  threadId: string;
+  threadId?: string;
   workspaceId?: string;
   initialMessage?: string;
   initialRagContext?: string;
@@ -916,7 +915,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
 
       try {
         const formData = new FormData();
-        formData.append('thread_id', threadId);
+        formData.append('thread_id', threadId || '');
         formData.append('account_id', user.id);
         formData.append('user_message', messageToProcess || '');
         if (selectedContext.length > 0) {
@@ -1116,7 +1115,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
       setIsResponding(true);
 
       const formData = new FormData();
-      formData.append('thread_id', threadId);
+      formData.append('thread_id', threadId || '');
       formData.append('account_id', user?.id || '');
       formData.append('user_message', text || '');
       if (selectedContext.length > 0) {
@@ -1423,6 +1422,9 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         } finally {
           setIsLoading(false);
         }
+      } else {
+        setIsLoading(false);
+        setMessages([]);
       }
     };
     fetchChatData();
@@ -1639,38 +1641,156 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
   }
 
   if (messages.length === 0 && !isResponding) {
-        return <EmptyChat
-          onSendMessage={handleSendMessage}
-          newMessage={newMessage}
-          setNewMessage={setNewMessage}
-          isResponding={isResponding}
-          isRecording={isRecording}
-          isProcessingAudio={isProcessingAudio}
-          isUploadingFile={isUploadingFile}
-          isUploadingImages={isUploadingImages}
-          uploadedImagePreviews={uploadedImagePreviews}
-          isKnowledgeAnalysisActive={isKnowledgeAnalysisActive}
-          isWebSearchActive={isWebSearchActive}
-          isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
-          isDeepResearchActive={isDeepResearchActive}
-          onKeyDown={() => { }}
-          onToggleKnowledgeAnalysis={() => { }}
-          onToggleWebSearch={() => { }}
-          onToggleComprehensiveAnalysis={() => { }}
-          onToggleDeepResearch={() => { }}
-          onStartRecording={handleStartRecording}
-          onStopRecording={handleStopRecording}
-          onFileUpload={handleFileUpload}
-          onImageUpload={handleImageUpload}
-          onRemoveImage={() => handleRemoveImage(0)}
-          onRemoveContextItem={handleRemoveContextItem}
-          onPaste={() => { }}
-          workspaceId={workspaceId}
-          selectedContext={selectedContext}
-          onContextSelected={setSelectedContext}
-          isVectorizingFile={isVectorizingFile} // Added isVectorizingFile
-          onStopResponding={handleStopResponding}
-        />;
+    const examplePrompts = [
+      {
+        title: "Analizar documentos",
+        subtitle: "Genera un resumen ejecutivo de tus archivos y proyectos recientes",
+        prompt: "Analiza los documentos recientes y genera un resumen ejecutivo."
+      },
+      {
+        title: "Tendencias en IA",
+        subtitle: "Explora las últimas novedades en inteligencia artificial generativa",
+        prompt: "¿Cuáles son las últimas tendencias en inteligencia artificial generativa?"
+      },
+      {
+        title: "Plan de proyecto",
+        subtitle: "Crea una hoja de ruta para una nueva aplicación de gestión",
+        prompt: "Crea un plan de proyecto para una nueva aplicación de gestión de tareas."
+      },
+      {
+        title: "Comparativa técnica",
+        subtitle: "Evalúa ventajas y contras entre React y Vue a gran escala",
+        prompt: "Compara las ventajas y desventajas de React vs. Vue para un proyecto a gran escala."
+      }
+    ];
+
+    const containerVariants = {
+      hidden: { opacity: 0 },
+      visible: {
+        opacity: 1,
+        transition: {
+          staggerChildren: 0.08,
+          delayChildren: 0.2,
+        },
+      },
+    };
+
+    const itemVariants = {
+      hidden: { y: 12, opacity: 0 },
+      visible: {
+        y: 0,
+        opacity: 1,
+        transition: {
+          type: 'spring' as const,
+          stiffness: 120,
+          damping: 15,
+        },
+      },
+    };
+
+    return (
+      <div className="relative flex flex-col h-full items-center justify-center text-center px-4 py-8 md:py-16 overflow-y-auto custom-scrollbar">
+        {/* Glow radial sutil de fondo */}
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[34rem] h-[34rem] bg-primary/5 blur-3xl rounded-full pointer-events-none -z-10" />
+
+        {/* Header minimalista con logo e indicador de modelo estilo Qwen */}
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+          className="flex items-center justify-center gap-3 mb-8"
+        >
+          <div className="flex items-center justify-center w-10 h-10 rounded-full border border-border/50 bg-card/80 backdrop-blur-md shadow-sm">
+            <Image
+              src="/logo-simple.png"
+              alt="Kognito AI"
+              width={24}
+              height={24}
+              className="object-contain"
+            />
+          </div>
+          <span className="text-2xl md:text-3xl font-semibold tracking-tight text-foreground/90">
+            kognito.ai
+          </span>
+        </motion.div>
+
+        <div className="w-full max-w-2xl mx-auto space-y-6">
+          {/* Input Bar Flotante Minimalista */}
+          <div className="bg-card/70 backdrop-blur-2xl p-1 rounded-[2.25rem] border border-border/40 shadow-xl shadow-foreground/[0.02] dark:shadow-black/20">
+            <ChatInputBar
+              newMessage={newMessage}
+              setNewMessage={setNewMessage}
+              onSendMessage={handleSendMessage}
+              onStopResponding={handleStopResponding}
+              isResponding={isResponding}
+              inputPlaceholder="¿Cómo puedo ayudarte hoy?"
+              isKnowledgeAnalysisActive={selectedContext.length > 0}
+              isWebSearchActive={isWebSearchActive}
+              isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
+              isDeepResearchActive={isDeepResearchActive}
+              isRecording={isRecording}
+              isProcessingAudio={isProcessingAudio}
+              isUploadingFile={isUploadingFile}
+              isVectorizingFile={isVectorizingFile}
+              isUploadingImages={isUploadingImages}
+              uploadedImagePreviews={uploadedImagePreviews}
+              onRemoveImage={handleRemoveImageByIndex}
+              onImageUpload={handleImageUpload}
+              onKeyDown={handleKeyDown}
+              onToggleKnowledgeAnalysis={handleToggleKnowledgeAnalysis}
+              onToggleWebSearch={handleToggleWebSearch}
+              onToggleComprehensiveAnalysis={handleToggleComprehensiveAnalysis}
+              onToggleDeepResearch={handleToggleDeepResearch}
+              onStartRecording={handleStartRecording}
+              onStopRecording={handleStopRecording}
+              onFileUpload={handleFileUpload}
+              onRemoveContextItem={handleRemoveContextItem}
+              onPaste={handlePaste}
+              currentContext={selectedContext}
+              isFixedPosition={false}
+              workspaceId={workspaceId}
+              onContextSelected={setSelectedContext}
+            />
+          </div>
+
+          {/* Sección de Sugerencias minimalistas */}
+          <div className="text-left px-1">
+            <div className="flex items-center gap-1.5 text-[11px] font-medium tracking-wider text-muted-foreground/60 uppercase mb-3 px-1">
+              <Zap className="h-3.5 w-3.5 text-primary/70" />
+              <span>Sugerido</span>
+            </div>
+
+            <motion.div
+              className="flex flex-col gap-2.5"
+              variants={containerVariants}
+              initial="hidden"
+              animate="visible"
+            >
+              {examplePrompts.map((item, index) => (
+                <motion.button
+                  key={index}
+                  onClick={() => setNewMessage(item.prompt)}
+                  className="group relative w-full text-left p-3.5 px-4 rounded-2xl border border-border/30 bg-card/30 hover:bg-card/80 hover:border-border/60 transition-all duration-200 shadow-none hover:shadow-sm cursor-pointer flex items-center justify-between"
+                  variants={itemVariants}
+                  whileHover={{ x: 3 }}
+                  whileTap={{ scale: 0.995 }}
+                >
+                  <div className="flex flex-col gap-0.5 pr-4">
+                    <span className="text-sm font-semibold text-foreground/90 group-hover:text-primary transition-colors">
+                      {item.title}
+                    </span>
+                    <span className="text-xs text-muted-foreground/75 font-normal line-clamp-1">
+                      {item.subtitle}
+                    </span>
+                  </div>
+                  <ArrowUpRight className="h-4 w-4 text-muted-foreground/40 group-hover:text-primary transition-colors flex-shrink-0 opacity-0 group-hover:opacity-100" />
+                </motion.button>
+              ))}
+            </motion.div>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
