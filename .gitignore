@@ -81,3 +81,5 @@ kokoro_service/models/extensions/
 package-lock.json
 SECURITY_AUDIT_REPORT_2025.md
 .kogniterm/
+.worktrees/
+
