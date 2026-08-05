@@ -5,7 +5,7 @@ import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
-import { ArrowUp, X, Paperclip, Loader2, Mic, Square, BookMarked } from 'lucide-react';
+import { ArrowUp, X, Paperclip, Loader2, Mic, Square, BookMarked, FlaskConical, Plus } from 'lucide-react';
 import { MoreActionsMenu } from './MoreActionsMenu';
 import ContextSelectorDialog from './ContextSelectorDialog';
 import { LLMSelectorMenu } from './LLMSelectorMenu';
@@ -69,6 +69,13 @@ interface ChatInputBarProps {
   inputPlaceholder?: string;
   activeRepositoryContext?: { type: 'github' | 'local', path: string, url?: string } | null;
   onClearRepositoryContext?: () => void;
+  onSendAnthropologicalResearch?: (params: {
+    theoreticalFrameworkItems: import('@/types/context').SelectedContextItem[];
+    ethnographicMaterialItems: import('@/types/context').SelectedContextItem[];
+    researchQuestion: string;
+    hypothesis: string;
+    request: string;
+  }) => void;
 }
 
 const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
@@ -109,6 +116,7 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
   activeRepositoryContext,
   onClearRepositoryContext = () => {},
   onContextSelected = () => {},
+  onSendAnthropologicalResearch,
 }) => {
   const { token } = useAuth();
   const textAreaRef = useRef<HTMLTextAreaElement>(null);
@@ -117,6 +125,15 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
   const repoTreeCacheRef = useRef<Map<string, string[]>>(new Map());
   const skillsCacheRef = useRef<string[] | null>(null);
   const [isContextSelectorOpen, setIsContextSelectorOpen] = useState(false);
+  // Estado del panel de Investigación Antropológica
+  const [isAnthroResearchOpen, setIsAnthroResearchOpen] = useState(false);
+  const [anthroFrameworkItems, setAnthroFrameworkItems] = useState<import('@/types/context').SelectedContextItem[]>([]);
+  const [anthroFrameworkSelectorOpen, setAnthroFrameworkSelectorOpen] = useState(false);
+  const [anthroEthnoItems, setAnthroEthnoItems] = useState<import('@/types/context').SelectedContextItem[]>([]);
+  const [anthroEthnoSelectorOpen, setAnthroEthnoSelectorOpen] = useState(false);
+  const [anthroResearchQuestion, setAnthroResearchQuestion] = useState('');
+  const [anthroHypothesis, setAnthroHypothesis] = useState('');
+  const [anthroRequest, setAnthroRequest] = useState('');
   const [isKnowledgeAnalysisForcedState, setIsKnowledgeAnalysisForcedState] = useState(false);
   const [isWebSearchForcedState, setIsWebSearchForcedState] = useState(false);
   const [isComprehensiveAnalysisForcedState, setIsComprehensiveAnalysisForcedState] = useState(false);
@@ -329,6 +346,54 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
     setIsContextSelectorOpen(true);
   }, []);
 
+  const handleSendAnthropologicalResearch = useCallback(() => {
+    if (anthroFrameworkItems.length === 0) {
+      toast.error('Agrega al menos un archivo como Marco Teórico.');
+      return;
+    }
+    if (!anthroRequest.trim()) {
+      toast.error('Escribe una solicitud de investigación.');
+      return;
+    }
+    if (onSendAnthropologicalResearch) {
+      onSendAnthropologicalResearch({
+        theoreticalFrameworkItems: anthroFrameworkItems,
+        ethnographicMaterialItems: anthroEthnoItems,
+        researchQuestion: anthroResearchQuestion,
+        hypothesis: anthroHypothesis,
+        request: anthroRequest,
+      });
+    } else {
+      // Fallback: construir mensaje directo con el tool
+      const frameworkText = anthroFrameworkItems.map(i => i.name).join(', ');
+      const ethnoText = anthroEthnoItems.length > 0 ? anthroEthnoItems.map(i => i.name).join(', ') : null;
+      const parts = [
+        `Marco Teórico: ${frameworkText}`,
+        ethnoText ? `Material Etnográfico: ${ethnoText}` : null,
+        anthroResearchQuestion ? `Pregunta de Investigación: ${anthroResearchQuestion}` : null,
+        anthroHypothesis ? `Hipótesis: ${anthroHypothesis}` : null,
+        `Solicitud: ${anthroRequest}`,
+      ].filter(Boolean).join('\n');
+      const messageText = `[USE_TOOL:anthropological_deep_research] ${parts}`;
+      onSendMessage(undefined, messageText);
+    }
+    // Limpiar el panel
+    setAnthroResearchQuestion('');
+    setAnthroHypothesis('');
+    setAnthroRequest('');
+    setAnthroFrameworkItems([]);
+    setAnthroEthnoItems([]);
+    setIsAnthroResearchOpen(false);
+  }, [
+    anthroFrameworkItems,
+    anthroEthnoItems,
+    anthroResearchQuestion,
+    anthroHypothesis,
+    anthroRequest,
+    onSendAnthropologicalResearch,
+    onSendMessage,
+  ]);
+
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (autocomplete.isVisible && autocomplete.options.length > 0) {
       if (e.key === 'ArrowDown') {
@@ -493,6 +558,111 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
       <div className="flex justify-center w-full">
         <form onSubmit={handleSubmit} className="relative w-full">
 
+          {/* Panel de Investigación Antropológica */}
+          {isAnthroResearchOpen && (
+            <div className="mb-3 glass-input rounded-2xl py-3 px-4 shadow-xl border border-indigo-500/30 backdrop-blur-xl bg-indigo-950/20 dark:bg-indigo-950/30 animate-in fade-in slide-in-from-bottom-2 duration-200">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <FlaskConical className="h-4 w-4 text-indigo-400" />
+                  <span className="text-sm font-semibold text-indigo-300">Investigación Antropológica</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsAnthroResearchOpen(false)}
+                  className="text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              {/* Marco Teórico */}
+              <div className="mb-3">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="text-xs font-medium text-indigo-300/80 uppercase tracking-wide">Marco Teórico</span>
+                  <button
+                    type="button"
+                    onClick={() => setAnthroFrameworkSelectorOpen(true)}
+                    className="flex items-center gap-1 text-xs rounded-full px-2 py-0.5 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/30 transition-all"
+                  >
+                    <Plus className="h-3 w-3" />
+                    Añadir
+                  </button>
+                </div>
+                {anthroFrameworkItems.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {anthroFrameworkItems.map((item) => (
+                      <span
+                        key={item.id}
+                        className="flex items-center gap-1.5 text-xs bg-indigo-500/20 border border-indigo-500/30 text-indigo-200 rounded-full px-2.5 py-1"
+                      >
+                        <Paperclip className="h-3 w-3 opacity-70" />
+                        {item.name}
+                        <button
+                          type="button"
+                          onClick={() => setAnthroFrameworkItems(prev => prev.filter(i => i.id !== item.id))}
+                          className="opacity-60 hover:opacity-100 transition-opacity ml-0.5"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground/50 italic">Sin archivos de marco teórico adjuntos</p>
+                )}
+              </div>
+
+              {/* Pregunta de Investigación */}
+              <div className="mb-2">
+                <label className="text-xs font-medium text-indigo-300/80 uppercase tracking-wide block mb-1">Pregunta de Investigación <span className="normal-case text-muted-foreground/50">(opcional)</span></label>
+                <input
+                  type="text"
+                  value={anthroResearchQuestion}
+                  onChange={e => setAnthroResearchQuestion(e.target.value)}
+                  placeholder="¿Cuál es la pregunta que guía esta investigación?"
+                  className="w-full text-sm bg-background/30 border border-border/30 rounded-lg px-3 py-1.5 placeholder:text-muted-foreground/40 focus:outline-none focus:border-indigo-500/50 transition-colors"
+                />
+              </div>
+
+              {/* Hipótesis */}
+              <div className="mb-3">
+                <label className="text-xs font-medium text-indigo-300/80 uppercase tracking-wide block mb-1">Hipótesis <span className="normal-case text-muted-foreground/50">(opcional)</span></label>
+                <input
+                  type="text"
+                  value={anthroHypothesis}
+                  onChange={e => setAnthroHypothesis(e.target.value)}
+                  placeholder="Hipótesis de trabajo..."
+                  className="w-full text-sm bg-background/30 border border-border/30 rounded-lg px-3 py-1.5 placeholder:text-muted-foreground/40 focus:outline-none focus:border-indigo-500/50 transition-colors"
+                />
+              </div>
+
+              {/* Solicitud */}
+              <div className="mb-3">
+                <label className="text-xs font-medium text-indigo-300/80 uppercase tracking-wide block mb-1">Solicitud</label>
+                <textarea
+                  value={anthroRequest}
+                  onChange={e => setAnthroRequest(e.target.value)}
+                  placeholder="Describe el tema, corpus o fenómeno a investigar..."
+                  rows={2}
+                  className="w-full text-sm bg-background/30 border border-border/30 rounded-lg px-3 py-1.5 placeholder:text-muted-foreground/40 focus:outline-none focus:border-indigo-500/50 transition-colors resize-none"
+                />
+              </div>
+
+              {/* Botón de envío */}
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={handleSendAnthropologicalResearch}
+                  disabled={isResponding}
+                  className="flex items-center gap-2 text-sm font-medium rounded-xl px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-40 transition-all"
+                >
+                  <FlaskConical className="h-3.5 w-3.5" />
+                  Iniciar Investigación
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="glass-input rounded-[2rem] py-2.5 px-4 shadow-xl shadow-foreground/[0.02] dark:shadow-black/20 border border-border/40 backdrop-blur-xl transition-all duration-300 focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/10">
             {currentContext.length > 0 && (
               <div className="mb-2 flex gap-2 overflow-x-auto pb-2">
@@ -607,6 +777,20 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
                 >
                   <BookMarked className="h-4 w-4" />
                 </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className={`rounded-full h-7.5 w-7.5 transition-all ${
+                    isAnthroResearchOpen
+                      ? 'text-indigo-400 bg-indigo-500/15 hover:bg-indigo-500/25'
+                      : 'text-muted-foreground/70 hover:bg-accent/50 hover:text-foreground'
+                  }`}
+                  onClick={() => setIsAnthroResearchOpen(prev => !prev)}
+                  title="Investigación Antropológica (1:N)"
+                >
+                  <FlaskConical className="h-4 w-4" />
+                </Button>
                 <LLMSelectorMenu />
               </div>
               <div className="flex items-center gap-1">
@@ -653,6 +837,34 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
             onSelectContext={onContextSelected}
             onSelectNote={handleAttachNote}
             currentContext={currentContext}
+            workspaceId={workspaceId}
+          />
+
+          {/* Selector de contexto para Marco Teórico del panel antropológico */}
+          <ContextSelectorDialog
+            isOpen={anthroFrameworkSelectorOpen}
+            onClose={() => setAnthroFrameworkSelectorOpen(false)}
+            onSelectContext={(items) => {
+              setAnthroFrameworkItems(prev => {
+                const existingIds = new Set(prev.map(i => i.id));
+                const newItems = items.filter(i => !existingIds.has(i.id));
+                return [...prev, ...newItems];
+              });
+              setAnthroFrameworkSelectorOpen(false);
+            }}
+            onSelectNote={(note) => {
+              const noteItem = {
+                id: `note-${note.id}`,
+                name: note.title || `Nota #${note.id}`,
+                type: 'note' as const,
+                content: note.content,
+              };
+              setAnthroFrameworkItems(prev =>
+                prev.some(i => i.id === noteItem.id) ? prev : [...prev, noteItem]
+              );
+              setAnthroFrameworkSelectorOpen(false);
+            }}
+            currentContext={anthroFrameworkItems}
             workspaceId={workspaceId}
           />
 

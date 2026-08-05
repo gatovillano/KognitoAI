@@ -15,11 +15,12 @@ import { EmailSettingsModal } from '@/components/EmailSettingsModal';
 import apiClient from '@/lib/api'; // Importar apiClient
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Edit, Trash2, Eye, Calendar, User, Sparkles, Brain, Zap, Image as ImageIcon, Wrench, Puzzle, Info, RefreshCw, Globe, Github, Slack, ShieldCheck, Menu, X, Server, Mail, Video } from 'lucide-react';
+import { Plus, Edit, Trash2, Eye, Calendar, User, Sparkles, Brain, Zap, Image as ImageIcon, Wrench, Puzzle, Info, RefreshCw, Globe, Github, Slack, ShieldCheck, Menu, X, Server, Mail, Video, Bug, FlaskConical } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { MCPSettings } from '@/components/settings/MCPSettings';
+import { BetaFeedbackSettings } from '@/components/settings/BetaFeedbackSettings';
 
 interface Memory {
   id: string;
@@ -436,7 +437,8 @@ const ExtensionsSettings: React.FC = () => {
         const IconComponent = ext.icon === 'Mail' ? Mail :
                               ext.icon === 'Video' ? Video :
                               ext.icon === 'Globe' ? Globe :
-                              ext.icon === 'ImageIcon' ? ImageIcon : Brain;
+                              ext.icon === 'ImageIcon' ? ImageIcon :
+                              ext.icon === 'FlaskConical' ? FlaskConical : Brain;
         
         return (
           <Card 
@@ -449,6 +451,7 @@ const ExtensionsSettings: React.FC = () => {
               ext.id === 'email_management' ? 'from-violet-500 via-purple-500 to-pink-500' :
               ext.id === 'jitsi_meet' ? 'from-cyan-500 via-blue-500 to-indigo-500' :
               ext.id === 'fediverso' ? 'from-emerald-500 via-teal-500 to-cyan-500' :
+              ext.id === 'anthropological_research' ? 'from-indigo-500 via-violet-500 to-purple-600' :
               'from-yellow-500 via-amber-600 to-orange-600'
             }`} />
             
@@ -1605,6 +1608,7 @@ const SETTINGS_MENU = [
   { id: 'sync', label: 'Sincronización', icon: RefreshCw },
   { id: 'extensions', label: 'Tienda de Extensiones', icon: Puzzle },
   { id: 'integrations', label: 'Integraciones', icon: Puzzle },
+  { id: 'beta-feedback', label: 'Beta Tester / Feedback', icon: Bug },
 ];
 
 const SettingsPage: React.FC = () => {
@@ -2132,6 +2136,7 @@ const SettingsPage: React.FC = () => {
           <TabsTrigger value="email">Correo Electrónico</TabsTrigger>
           <TabsTrigger value="extensions">Tienda de Extensiones</TabsTrigger>
           <TabsTrigger value="integrations">Integraciones</TabsTrigger>
+          <TabsTrigger value="beta-feedback">Beta Feedback</TabsTrigger>
         </TabsList>
         <TabsContent value="personal-data">
           <h2 className="text-xl font-semibold mb-3">Datos Personales</h2>
@@ -2497,6 +2502,9 @@ const SettingsPage: React.FC = () => {
         </TabsContent>
         <TabsContent value="mcp">
           <MCPSettings />
+        </TabsContent>
+        <TabsContent value="beta-feedback">
+          <BetaFeedbackSettings />
         </TabsContent>
         <TabsContent value="skills">
           <div className="space-y-6">

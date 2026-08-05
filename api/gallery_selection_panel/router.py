@@ -8,7 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 
-from core.database import get_db_session, Album, Account, Photo
+from core.dependencies import get_db_session
+from core.database import Album, Account, Photo
 from api.auth import get_current_account_id
 from api.galleries import hash_password, PhotoResponse, AlbumResponse
 from .models import SelectionShareLink, SelectionSubmission, SelectionItem

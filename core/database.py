@@ -56,8 +56,16 @@ from utils.sanitization import remove_null_bytes
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
 
-import json
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+# --- Patch para langchain_postgres con asyncpg ---
+try:
+    import langchain_postgres.vectorstores
+    def _fixed_create_vector_extension(conn):
+        conn.execute(text("SELECT pg_advisory_xact_lock(1573678846307946496);"))
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
+        conn.commit()
+    langchain_postgres.vectorstores._create_vector_extension = _fixed_create_vector_extension
+except Exception as patch_err:
+    pass
 
 # ... (other imports)
 
@@ -264,6 +272,7 @@ class Account(Base):
     custom_heartbeats = relationship("CustomHeartbeat", back_populates="account", cascade="all, delete-orphan")
     mcp_servers = relationship("MCPServer", back_populates="account", cascade="all, delete-orphan")
     api_keys = relationship("ApiKey", back_populates="account", cascade="all, delete-orphan")
+    beta_feedbacks = relationship("BetaFeedback", back_populates="account", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Account(id={self.id}, name='{self.name}')>"
@@ -317,6 +326,32 @@ class MCPServer(Base):
 
     def __repr__(self):
         return f"<MCPServer(id={self.id}, name='{self.name}', transport='{self.transport_type}')>"
+
+
+class BetaFeedback(Base):
+    """
+    Representa un reporte de feedback o error enviado por un usuario Beta.
+    """
+    __tablename__ = "beta_feedback"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
+    feedback_type = Column(String(50), nullable=False, default="ux_experience", comment="bug, suggestion, ux_experience")
+    title = Column(String(255), nullable=False, comment="Título o asunto breve del feedback")
+    description = Column(Text, nullable=False, comment="Detalles del reporte o sugerencia")
+    attachment_path = Column(String(512), nullable=True, comment="Ruta local a la captura/pantalla adjunta")
+    system_metadata = Column(JSONB, nullable=True, comment="Metadatos automáticos: URL, navegador, resolución, etc.")
+    status = Column(String(50), nullable=False, default="new", index=True, comment="new, in_review, resolved, archived")
+    admin_notes = Column(Text, nullable=True, comment="Notas o respuestas internas del administrador")
+
+    created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
+
+    # Relación inversa con Account
+    account = relationship("Account", back_populates="beta_feedbacks")
+
+    def __repr__(self):
+        return f"<BetaFeedback(id={self.id}, type='{self.feedback_type}', status='{self.status}')>"
 
 
 # --- Modelo de Espacio de Trabajo ---
@@ -1416,30 +1451,6 @@ async def create_tables():
             else:
                 logger.error("❌ ERROR CRÍTICO: No se pudieron crear las tablas de la base de datos después de varios reintentos.")
                 raise
-
-async def get_db_session() -> AsyncIterator[AsyncSession]:
-    """
-    Dependencia de FastAPI para obtener una sesión de base de datos asíncrona.
-    Este es el patrón estándar para la inyección de dependencias de sesiones en FastAPI.
-    """
-    from fastapi.exceptions import RequestValidationError
-    from starlette.exceptions import HTTPException as StarletteHTTPException
-    from fastapi import WebSocketDisconnect
-
-    session = SessionLocal()
-    try:
-        yield session
-        await session.commit()
-    except (RequestValidationError, StarletteHTTPException, WebSocketDisconnect):
-        await session.rollback()
-        raise
-    except Exception as e:
-        logger.error(f"Error en la sesión de la base de datos: {e}", exc_info=True)
-        await session.rollback()
-        raise
-    finally:
-        await session.close()
-        await log_pool_status()
 
 
 

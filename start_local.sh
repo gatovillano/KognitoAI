@@ -30,6 +30,7 @@ fi
 echo -e "${GREEN}Iniciando el servidor Backend (Kognito API)...${NC}"
 echo -e "${GREEN}  → Logs: ./logs/backend.log${NC}"
 export PYTHONPATH=.
+fuser -k 8889/tcp >/dev/null 2>&1 || true
 ./venv_host/bin/python run_api.py >> logs/backend.log 2>&1 &
 BACKEND_PID=$!
 
@@ -43,6 +44,7 @@ PORT=3002 npm run start >> logs/frontend.log 2>&1 &
 FRONTEND_PID=$!
 echo -e "${YELLOW}Iniciando Telegram Gateway (ultraligero)...${NC}"
 echo -e "${YELLOW}  → Logs: ./logs/telegram_gateway.log${NC}"
+fuser -k 9091/tcp >/dev/null 2>&1 || true
 ./venv_host/bin/python run_telegram_gateway.py >> logs/telegram_gateway.log 2>&1 &
 TELEGRAM_PID=$!
 

@@ -2336,17 +2336,22 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
             "recommendations": []
         }
         
-        # 4. Analizar cada chunk (MODO PARALELO para máxima velocidad)
-        logger.info(f"Analizando {len(chunks)} chunks en paralelo para optimizar tiempo...")
+        # 4. Analizar cada chunk (MODO PARALELO CONTROLADO con Semaphore para evitar saturar pool DB y Rate Limit)
+        logger.info(f"Analizando {len(chunks)} chunks con concurrencia controlada...")
         
+        from core.llm_manager import get_llm_for_user, get_fast_llm
+        shared_llm = await get_llm_for_user(account_id, purpose="fast") if account_id else get_fast_llm()
+
+        semaphore = asyncio.Semaphore(2)
         async def analyze_single_chunk(index, chunk_data):
-            try:
-                logger.info(f"Iniciando análisis de chunk {index+1}/{len(chunks)}...")
-                res = await analyze_code_content(chunk_data["content"], account_id=account_id, analysis_type=analysis_type)
-                return index, res
-            except Exception as e:
-                logger.error(f"Error analizando chunk {index+1}: {e}")
-                return index, None
+            async with semaphore:
+                try:
+                    logger.info(f"Iniciando análisis de chunk {index+1}/{len(chunks)}...")
+                    res = await analyze_code_content(chunk_data["content"], account_id=account_id, analysis_type=analysis_type, llm=shared_llm)
+                    return index, res
+                except Exception as e:
+                    logger.error(f"Error analizando chunk {index+1}: {e}")
+                    return index, None
 
         analysis_tasks = [analyze_single_chunk(i, chunk) for i, chunk in enumerate(chunks)]
         chunk_results_with_indices = await asyncio.gather(*analysis_tasks)
@@ -2443,12 +2448,13 @@ async def run_code_analysis_and_save(task_id: str, account_id: str, repo_name: s
         
         # Generar formatted_result consolidado usando el analizador y la herramienta
         try:
-            # Usar solo una muestra representativa para el formato final
-            sample_content = chunks[0]["content"][:30000] if chunks else ""
+            # Usar una muestra reducida para el formato final (máximo 10k caracteres)
+            sample_content = chunks[0]["content"][:10000] if chunks else ""
             final_code_analysis = await analyze_code_content(
                 code_content=sample_content + f"\n\nNOTA: Este es un análisis de {len(chunks)} partes del repositorio {repo_name}",
                 account_id=account_id,
-                analysis_type=analysis_type
+                analysis_type=analysis_type,
+                llm=shared_llm
             )
             formatted_result = tool._format_result(final_code_analysis, analysis_type)
             consolidated_executive_summary = final_code_analysis.executive_summary

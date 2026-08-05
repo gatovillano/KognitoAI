@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, update
 from pydantic import BaseModel, Field
 
-from core.database import UserTable, UserTableRow, get_db_session
+from core.dependencies import get_db_session
 from utils.security import get_current_account_id
 from utils.helpers import clean_nan_values
 

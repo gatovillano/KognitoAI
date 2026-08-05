@@ -12,9 +12,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { Users, Settings, Clock, ArrowRight, Plus, Edit, Trash2, Network, BarChart2, FlaskConical, RefreshCw, CheckCircle, AlertTriangle, Zap } from 'lucide-react';
+import { Users, Settings, Clock, ArrowRight, Plus, Edit, Trash2, Network, BarChart2, FlaskConical, RefreshCw, CheckCircle, AlertTriangle, Zap, Bug } from 'lucide-react';
 import apiClient from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
+import { BetaFeedbackAdminPanel } from '@/components/admin/BetaFeedbackAdminPanel';
 
 interface User {
   id: string;
@@ -335,13 +336,17 @@ export default function AdminPage({ params }: PageProps) {
       </div>
 
       <Tabs defaultValue="users" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="users">Gestión de Usuarios</TabsTrigger>
           <TabsTrigger value="tools">Herramientas del Sistema</TabsTrigger>
           <TabsTrigger value="metrics">Métricas del Sistema</TabsTrigger>
           <TabsTrigger value="ai-quality" className="flex items-center gap-1.5">
             <FlaskConical className="h-3.5 w-3.5" />
             Calidad IA
+          </TabsTrigger>
+          <TabsTrigger value="beta-feedback" className="flex items-center gap-1.5">
+            <Bug className="h-3.5 w-3.5 text-red-500" />
+            Feedback Beta
           </TabsTrigger>
         </TabsList>
 
@@ -895,6 +900,10 @@ export default function AdminPage({ params }: PageProps) {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="beta-feedback" className="space-y-4">
+          <BetaFeedbackAdminPanel />
         </TabsContent>
       </Tabs>
     </div>

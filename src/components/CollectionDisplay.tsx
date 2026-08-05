@@ -38,6 +38,7 @@ interface CollectionDisplayProps {
   onEdit?: (collection: Collection, workspaceId?: string) => void;
   onShare?: (collection: Collection, workspaceId?: string) => void;
   onProcessKnowledgeGraph?: (topic: string, workspaceId?: string) => void;
+  onProcessAnthropologicalGraph?: (topic: string, workspaceId?: string) => void;
   onUploadDocument?: (topic: string, workspaceId?: string) => void;
   onExtractTitles?: (topic: string, workspaceId?: string) => void;
   onSemanticSummary?: (topic: string, workspaceId?: string) => void;
@@ -57,6 +58,7 @@ export const CollectionDisplay = ({
   onEdit,
   onShare,
   onProcessKnowledgeGraph,
+  onProcessAnthropologicalGraph,
   onUploadDocument,
   onExtractTitles,
   onSemanticSummary,
@@ -147,6 +149,13 @@ export const CollectionDisplay = ({
             <span>Crear Grafo</span>
           </DropdownMenuItem>
         )}
+        {onProcessAnthropologicalGraph && (
+          <DropdownMenuItem onClick={handleAction(onProcessAnthropologicalGraph)} disabled={isProcessingKnowledgeGraph}>
+            <BookMarked className="mr-2 h-4 w-4 text-indigo-500" />
+            <span className="font-medium text-indigo-600 dark:text-indigo-400">Grafo Antropológico (1:N)</span>
+          </DropdownMenuItem>
+        )}
+
         {onEdit && (
           <DropdownMenuItem onClick={(e) => { e.stopPropagation(); onEdit(collection, workspaceId); }}>
             <Edit className="mr-2 h-4 w-4" />
@@ -205,6 +214,12 @@ export const CollectionDisplay = ({
         <Button onClick={handleAction(onProcessKnowledgeGraph)} variant="outline" disabled={isProcessingKnowledgeGraph}>
           {isProcessingKnowledgeGraph ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Network className="mr-2 h-4 w-4" />}
           Crear Grafo
+        </Button>
+      )}
+      {onProcessAnthropologicalGraph && (
+        <Button onClick={handleAction(onProcessAnthropologicalGraph)} variant="outline" className="border-indigo-500/30 hover:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400" disabled={isProcessingKnowledgeGraph}>
+          {isProcessingKnowledgeGraph ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <BookMarked className="mr-2 h-4 w-4" />}
+          Grafo Antropológico (1:N)
         </Button>
       )}
     </div>

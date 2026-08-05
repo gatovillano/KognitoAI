@@ -19,7 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from typing import List, Optional, Tuple # Added Tuple
 
-from core.database import get_db_session, Album, Account, Photo, SharedAlbumLink, ContactProfile # Added ContactProfile
+from core.dependencies import get_db_session
+from core.database import Album, Account, Photo, SharedAlbumLink, ContactProfile
 from core.config import settings
 from api.auth import get_current_account_id
 from sqlalchemy.future import select

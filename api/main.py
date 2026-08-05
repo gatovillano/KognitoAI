@@ -38,6 +38,7 @@ from api.collection_search import router as collection_search_router # Importar 
 from api.note_search import router as note_search_router # Importar el router de búsqueda en notas
 from api.tables import router as tables_router
 from api.extensions import router as extensions_router # Importar router de la tienda de extensiones
+from api.feedback import router as feedback_router # Importar router de beta feedback
 from core.config import settings
 from core.database import create_tables, Account
 from core.llm_manager import initialize_llms
@@ -428,6 +429,7 @@ except ImportError:
     pass
 
 app.include_router(extensions_router)
+app.include_router(feedback_router)
 
 # Extensiones
 try:

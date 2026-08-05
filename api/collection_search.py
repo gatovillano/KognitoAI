@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.database import get_db_session
+from core.dependencies import get_db_session
 from core.memory_manager import _run_semantic_search, _run_fts_search
 from utils.embeddings import get_cached_embedding
 from core.reranker import reranker, Reranker # Importar el reranker

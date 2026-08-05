@@ -1,13 +1,13 @@
 'use client';
 
 import React, { useState, useEffect } from "react";
-import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ThemeToggle } from "@/components/ThemeToggle";
 import { motion, AnimatePresence } from "framer-motion";
-import { Menu, X, ArrowRight, Shield, Cpu, Mail, Sparkles } from "lucide-react";
+import { Menu, X, ArrowRight, Shield, Cpu, Mail, Sparkles, Users, Globe } from "lucide-react";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
+import { CircuitBrainLogo } from "@/components/CircuitBrainLogo";
 
 export default function PresentacionClientLayout({
   children,
@@ -45,41 +45,37 @@ export default function PresentacionClientLayout({
   ];
 
   return (
-    <div className="min-h-screen bg-background text-foreground relative overflow-hidden flex flex-col font-sans transition-colors duration-300">
-      {/* Fondo de alta tecnología decorativo */}
+    <div className="min-h-screen bg-[#020408] text-slate-100 relative overflow-hidden flex flex-col font-sans selection:bg-cyan-500/30 selection:text-cyan-200">
+      {/* Fondo Cyber-Space Neón */}
       <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
-        {/* Luces de fondo (Glow Orbs) */}
-        <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-cyan-500/10 dark:bg-cyan-500/5 rounded-full blur-[120px]" />
-        <div className="absolute top-1/3 right-1/5 w-[400px] h-[400px] bg-purple-500/10 dark:bg-purple-500/5 rounded-full blur-[120px]" />
-        <div className="absolute bottom-0 left-1/3 w-[300px] h-[300px] bg-blue-500/10 dark:bg-blue-500/5 rounded-full blur-[100px]" />
-{/* Grid pattern sutil - usando CSS gradients en lugar de SVG data URL */}
-        <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(6,182,212,0.02)_1px,transparent_1px),linear-gradient(to_bottom,rgba(6,182,212,0.02)_1px,transparent_1px)] bg-[size:60px_60px] opacity-50" />      </div>
+        {/* Glow Orbs Neón */}
+        <div className="absolute top-0 left-1/4 w-[600px] h-[600px] bg-cyan-500/10 rounded-full blur-[140px]" />
+        <div className="absolute top-1/3 right-1/4 w-[500px] h-[500px] bg-purple-600/15 rounded-full blur-[150px]" />
+        <div className="absolute bottom-1/4 left-1/3 w-[450px] h-[450px] bg-blue-600/10 rounded-full blur-[130px]" />
+        {/* Grid pattern cyber */}
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(6,182,212,0.03)_1px,transparent_1px),linear-gradient(to_bottom,rgba(6,182,212,0.03)_1px,transparent_1px)] bg-[size:50px_50px] opacity-70" />
+      </div>
 
       {/* Header / Navbar */}
-      <header className={`relative z-10 sticky top-0 transition-all duration-300 ${
+      <header className={`relative z-50 sticky top-0 transition-all duration-300 ${
         isScrolled 
-          ? "bg-background/95 backdrop-blur-md border-b border-border/40 shadow-lg shadow-cyan-500/5" 
+          ? "bg-[#020408]/90 backdrop-blur-xl border-b border-slate-800/80 shadow-2xl shadow-cyan-500/5" 
           : "bg-transparent"
       }`}>
         <nav className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8" aria-label="Navegación principal">
-          <div className="flex h-16 items-center justify-between">
-            {/* Logo & Brand */}
+          <div className="flex h-20 items-center justify-between">
+            {/* Logo & Brand KOGNITO AI LABS */}
             <div className="flex items-center gap-3">
-              <Link href="/presentacion" className="flex items-center gap-2" aria-label="KognitoAI Inicio">
-                <div className="relative w-9 h-9 flex items-center justify-center">
-                  <div className="absolute inset-0 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-xl opacity-20 blur" />
-                  <Image
-                    src="/logo-simple.png"
-                    alt=""
-                    width={36}
-                    height={36}
-                    className="relative z-10"
-                    priority
-                  />
+              <Link href="/presentacion" className="flex items-center gap-3 group" aria-label="KognitoAI Inicio">
+                <CircuitBrainLogo size={42} variant="brain" />
+                <div className="flex flex-col">
+                  <span className="font-black text-xl tracking-wider text-white uppercase group-hover:text-cyan-400 transition-colors flex items-center gap-1">
+                    KOGNITO <span className="bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent">AI</span>
+                  </span>
+                  <span className="text-[9px] font-bold tracking-[0.25em] text-slate-400 uppercase -mt-1">
+                    AI LABS
+                  </span>
                 </div>
-                <span className="font-black text-xl tracking-tight bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-500 bg-clip-text text-transparent">
-                  KognitoAI
-                </span>
               </Link>
             </div>
 
@@ -90,17 +86,17 @@ export default function PresentacionClientLayout({
                   <li key={link.name}>
                     <Link
                       href={link.href}
-                      className={`relative text-sm font-medium transition-colors ${
+                      className={`relative text-xs uppercase font-bold tracking-wider transition-colors ${
                         pathname === link.href
-                          ? "text-cyan-400 dark:text-cyan-300"
-                          : "text-muted-foreground hover:text-primary"
+                          ? "text-cyan-400"
+                          : "text-slate-400 hover:text-slate-200"
                       }`}
                     >
                       {link.name}
                       {pathname === link.href && (
                         <motion.div
                           layoutId="navIndicator"
-                          className="absolute bottom-[-4px] left-0 right-0 h-0.5 bg-gradient-to-r from-cyan-400 to-blue-500 rounded-full"
+                          className="absolute bottom-[-6px] left-0 right-0 h-0.5 bg-gradient-to-r from-cyan-400 to-purple-500 rounded-full shadow-[0_0_8px_rgba(6,182,212,0.8)]"
                           transition={{ type: "spring", stiffness: 500, damping: 30 }}
                         />
                       )}
@@ -110,12 +106,14 @@ export default function PresentacionClientLayout({
               </ul>
               
               <div className="flex items-center gap-3 ml-4">
-                <ThemeToggle />
-                <Link href="/presentacion/contacto">
-                  <Button className="rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white font-bold shadow-md shadow-cyan-500/10 hover:shadow-lg px-5 h-11 flex items-center gap-2">
-                    <Sparkles className="w-4 h-4" />
-                    Solicitar Demo
-                  </Button>
+                <Link href="/beta">
+                  <button className="rounded-full px-5 py-2.5 bg-slate-950/80 hover:bg-slate-900 border border-purple-500/50 hover:border-cyan-400 text-white font-bold text-xs tracking-wide shadow-[0_0_15px_rgba(168,85,247,0.25)] hover:shadow-[0_0_20px_rgba(6,182,212,0.4)] transition-all flex items-center gap-2.5 group">
+                    <span className="w-6 h-6 rounded-full bg-purple-500/20 flex items-center justify-center border border-purple-400/40 text-cyan-400 group-hover:scale-110 transition-transform">
+                      <Users size={12} />
+                    </span>
+                    <span className="text-slate-200 group-hover:text-white">Se <span className="text-purple-400 group-hover:text-cyan-300">Beta Tester</span></span>
+                    <ArrowRight size={14} className="text-cyan-400 group-hover:translate-x-1 transition-transform" />
+                  </button>
                 </Link>
               </div>
             </div>
@@ -161,10 +159,10 @@ export default function PresentacionClientLayout({
                     ))}
                   </ul>
                   <div className="pt-2 border-t border-border/40 flex flex-col gap-3">
-                    <Link href="/presentacion/contacto">
+                    <Link href="/beta">
                       <Button className="w-full rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white font-bold shadow-md shadow-cyan-500/10 hover:shadow-lg px-5 h-11 flex items-center justify-center gap-2">
                         <Sparkles className="w-4 h-4" />
-                        Solicitar Demo
+                        Hazte Beta Tester
                       </Button>
                     </Link>
                   </div>
@@ -187,16 +185,7 @@ export default function PresentacionClientLayout({
             {/* Brand Column */}
             <div className="lg:col-span-1">
               <Link href="/presentacion" className="flex items-center gap-2 mb-6" aria-label="KognitoAI Inicio">
-                <div className="relative w-9 h-9 flex items-center justify-center">
-                  <div className="absolute inset-0 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-xl opacity-20 blur" />
-                  <Image
-                    src="/logo-simple.png"
-                    alt=""
-                    width={36}
-                    height={36}
-                    className="relative z-10"
-                  />
-                </div>
+                <CircuitBrainLogo size={32} />
                 <span className="font-black text-xl tracking-tight bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-500 bg-clip-text text-transparent">
                   KognitoAI
                 </span>
@@ -240,7 +229,7 @@ export default function PresentacionClientLayout({
                 </li>
                 <li>
                   <Link href="/presentacion/contacto" className="hover:text-primary transition-colors">
-                    Solicitar demo
+                    Hazte Beta Tester
                   </Link>
                 </li>
               </ul>
@@ -283,8 +272,8 @@ export default function PresentacionClientLayout({
               <ul className="flex flex-col gap-3.5 text-sm text-muted-foreground">
                 <li className="flex items-center gap-2">
                   <Mail size={16} className="text-cyan-500" />
-                  <a href="mailto:contacto@kognitoai.com" className="hover:text-primary transition-colors">
-                    contacto@kognitoai.com
+                  <a href="mailto:contacto@kognitoai.cloud" className="hover:text-primary transition-colors">
+                    contacto@kognitoai.cloud
                   </a>
                 </li>
                 <li className="flex items-center gap-2">
