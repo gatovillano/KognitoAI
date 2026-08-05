@@ -185,9 +185,10 @@ async def _run_semantic_search(
                 FROM langchain_pg_embedding
                 WHERE account_id = :account_id
             """
+            query_embedding_str = str(query_embedding) if not isinstance(query_embedding, str) else query_embedding
             query_params: Dict[str, Any] = {
                 "account_id": account_id,
-                "query_embedding": query_embedding,
+                "query_embedding": query_embedding_str,
             }
 
             filter_clauses = []

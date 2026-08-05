@@ -45,6 +45,17 @@ interface ContextSelectorDialogProps {
 interface OnlyOfficeDocument {
   id: string;
   filename: string;
+  folder_id: string | null;
+}
+
+interface OnlyOfficeFolder {
+  id: string;
+  name: string;
+  parent_id: string | null;
+  children?: OnlyOfficeFolder[];
+  documents?: OnlyOfficeDocument[];
+  isLoaded?: boolean;
+  isExpanded?: boolean;
 }
 
 const ContextSelectorDialog: React.FC<ContextSelectorDialogProps> = ({
@@ -67,8 +78,11 @@ const ContextSelectorDialog: React.FC<ContextSelectorDialogProps> = ({
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [activeTab, setActiveTab] = useState<'context' | 'notes' | 'onlyoffice' | 'github' | 'galleries'>(initialTab as any);
 
-  // Estado para OnlyOffice
-  const [onlyOfficeDocuments, setOnlyOfficeDocuments] = useState<OnlyOfficeDocument[]>([]);
+  // Estado para OnlyOffice (árbol de carpetas)
+  const [onlyOfficeFolders, setOnlyOfficeFolders] = useState<OnlyOfficeFolder[]>([]);
+  const [onlyOfficeRootDocs, setOnlyOfficeRootDocs] = useState<OnlyOfficeDocument[]>([]);
+  const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({});
+  const [folderDocs, setFolderDocs] = useState<Record<string, OnlyOfficeDocument[]>>({});
   const [isLoadingOnlyOffice, setIsLoadingOnlyOffice] = useState(false);
 
   // Estado para GitHub
@@ -143,16 +157,33 @@ const ContextSelectorDialog: React.FC<ContextSelectorDialogProps> = ({
     setIsLoadingOnlyOffice(true);
     try {
       const params: { workspace_id?: string } = {};
-      if (workspaceId) {
-        params.workspace_id = workspaceId;
-      }
+      if (workspaceId) params.workspace_id = workspaceId;
 
-      const response = await apiClient.get('/api/onlyoffice/list', { params });
-      const docs: OnlyOfficeDocument[] = (response.data || []).map((doc: any) => ({
-        id: String(doc.id),
-        filename: doc.filename || 'Documento sin nombre',
+      // Carga carpetas raíz y documentos sin carpeta en paralelo
+      const [foldersRes, rootDocsRes] = await Promise.all([
+        apiClient.get('/api/onlyoffice/folders', { params: { ...params, parent_id: 'null' } }),
+        apiClient.get('/api/onlyoffice/list', { params: { ...params, folder_id: 'null' } }),
+      ]);
+
+      const folders: OnlyOfficeFolder[] = (foldersRes.data || []).map((f: any) => ({
+        id: f.id,
+        name: f.name,
+        parent_id: f.parent_id,
+        isLoaded: false,
+        documents: [],
+        children: [],
       }));
-      setOnlyOfficeDocuments(docs);
+
+      const rootDocs: OnlyOfficeDocument[] = (rootDocsRes.data || []).map((d: any) => ({
+        id: String(d.id),
+        filename: d.filename || 'Documento sin nombre',
+        folder_id: d.folder_id || null,
+      }));
+
+      setOnlyOfficeFolders(folders);
+      setOnlyOfficeRootDocs(rootDocs);
+      setFolderDocs({});
+      setExpandedFolders({});
     } catch (error) {
       console.error('Error fetching OnlyOffice documents:', error);
       toast.error('Error al cargar documentos de OnlyOffice.');
@@ -160,6 +191,47 @@ const ContextSelectorDialog: React.FC<ContextSelectorDialogProps> = ({
       setIsLoadingOnlyOffice(false);
     }
   }, [workspaceId]);
+
+  const loadFolderContents = async (folderId: string) => {
+    if (folderDocs[folderId]) return; // ya cargado
+    try {
+      const params: Record<string, string> = { parent_id: folderId };
+      const docParams: Record<string, string> = { folder_id: folderId };
+      if (workspaceId) {
+        params.workspace_id = workspaceId;
+        docParams.workspace_id = workspaceId;
+      }
+      const [subfoldersRes, docsRes] = await Promise.all([
+        apiClient.get('/api/onlyoffice/folders', { params }),
+        apiClient.get('/api/onlyoffice/list', { params: docParams }),
+      ]);
+      const subfolders: OnlyOfficeFolder[] = (subfoldersRes.data || []).map((f: any) => ({
+        id: f.id, name: f.name, parent_id: f.parent_id, isLoaded: false, documents: [], children: [],
+      }));
+      const docs: OnlyOfficeDocument[] = (docsRes.data || []).map((d: any) => ({
+        id: String(d.id), filename: d.filename || 'Documento sin nombre', folder_id: d.folder_id || null,
+      }));
+      // Agregar subcarpetas al árbol
+      if (subfolders.length > 0) {
+        setOnlyOfficeFolders(prev => {
+          const addChildren = (folders: OnlyOfficeFolder[]): OnlyOfficeFolder[] =>
+            folders.map(f => f.id === folderId ? { ...f, children: subfolders, isLoaded: true } : { ...f, children: addChildren(f.children || []) });
+          return addChildren(prev);
+        });
+      }
+      setFolderDocs(prev => ({ ...prev, [folderId]: docs }));
+    } catch (e) {
+      console.error('Error loading folder contents:', e);
+    }
+  };
+
+  const toggleFolderExpansion = async (folderId: string) => {
+    const isNowExpanded = !expandedFolders[folderId];
+    setExpandedFolders(prev => ({ ...prev, [folderId]: isNowExpanded }));
+    if (isNowExpanded) {
+      await loadFolderContents(folderId);
+    }
+  };
 
   const fetchGithubRepositories = useCallback(async () => {
     setIsLoadingGithub(true);
@@ -606,42 +678,93 @@ const ContextSelectorDialog: React.FC<ContextSelectorDialogProps> = ({
                 <div className="flex items-center justify-center p-4">
                   <Loader2 className="h-4 w-4 animate-spin" />
                 </div>
-              ) : onlyOfficeDocuments.length === 0 ? (
+              ) : onlyOfficeFolders.length === 0 && onlyOfficeRootDocs.length === 0 ? (
                 <div className="p-4 text-center text-sm text-muted-foreground">
                   No se encontraron documentos de OnlyOffice.
                 </div>
               ) : (
-                <div className="p-2 space-y-1">
-                  {onlyOfficeDocuments.map((doc) => {
-                    const contextItem: SelectedContextItem = {
-                      id: doc.id,
-                      type: 'document',
-                      name: `[OnlyOffice] ${doc.filename}`,
-                      title: doc.filename,
-                      topic: 'OnlyOffice',
+                <div className="p-2">
+                  {/* Árbol de carpetas recursivo */}
+                  {(() => {
+                    const renderDoc = (doc: OnlyOfficeDocument) => {
+                      const contextItem: SelectedContextItem = {
+                        id: doc.id,
+                        type: 'document',
+                        name: `[OnlyOffice] ${doc.filename}`,
+                        title: doc.filename,
+                        topic: 'OnlyOffice',
+                      };
+                      return (
+                        <div
+                          key={`oo-doc-${doc.id}`}
+                          className="flex items-center space-x-2 p-2 hover:bg-muted rounded-md cursor-pointer"
+                          onClick={() => handleSelectItem(contextItem)}
+                        >
+                          <Checkbox
+                            id={`onlyoffice-${doc.id}`}
+                            checked={isItemSelected(contextItem)}
+                            onCheckedChange={() => handleSelectItem(contextItem)}
+                          />
+                          <label
+                            htmlFor={`onlyoffice-${doc.id}`}
+                            className="text-sm font-medium leading-none flex-1 cursor-pointer flex items-center gap-2"
+                          >
+                            <FileIcon className="h-4 w-4 text-blue-500 flex-shrink-0" />
+                            <span className="truncate">{doc.filename}</span>
+                          </label>
+                        </div>
+                      );
+                    };
+
+                    const renderFolder = (folder: OnlyOfficeFolder, depth = 0) => {
+                      const isOpen = !!expandedFolders[folder.id];
+                      const docsInFolder = folderDocs[folder.id] || [];
+                      const subfolders = folder.children || [];
+                      return (
+                        <Collapsible
+                          key={`oo-folder-${folder.id}`}
+                          open={isOpen}
+                          onOpenChange={() => toggleFolderExpansion(folder.id)}
+                        >
+                          <CollapsibleTrigger asChild>
+                            <div
+                              className="flex items-center space-x-2 p-2 hover:bg-muted rounded-md cursor-pointer"
+                              style={{ paddingLeft: `${8 + depth * 16}px` }}
+                            >
+                              <ChevronRight className={`h-4 w-4 transition-transform flex-shrink-0 ${isOpen ? 'rotate-90' : ''}`} />
+                              <Folder className="h-4 w-4 text-primary flex-shrink-0" />
+                              <span className="text-sm font-medium flex-1 truncate">{folder.name}</span>
+                            </div>
+                          </CollapsibleTrigger>
+                          <CollapsibleContent>
+                            <div className="ml-4 border-l border-border">
+                              {subfolders.map(sub => renderFolder(sub, depth + 1))}
+                              {docsInFolder.map(doc => (
+                                <div key={`oo-fdoc-${doc.id}`} style={{ paddingLeft: `${depth * 8}px` }}>
+                                  {renderDoc(doc)}
+                                </div>
+                              ))}
+                              {isOpen && subfolders.length === 0 && docsInFolder.length === 0 && (
+                                <p className="text-xs text-muted-foreground px-4 py-2 italic">Carpeta vacía</p>
+                              )}
+                            </div>
+                          </CollapsibleContent>
+                        </Collapsible>
+                      );
                     };
 
                     return (
-                      <div
-                        key={doc.id}
-                        className="flex items-center space-x-2 p-2 hover:bg-muted rounded-md cursor-pointer"
-                        onClick={() => handleSelectItem(contextItem)}
-                      >
-                        <Checkbox
-                          id={`onlyoffice-${doc.id}`}
-                          checked={isItemSelected(contextItem)}
-                          onCheckedChange={() => handleSelectItem(contextItem)}
-                        />
-                        <label
-                          htmlFor={`onlyoffice-${doc.id}`}
-                          className="text-sm font-medium leading-none flex-1 cursor-pointer"
-                        >
-                          <div className="font-medium truncate">{doc.filename}</div>
-                          <div className="text-xs text-muted-foreground">OnlyOffice</div>
-                        </label>
-                      </div>
+                      <>
+                        {onlyOfficeFolders.map(f => renderFolder(f))}
+                        {/* Documentos en raíz (sin carpeta) */}
+                        {onlyOfficeRootDocs.length > 0 && (
+                          <div className="mt-1">
+                            {onlyOfficeRootDocs.map(doc => renderDoc(doc))}
+                          </div>
+                        )}
+                      </>
                     );
-                  })}
+                  })()}
                 </div>
               )}
             </ScrollArea>

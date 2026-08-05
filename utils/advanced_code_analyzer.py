@@ -79,6 +79,25 @@ class RecommendationItem(BaseModel):
     application: str = Field(description="Dónde o cómo se debe aplicar en el proyecto.")
     implementation: str = Field(description="Ejemplo breve o guía de implementación (puede ser un fragmento de código).")
 
+# Modelos ligeros por módulo para optimizar el prompt JSON y evitar errores 413
+class StructureAndSummaryResult(BaseModel):
+    executive_summary: str = ""
+    code_structure: List[CodeStructureItem] = []
+    design_patterns: List[DesignPatternItem] = []
+    dependencies: List[DependencyItem] = []
+
+class SecurityAndIssuesResult(BaseModel):
+    security_analysis: List[SecurityAnalysisItem] = []
+    potential_issues: List[PotentialIssueItem] = []
+
+class PerformanceAndRefactoringResult(BaseModel):
+    performance_analysis: List[PerformanceAnalysisItem] = []
+    refactoring_opportunities: List[RefactoringOpportunityItem] = []
+
+class DocumentationAndRecommendationsResult(BaseModel):
+    documentation_health: List[DocumentationHealthItem] = []
+    recommendations: List[RecommendationItem] = []
+
 class CodeAnalysisResult(BaseModel):
     """Modelo de datos para el resultado del análisis de un fragmento de código."""
     executive_summary: str = ""
@@ -95,7 +114,8 @@ class CodeAnalysisResult(BaseModel):
 async def analyze_code_content(
     code_content: str, 
     account_id: Optional[str] = None, 
-    analysis_type: str = "all"
+    analysis_type: str = "all",
+    llm: Optional[Any] = None
 ) -> CodeAnalysisResult:
     """Analiza un fragmento de código o contenido de repositorio.
     
@@ -103,17 +123,30 @@ async def analyze_code_content(
         code_content: El contenido del código a analizar.
         account_id: ID de cuenta del usuario.
         analysis_type: Tipo de análisis: 'all', 'security', 'performance', 'refactoring', 'documentation', 'structure'.
+        llm: Instancia de LLM opcional para reutilizar.
     """
     logger.info(f"Iniciando análisis avanzado de código (tipo={analysis_type})...")
+    
+    # Truncamiento seguro del contenido de código (máximo 15,000 caracteres)
+    if code_content:
+        code_content = code_content[:15000]
+
+    # Pre-obtención del LLM si no fue proporcionado
+    if llm is None:
+        if account_id:
+            llm = await get_llm_for_user(account_id, purpose="fast")
+        else:
+            llm = get_fast_llm()
+
     # Si es 'all', ejecutamos análisis modulares en paralelo para mayor velocidad
     if analysis_type == "all":
         logger.info("Ejecutando análisis modular en paralelo para optimizar el tiempo de respuesta...")
         
         tasks = [
-            _analyze_module(code_content, "structure_and_summary", account_id),
-            _analyze_module(code_content, "security_and_issues", account_id),
-            _analyze_module(code_content, "performance_and_refactoring", account_id),
-            _analyze_module(code_content, "documentation_and_recommendations", account_id)
+            _analyze_module(code_content, "structure_and_summary", account_id, llm=llm),
+            _analyze_module(code_content, "security_and_issues", account_id, llm=llm),
+            _analyze_module(code_content, "performance_and_refactoring", account_id, llm=llm),
+            _analyze_module(code_content, "documentation_and_recommendations", account_id, llm=llm)
         ]
         
         try:
@@ -139,12 +172,6 @@ async def analyze_code_content(
 
     # MODO ORIGINAL (Secuencial / Específico)
     try:
-        # Obtener el LLM configurado por el usuario si tenemos account_id
-        if account_id:
-            llm = await get_llm_for_user(account_id, purpose="fast")
-        else:
-            llm = get_fast_llm()
-
         if not llm:
             raise ValueError("No se puede realizar el análisis de código sin un modelo de lenguaje.")
         
@@ -190,11 +217,33 @@ async def analyze_code_content(
             potential_issues=[{"issue": "Error de análisis", "description": str(e)}]
         )
 
-async def _analyze_module(code_content: str, module_type: str, account_id: Optional[str]) -> CodeAnalysisResult:
+async def _analyze_module(
+    code_content: str, 
+    module_type: str, 
+    account_id: Optional[str] = None,
+    llm: Optional[Any] = None
+) -> CodeAnalysisResult:
     """Helper para análisis modular paralelo."""
     try:
-        llm = await get_llm_for_user(account_id, purpose="fast") if account_id else get_fast_llm()
-        
+        # Truncamiento seguro de código por módulo
+        truncated_code = code_content[:12000] if code_content else ""
+
+        if llm is None:
+            llm = await get_llm_for_user(account_id, purpose="fast") if account_id else get_fast_llm()
+
+        if not llm:
+            return CodeAnalysisResult()
+
+        target_pydantic_cls = CodeAnalysisResult
+        if module_type == "structure_and_summary":
+            target_pydantic_cls = StructureAndSummaryResult
+        elif module_type == "security_and_issues":
+            target_pydantic_cls = SecurityAndIssuesResult
+        elif module_type == "performance_and_refactoring":
+            target_pydantic_cls = PerformanceAndRefactoringResult
+        elif module_type == "documentation_and_recommendations":
+            target_pydantic_cls = DocumentationAndRecommendationsResult
+
         sections = ""
         if "structure" in module_type:
             sections = "- executive_summary, - code_structure, - design_patterns, - dependencies"
@@ -215,7 +264,7 @@ async def _analyze_module(code_content: str, module_type: str, account_id: Optio
         else:
             module_instructions += " Deja las llaves no deseadas o irrelevantes vacías (ej: listas vacías [])."
 
-        parser = JsonOutputParser(pydantic_object=CodeAnalysisResult)
+        parser = JsonOutputParser(pydantic_object=target_pydantic_cls)
         format_instructions = parser.get_format_instructions()
 
         prompt = ChatPromptTemplate.from_template(
@@ -228,16 +277,27 @@ async def _analyze_module(code_content: str, module_type: str, account_id: Optio
         res = await chain.ainvoke({
             "module_instructions": module_instructions,
             "format_instructions": format_instructions,
-            "code_content": code_content
+            "code_content": truncated_code
         })
         
-        # Filtramos solo lo que viene en el diccionario y creamos la instancia
+        final_data = {field: "" if field == "executive_summary" else [] for field in CodeAnalysisResult.model_fields}
         if isinstance(res, dict):
-            final_data = {field: res.get(field, "" if field == "executive_summary" else []) for field in CodeAnalysisResult.model_fields}
+            for k, v in res.items():
+                if k in final_data:
+                    final_data[k] = v
             final_data["executive_summary"] = _normalize_executive_summary(final_data["executive_summary"])
             return CodeAnalysisResult(**final_data)
+        elif isinstance(res, BaseModel):
+            data_dict = res.model_dump() if hasattr(res, 'model_dump') else res.dict()
+            for k, v in data_dict.items():
+                if k in final_data:
+                    final_data[k] = v
+            final_data["executive_summary"] = _normalize_executive_summary(final_data["executive_summary"])
+            return CodeAnalysisResult(**final_data)
+
         return CodeAnalysisResult()
     except Exception as e:
         logger.error(f"Error en _analyze_module ({module_type}): {e}", exc_info=True)
         return CodeAnalysisResult()
+
 

@@ -30,9 +30,15 @@ import {
   FolderOpen,
   Settings,
   Bot,
-  FileText
+  FileText,
+  Users,
+  Globe
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { CircuitBrainLogo } from "@/components/CircuitBrainLogo";
+import { PillarsDiagram } from "@/components/PillarsDiagram";
+import { MemoryArchitectureDiagram } from "@/components/MemoryArchitectureDiagram";
+import { PublicSectorDiagram } from "@/components/PublicSectorDiagram";
 
 export default function PresentacionPage() {
   const [activeStep, setActiveStep] = useState(0);
@@ -581,74 +587,69 @@ services:
   return (
     <div className="flex flex-col gap-24 items-center w-full max-w-6xl mx-auto px-4 md:px-0">
       
-      {/* 1. HERO SECTION (FOCUSED ON CLIENT VALUE & EMOTION) */}
-      <section className="relative w-full flex flex-col items-center text-center gap-6 pt-12">
-        {/* Centered Large Logo */}
+      {/* 1. HERO SECTION (KOGNITO AI LABS ESTÉTICA) */}
+      <section className="relative w-full flex flex-col items-center text-center gap-6 pt-10 pb-6">
+        {/* Centered Large Official Logo */}
         <motion.div
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.7 }}
-          className="relative w-36 h-36 md:w-44 md:h-44 mb-2 select-none pointer-events-none drop-shadow-[0_0_30px_rgba(6,182,212,0.15)] dark:drop-shadow-[0_0_40px_rgba(6,182,212,0.25)]"
-        >
-          <Image
-            src="/logo-simple.png"
-            alt="KognitoAI Logo"
-            fill
-            className="object-contain"
-            priority
-          />
-        </motion.div>
-
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
+          initial={{ opacity: 0, scale: 0.8 }}
           animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.5 }}
-          className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-600 dark:text-cyan-400 text-xs font-extrabold uppercase tracking-widest mb-2 hover:bg-cyan-500/15 transition-colors cursor-default"
+          transition={{ duration: 0.7 }}
+          className="flex flex-col items-center gap-3 mb-2"
         >
-          <Sparkles className="w-3.5 h-3.5" />
-          Tu Conocimiento Corporativo, Seguro y Activo
+          <CircuitBrainLogo size={140} />
+          <span className="text-xs font-black tracking-[0.35em] text-slate-300 uppercase">
+            KOGNITO <span className="text-cyan-400">AI LABS</span>
+          </span>
         </motion.div>
 
+        {/* Main Headline */}
         <motion.h1
           initial={{ opacity: 0, y: 15 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1, duration: 0.6 }}
-          className="text-4xl md:text-6xl font-extrabold tracking-tight leading-[1.1] text-foreground max-w-4xl"
+          className="text-4xl sm:text-5xl md:text-6xl font-black tracking-tight leading-[1.1] text-white max-w-4xl"
         >
-          Construye el <span className="text-gradient">Exocerebro Digital</span> de tu empresa
+          Ayúdanos a construir la <span className="text-cyan-400">IA</span> que <span className="bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-400 bg-clip-text text-transparent">realmente</span> <span className="text-cyan-300">necesitamos.</span>
         </motion.h1>
 
-        <motion.p
-          initial={{ opacity: 0, y: 15 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2, duration: 0.6 }}
-          className="text-muted-foreground text-base md:text-lg max-w-3xl leading-relaxed mt-2"
-        >
-          Centraliza PDFs, minutas, chats y notas en una base de conocimientos privada. 
-          Un compañero inteligente que razona contigo, se integra con tus herramientas diarias (como Telegram) 
-          y opera con soberanía de datos total.
-        </motion.p>
+        {/* Neon horizontal line with glowing central point */}
+        <div className="w-full max-w-md h-[1px] bg-gradient-to-r from-transparent via-cyan-500/60 to-transparent relative my-3">
+          <div className="absolute left-1/2 -top-1 -translate-x-1/2 w-2.5 h-2.5 rounded-full bg-cyan-400 shadow-[0_0_12px_#00f0ff]" />
+        </div>
 
-        {/* CTA Buttons */}
+        {/* Pill CTA Button (Se Beta Tester) */}
         <motion.div
           initial={{ opacity: 0, y: 15 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.3, duration: 0.6 }}
-          className="flex flex-col sm:flex-row items-center gap-4 mt-6 w-full justify-center"
+          className="flex flex-col items-center gap-4 mt-2"
         >
-          <Link href="/presentacion/contacto" className="w-full sm:w-auto">
-            <Button className="w-full sm:w-auto rounded-full text-base font-bold h-12 px-8 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white shadow-lg shadow-cyan-500/10 hover:shadow-xl hover:shadow-cyan-500/20 hover:scale-[1.02] transition-all">
-              Solicitar Demo Gratuita
-              <ArrowRight className="w-4 h-4 ml-2" />
-            </Button>
+          <Link href="/beta">
+            <button className="rounded-full px-8 py-4 bg-slate-950 border border-purple-500/70 hover:border-cyan-400 text-white font-bold text-base tracking-wide shadow-[0_0_25px_rgba(168,85,247,0.3)] hover:shadow-[0_0_35px_rgba(6,182,212,0.5)] transition-all flex items-center gap-3 group">
+              <span className="w-8 h-8 rounded-full bg-purple-500/20 flex items-center justify-center border border-purple-400/50 text-cyan-400 group-hover:scale-110 transition-transform">
+                <Users size={16} />
+              </span>
+              <span>Se <span className="text-purple-400 group-hover:text-cyan-300">Beta Tester</span></span>
+              <ArrowRight size={18} className="text-cyan-400 group-hover:translate-x-1 transition-transform" />
+            </button>
           </Link>
-          <Link href="/presentacion/casos" className="w-full sm:w-auto">
-            <Button variant="outline" className="w-full sm:w-auto rounded-full text-base font-bold h-12 px-8 border-border/60 hover:bg-muted/50 hover:scale-[1.02] transition-all">
-              Ver Historias Reales
-            </Button>
-          </Link>
+
+          {/* Domain Footer Badge */}
+          <div className="flex items-center gap-2 text-cyan-400/90 text-xs font-mono tracking-widest mt-3">
+            <Globe size={14} />
+            <span>kognitoai.cloud</span>
+          </div>
         </motion.div>
       </section>
+
+      {/* 2. DIAGRAMA DE LOS 3 PILARES Y MÓDULOS */}
+      <PillarsDiagram />
+
+      {/* 3. ARQUITECTURA DE MEMORIA HÍBRIDA EN 3 NIVELES */}
+      <MemoryArchitectureDiagram />
+
+      {/* 4. CASO DE USO: INSTITUCIONES PÚBLICAS */}
+      <PublicSectorDiagram />
 
       {/* 2. THE DILEMMA SECTION: EMPATHY FOR THE END CLIENT */}
       <section className="w-full grid grid-cols-1 md:grid-cols-2 gap-8 items-stretch border-t border-b border-border/20 py-16 my-4">
@@ -1086,7 +1087,7 @@ services:
             Explora más sobre Kognito
           </h2>
           <p className="text-muted-foreground text-sm max-w-xl">
-            Profundiza en la tecnología, casos de estudio o agenda una demostración con nuestro equipo.
+            Profundiza en la tecnología, casos de estudio o súmate como beta tester con nuestro equipo.
           </p>
         </div>
 
@@ -1159,15 +1160,15 @@ services:
                   <Sparkles className="w-6 h-6 text-pink-500" />
                 </div>
                 <h3 className="text-lg font-bold text-foreground mb-2 group-hover:text-primary transition-colors flex items-center gap-1.5">
-                  Solicita una Demo
+                  Hazte Beta Tester
                   <ArrowUpRight className="w-4 h-4 opacity-50 group-hover:opacity-100 transition-opacity" />
                 </h3>
                 <p className="text-muted-foreground text-xs leading-relaxed">
-                  Conéctate directamente con nuestros ingenieros para realizar una integración personalizada con tus sistemas actuales.
+                  Únete a la fase de pruebas y conéctate con nuestro equipo para explorar la plataforma en primicia.
                 </p>
               </div>
               <span className="text-[10px] font-bold text-pink-500 mt-6 block uppercase tracking-wider">
-                Agendar Sesión
+                Unirse al Programa
               </span>
             </div>
           </Link>

@@ -54,11 +54,18 @@ const GraphVisualization = dynamic(() => import('@/components/KnowledgeGraph/Gra
   ),
 });
 
-const normalizeGraphId = (value: string | number | null | undefined) => {
+const normalizeGraphId = (value: any): string | null => {
   if (value === null || value === undefined) {
     return null;
   }
-
+  if (typeof value === 'object') {
+    if (value.id !== undefined && value.id !== null) {
+      return String(value.id);
+    }
+    if (value.name !== undefined && value.name !== null) {
+      return String(value.name);
+    }
+  }
   return String(value);
 };
 
@@ -127,7 +134,10 @@ const useKnowledgeGraph = (maxNodes: number, maxHops: number, selectedDataset: s
         return isConnectedToFocusedNode;
       });
 
-      filteredNodes = originalGraphData.nodes.filter(node => visibleNodeIds.has(String(node.id)));
+      filteredNodes = originalGraphData.nodes.filter(node => {
+        const nodeId = normalizeGraphId(node.id);
+        return nodeId !== null && visibleNodeIds.has(nodeId);
+      });
       filteredEdges = visibleEdges;
 
       console.log("🔍 Después del filtro por nodo enfocado:", filteredNodes.length, "nodos y", filteredEdges.length, "edges");
@@ -409,7 +419,8 @@ const useKnowledgeGraph = (maxNodes: number, maxHops: number, selectedDataset: s
   }, []);
 
   const updateFilteredNodeId = useCallback((nodeId: string | number | null) => {
-    setFocusedNodeId(normalizeGraphId(nodeId));
+    const normalized = normalizeGraphId(nodeId);
+    setFocusedNodeId(prev => (prev === normalized ? null : normalized));
   }, []);
 
   return {

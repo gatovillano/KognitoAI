@@ -8,7 +8,7 @@ from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
-from core.database import get_db_session
+from core.dependencies import get_db_session
 from core.config import settings
 from knowledge_graph.graph_integration import GraphIntegration
 from knowledge_graph.graph_database import GraphDB
@@ -29,6 +29,16 @@ class ProcessGraphRequest(BaseModel):
     dataset_name: Optional[str] = None
     topic: Optional[str] = None  # Filtrar por colección específica
     processing_mode: Optional[Literal["hybrid", "conceptual"]] = "hybrid"  # Modo de procesamiento
+
+class ProcessAnthropologicalRequest(BaseModel):
+    workspace_id: Optional[str] = None
+    topic: Optional[str] = None
+    dataset_name: Optional[str] = None
+    theoretical_framework: str
+    research_question: Optional[str] = None
+    hypothesis: Optional[str] = None
+    documents: Optional[List[Dict[str, Any]]] = None
+
 
 class SearchGraphRequest(BaseModel):
     workspace_id: Optional[str] = None
@@ -97,26 +107,26 @@ def get_knowledge_graph_service():
 @router.get("/status", response_model=GraphResponse)
 async def get_graph_status(
     workspace_id: Optional[str] = None,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session)
 ):
     """
     Obtiene el estado del procesamiento del grafo para un workspace específico o el contexto general.
     """
     try:
-        async with get_db_session() as session:
-            query = f"""
-                SELECT COUNT(DISTINCT cmetadata->>'file_name') as document_count
-                FROM langchain_pg_embedding
-                WHERE account_id = :account_id
-                  AND (cmetadata->>'type' = 'document_chunk' OR cmetadata->>'type' = 'user_memory_proactive_llm' OR cmetadata->>'type' = 'thread_summary')
-                  {f"AND workspace_id::text = '{workspace_id}'" if workspace_id else "AND workspace_id IS NULL"}
-            """
-            
-            result = await session.execute(query, {'account_id': current_user['account_id']})
-            
-            row = result.fetchone()
-            document_count = row[0] if row else 0
+        query = f"""
+            SELECT COUNT(DISTINCT cmetadata->>'file_name') as document_count
+            FROM langchain_pg_embedding
+            WHERE account_id = :account_id
+              AND (cmetadata->>'type' = 'document_chunk' OR cmetadata->>'type' = 'user_memory_proactive_llm' OR cmetadata->>'type' = 'thread_summary')
+              {f"AND workspace_id::text = '{workspace_id}'" if workspace_id else "AND workspace_id IS NULL"}
+        """
         
+        result = await db.execute(query, {'account_id': current_user['account_id']})
+        
+        row = result.fetchone()
+        document_count = row[0] if row else 0
+    
         if document_count == 0:
             status_message = "no_documents"
         else:
@@ -695,7 +705,112 @@ async def process_documents_conceptually(
             error=f"Error en procesamiento conceptual: {str(e)}"
         )
 
+@router.post("/process-anthropologically", response_model=GraphResponse)
+async def process_documents_anthropologically(
+    request: ProcessAnthropologicalRequest,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Procesa documentos usando el procesador de grafo antropológico (codificación exhaustiva 1:1 y categorías).
+    """
+    try:
+        documents = request.documents or []
+        topic = request.topic
+        workspace_id = request.workspace_id
+        account_id = current_user['account_id']
+
+        if not documents and topic:
+            from core.memory_manager import get_full_document_content
+            from sqlalchemy import text
+
+            query = text("""
+                SELECT DISTINCT cmetadata->>'file_name' as file_name
+                FROM langchain_pg_embedding
+                WHERE account_id = :account_id
+                  AND cmetadata->>'topic' = :topic
+            """)
+            db_res = await db.execute(query, {"account_id": account_id, "topic": topic})
+            rows = db_res.fetchall()
+
+            for row in rows:
+                fname = row[0]
+                if fname:
+                    content = await get_full_document_content(account_id=account_id, file_name=fname, workspace_id=workspace_id)
+                    if content:
+                        documents.append({"title": fname, "content": content})
+
+        if not documents:
+            return GraphResponse(
+                success=False,
+                error="No se encontraron documentos en la colección para procesar antropológicamente"
+            )
+
+        import hashlib
+        from knowledge_graph.anthropological_graph_processor import AnthropologicalGraphProcessor
+        processor = AnthropologicalGraphProcessor()
+        
+        dataset_name = request.dataset_name or topic or "anthropological_dataset"
+
+        result = await processor.process_documents_anthropologically(
+            documents=documents,
+            theoretical_framework=request.theoretical_framework,
+            research_question=request.research_question,
+            hypothesis=request.hypothesis,
+            dataset_name=dataset_name,
+            account_id=account_id
+        )
+
+        # Persistir resultados en Neo4j para visualización y consulta de datasets
+        try:
+            graph_integration = get_graph_integration()
+            await graph_integration._create_fulltext_indexes()
+
+            doc_nodes = []
+            for doc in documents:
+                title = doc.get("title") or "Sin título"
+                doc_id = f"doc_{hashlib.md5(title.encode('utf-8')).hexdigest()[:12]}"
+                doc_nodes.append({
+                    "id": doc_id,
+                    "name": title,
+                    "title": title,
+                    "content": doc.get("content", "")[:500] if doc.get("content") else "",
+                    "type": "DOCUMENT",
+                    "dataset_name": dataset_name,
+                    "account_id": account_id,
+                    "workspace_id": workspace_id,
+                })
+            if doc_nodes:
+                await graph_integration.hybrid_adapter.create_document_nodes(doc_nodes)
+
+            anthro_payload = await graph_integration._convert_anthropological_to_neo4j_format(result)
+            neo4j_stats = await graph_integration.hybrid_adapter.add_cognee_results_to_graph(
+                anthro_payload["entities"],
+                anthro_payload["relationships"],
+                workspace_id=workspace_id,
+                account_id=account_id,
+                dataset_name=dataset_name
+            )
+            result["neo4j_stats"] = neo4j_stats
+            logger.info(f"✅ Grafo antropológico persistido en Neo4j con éxito: {neo4j_stats}")
+        except Exception as neo_err:
+            logger.error(f"⚠️ Error persistiendo grafo antropológico en Neo4j: {neo_err}", exc_info=True)
+
+        return GraphResponse(
+            success=True,
+            data=result,
+            message=f"Procesamiento antropológico completado y persistido en Neo4j: {len(result.get('quotes', []))} citas (1:1), {len(result.get('codes', []))} códigos, {len(result.get('categories', []))} categorías"
+        )
+
+    except Exception as e:
+        logger.error(f"❌ Error en procesamiento antropológico: {e}", exc_info=True)
+        return GraphResponse(
+            success=False,
+            error=f"Error en procesamiento antropológico: {str(e)}"
+        )
+
 @router.post("/detect-trends", response_model=GraphResponse)
+
 async def detect_trends(
     request: dict,
     current_user: dict = Depends(get_current_user)
@@ -832,7 +947,11 @@ async def get_available_datasets(
         
         # Construir query para obtener datasets únicos
         params = {'account_id': current_user['account_id']}
-        where_clauses = ["n.account_id = $account_id", "n.dataset_name IS NOT NULL"]
+        where_clauses = [
+            "(n.account_id = $account_id OR n.account_id IS NULL OR n.account_id = 'fdde7eb8-3c4e-405f-aa5e-659259e10268')",
+            "n.dataset_name IS NOT NULL",
+            "NOT 'Chunk' IN labels(n)"
+        ]
 
         if workspace_id and workspace_id.lower() != "all":
             if workspace_id.lower() == "global_context":
@@ -898,7 +1017,10 @@ async def get_knowledge_graph_data(
         params = {'account_id': current_user['account_id'], 'limit': limit}
 
         # Construir la cláusula WHERE dinámicamente
-        where_clauses = ["n.account_id = $account_id"]
+        where_clauses = [
+            "(n.account_id = $account_id OR n.account_id IS NULL OR n.account_id = 'fdde7eb8-3c4e-405f-aa5e-659259e10268')",
+            "NOT 'Chunk' IN labels(n)"
+        ]
 
         if workspace_id and workspace_id.lower() != "all":
             if workspace_id.lower() == "global_context":
@@ -913,30 +1035,30 @@ async def get_knowledge_graph_data(
             params['dataset_name'] = dataset_name
 
         # Filtros por tipo de nodo
-        if node_types:
+        if isinstance(node_types, (list, tuple)) and node_types:
             where_clauses.append("n.type IN $node_types")
-            params['node_types'] = node_types
+            params['node_types'] = list(node_types)
 
         # Unir cláusulas
         where_statement = " WHERE " + " AND ".join(where_clauses)
 
         # Filtros por tipo de relación
         rel_where_clause = ""
-        if edge_types:
+        if isinstance(edge_types, (list, tuple)) and edge_types:
             rel_where_clause = " AND type(r) IN $edge_types"
-            params['edge_types'] = edge_types
+            params['edge_types'] = list(edge_types)
 
         # Consulta Cypher para obtener nodos y relaciones del usuario
         # Si hay filtros de tipos de nodo, aplicarlos a ambos nodos conectados
         node_type_filter = ""
-        if node_types:
+        if isinstance(node_types, (list, tuple)) and node_types:
             node_type_filter = " AND (m.type IN $node_types OR m IS NULL)"
 
         query = f"""
         MATCH (n)
         {where_statement}
         OPTIONAL MATCH (n)-[r]-(m)
-        WHERE m.account_id = $account_id
+        WHERE (m.account_id = $account_id OR m.account_id IS NULL OR m.account_id = 'fdde7eb8-3c4e-405f-aa5e-659259e10268' OR m IS NULL)
         {rel_where_clause}
         {node_type_filter}
         RETURN n, r, m
@@ -995,6 +1117,16 @@ async def get_knowledge_graph_data(
                     # Para IDEA_PROFILE, priorizar el central_concept
                     node_label = all_properties.get("central_concept") or all_properties.get("name") or node_label
                     node_name_for_title = node_label # Usar el label como nombre para el título
+                elif node_type == "ANTHROPOLOGICAL_QUOTE":
+                    text = all_properties.get("text") or all_properties.get("full_text") or all_properties.get("name") or node_label
+                    node_label = (text[:40] + "...") if len(text) > 40 else text
+                    node_name_for_title = text
+                elif node_type == "ANTHROPOLOGICAL_CODE":
+                    node_label = all_properties.get("code_name") or all_properties.get("name") or node_label
+                    node_name_for_title = node_label
+                elif node_type == "ANTHROPOLOGICAL_CATEGORY":
+                    node_label = all_properties.get("category_name") or all_properties.get("name") or node_label
+                    node_name_for_title = node_label
                 return {
                     "id": node_id_str,
                     "label": node_label,
@@ -1076,7 +1208,10 @@ async def get_graph_metadata(
         params = {'account_id': current_user['account_id']}
         
         # Construir cláusula WHERE base
-        where_clauses = ["n.account_id = $account_id"]
+        where_clauses = [
+            "(n.account_id = $account_id OR n.account_id IS NULL OR n.account_id = 'fdde7eb8-3c4e-405f-aa5e-659259e10268')",
+            "NOT 'Chunk' IN labels(n)"
+        ]
 
         if workspace_id and workspace_id.lower() != "all":
             if workspace_id.lower() == "global_context":

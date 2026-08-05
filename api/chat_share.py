@@ -15,7 +15,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.database import ChatThread, SharedConversationLink, get_db_session
+from core.dependencies import get_db_session
+from core.database import ChatThread, SharedConversationLink
 from core.config import settings
 from utils.security import get_current_account_id
 from utils.postgres_chat_history import get_postgres_history_connection_url

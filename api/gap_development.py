@@ -12,7 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import update
 
-from core.database import GapDevelopmentAnalysis, get_db_session, Account, AnalysisTask
+from core.dependencies import get_db_session
+from core.database import Account
 from core.agents.deep_researcher import compile_deep_researcher_graph
 from core.agents.gap_developer import compile_gap_developer_graph
 from core.llm_manager import get_main_llm

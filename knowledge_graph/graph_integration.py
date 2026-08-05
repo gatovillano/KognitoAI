@@ -106,20 +106,20 @@ class GraphIntegration:
         try:
             logger.info("🔍 Verificando y creando índices full-text en Neo4j...")
 
-            # Índice para nodos (CONCEPTUAL_QUOTE y IDEA_PROFILE)
+            # Índice para nodos (CONCEPTUAL_QUOTE, IDEA_PROFILE, ANTHROPOLOGICAL_*)
             node_index_query = """
             CREATE FULLTEXT INDEX node_fulltext_index IF NOT EXISTS
-            FOR (n:CONCEPTUAL_QUOTE | IDEA_PROFILE | DOCUMENT | MEMORY | USER_MEMORY | USER_MEMORY_PROACTIVE_LLM | AGENT_MEMORY | CHAT_SUMMARY | GENERAL_MEMORY | PERSON | ORGANIZATION | EVENT | LOCATION | PRODUCT | TOPIC | CHAT_MESSAGE)
-            ON EACH [n.name, n.title, n.description, n.concept, n.full_text, n.category, n.summary, n.content]
+            FOR (n:CONCEPTUAL_QUOTE | IDEA_PROFILE | ANTHROPOLOGICAL_QUOTE | ANTHROPOLOGICAL_CODE | ANTHROPOLOGICAL_CATEGORY | DOCUMENT | MEMORY | USER_MEMORY | USER_MEMORY_PROACTIVE_LLM | AGENT_MEMORY | CHAT_SUMMARY | GENERAL_MEMORY | PERSON | ORGANIZATION | EVENT | LOCATION | PRODUCT | TOPIC | CHAT_MESSAGE)
+            ON EACH [n.name, n.title, n.description, n.concept, n.full_text, n.category, n.summary, n.content, n.code_explanation, n.theoretical_connection]
             """
             await self.graph_db.execute_query(node_index_query)
             logger.info("✅ Índice 'node_fulltext_index' para nodos asegurado.")
 
-            # Índice para relaciones de memorias y documentos
+            # Índice para relaciones de memorias, documentos y antropológicas
             relationship_index_query = """
             CREATE FULLTEXT INDEX relationship_fulltext_index IF NOT EXISTS
-            FOR ()-[r:THEMATIC_RELATIONSHIP | CONTAINS_IDEA | MEMORY_RELATED | MEMORY_COMPLEMENTA | MEMORY_REFUERZA | MEMORY_CONTRADICE | MEMORY_CAUSA | MEMORY_CONSECUENCIA | MEMORY_SECUENCIA | MEMORY_CONTEXTO | MEMORY_PREGUNTA_RESPUESTA | MEMORY_MISMO_TEMA | MEMORY_MENTIONS]-()
-            ON EACH [r.description, r.full_text]
+            FOR ()-[r:THEMATIC_RELATIONSHIP | CONTAINS_IDEA | EXPRESSES_CODE | BELONGS_TO_CATEGORY | MEMORY_RELATED | MEMORY_COMPLEMENTA | MEMORY_REFUERZA | MEMORY_CONTRADICE | MEMORY_CAUSA | MEMORY_CONSECUENCIA | MEMORY_SECUENCIA | MEMORY_CONTEXTO | MEMORY_PREGUNTA_RESPUESTA | MEMORY_MISMO_TEMA | MEMORY_MENTIONS]-()
+            ON EACH [r.description, r.full_text, r.explanation]
             """
             await self.graph_db.execute_query(relationship_index_query)
             logger.info("✅ Índice 'relationship_fulltext_index' para relaciones asegurado.")
@@ -1130,6 +1130,122 @@ class GraphIntegration:
             "relationships": relationships,
             "profiles": profiles,
             "profile_relationships": profile_relationships
+        }
+
+    async def _convert_anthropological_to_neo4j_format(self, anthropological_result: Dict[str, Any]) -> Dict[str, Any]:
+        """Convierte el resultado del procesador antropológico al formato compatible con Neo4j."""
+        dataset_name = anthropological_result.get("metadata", {}).get("dataset_name", "anthropological_study")
+
+        entities = []
+        relationships = []
+
+        # 1. Citas etnográficas/antropológicas
+        quotes = anthropological_result.get("quotes", [])
+        for quote in quotes:
+            entity = {
+                "id": quote["id"],
+                "type": "ANTHROPOLOGICAL_QUOTE",
+                "dataset_name": dataset_name,
+                "properties": {
+                    "name": quote["text"][:100] + "..." if len(quote["text"]) > 100 else quote["text"],
+                    "cognee_id": quote["id"],
+                    "description": quote.get("code_explanation", ""),
+                    "full_text": quote["text"],
+                    "code": quote.get("code", ""),
+                    "analytical_level": quote.get("analytical_level", "emic"),
+                    "relevance": quote.get("relevance", "alta"),
+                    "source_document": quote.get("source_document", ""),
+                    "extraction_method": "anthropological_coder",
+                    "created_at": datetime.now().isoformat()
+                }
+            }
+            entities.append(entity)
+
+            # Crear relación con el documento de origen si existe
+            if quote.get("source_document_id"):
+                rel = {
+                    "id": f"rel_doc_quote_{quote['source_document_id']}_{quote['id']}",
+                    "source_id": quote["source_document_id"],
+                    "target_id": quote["id"],
+                    "source_type": "DOCUMENT",
+                    "target_type": "ANTHROPOLOGICAL_QUOTE",
+                    "type": "MENTIONS",
+                    "relationship_type": "MENTIONS",
+                    "dataset_name": dataset_name,
+                    "confidence": 1.0,
+                    "cognee_id": f"rel_doc_quote_{quote['source_document_id']}_{quote['id']}",
+                    "properties": {
+                        "description": f"Documento menciona la cita antropológica",
+                        "extraction_method": "anthropological_coder",
+                        "created_at": datetime.now().isoformat()
+                    }
+                }
+                relationships.append(rel)
+
+        # 2. Códigos etnográficos/antropológicos
+        codes = anthropological_result.get("codes", [])
+        for code in codes:
+            entity = {
+                "id": code["id"],
+                "type": "ANTHROPOLOGICAL_CODE",
+                "dataset_name": dataset_name,
+                "properties": {
+                    "name": code["code_name"],
+                    "code_name": code["code_name"],
+                    "cognee_id": code["id"],
+                    "description": code.get("description", ""),
+                    "quotes_count": code.get("quotes_count", 0),
+                    "extraction_method": "anthropological_coder",
+                    "created_at": datetime.now().isoformat()
+                }
+            }
+            entities.append(entity)
+
+        # 3. Categorías superiores antropológicas
+        categories = anthropological_result.get("categories", [])
+        for cat in categories:
+            entity = {
+                "id": cat["id"],
+                "type": "ANTHROPOLOGICAL_CATEGORY",
+                "dataset_name": dataset_name,
+                "properties": {
+                    "name": cat["category_name"],
+                    "category_name": cat["category_name"],
+                    "cognee_id": cat["id"],
+                    "description": cat.get("description", ""),
+                    "theoretical_connection": cat.get("theoretical_connection", ""),
+                    "extraction_method": "anthropological_coder",
+                    "created_at": datetime.now().isoformat()
+                }
+            }
+            entities.append(entity)
+
+        # 4. Relaciones (EXPRESSES_CODE, BELONGS_TO_CATEGORY)
+        raw_rels = anthropological_result.get("relationships", [])
+        for rel in raw_rels:
+            relationship = {
+                "id": rel.get("id", ""),
+                "source_id": rel.get("source_id", ""),
+                "target_id": rel.get("target_id", ""),
+                "source_type": rel.get("source_type", "Entity"),
+                "target_type": rel.get("target_type", "Entity"),
+                "type": rel.get("type", "RELATED_TO"),
+                "relationship_type": rel.get("type", "RELATED_TO"),
+                "dataset_name": dataset_name,
+                "confidence": 1.0,
+                "cognee_id": rel.get("id", ""),
+                "properties": {
+                    "description": rel.get("description", ""),
+                    "explanation": rel.get("explanation", ""),
+                    "extraction_method": "anthropological_coder",
+                    "created_at": datetime.now().isoformat()
+                }
+            }
+            relationships.append(relationship)
+
+        return {
+            "entities": entities,
+            "relationships": relationships
         }
 
     def _format_advanced_search_results(self, raw_results: List[Dict[str, Any]], return_type: str, dataset_name: str = "default") -> List[Dict[str, Any]]:

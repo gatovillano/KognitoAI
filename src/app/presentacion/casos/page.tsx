@@ -392,7 +392,7 @@ export default function CasosPage() {
       <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mt-8 border-t border-border/40 pt-12">
         <Link href="/presentacion/contacto" className="w-full sm:w-auto">
           <Button className="w-full sm:w-auto rounded-full bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white font-bold h-12 px-8">
-            Solicitar una Demo
+            Hazte Beta Tester
             <ArrowRight className="w-4 h-4 ml-2" />
           </Button>
         </Link>

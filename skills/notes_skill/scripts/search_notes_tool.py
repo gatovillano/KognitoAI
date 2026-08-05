@@ -67,8 +67,9 @@ class SearchNotesTool(BaseTool):
                     AND is_agent_message = false
                 """)
                 
+                query_embedding_str = str(query_embedding) if not isinstance(query_embedding, str) else query_embedding
                 params = {
-                    "query_embedding": query_embedding,
+                    "query_embedding": query_embedding_str,
                     "account_id": account_id,
                 }
 

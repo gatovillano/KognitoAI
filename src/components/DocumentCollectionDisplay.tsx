@@ -3,7 +3,7 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Upload, History, Loader2, ScanSearch, FileText, FolderKanban, Text, Sparkles, ChevronDown, MoreHorizontal, Network, Brain, ArrowLeft, Info, FolderPlus, Zap } from 'lucide-react';
+import { Upload, History, Loader2, ScanSearch, FileText, FolderKanban, Text, Sparkles, ChevronDown, MoreHorizontal, Network, Brain, ArrowLeft, Info, FolderPlus, Zap, BookMarked } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { useWebSocketContext } from '@/contexts/WebSocketContext';
@@ -30,6 +30,7 @@ import UploadProgressIndicator, { UploadTask } from '@/components/UploadProgress
 import { ShareDocumentDialog } from '@/app/(dashboard)/rag/share-document-dialog';
 import { CustomAnalysisDialog } from '@/app/(dashboard)/rag/custom-analysis-dialog';
 import { DatasetNameDialog } from '@/app/(dashboard)/rag/dataset-name-dialog';
+import { AnthropologicalProcessDialog } from '@/app/(dashboard)/rag/anthropological-process-dialog';
 import { MoveToCollectionDialog } from '@/app/(dashboard)/rag/move-to-collection-dialog';
 import { CollectionSearch } from '@/components/CollectionSearch';
 import { CollectionDisplay, Collection } from '@/components/CollectionDisplay';
@@ -122,6 +123,7 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
   const [isProcessingKnowledgeGraph, setIsProcessingKnowledgeGraph] = useState(false);
 
   // Estado para el diálogo de configuración de grafo
+  const [isAnthroDialogOpen, setIsAnthroDialogOpen] = useState(false);
   const [isDatasetDialogOpen, setIsDatasetDialogOpen] = useState(false);
   const [processingTopic, setProcessingTopic] = useState<string | null>(null);
   const [processingWorkspaceId, setProcessingWorkspaceId] = useState<string | null>(null);
@@ -602,6 +604,74 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
     setIsDatasetDialogOpen(true);
   };
 
+  // --- Handler para Procesar Grafo Antropológico (1:N) ---
+  const handleProcessAnthropologicalGraph = () => {
+    if (isProcessingKnowledgeGraph) {
+      toast.info("Ya hay un procesamiento de grafo en progreso.");
+      return;
+    }
+    setProcessingTopic(topic);
+    setProcessingWorkspaceId(workspaceId || null);
+    setIsAnthroDialogOpen(true);
+  };
+  const handleConfirmAnthropologicalProcess = async (data: {
+    theoreticalFramework: string;
+    researchQuestion: string;
+    hypothesis: string;
+    datasetName: string;
+    topic?: string;
+    workspaceId?: string;
+  }) => {
+    setIsProcessingKnowledgeGraph(true);
+    const toastId = toast.loading(`Iniciando procesamiento antropológico para "${data.datasetName}"...`);
+
+    const tempTaskId = `temp-${Date.now()}`;
+    try {
+      addAnalysisTask({
+        task_id: tempTaskId,
+        phase: 'initializing',
+        message: 'Iniciando codificación etnográfica...',
+        progress_percent: 0,
+        is_complete: false,
+        has_error: false,
+        processing_mode: 'anthropological',
+        topic: data.topic || undefined
+      });
+
+      const payload = {
+        dataset_name: data.datasetName,
+        theoretical_framework: data.theoreticalFramework,
+        research_question: data.researchQuestion,
+        hypothesis: data.hypothesis,
+        topic: data.topic || undefined,
+        workspace_id: data.workspaceId || undefined,
+      };
+
+      const response = await apiClient.post('/api/knowledge-graph/process-anthropologically', payload);
+      if (response.data?.success) {
+        const counts = response.data?.data || {};
+        toast.success(
+          `Procesamiento antropológico completado: ${counts.quotes?.length || 0} citas, ${counts.codes?.length || 0} códigos, ${counts.categories?.length || 0} categorías`,
+          { id: toastId }
+        );
+        updateAnalysisTask(tempTaskId, {
+          phase: 'completed',
+          is_complete: true,
+          progress_percent: 100,
+          message: 'Procesamiento antropológico completado'
+        });
+      } else {
+        throw new Error(response.data?.error || 'Respuesta sin éxito del servidor');
+      }
+    } catch (error) {
+      console.error(error);
+      toast.error("Error al iniciar el procesamiento antropológico.", { id: toastId });
+      removeUploadTask(tempTaskId);
+    } finally {
+      setIsProcessingKnowledgeGraph(false);
+    }
+  };
+
   const handleConfirmProcessGraph = async (datasetName: string, mode: 'hybrid' | 'conceptual') => {
     setIsProcessingKnowledgeGraph(true);
     const toastId = toast.loading(
@@ -798,6 +868,10 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
               <DropdownMenuItem onClick={handleProcessKnowledgeGraph} disabled={isProcessingKnowledgeGraph}>
                 <Network className="mr-2 h-4 w-4" />
                 <span>Crear Grafo</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleProcessAnthropologicalGraph} disabled={isProcessingKnowledgeGraph}>
+                <BookMarked className="mr-2 h-4 w-4 text-indigo-500" />
+                <span className="font-medium text-indigo-600 dark:text-indigo-400">Grafo Antropológico (1:N)</span>
               </DropdownMenuItem>
               <DropdownMenuItem onClick={handleKnowledgeGraphAnalysis} disabled={!!docPollingId || !!collectionPollingId}>
                 <Brain className="mr-2 h-4 w-4" />
@@ -1163,6 +1237,14 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
         isOpen={isDatasetDialogOpen}
         onOpenChange={setIsDatasetDialogOpen}
         onConfirm={handleConfirmProcessGraph}
+        defaultTopic={processingTopic}
+        workspaceId={processingWorkspaceId || undefined}
+      />
+
+      <AnthropologicalProcessDialog
+        isOpen={isAnthroDialogOpen}
+        onOpenChange={setIsAnthroDialogOpen}
+        onConfirm={handleConfirmAnthropologicalProcess}
         defaultTopic={processingTopic}
         workspaceId={processingWorkspaceId || undefined}
       />

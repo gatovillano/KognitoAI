@@ -8,7 +8,8 @@ from datetime import datetime
 
 from sqlalchemy import func
 
-from core.database import get_db_session, ContactProfile, Account, Nota, AgendaEvent, Task, UserDocumentTopic, Album, Photo, FormResponse
+from core.dependencies import get_db_session
+from core.database import ContactProfile, Account, Nota, AgendaEvent, Task, UserDocumentTopic, Album, Photo, FormResponse
 from api.auth import get_current_account_id
 from sqlalchemy.orm import selectinload
 

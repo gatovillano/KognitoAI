@@ -401,7 +401,7 @@ flake8 .
 
 ### **Canales de Comunicación**
 - 💬 **Telegram**: [@KognitoAIBot](https://t.me/KognitoAIBot) - Bot oficial para pruebas
-- 📧 **Email**: [contacto@kognito.ai](mailto:contacto@kognito.ai)
+- 📧 **Email**: [contacto@kognitoai.cloud](mailto:contacto@kognitoai.cloud)
 - 🐛 **Issues**: GitHub Issues para bugs y features
 - 📖 **Wiki**: Documentación colaborativa
 

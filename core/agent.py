@@ -2667,6 +2667,7 @@ async def tool_node(state: AgentState):
         query_based_tools = {
             "web_search": "query",
             "deep_research": "query",
+            "anthropological_deep_research": "query",
             "knowledge_graph": "natural_language_query",
             "comprehensive_web_analyzer": "query",
             "add_note": "content",
