@@ -21,7 +21,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
-from core.database import get_db_session, Account
+from core.dependencies import get_db_session
+from core.database import Account
 from core.api_key_model import ApiKey
 from core.llm_manager import get_main_llm, get_llm_for_user, get_fast_llm, get_fallback_llm
 from core.prompts import KAI_SYSTEM_PROMPT

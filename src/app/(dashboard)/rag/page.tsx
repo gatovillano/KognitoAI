@@ -29,12 +29,13 @@ import { ShareCollectionDialog } from './share-collection-dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { CollectionDisplay, StaticCollectionCard, Collection } from '@/components/CollectionDisplay';
 import { GenericCard } from '@/components/GenericCard'; // Import CollectionDisplay and StaticCollectionCard
-import { DatasetNameDialog } from './dataset-name-dialog';
-import { TablesView } from './tables-view';
 import { AnalysisResults } from '@/components/AnalysisResults';
 import { GraphView } from '@/components/GraphView';
 import { ContextualChat } from '@/components/ContextualChat';
 import { AnalysisTask as GraphTask } from '@/contexts/TaskContext';
+import { TablesView } from './tables-view';
+import { DatasetNameDialog } from './dataset-name-dialog';
+import { AnthropologicalProcessDialog } from './anthropological-process-dialog';
 
 // Using unified Collection interface imported above
 
@@ -85,6 +86,7 @@ export default function RagCollectionsPage() {
   const [processingWorkspaceId, setProcessingWorkspaceId] = useState<string | null>(null);
 
   const { registerMessageHandler } = useWebSocketContext();
+  const [isAnthroDialogOpen, setIsAnthroDialogOpen] = useState(false);
 
   const fetchCollections = useCallback(async () => {
     setIsLoading(true);
@@ -308,17 +310,18 @@ export default function RagCollectionsPage() {
     setIsDatasetDialogOpen(true);
   };
 
-  const handleConfirmProcessGraph = async (datasetName: string, mode: 'hybrid' | 'conceptual') => {
+
+
+  const handleConfirmProcessGraph = async (datasetName: string, mode: 'hybrid' | 'conceptual' | 'anthropological') => {
     setIsProcessingKnowledgeGraph(true);
     const toastId = toast.loading(
       processingTopic
-        ? `Procesando grafo de conocimiento para "${processingTopic}" (Modo: ${mode === 'hybrid' ? 'Estándar' : 'Conceptual'})...`
-        : `Procesando grafo global (Modo: ${mode === 'hybrid' ? 'Estándar' : 'Conceptual'})...`
+        ? `Procesando grafo de conocimiento para "${processingTopic}" (Modo: ${mode === 'hybrid' ? 'Estándar' : mode === 'conceptual' ? 'Conceptual' : 'Antropológico'})...`
+        : `Procesando grafo global (Modo: ${mode === 'hybrid' ? 'Estándar' : mode === 'conceptual' ? 'Conceptual' : 'Antropológico'})...`
     );
 
     const tempTaskId = `temp-${Date.now()}`;
     try {
-      // Inicializar tarea localmente para feedback inmediato
       addAnalysisTask({
         task_id: tempTaskId,
         phase: 'initializing',
@@ -330,20 +333,27 @@ export default function RagCollectionsPage() {
         topic: processingTopic || undefined
       });
 
-      // Determinar qué endpoint usar basado en el modo
-      if (mode === 'conceptual') {
+      if (mode === 'anthropological') {
+        // El modo antropológico requiere marco teórico/pregunta/hipótesis.
+        // Sin esos campos, redirigimos al usuario al diálogo especializado
+        // en lugar de llamar al endpoint que los exige como obligatorios.
+        toast.error(
+          "El procesamiento antropológico requiere marco teórico, pregunta e hipótesis. Usa el diálogo 'Grafo Antropológico (1:N)' desde la colección.",
+          { id: toastId }
+        );
+        removeAnalysisTask(tempTaskId);
+        return;
+      } else if (mode === 'conceptual') {
         // Modo Conceptual: Usar la herramienta de Procesamiento Conceptual
         const payload = {
           tool_name: "conceptual_processing",
           action: "process_documents",
-          dataset_name: datasetName,  // Nombre para organizar el grafo
-          topic: processingTopic || undefined,  // Nombre de la colección para filtrar documentos
+          dataset_name: datasetName,
+          topic: processingTopic || undefined,
           documents: [],
-          workspace_id: processingWorkspaceId || undefined  // Workspace de la colección específica
+          workspace_id: processingWorkspaceId || undefined
         };
         const response = await apiClient.post('/api/tools/run', payload);
-
-        // Actualizar el ID de la tarea temporal con el real si viene en la respuesta
         if (response.data?.task_id) {
           updateAnalysisTask(tempTaskId, { task_id: response.data.task_id });
         }
@@ -352,24 +362,18 @@ export default function RagCollectionsPage() {
         const response = await apiClient.post('/api/knowledge-graph/process-knowledge-graph-optimized', {
           workspace_id: processingWorkspaceId || undefined,
           dataset_name: datasetName,
-          topic: processingTopic || undefined,  // Filtrar por colección específica
+          topic: processingTopic || undefined,
           force_reprocess: true
         });
-
-        // Actualizar el ID de la tarea temporal con el real
         if (response.data?.task_id) {
           updateAnalysisTask(tempTaskId, { task_id: response.data.task_id });
         }
       }
 
-      toast.success(
-        `¡Creación de grafo iniciada!`,
-        { id: toastId }
-      );
+      toast.success(`¡Procesamiento de grafo iniciado!`, { id: toastId });
     } catch (error) {
       console.error(error);
       toast.error("Error al iniciar el procesamiento del grafo.", { id: toastId });
-      // Limpiar tareas temporales en caso de error
       removeAnalysisTask(tempTaskId);
     } finally {
       setIsProcessingKnowledgeGraph(false);
@@ -377,11 +381,76 @@ export default function RagCollectionsPage() {
       setProcessingWorkspaceId(null);
     }
   };
+  const handleConfirmAnthropologicalProcess = async (data: {
+    theoreticalFramework: string;
+    researchQuestion: string;
+    hypothesis: string;
+    datasetName: string;
+    topic?: string;
+    workspaceId?: string;
+  }) => {
+    setIsProcessingKnowledgeGraph(true);
+    const toastId = toast.loading(`Iniciando procesamiento antropológico para "${data.datasetName}"...`);
+
+    const tempTaskId = `temp-${Date.now()}`;
+    try {
+      addAnalysisTask({
+        task_id: tempTaskId,
+        phase: 'initializing',
+        message: 'Iniciando codificación etnográfica...',
+        progress_percent: 0,
+        is_complete: false,
+        has_error: false,
+        processing_mode: 'anthropological',
+        topic: data.topic || undefined
+      });
+
+      const payload = {
+        dataset_name: data.datasetName,
+        theoretical_framework: data.theoreticalFramework,
+        research_question: data.researchQuestion,
+        hypothesis: data.hypothesis,
+        topic: data.topic || undefined,
+        workspace_id: data.workspaceId || undefined,
+      };
+
+      const response = await apiClient.post('/api/knowledge-graph/process-anthropologically', payload);
+      if (response.data?.success) {
+        const counts = response.data?.data || {};
+        toast.success(
+          `Procesamiento antropológico completado: ${counts.quotes?.length || 0} citas, ${counts.codes?.length || 0} códigos, ${counts.categories?.length || 0} categorías`,
+          { id: toastId }
+        );
+        updateAnalysisTask(tempTaskId, {
+          phase: 'completed',
+          is_complete: true,
+          progress_percent: 100,
+          message: 'Procesamiento antropológico completado'
+        });
+      } else {
+        throw new Error(response.data?.error || 'Respuesta sin éxito del servidor');
+      }
+    } catch (error) {
+      console.error(error);
+      toast.error("Error al iniciar el procesamiento antropológico.", { id: toastId });
+      removeAnalysisTask(tempTaskId);
+    } finally {
+      setIsProcessingKnowledgeGraph(false);
+    }
+  };
+
+  const handleProcessAnthropologicalGraph = (topic: string, workspaceId?: string) => {
+    setIsAnthroDialogOpen(true);
+    setProcessingTopic(topic || null);
+    setProcessingWorkspaceId(workspaceId || null);
+  };
 
   const handleChatCollection = (collection: Collection) => {
     setSelectedCollectionForChat(collection);
     setIsChatOpen(true);
   };
+
+
 
   const renderContent = () => {
     if (isLoading) {
@@ -423,25 +492,26 @@ export default function RagCollectionsPage() {
             description="Ver y gestionar todos tus repositorios de GitHub."
             className="bg-muted"
           />
-          {collections.filter((collection) => !collection.parent_id).map((collection) => (
-            <motion.div key={collection.topic} className="relative h-full" layout initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.8 }} transition={{ type: "spring", stiffness: 300, damping: 30 }}>
-              <CollectionDisplay
-                collection={collection}
-                onAnalyze={handleAnalyzeCollection}
-                onDelete={openDeleteDialog}
-                onEdit={handleEditCollection}
-                onShare={handleShareCollection}
-                onChat={handleChatCollection}
-                onProcessKnowledgeGraph={handleProcessKnowledgeGraph}
-                isAnalyzing={
-                  (collectionPollingId !== null && analyzingTopic === collection.topic) || 
-                  activeTasks.some(t => t.topic === collection.topic && !t.is_complete && !t.has_error && !t.task_id.includes('temp'))
-                }
-                type="list" // Specify type as 'list'
-              />
-              {/* La etiqueta del workspace ahora se renderiza dentro de CollectionDisplay */}
-            </motion.div>
-          ))}
+            {collections.filter((collection) => !collection.parent_id).map((collection) => (
+              <motion.div key={collection.topic} className="relative h-full" layout initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.8 }} transition={{ type: "spring", stiffness: 300, damping: 30 }}>
+                <CollectionDisplay
+                  collection={collection}
+                  onAnalyze={handleAnalyzeCollection}
+                  onDelete={openDeleteDialog}
+                  onEdit={handleEditCollection}
+                  onShare={handleShareCollection}
+                  onChat={handleChatCollection}
+                  onProcessKnowledgeGraph={handleProcessKnowledgeGraph}
+                   onProcessAnthropologicalGraph={handleProcessAnthropologicalGraph}
+                  isAnalyzing={
+                    (collectionPollingId !== null && analyzingTopic === collection.topic) || 
+                    activeTasks.some(t => t.topic === collection.topic && !t.is_complete && !t.has_error && !t.task_id.includes('temp'))
+                  }
+                  type="list" // Specify type as 'list'
+                />
+                {/* La etiqueta del workspace ahora se renderiza dentro de la CollectionDisplay */}
+              </motion.div>
+            ))}
           {/* Tarjeta para crear nueva colección */}
           <motion.div
             key="create-collection-card"
@@ -534,14 +604,15 @@ export default function RagCollectionsPage() {
                 <Github className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
                 <span className="text-xs sm:text-sm">Añadir Repositorio</span>
               </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => handleProcessKnowledgeGraph()}
-                disabled={isProcessingKnowledgeGraph}
-                className="cursor-pointer"
-              >
-                <Network className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
-                <span className="text-xs sm:text-sm">{isProcessingKnowledgeGraph ? "Procesando Grafos..." : "Crear Grafos de Conocimiento"}</span>
-              </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => handleProcessKnowledgeGraph()}
+                  disabled={isProcessingKnowledgeGraph}
+                  className="cursor-pointer"
+                >
+                  <Network className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                  <span className="text-xs sm:text-sm">{isProcessingKnowledgeGraph ? "Procesando Grafos..." : "Crear Grafos de Conocimiento"}</span>
+                </DropdownMenuItem>
+
               <DropdownMenuItem
                 onClick={handleClearKnowledgeGraph}
                 className="text-red-600 focus:text-red-600 focus:bg-red-50 cursor-pointer"
@@ -679,6 +750,13 @@ export default function RagCollectionsPage() {
         isOpen={isDatasetDialogOpen}
         onOpenChange={setIsDatasetDialogOpen}
         onConfirm={handleConfirmProcessGraph}
+        defaultTopic={processingTopic}
+        workspaceId={collections.length > 0 ? collections[0].workspace_id : undefined}
+      />
+      <AnthropologicalProcessDialog
+        isOpen={isAnthroDialogOpen}
+        onOpenChange={setIsAnthroDialogOpen}
+        onConfirm={handleConfirmAnthropologicalProcess}
         defaultTopic={processingTopic}
         workspaceId={collections.length > 0 ? collections[0].workspace_id : undefined}
       />

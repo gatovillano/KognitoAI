@@ -27,7 +27,7 @@ export default function ContactoPage() {
     organizacion: "",
     email: "",
     mensaje: "",
-    categoria: "demo"
+    categoria: "beta_tester"
   });
   
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -39,7 +39,7 @@ export default function ContactoPage() {
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleFormSubmit = (e: React.FormEvent) => {
+  const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.nombre || !formData.email || !formData.mensaje) {
       toast.error("Por favor completa los campos requeridos.");
@@ -47,16 +47,28 @@ export default function ContactoPage() {
     }
     
     setIsSubmitting(true);
-    // Simular guardado o envío
-    setTimeout(() => {
+    try {
+      const res = await fetch("/api/contacto", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(formData)
+      });
+      if (res.ok) {
+        setSubmitted(true);
+        toast.success("¡Solicitud enviada a contacto@kognitoai.cloud!");
+      } else {
+        toast.error("Hubo un problema enviando el formulario.");
+      }
+    } catch (error) {
+      console.error("Error al enviar formulario:", error);
+      toast.error("Error de conexión al enviar el formulario.");
+    } finally {
       setIsSubmitting(false);
-      setSubmitted(true);
-      toast.success("¡Mensaje enviado exitosamente!");
-    }, 2000);
+    }
   };
 
   const copyEmail = () => {
-    navigator.clipboard.writeText("contacto@kognitoai.com");
+    navigator.clipboard.writeText("contacto@kognitoai.cloud");
     setCopied(true);
     toast.success("Email copiado al portapapeles.");
     setTimeout(() => setCopied(false), 3000);
@@ -80,11 +92,11 @@ export default function ContactoPage() {
               Hablemos de tu proyecto
             </span>
             <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight text-foreground">
-              Contacto y Demostración
+              Hazte Beta Tester
             </h1>
           </div>
           <p className="text-muted-foreground text-sm max-w-md leading-relaxed">
-            Programa una demostración del ecosistema con un ingeniero de software o hablemos de integraciones de infraestructura.
+            Súmate al programa de Beta Testers del ecosistema con nuestro equipo o hablemos de integraciones de infraestructura.
           </p>
         </div>
       </div>
@@ -108,7 +120,7 @@ export default function ContactoPage() {
               </div>
               <div className="flex flex-col">
                 <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Correo Oficial</span>
-                <span className="text-sm font-bold text-foreground group-hover:text-primary transition-colors">contacto@kognitoai.com</span>
+                <span className="text-sm font-bold text-foreground group-hover:text-primary transition-colors">contacto@kognitoai.cloud</span>
               </div>
             </div>
             {copied ? (
@@ -220,7 +232,7 @@ export default function ContactoPage() {
                     onChange={handleInputChange}
                     className="h-11 px-3 rounded-xl bg-card border border-border/40 text-xs focus:ring-primary/20 text-foreground"
                   >
-                    <option value="demo">Demo Personalizada del Exocerebro</option>
+                    <option value="beta_tester">Programa Beta Tester / Exocerebro</option>
                     <option value="alianza">Alianza Estratégica</option>
                     <option value="integracion">Integración Técnica / Self-Hosted</option>
                     <option value="otros">Otros Asuntos</option>

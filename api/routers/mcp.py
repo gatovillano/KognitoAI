@@ -6,7 +6,8 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from core.database import MCPServer, Account, get_db_session
+from core.dependencies import get_db_session
+from core.database import Account
 from utils.security import get_current_active_account
 from core.mcp_manager import mcp_manager
 

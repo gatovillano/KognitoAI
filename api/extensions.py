@@ -59,13 +59,13 @@ AVAILABLE_EXTENSIONS = [
         "requires_db": True
     },
     {
-        "id": "kai_ethno",
-        "name": "KAI Ethno",
+        "id": "anthropological_research",
+        "name": "Investigación Antropológica",
         "category": "Research / AI",
-        "description": "Ecosistema de investigación etnográfica y antropológica aumentada para análisis cualitativo.",
-        "icon": "Brain",
+        "description": "Deep Researcher etnográfico con marco teórico, codificación cualitativa exhaustiva 1:N y grafo antropológico de conocimiento. Reemplaza KAI-Ethno.",
+        "icon": "FlaskConical",
         "requires_db": False,
-        "requires_pip": True
+        "requires_pip": False
     }
 ]
 
@@ -194,19 +194,11 @@ async def install_extension(
                 except Exception as install_err:
                     logger.warning(f"No se pudo ejecutar install.py de KognitoChat: {install_err}")
 
-        elif ext_id == "kai_ethno":
-            # Ejecutar instalación de pip en segundo plano/proceso
-            api_dir = os.path.dirname(os.path.abspath(__file__))
-            project_root = os.path.dirname(api_dir)
-            python_bin = os.path.join(project_root, "venv_host", "bin", "python")
-            req_file = os.path.join(project_root, "skills", "kai_ethno_skill", "requirements.txt")
-            
-            if os.path.exists(req_file) and os.path.exists(python_bin):
-                cmd = [python_bin, "-m", "pip", "install", "-r", req_file]
-                logger.info(f"Instalando dependencias de KAI Ethno: {' '.join(cmd)}")
-                subprocess.run(cmd, check=True)
-            else:
-                logger.warning(f"No se encontró venv o requirements.txt para KAI Ethno. python_bin: {python_bin}, req_file: {req_file}")
+        elif ext_id == "anthropological_research":
+            # Esta extensión ya está integrada en el core de kognito-ai.
+            # No requiere instalación adicional de base de datos ni pip.
+            # El registro en account.installed_extensions es suficiente para activarla.
+            logger.info("Activando extensión Investigación Antropológica (ya integrada en el core)")
 
         # 2. Registrar como instalada en la cuenta
         installed.append(ext_id)

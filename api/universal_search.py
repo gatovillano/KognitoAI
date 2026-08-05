@@ -2,7 +2,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession # Importar AsyncSession
-from core.database import get_db_session # Cambiado de get_db a get_db_session
+from core.dependencies import get_db_session # Cambiado de get_db a get_db_session
 from core.notes_manager import NotesManager # Importar NotesManager
 from core.agenda_manager import get_events_as_dicts # Importar get_events_as_dicts
 from api.chat import get_threads, search_chat_messages # Importar get_threads y la nueva función search_chat_messages

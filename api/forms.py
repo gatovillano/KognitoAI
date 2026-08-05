@@ -14,7 +14,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 
-from core.database import get_db_session, Form as DBForm, ContactProfile as DBContactProfile, Account, FormResponse as DBFormResponse
+from core.dependencies import get_db_session
+from core.database import Form as DBForm, ContactProfile as DBContactProfile, Account, FormResponse as DBFormResponse
 from api.contact_profiles import ContactProfileResponse
 from utils.security import get_current_active_account, get_optional_current_active_account
 

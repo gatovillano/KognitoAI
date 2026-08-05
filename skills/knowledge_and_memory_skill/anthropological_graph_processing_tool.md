@@ -1,0 +1,1 @@
+Procesa documentos con codificación cualitativa etnográfica y antropológica exhaustiva. Realiza extracción casi total de citas, las agrupa bajo códigos atómicos (relación 1:N donde un Código agrupa múltiples Citas) y luego estructura los códigos en categorías analíticas superiores, guiado por un marco teórico, pregunta de investigación e hipótesis opcionales.

@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.database import AnalysisTask, SharedAnalysisLink, get_db_session
+from core.dependencies import get_db_session
 from core.config import settings
 from utils.security import get_current_account_id
 

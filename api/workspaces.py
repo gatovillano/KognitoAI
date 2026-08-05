@@ -21,7 +21,7 @@ from langchain_core.messages import HumanMessage, AIMessage
 from core.config import settings
 from api.tasks import list_tasks as get_tasks_from_api
 from api.agenda import _get_events_logic as get_events_from_api
-from core.dependencies import get_db_session, check_workspace_permission # Importar dependencia centralizada y check_workspace_permission
+from core.dependencies import get_db_session # Importar dependencia centralizada y check_workspace_permission
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)

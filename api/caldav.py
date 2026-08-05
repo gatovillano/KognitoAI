@@ -13,8 +13,8 @@ from sqlalchemy import select, and_, or_
 from sqlalchemy.orm import selectinload
 
 from api.caldav_router import CalDAVRouter
+from core.dependencies import get_db_session
 from core.database import (
-    get_db_session,
     AgendaEvent,
     Account,
     Task,

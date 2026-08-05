@@ -65,12 +65,12 @@ from fastapi.security import OAuth2PasswordBearer
 from passlib.context import CryptContext
 
 from core.config import settings
+from core.dependencies import get_db_session
 from core.database import (
-    get_db_session,
     Account,
     Workspace,
     WorkspacePermission,
-)  # Importar WorkspacePermission
+)
 from sqlalchemy.ext.asyncio import AsyncSession  # Importar AsyncSession
 from sqlalchemy import select, or_, func  # Importar select, or_ y func
 import uuid  # Importar uuid

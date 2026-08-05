@@ -9,29 +9,49 @@ en todos los endpoints de la API, garantizando consistencia y reutilización.
 
 import logging
 from typing import AsyncGenerator, List
-from contextlib import asynccontextmanager
+from fastapi import HTTPException, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from core.database import SessionLocal, WorkspacePermission, Workspace, Account, get_db_session # Importar get_db_session
-from utils.db_session import DBSession
-from fastapi import HTTPException, status # Importar HTTPException y status
-from sqlalchemy import select # Importar select
-import uuid # Importar uuid
+from sqlalchemy import select
+import uuid
 
 logger = logging.getLogger(__name__)
 
-# get_db_session eliminada de aquí porque ahora se importa directamente de core.database
-# para evitar el error de _AsyncGeneratorContextManager y mantener consistencia.
+
+async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
+    """
+    Dependencia de FastAPI para obtener una sesión de base de datos asíncrona.
+    Este es el patrón estándar para la inyección de dependencias de sesiones en FastAPI.
+    
+    YIELD:
+        - AsyncSession: La sesión de base de datos
+    """
+    from core.database import SessionLocal, log_pool_status
+    
+    session = SessionLocal()
+    try:
+        yield session
+        await session.commit()
+    except Exception as e:
+        logger.error(f"Error en la sesión de la base de datos: {e}", exc_info=True)
+        await session.rollback()
+        raise
+    finally:
+        await session.close()
+        await log_pool_status()
+
 
 async def check_workspace_permission(
-    db: AsyncSession,
-    workspace_id: uuid.UUID,
-    account_id: uuid.UUID,
-    required_roles: List[str]
+    db: AsyncSession = Depends(get_db_session),
+    workspace_id: uuid.UUID = None,
+    account_id: uuid.UUID = None,
+    required_roles: List[str] = None
 ):
     """
     Verifica si un usuario tiene el permiso requerido en un workspace.
     Lanza HTTPException 403 si el permiso es denegado.
     """
+    from core.database import WorkspacePermission
+    
     stmt = select(WorkspacePermission).where(
         WorkspacePermission.workspace_id == workspace_id,
         WorkspacePermission.account_id == account_id

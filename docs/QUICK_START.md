@@ -181,7 +181,7 @@ docker stats
 - 📖 **Documentación**: [docs/COGNEE_USAGE_GUIDE.md](docs/COGNEE_USAGE_GUIDE.md)
 - 🐛 **Issues**: GitHub Issues para problemas
 - 💬 **Telegram**: @KognitoAIBot para pruebas
-- 📧 **Email**: contacto@kognito.ai
+- 📧 **Email**: contacto@kognitoai.cloud
 
 ---
 
