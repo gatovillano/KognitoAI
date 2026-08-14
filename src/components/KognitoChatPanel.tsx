@@ -8,6 +8,14 @@ import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+  DropdownMenuLabel,
+} from '@/components/ui/dropdown-menu';
+import {
   MessageSquare,
   Users,
   Bot,
@@ -29,6 +37,9 @@ import {
   UserX,
   Shield,
   X,
+  ChevronDown,
+  ExternalLink,
+  Share2,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -491,51 +502,105 @@ export default function KognitoChatPanel() {
               </div>
             </div>
 
-            {/* Acciones rápidas */}
+            {/* MENÚ DE ACCIONES Y COMPARTIR */}
             <div className="flex items-center gap-2">
-              {/* Botón de Crear Sub-sala */}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowSubroomModal(true)}
-                className="text-xs gap-1.5 border-indigo-300 text-indigo-600 dark:text-indigo-400"
-                title="Crear una sub-sala (breakout room) en esta reunión"
-              >
-                <GitFork className="w-3.5 h-3.5 text-indigo-500" />
-                <span>+ Sub-sala</span>
-              </Button>
-
+              {/* Botón Compartir Rápido */}
               <Button
                 variant="outline"
                 size="sm"
                 onClick={handleCopyHeaderLink}
-                className="text-xs gap-1.5 border-slate-300 dark:border-slate-700"
-                title="Copiar enlace de acceso directo a esta sala"
+                className="text-xs border-indigo-300 dark:border-indigo-700 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 gap-1.5 font-medium"
+                title="Copiar enlace de webinar o sala pública para invitados"
               >
-                {copiedHeaderLink ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-                <span>{copiedHeaderLink ? '¡Enlace Copiado!' : 'Copiar Enlace'}</span>
+                {copiedHeaderLink ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-500" />
+                    <span>¡Enlace copiado!</span>
+                  </>
+                ) : (
+                  <>
+                    <Share2 className="w-3.5 h-3.5 text-indigo-500" />
+                    <span className="hidden sm:inline">Compartir</span>
+                  </>
+                )}
               </Button>
 
-              <Button
-                variant="default"
-                size="sm"
-                onClick={handleStartNativeVideoCall}
-                className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 shadow-sm"
-                title="Iniciar videollamada nativa WebRTC estilo Nextcloud Talk"
-              >
-                <Video className="w-3.5 h-3.5" />
-                Videollamada
-              </Button>
+              {/* Dropdown Acciones Unificado */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="default" size="sm" className="text-xs bg-indigo-600 hover:bg-indigo-700 text-white gap-1.5 font-semibold shadow-sm">
+                    <span>Acciones</span>
+                    <ChevronDown className="w-3.5 h-3.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-60">
+                  <DropdownMenuLabel className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Acciones de Sala</DropdownMenuLabel>
 
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleSummarizeWithKAI}
-                className="text-xs border-indigo-300 dark:border-indigo-700 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/60 gap-1.5"
-              >
-                <Bot className="w-3.5 h-3.5 text-indigo-500" />
-                Resumir con @KAI
-              </Button>
+                  <DropdownMenuItem onClick={handleStartNativeVideoCall} className="gap-2 cursor-pointer py-2 font-medium text-xs">
+                    <Video className="w-4 h-4 text-emerald-500" />
+                    <div>
+                      <p className="font-semibold text-foreground">Iniciar Videollamada</p>
+                      <p className="text-[10px] text-muted-foreground">Transmisión nativa WebRTC</p>
+                    </div>
+                  </DropdownMenuItem>
+
+                  <DropdownMenuItem onClick={handleCopyHeaderLink} className="gap-2 cursor-pointer py-2 font-medium text-xs">
+                    {copiedHeaderLink ? (
+                      <Check className="w-4 h-4 text-emerald-500" />
+                    ) : (
+                      <Share2 className="w-4 h-4 text-indigo-500" />
+                    )}
+                    <div>
+                      <p className="font-semibold text-foreground">Compartir Enlace Webinar</p>
+                      <p className="text-[10px] text-muted-foreground">Link directo para invitados sin login</p>
+                    </div>
+                  </DropdownMenuItem>
+
+                  <DropdownMenuItem
+                    onClick={() => { if (activeRoomId) window.open(`/join/${activeRoomId}`, '_blank'); }}
+                    className="gap-2 cursor-pointer py-2 font-medium text-xs"
+                  >
+                    <ExternalLink className="w-4 h-4 text-purple-500" />
+                    <div>
+                      <p className="font-semibold text-foreground">Abrir Página de Invitados</p>
+                      <p className="text-[10px] text-muted-foreground">Formulario pre-join para webinar</p>
+                    </div>
+                  </DropdownMenuItem>
+
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Colaboración</DropdownMenuLabel>
+
+                  <DropdownMenuItem onClick={() => setShowSubroomModal(true)} className="gap-2 cursor-pointer py-2 font-medium text-xs">
+                    <GitFork className="w-4 h-4 text-indigo-500" />
+                    <div>
+                      <p className="font-semibold text-foreground">Crear Sub-sala</p>
+                      <p className="text-[10px] text-muted-foreground">Grupo derivado de la sesión</p>
+                    </div>
+                  </DropdownMenuItem>
+
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Asistente IA</DropdownMenuLabel>
+
+                  <DropdownMenuItem onClick={handleSummarizeWithKAI} className="gap-2 cursor-pointer py-2 font-medium text-xs">
+                    <Bot className="w-4 h-4 text-indigo-500" />
+                    <div>
+                      <p className="font-semibold text-foreground">Resumir con @KAI</p>
+                      <p className="text-[10px] text-muted-foreground">Sintetizar la conversación</p>
+                    </div>
+                  </DropdownMenuItem>
+
+                  <DropdownMenuItem
+                    onClick={() => setInputText('@KAI ')}
+                    className="gap-2 cursor-pointer py-2 font-medium text-xs"
+                  >
+                    <Sparkles className="w-4 h-4 text-purple-500" />
+                    <div>
+                      <p className="font-semibold text-foreground">Consultar a @KAI</p>
+                      <p className="text-[10px] text-muted-foreground">Mencionar al asistente</p>
+                    </div>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
 
