@@ -158,13 +158,10 @@ async def write_anthropological_brief(state: AnthropologicalAgentState, config: 
 
     account_id = state.get("account_id")
     if account_id:
-        fast_llm = await get_llm_for_user(account_id, purpose="fast")
-        main_llm = await get_llm_for_user(account_id, purpose="main")
+        target_llm = (await get_llm_for_user(account_id, purpose="main")) or (await get_llm_for_user(account_id, purpose="fast"))
     else:
-        fast_llm = get_fast_llm()
-        main_llm = get_main_llm()
+        target_llm = get_main_llm() or get_fast_llm()
 
-    target_llm = fast_llm or main_llm
     if not target_llm:
         raise ValueError("LLM no inicializado.")
 
@@ -232,9 +229,9 @@ async def anthropological_supervisor(state: AnthropologicalAgentState, config: R
 
     account_id = state.get("account_id")
     if account_id:
-        llm = await get_llm_for_user(account_id, purpose="fast")
+        llm = (await get_llm_for_user(account_id, purpose="main")) or (await get_llm_for_user(account_id, purpose="fast"))
     else:
-        llm = get_fast_llm()
+        llm = get_main_llm() or get_fast_llm()
 
     if not llm:
         raise ValueError("LLM no inicializado.")

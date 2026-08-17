@@ -136,3 +136,6 @@ python-pptx>=1.0.0
 odfpy>=1.4.1
 
 # Force cache invalidation 2026-02-13
+
+# === MONITORING ===
+prometheus-client>=0.19.0

@@ -222,39 +222,42 @@ class ConceptualGraphProcessor:
     
     async def _extract_conceptual_quotes(self, documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        Método privado: Extrae citas conceptuales usando múltiples estrategias.
-        
-        Estrategias utilizadas:
-        1. LLM para contenido largo (>500 chars)
-        2. Análisis de oraciones conceptualmente ricas
-        3. Extracción de párrafos con alta densidad conceptual
-        
-        Elimina duplicados y filtra por calidad (confidence >= 0.6).
+        Método privado: Extrae citas conceptuales usando múltiples estrategias de forma concurrente con LLM.
         """
-
         conceptual_quotes = []
 
-        for doc_idx, doc in enumerate(documents):
+        async def _process_single_doc(doc_idx: int, doc: Dict[str, Any]) -> List[Dict[str, Any]]:
             content = doc.get('content', '')
             if not content:
-                continue
+                return []
 
-            logger.debug(f"🔍 Extrayendo conceptos del documento {doc_idx + 1}")
+            doc_quotes = []
 
-            # Estrategia 1: Usar LLM para extraer ideas clave (solo si el contenido es significativo)
-            if self.llm and len(content) > 500:
+            # Estrategia 1: Usar LLM para extraer ideas clave
+            target_llm = self.fast_llm or self.llm
+            if target_llm and len(content) > 100:
                 llm_quotes = await self._extract_quotes_with_llm(content, doc)
-                conceptual_quotes.extend(llm_quotes)
-            elif self.llm:
-                logger.debug("⚠️ Contenido demasiado corto para extracción con LLM, usando métodos alternativos")
+                doc_quotes.extend(llm_quotes)
 
             # Estrategia 2: Extraer oraciones conceptualmente ricas
             sentence_quotes = await self._extract_rich_sentences(content, doc, doc_idx)
-            conceptual_quotes.extend(sentence_quotes)
+            doc_quotes.extend(sentence_quotes)
 
             # Estrategia 3: Extraer párrafos con alta densidad conceptual
             paragraph_quotes = await self._extract_conceptual_paragraphs(content, doc, doc_idx)
-            conceptual_quotes.extend(paragraph_quotes)
+            doc_quotes.extend(paragraph_quotes)
+
+            return doc_quotes
+
+        # Ejecución concurrente con asyncio.gather
+        tasks = [_process_single_doc(idx, doc) for idx, doc in enumerate(documents)]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for res in results:
+            if isinstance(res, list):
+                conceptual_quotes.extend(res)
+            elif isinstance(res, Exception):
+                logger.error(f"❌ Error en extracción concurrente de documento: {res}")
 
         # Eliminar duplicados y filtrar por calidad
         unique_quotes = await self._deduplicate_and_filter_quotes(conceptual_quotes)
@@ -661,20 +664,44 @@ Texto:
                         "similarity": similarity
                     })
         
-        if self.llm:
+        target_llm = self.fast_llm or self.llm
+        if target_llm:
             logger.info(f"🔎 {len(candidate_pairs)} pares de citas candidatas para análisis de relación por LLM.")
 
-            # Procesar candidatos en lotes con LLM
-            BATCH_SIZE = 10 # Agrupar de a 10 pares por llamada al LLM
-            for i in range(0, len(candidate_pairs), BATCH_SIZE):
-                batch = candidate_pairs[i:i + BATCH_SIZE]
-                
-                try:
-                    # Llamar al LLM con el lote
-                    batch_results = await self._create_batch_llm_relationships(batch, quotes)
+            # Procesar candidatos en lotes concurrentes con LLM
+            BATCH_SIZE = 10  # Agrupar de a 10 pares por llamada al LLM
+            batches = [candidate_pairs[i:i + BATCH_SIZE] for i in range(0, len(candidate_pairs), BATCH_SIZE)]
 
-                    # Procesar los resultados del lote
-                    for res in batch_results:
+            async def _process_batch(batch):
+                try:
+                    return await self._create_batch_llm_relationships(batch, quotes)
+                except Exception as e:
+                    logger.error(f"❌ Error en el procesamiento por lotes con LLM, recurriendo a reglas: {e}")
+                    fallback_res = []
+                    for pair in batch:
+                        try:
+                            quote1 = quotes[pair["quote1_idx"]]
+                            quote2 = quotes[pair["quote2_idx"]]
+                            similarity = pair["similarity"]
+                            rel_type = self._determine_thematic_relationship_type(quote1, quote2, similarity)
+                            desc = self._generate_relationship_description(quote1, quote2, rel_type)
+                            conf = self._calculate_relationship_confidence(quote1, quote2, similarity)
+                            fallback_res.append({
+                                "original_pair": pair,
+                                "type": rel_type,
+                                "description": desc,
+                                "confidence": conf
+                            })
+                        except Exception:
+                            pass
+                    return fallback_res
+
+            batch_tasks = [_process_batch(b) for b in batches]
+            batch_results_list = await asyncio.gather(*batch_tasks, return_exceptions=True)
+
+            for b_res in batch_results_list:
+                if isinstance(b_res, list):
+                    for res in b_res:
                         try:
                             original_pair_info = res["original_pair"]
                             quote1_idx = original_pair_info["quote1_idx"]
@@ -687,39 +714,15 @@ Texto:
                                 "id": f"thematic_rel_{len(relationships)}",
                                 "source_id": quote1["id"],
                                 "target_id": quote2["id"],
-                                "type": res.get("type", "RELACION_TEMATICA_LLM"), # Usar tipo del LLM
+                                "type": res.get("type", "RELACION_TEMATICA_LLM"),
                                 "similarity_score": float(similarity),
-                                "description": res.get("description", "Las ideas están temáticamente relacionadas (LLM)."), # Usar descripción del LLM
-                                "confidence": self._calculate_relationship_confidence(
-                                    quote1, quote2, similarity
-                                ),
+                                "description": res.get("description", "Las ideas están temáticamente relacionadas (LLM)."),
+                                "confidence": self._calculate_relationship_confidence(quote1, quote2, similarity),
                                 "extraction_method": "llm_thematic_batch"
                             }
                             relationships.append(relationship)
                         except (KeyError, IndexError) as e:
                             logger.error(f"❌ Error procesando resultado de relación del lote: {e} - Data: {res}")
-                except Exception as e:
-                    logger.error(f"❌ Error en el procesamiento por lotes con LLM, recurriendo a reglas: {e}")
-                    # Fallback a reglas para este lote si el LLM falla
-                    for pair in batch:
-                        quote1 = quotes[pair["quote1_idx"]]
-                        quote2 = quotes[pair["quote2_idx"]]
-                        similarity = pair["similarity"]
-                        
-                        relationship_type = self._determine_thematic_relationship_type(quote1, quote2, similarity)
-                        description = self._generate_relationship_description(quote1, quote2, relationship_type)
-                        confidence = self._calculate_relationship_confidence(quote1, quote2, similarity)
-
-                        relationships.append({
-                            "id": f"thematic_rel_{len(relationships)}",
-                            "source_id": quote1["id"],
-                            "target_id": quote2["id"],
-                            "type": relationship_type,
-                            "similarity_score": similarity,
-                            "description": description,
-                            "confidence": confidence,
-                            "extraction_method": "thematic_similarity_fallback"
-                        })
         else:
             logger.warning("⚠️ LLM no disponible para análisis de relaciones temáticas. Recurriendo a reglas predefinidas.")
             # Crear relaciones basadas en similitud temática usando reglas si el LLM no está disponible

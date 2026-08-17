@@ -70,7 +70,7 @@ const normalizeGraphId = (value: any): string | null => {
 };
 
 // Hook personalizado para el grafo de conocimiento
-const useKnowledgeGraph = (maxNodes: number, maxHops: number, selectedDataset: string, filters: GraphFiltersType, processingMode: 'hybrid' | 'conceptual' = 'hybrid') => {
+const useKnowledgeGraph = (maxNodes: number, maxHops: number, selectedDataset: string, filters: GraphFiltersType, processingMode: 'hybrid' | 'conceptual' = 'conceptual') => {
   const [originalGraphData, setOriginalGraphData] = useState<{ nodes: any[], edges: any[] } | null>(null); // Store full graph
   const [displayGraphData, setDisplayGraphData] = useState<{ nodes: any[], edges: any[] } | null>(null); // Displayed graph
   const [metadata, setMetadata] = useState<GraphMetadata | null>(null);
@@ -80,6 +80,11 @@ const useKnowledgeGraph = (maxNodes: number, maxHops: number, selectedDataset: s
   const [availableDatasets, setAvailableDatasets] = useState<Array<{ name: string, node_count: number }>>([]);
   const [isInitialLoad, setIsInitialLoad] = useState(true); // Track initial load
   const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
+  const [isolationDepth, setIsolationDepth] = useState<1 | 2>(1);
+
+  const toggleIsolationDepth = useCallback(() => {
+    setIsolationDepth(prev => (prev === 1 ? 2 : 1));
+  }, []);
 
   const loadAvailableDatasets = useCallback(async () => {
     try {
@@ -112,26 +117,56 @@ const useKnowledgeGraph = (maxNodes: number, maxHops: number, selectedDataset: s
     }
 
     console.log("🔍 applyClientFilters: Iniciando con", originalGraphData.nodes.length, "nodos y", originalGraphData.edges.length, "edges");
-    console.log("🔍 focusedNodeId:", focusedNodeId);
+    console.log("🔍 focusedNodeId:", focusedNodeId, "isolationDepth:", isolationDepth);
 
     let filteredNodes = [...originalGraphData.nodes];
     let filteredEdges = [...originalGraphData.edges];
 
     if (focusedNodeId !== null) {
-      console.log("🔍 Aplicando filtro por nodo enfocado:", focusedNodeId);
+      console.log("🔍 Aplicando filtro por nodo enfocado:", focusedNodeId, "con nivel:", isolationDepth);
 
       const visibleNodeIds = new Set<string>([focusedNodeId]);
+      const hop1NodeIds = new Set<string>();
+
+      // Recopilar nodos de 1er nivel (vecinos directos)
+      originalGraphData.edges.forEach(edge => {
+        const edgeSource = normalizeGraphId(edge.from ?? edge.source);
+        const edgeTarget = normalizeGraphId(edge.to ?? edge.target);
+        if (edgeSource === focusedNodeId || edgeTarget === focusedNodeId) {
+          if (edgeSource !== null && edgeSource !== focusedNodeId) hop1NodeIds.add(edgeSource);
+          if (edgeTarget !== null && edgeTarget !== focusedNodeId) hop1NodeIds.add(edgeTarget);
+        }
+      });
+
+      hop1NodeIds.forEach(id => visibleNodeIds.add(id));
+
+      if (isolationDepth === 2) {
+        // Recopilar nodos de 2º nivel (conectados a nodos de 1er nivel)
+        originalGraphData.edges.forEach(edge => {
+          const edgeSource = normalizeGraphId(edge.from ?? edge.source);
+          const edgeTarget = normalizeGraphId(edge.to ?? edge.target);
+          if (edgeSource !== null && hop1NodeIds.has(edgeSource)) {
+            if (edgeTarget !== null) visibleNodeIds.add(edgeTarget);
+          }
+          if (edgeTarget !== null && hop1NodeIds.has(edgeTarget)) {
+            if (edgeSource !== null) visibleNodeIds.add(edgeSource);
+          }
+        });
+      }
+
+      // Filtrar aristas visibles
       const visibleEdges = originalGraphData.edges.filter(edge => {
         const edgeSource = normalizeGraphId(edge.from ?? edge.source);
         const edgeTarget = normalizeGraphId(edge.to ?? edge.target);
-        const isConnectedToFocusedNode = edgeSource === focusedNodeId || edgeTarget === focusedNodeId;
+        if (edgeSource === null || edgeTarget === null) return false;
 
-        if (isConnectedToFocusedNode) {
-          if (edgeSource !== null) visibleNodeIds.add(edgeSource);
-          if (edgeTarget !== null) visibleNodeIds.add(edgeTarget);
+        if (!visibleNodeIds.has(edgeSource) || !visibleNodeIds.has(edgeTarget)) return false;
+
+        if (isolationDepth === 1) {
+          return edgeSource === focusedNodeId || edgeTarget === focusedNodeId;
+        } else {
+          return edgeSource === focusedNodeId || edgeTarget === focusedNodeId || hop1NodeIds.has(edgeSource) || hop1NodeIds.has(edgeTarget);
         }
-
-        return isConnectedToFocusedNode;
       });
 
       filteredNodes = originalGraphData.nodes.filter(node => {
@@ -210,7 +245,7 @@ const useKnowledgeGraph = (maxNodes: number, maxHops: number, selectedDataset: s
       }
       return { nodes: filteredNodes, edges: filteredEdges };
     });
-  }, [originalGraphData, filters, focusedNodeId]);
+  }, [originalGraphData, filters, focusedNodeId, isolationDepth]);
 
   const loadGraphData = useCallback(async (forceReload: boolean = false) => {
     // Si no es recarga forzada y ya tenemos datos, aplicar filtros en cliente
@@ -416,11 +451,13 @@ const useKnowledgeGraph = (maxNodes: number, maxHops: number, selectedDataset: s
 
   const resetGraphFilter = useCallback(() => {
     setFocusedNodeId(null);
+    setIsolationDepth(1);
   }, []);
 
   const updateFilteredNodeId = useCallback((nodeId: string | number | null) => {
     const normalized = normalizeGraphId(nodeId);
     setFocusedNodeId(prev => (prev === normalized ? null : normalized));
+    setIsolationDepth(1);
   }, []);
 
   return {
@@ -439,6 +476,8 @@ const useKnowledgeGraph = (maxNodes: number, maxHops: number, selectedDataset: s
     resetGraphFilter, // Expose new function
     updateFilteredNodeId, // Expose toggle function
     focusedNodeId,
+    isolationDepth,
+    toggleIsolationDepth,
     deleteDataset: async (datasetName: string) => {
       try {
         const response = await apiClient.delete(`/api/knowledge-graph/datasets/${encodeURIComponent(datasetName)}`);
@@ -466,7 +505,7 @@ export function GraphView() {
   const [maxNodes, setMaxNodes] = useState(100);
   const [maxHops, setMaxHops] = useState(2);
   const [selectedDataset, setSelectedDataset] = useState('all');
-  const [processingMode, setProcessingMode] = useState<'hybrid' | 'conceptual'>('hybrid');
+  const [processingMode, setProcessingMode] = useState<'hybrid' | 'conceptual'>('conceptual');
   const [filters, setFilters] = useState<GraphFiltersType>({
     nodeTypes: [],
     edgeTypes: [],
@@ -519,6 +558,8 @@ export function GraphView() {
     resetGraphFilter, // Get new function from hook
     updateFilteredNodeId, // Get setter function from hook
     focusedNodeId,
+    isolationDepth,
+    toggleIsolationDepth,
     deleteDataset,
   } = useKnowledgeGraph(maxNodes, maxHops, selectedDataset, filters, processingMode);
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -902,6 +943,8 @@ export function GraphView() {
             onEdgeClick={handleEdgeClick} // Pass the new handler
             savedNodeIds={new Set(savedNodes.map(n => n.id))}
             focusedNodeId={focusedNodeId}
+            isolationDepth={isolationDepth}
+            onToggleIsolationDepth={toggleIsolationDepth}
           />
         </div>
       );

@@ -13,7 +13,7 @@ from sqlalchemy.future import select
 from sqlalchemy import update
 
 from core.dependencies import get_db_session
-from core.database import Account
+from core.database import Account, GapDevelopmentAnalysis, AnalysisTask
 from core.agents.deep_researcher import compile_deep_researcher_graph
 from core.agents.gap_developer import compile_gap_developer_graph
 from core.llm_manager import get_main_llm

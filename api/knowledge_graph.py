@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Query, R
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional, Literal
 import logging
+import asyncio
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
@@ -28,7 +29,7 @@ class ProcessGraphRequest(BaseModel):
     force_reprocess: bool = False
     dataset_name: Optional[str] = None
     topic: Optional[str] = None  # Filtrar por colección específica
-    processing_mode: Optional[Literal["hybrid", "conceptual"]] = "hybrid"  # Modo de procesamiento
+    processing_mode: Optional[Literal["hybrid", "conceptual"]] = "conceptual"  # Modo de procesamiento (LLM-Driven por defecto para mayor rapidez y precisión)
 
 class ProcessAnthropologicalRequest(BaseModel):
     workspace_id: Optional[str] = None
@@ -712,7 +713,8 @@ async def process_documents_anthropologically(
     db: AsyncSession = Depends(get_db_session)
 ):
     """
-    Procesa documentos usando el procesador de grafo antropológico (codificación exhaustiva 1:1 y categorías).
+    Procesa documentos usando el procesador de grafo antropológico.
+    Ejecución NO BLOQUEANTE en segundo plano con seguimiento de task_id.
     """
     try:
         documents = request.documents or []
@@ -747,66 +749,82 @@ async def process_documents_anthropologically(
             )
 
         import hashlib
-        from knowledge_graph.anthropological_graph_processor import AnthropologicalGraphProcessor
-        processor = AnthropologicalGraphProcessor()
-        
+        import uuid
+        from knowledge_graph.progress_tracker import create_progress_tracker, ProcessingPhase
+
         dataset_name = request.dataset_name or topic or "anthropological_dataset"
+        task_id = f"anthro_{uuid.uuid4().hex[:8]}"
 
-        result = await processor.process_documents_anthropologically(
-            documents=documents,
-            theoretical_framework=request.theoretical_framework,
-            research_question=request.research_question,
-            hypothesis=request.hypothesis,
-            dataset_name=dataset_name,
-            account_id=account_id
-        )
+        tracker = create_progress_tracker(task_id=task_id, processing_mode="anthropological", total_phases=4)
+        tracker.update_phase(ProcessingPhase.INITIALIZING, "Iniciando análisis antropológico...", 10)
 
-        # Persistir resultados en Neo4j para visualización y consulta de datasets
-        try:
-            graph_integration = get_graph_integration()
-            await graph_integration._create_fulltext_indexes()
+        async def _async_background_runner():
+            try:
+                tracker.update_phase(ProcessingPhase.CONCEPTUAL_EXTRACTING_QUOTES, "Codificando citas etnográficas en paralelo...", 30)
+                from knowledge_graph.anthropological_graph_processor import AnthropologicalGraphProcessor
+                processor = AnthropologicalGraphProcessor()
 
-            doc_nodes = []
-            for doc in documents:
-                title = doc.get("title") or "Sin título"
-                doc_id = f"doc_{hashlib.md5(title.encode('utf-8')).hexdigest()[:12]}"
-                doc_nodes.append({
-                    "id": doc_id,
-                    "name": title,
-                    "title": title,
-                    "content": doc.get("content", "")[:500] if doc.get("content") else "",
-                    "type": "DOCUMENT",
-                    "dataset_name": dataset_name,
-                    "account_id": account_id,
-                    "workspace_id": workspace_id,
-                })
-            if doc_nodes:
-                await graph_integration.hybrid_adapter.create_document_nodes(doc_nodes)
+                result = await processor.process_documents_anthropologically(
+                    documents=documents,
+                    theoretical_framework=request.theoretical_framework,
+                    research_question=request.research_question,
+                    hypothesis=request.hypothesis,
+                    dataset_name=dataset_name,
+                    account_id=account_id
+                )
 
-            anthro_payload = await graph_integration._convert_anthropological_to_neo4j_format(result)
-            neo4j_stats = await graph_integration.hybrid_adapter.add_cognee_results_to_graph(
-                anthro_payload["entities"],
-                anthro_payload["relationships"],
-                workspace_id=workspace_id,
-                account_id=account_id,
-                dataset_name=dataset_name
-            )
-            result["neo4j_stats"] = neo4j_stats
-            logger.info(f"✅ Grafo antropológico persistido en Neo4j con éxito: {neo4j_stats}")
-        except Exception as neo_err:
-            logger.error(f"⚠️ Error persistiendo grafo antropológico en Neo4j: {neo_err}", exc_info=True)
+                tracker.update_phase(ProcessingPhase.SAVING_TO_NEO4J, "Persistiendo grafo antropológico en Neo4j...", 80)
+
+                # Persistir resultados en Neo4j para visualización
+                graph_integration = get_graph_integration()
+                await graph_integration._create_fulltext_indexes()
+
+                doc_nodes = []
+                for doc in documents:
+                    title = doc.get("title") or "Sin título"
+                    doc_id = f"doc_{hashlib.md5(title.encode('utf-8')).hexdigest()[:12]}"
+                    doc_nodes.append({
+                        "id": doc_id,
+                        "name": title,
+                        "title": title,
+                        "content": doc.get("content", "")[:500] if doc.get("content") else "",
+                        "type": "DOCUMENT",
+                        "dataset_name": dataset_name,
+                        "account_id": account_id,
+                        "workspace_id": workspace_id,
+                    })
+                if doc_nodes:
+                    await graph_integration.hybrid_adapter.create_document_nodes(doc_nodes)
+
+                anthro_payload = await graph_integration._convert_anthropological_to_neo4j_format(result)
+                neo4j_stats = await graph_integration.hybrid_adapter.add_cognee_results_to_graph(
+                    anthro_payload["entities"],
+                    anthro_payload["relationships"],
+                    workspace_id=workspace_id,
+                    account_id=account_id,
+                    dataset_name=dataset_name
+                )
+                result["neo4j_stats"] = neo4j_stats
+                tracker.details["result"] = result
+                tracker.complete(f"Grafo antropológico completado y persistido en Neo4j ({len(result.get('quotes', []))} citas, {len(result.get('codes', []))} códigos, {len(result.get('categories', []))} categorías)")
+            except Exception as bg_err:
+                logger.error(f"❌ Error en background runner antropológico: {bg_err}", exc_info=True)
+                tracker.set_error(str(bg_err))
+
+        # Lanzar la tarea asíncrona inmediatamente en segundo plano
+        asyncio.create_task(_async_background_runner())
 
         return GraphResponse(
             success=True,
-            data=result,
-            message=f"Procesamiento antropológico completado y persistido en Neo4j: {len(result.get('quotes', []))} citas (1:1), {len(result.get('codes', []))} códigos, {len(result.get('categories', []))} categorías"
+            data={"task_id": task_id, "dataset_name": dataset_name, "status": "processing"},
+            message=f"Análisis antropológico iniciado en segundo plano (Task ID: {task_id}). La plataforma permanece totalmente operativa."
         )
 
     except Exception as e:
-        logger.error(f"❌ Error en procesamiento antropológico: {e}", exc_info=True)
+        logger.error(f"❌ Error al iniciar procesamiento antropológico: {e}", exc_info=True)
         return GraphResponse(
             success=False,
-            error=f"Error en procesamiento antropológico: {str(e)}"
+            error=f"Error al iniciar procesamiento antropológico: {str(e)}"
         )
 
 @router.post("/detect-trends", response_model=GraphResponse)

@@ -25,9 +25,13 @@ import struct
 import subprocess
 import termios
 from typing import Any, Optional, Type
+from uuid import UUID
 
 from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from core.database import Account
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +40,33 @@ logger = logging.getLogger(__name__)
 MAX_OUTPUT_CHARS = 32_000   # límite de caracteres de salida al agente
 PTY_READ_CHUNK = 4_096
 DEFAULT_SHELL = os.environ.get("TERMINAL_SHELL", "/bin/bash")
+
+
+# ── Helpers de autorización ───────────────────────────────────────────────────
+async def _get_db_session() -> AsyncSession:
+    """Crea una sesión de base de datos para consultas de autorización."""
+    from core.database import SessionLocal
+    return SessionLocal()
+
+
+async def _check_admin_permission(account_id: Optional[str]) -> bool:
+    """
+    Verifica si la cuenta tiene privilegios de administrador.
+    Retorna True si es admin, False en caso contrario.
+    """
+    if not account_id:
+        return False
+    
+    try:
+        db = await _get_db_session()
+        try:
+            account = await db.get(Account, UUID(account_id))
+            return bool(account and account.is_admin)
+        finally:
+            await db.close()
+    except Exception as e:
+        logger.error(f"Error al verificar permisos de administrador: {e}")
+        return False
 
 
 # ── Helpers PTY ───────────────────────────────────────────────────────────────
@@ -222,6 +253,12 @@ class TerminalExecutor(BaseTool):
         interactive: bool = True,
         **kwargs: Any,
     ) -> str:
+        # Verificar permisos de administrador
+        acct = getattr(self, "account_id", None) or kwargs.get("account_id")
+        is_admin = asyncio.run(_check_admin_permission(acct))
+        if not is_admin:
+            return "❌ Error: Solo los administradores pueden ejecutar comandos de terminal."
+        
         if streaming:
             # --- Modo PTY: salida progresiva acumulada o terminal interactivo ---
             if interactive:
@@ -271,6 +308,12 @@ class TerminalExecutor(BaseTool):
         **kwargs: Any,
     ) -> str:
         """Versión asíncrona: delega a un executor para no bloquear el event loop."""
+        # Verificar permisos de administrador
+        acct = getattr(self, "account_id", None) or kwargs.get("account_id")
+        is_admin = await _check_admin_permission(acct)
+        if not is_admin:
+            return "❌ Error: Solo los administradores pueden ejecutar comandos de terminal."
+        
         if streaming and interactive:
             # Modo interactivo: crear sesión PTY real y devolver placeholder HTML
             try:

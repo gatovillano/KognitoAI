@@ -1147,7 +1147,7 @@ class GraphIntegration:
                 "type": "ANTHROPOLOGICAL_QUOTE",
                 "dataset_name": dataset_name,
                 "properties": {
-                    "name": quote["text"][:100] + "..." if len(quote["text"]) > 100 else quote["text"],
+                    "name": quote["text"],
                     "cognee_id": quote["id"],
                     "description": quote.get("code_explanation", ""),
                     "full_text": quote["text"],

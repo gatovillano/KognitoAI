@@ -20,6 +20,7 @@ import {
   Presentation as PresentationIcon,
   Radio,
   Users,
+  Shield,
   X,
   CheckCircle2,
   Copy,
@@ -54,7 +55,6 @@ const ICE_SERVERS: RTCConfiguration = {
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
-    { urls: 'stun:stun3.l.google.com:19302' },
   ],
 };
 
@@ -77,7 +77,6 @@ export const KognitoNativeVideoCall: React.FC<KognitoNativeVideoCallProps> = ({
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
   const [peerConnected, setPeerConnected] = useState(false);
-  const [copiedLink, setCopiedLink] = useState(false);
   const [remoteUserName, setRemoteUserName] = useState<string>(
     incomingCallData?.callerName || 'Participante'
   );
@@ -91,16 +90,12 @@ export const KognitoNativeVideoCall: React.FC<KognitoNativeVideoCallProps> = ({
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const mainLocalVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
-
   const localStreamRef = useRef<MediaStream | null>(null);
-  const remoteStreamRef = useRef<MediaStream | null>(null);
-
   const pcRef = useRef<RTCPeerConnection | null>(null);
-  const iceCandidatesQueue = useRef<RTCIceCandidateInit[]>([]);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const ringOscillatorRef = useRef<NodeJS.Timeout | null>(null);
 
-  // --- Sincronización continua de referencias de Video en el DOM ---
+  // Asignar dinámicamente las referencias de video cuando los elementos del DOM se montan
   useEffect(() => {
     if (localStreamRef.current) {
       if (localVideoRef.current && localVideoRef.current.srcObject !== localStreamRef.current) {
@@ -110,14 +105,9 @@ export const KognitoNativeVideoCall: React.FC<KognitoNativeVideoCallProps> = ({
         mainLocalVideoRef.current.srcObject = localStreamRef.current;
       }
     }
-    if (remoteStreamRef.current && remoteVideoRef.current) {
-      if (remoteVideoRef.current.srcObject !== remoteStreamRef.current) {
-        remoteVideoRef.current.srcObject = remoteStreamRef.current;
-      }
-    }
   });
 
-  // --- Tono de llamada sintetizado ---
+  // --- Tono de llamada sintetizado con Web Audio API ---
   const startRingtone = useCallback(() => {
     try {
       if (typeof window === 'undefined') return;
@@ -158,49 +148,24 @@ export const KognitoNativeVideoCall: React.FC<KognitoNativeVideoCallProps> = ({
     }
   }, []);
 
-  // --- Agregar pistas locales a RTCPeerConnection ---
-  const attachLocalTracks = useCallback((pc: RTCPeerConnection, stream: MediaStream) => {
-    const existingSenders = pc.getSenders();
-    stream.getTracks().forEach((track) => {
-      const alreadyAdded = existingSenders.some((s) => s.track === track);
-      if (!alreadyAdded) {
-        pc.addTrack(track, stream);
-      }
-    });
-  }, []);
-
-  // --- Procesar cola de candidatos ICE pendientes ---
-  const flushIceCandidates = useCallback(async (pc: RTCPeerConnection) => {
-    while (iceCandidatesQueue.current.length > 0) {
-      const candidate = iceCandidatesQueue.current.shift();
-      if (candidate) {
-        try {
-          await pc.addIceCandidate(new RTCIceCandidate(candidate));
-        } catch (err) {
-          console.error('Error agregando candidato ICE en cola:', err);
-        }
-      }
-    }
-  }, []);
-
-  // --- Crear y Configurar RTCPeerConnection ---
+  // --- Crear Conexión Peer Connection ---
   const createPeerConnection = useCallback(() => {
     if (pcRef.current) return pcRef.current;
 
     const pc = new RTCPeerConnection(ICE_SERVERS);
 
     if (localStreamRef.current) {
-      attachLocalTracks(pc, localStreamRef.current);
+      localStreamRef.current.getTracks().forEach((track) => {
+        if (localStreamRef.current) {
+          pc.addTrack(track, localStreamRef.current);
+        }
+      });
     }
 
     pc.ontrack = (event) => {
-      if (event.streams && event.streams[0]) {
-        remoteStreamRef.current = event.streams[0];
+      if (remoteVideoRef.current && event.streams[0]) {
+        remoteVideoRef.current.srcObject = event.streams[0];
         setPeerConnected(true);
-
-        if (remoteVideoRef.current) {
-          remoteVideoRef.current.srcObject = event.streams[0];
-        }
       }
     };
 
@@ -231,14 +196,14 @@ export const KognitoNativeVideoCall: React.FC<KognitoNativeVideoCallProps> = ({
 
     pcRef.current = pc;
     return pc;
-  }, [attachLocalTracks, roomId, ws]);
+  }, [roomId, ws]);
 
-  // --- Configurar Dispositivos Locales ---
+  // --- Iniciar Medios Locales ---
   const setupLocalMedia = useCallback(async () => {
     const wantVideo = roomType !== 'voice_room';
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: wantVideo ? { width: { ideal: 1280 }, height: { ideal: 720 } } : false,
+        video: wantVideo,
         audio: true,
       });
       localStreamRef.current = stream;
@@ -253,7 +218,7 @@ export const KognitoNativeVideoCall: React.FC<KognitoNativeVideoCallProps> = ({
       setIsVideoOn(wantVideo);
       return stream;
     } catch (err) {
-      console.warn('Error accediendo a cámara o micrófono, reintentando solo audio:', err);
+      console.warn('Error accediendo a cámara o micrófono, intentando solo audio:', err);
       try {
         const audioOnly = await navigator.mediaDevices.getUserMedia({
           video: false,
@@ -269,11 +234,20 @@ export const KognitoNativeVideoCall: React.FC<KognitoNativeVideoCallProps> = ({
     }
   }, [roomType]);
 
-  // --- Enviar Oferta WebRTC ---
-  const sendOffer = useCallback(async () => {
-    const stream = localStreamRef.current || (await setupLocalMedia());
+  // --- Iniciar Llamada Saliente ---
+  const initiateCall = useCallback(async () => {
+    await setupLocalMedia();
     const pc = createPeerConnection();
-    if (stream) attachLocalTracks(pc, stream);
+
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(
+        JSON.stringify({
+          type: 'call_initiate',
+          room_id: roomId,
+          caller_name: currentUserName,
+        })
+      );
+    }
 
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
@@ -289,33 +263,14 @@ export const KognitoNativeVideoCall: React.FC<KognitoNativeVideoCallProps> = ({
         })
       );
     }
-  }, [attachLocalTracks, createPeerConnection, currentUserName, roomId, setupLocalMedia, ws]);
-
-  // --- Iniciar Llamada ---
-  const initiateCall = useCallback(async () => {
-    await setupLocalMedia();
-    createPeerConnection();
-
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(
-        JSON.stringify({
-          type: 'call_initiate',
-          room_id: roomId,
-          caller_name: currentUserName,
-        })
-      );
-    }
-
-    await sendOffer();
-  }, [createPeerConnection, currentUserName, roomId, sendOffer, setupLocalMedia, ws]);
+  }, [createPeerConnection, currentUserName, roomId, setupLocalMedia, ws]);
 
   // --- Aceptar Llamada Entrante ---
   const acceptCall = useCallback(async () => {
     stopRingtone();
     setCallState('connected');
-    const stream = await setupLocalMedia();
+    await setupLocalMedia();
     const pc = createPeerConnection();
-    if (stream) attachLocalTracks(pc, stream);
 
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(
@@ -326,9 +281,7 @@ export const KognitoNativeVideoCall: React.FC<KognitoNativeVideoCallProps> = ({
         })
       );
     }
-
-    await sendOffer();
-  }, [attachLocalTracks, createPeerConnection, currentUserName, roomId, sendOffer, setupLocalMedia, stopRingtone, ws]);
+  }, [createPeerConnection, currentUserName, roomId, setupLocalMedia, stopRingtone, ws]);
 
   // --- Finalizar Llamada ---
   const handleEndCall = useCallback(() => {
@@ -338,10 +291,6 @@ export const KognitoNativeVideoCall: React.FC<KognitoNativeVideoCallProps> = ({
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => track.stop());
       localStreamRef.current = null;
-    }
-    if (remoteStreamRef.current) {
-      remoteStreamRef.current.getTracks().forEach((track) => track.stop());
-      remoteStreamRef.current = null;
     }
 
     if (pcRef.current) {
@@ -360,14 +309,6 @@ export const KognitoNativeVideoCall: React.FC<KognitoNativeVideoCallProps> = ({
 
     onClose();
   }, [onClose, roomId, stopRingtone, ws]);
-
-  // --- Copiar Enlace ---
-  const handleCopyLink = () => {
-    const url = `${window.location.origin}/kognito-chat?join=${roomId}`;
-    navigator.clipboard.writeText(url);
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2500);
-  };
 
   // --- Toggle Micrófono ---
   const toggleMic = () => {
@@ -398,7 +339,7 @@ export const KognitoNativeVideoCall: React.FC<KognitoNativeVideoCallProps> = ({
         const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
         const screenTrack = screenStream.getVideoTracks()[0];
 
-        if (pcRef.current) {
+        if (pcRef.current && localStreamRef.current) {
           const sender = pcRef.current.getSenders().find((s) => s.track?.kind === 'video');
           if (sender) sender.replaceTrack(screenTrack);
         }
@@ -431,7 +372,7 @@ export const KognitoNativeVideoCall: React.FC<KognitoNativeVideoCallProps> = ({
     setIsScreenSharing(false);
   };
 
-  // --- Cargar Documentos de OnlyOffice ---
+  // --- Cargar Documentos de OnlyOffice desde API ---
   const fetchOnlyOfficeDocs = async () => {
     setLoadingDocs(true);
     try {
@@ -461,7 +402,7 @@ export const KognitoNativeVideoCall: React.FC<KognitoNativeVideoCallProps> = ({
     }
   };
 
-  // --- Escuchar WebSocket para Señalización WebRTC ---
+  // --- Escuchar WebSocket para Señalización y Proyección ---
   useEffect(() => {
     if (!ws) return;
 
@@ -480,7 +421,6 @@ export const KognitoNativeVideoCall: React.FC<KognitoNativeVideoCallProps> = ({
           stopRingtone();
           setCallState('connected');
           if (data.responder_name) setRemoteUserName(data.responder_name);
-          await sendOffer();
         } else if (data.type === 'call_end') {
           handleEndCall();
         } else if (data.type === 'webrtc_signal' && data.sender_account_id !== currentUserId) {
@@ -488,13 +428,7 @@ export const KognitoNativeVideoCall: React.FC<KognitoNativeVideoCallProps> = ({
 
           if (data.signal_type === 'offer' && data.sdp) {
             if (data.caller_name) setRemoteUserName(data.caller_name);
-
-            const stream = localStreamRef.current || (await setupLocalMedia());
-            if (stream) attachLocalTracks(pc, stream);
-
             await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
-            await flushIceCandidates(pc);
-
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
 
@@ -510,14 +444,9 @@ export const KognitoNativeVideoCall: React.FC<KognitoNativeVideoCallProps> = ({
             }
           } else if (data.signal_type === 'answer' && data.sdp) {
             await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
-            await flushIceCandidates(pc);
             setPeerConnected(true);
           } else if (data.signal_type === 'ice_candidate' && data.candidate) {
-            if (pc.remoteDescription && pc.remoteDescription.type) {
-              await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-            } else {
-              iceCandidatesQueue.current.push(data.candidate);
-            }
+            await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
           }
         }
       } catch (err) {
@@ -529,9 +458,9 @@ export const KognitoNativeVideoCall: React.FC<KognitoNativeVideoCallProps> = ({
     return () => {
       ws.removeEventListener('message', handleMessage);
     };
-  }, [attachLocalTracks, createPeerConnection, currentUserId, flushIceCandidates, handleEndCall, roomId, sendOffer, setupLocalMedia, startRingtone, stopRingtone, ws]);
+  }, [createPeerConnection, currentUserId, handleEndCall, roomId, startRingtone, stopRingtone, ws]);
 
-  // Iniciar llamada al montar
+  // Iniciar automáticamente
   useEffect(() => {
     if (!incomingCallData) {
       initiateCall();
@@ -543,9 +472,6 @@ export const KognitoNativeVideoCall: React.FC<KognitoNativeVideoCallProps> = ({
       stopRingtone();
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach((t) => t.stop());
-      }
-      if (remoteStreamRef.current) {
-        remoteStreamRef.current.getTracks().forEach((t) => t.stop());
       }
       if (pcRef.current) pcRef.current.close();
     };
@@ -647,18 +573,12 @@ export const KognitoNativeVideoCall: React.FC<KognitoNativeVideoCallProps> = ({
               </Badge>
             </h2>
             <p className="text-xs text-muted-foreground">
-              {peerConnected ? `En llamada activa con ${remoteUserName}` : `Llamada activa • Esperando a ${remoteUserName}`}
+              {peerConnected ? `En llamada activa con ${remoteUserName}` : `Llamada iniciada • Esperando a ${remoteUserName}`}
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Botón de Copiar Enlace */}
-          <Button variant="outline" size="sm" onClick={handleCopyLink} className="text-xs gap-1.5">
-            {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
-            <span>{copiedLink ? '¡Enlace Copiado!' : 'Copiar Enlace'}</span>
-          </Button>
-
           {/* Botón de Cargar Presentación OnlyOffice (para modo Presentación o Default) */}
           {(roomType === 'presentation' || roomType === 'default') && (
             <Button
@@ -713,7 +633,7 @@ export const KognitoNativeVideoCall: React.FC<KognitoNativeVideoCallProps> = ({
             </div>
           </div>
         ) : (
-          /* VIDEO REMOTO / VISTA LOCAL DE RESPALDO */
+          /* VIDEO REMOTO / VISTA LOCAL */
           <div className="relative w-full h-full max-w-5xl max-h-[80vh] flex items-center justify-center rounded-2xl overflow-hidden border border-white/10 shadow-2xl bg-black">
             {peerConnected ? (
               <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-contain" />
@@ -730,10 +650,9 @@ export const KognitoNativeVideoCall: React.FC<KognitoNativeVideoCallProps> = ({
                       Esperando que otros participantes se unan a la llamada...
                     </p>
                   </div>
-                  <Button variant="secondary" onClick={handleCopyLink} className="bg-white/20 hover:bg-white/30 text-white border border-white/30 text-xs gap-1.5">
-                    {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{copiedLink ? '¡Enlace Copiado!' : 'Copiar Enlace de Invitación'}</span>
-                  </Button>
+                  <Badge variant="secondary" className="bg-white/20 text-white border-white/30 text-xs px-3 py-1 font-mono">
+                    Notificación enviada por chat
+                  </Badge>
                 </div>
               </div>
             )}
@@ -745,7 +664,7 @@ export const KognitoNativeVideoCall: React.FC<KognitoNativeVideoCallProps> = ({
           </div>
         )}
 
-        {/* OVERLAY DE VIDEO LOCAL EN PIP (CUANDO HAY PEER CONECTADO) */}
+        {/* OVERLAY DE VIDEO LOCAL EN PIP (CUANDO HAY PAR PEER CONECTADO) */}
         {roomType !== 'voice_room' && peerConnected && (
           <div className="absolute bottom-6 right-6 w-44 sm:w-56 aspect-video rounded-2xl overflow-hidden border-2 border-white/20 shadow-2xl bg-black transition-all duration-200 hover:scale-105">
             <video ref={localVideoRef} autoPlay playsInline muted className="w-full h-full object-cover transform -scale-x-100" />

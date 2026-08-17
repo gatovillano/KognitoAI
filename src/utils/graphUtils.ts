@@ -21,11 +21,18 @@ export const NODE_COLOR_PALETTE = [
 export function getNodeColor(type: string): string {
     if (!type || type.toLowerCase() === 'desconocido') return '#9CA3AF'; // gray-400 for unknown or 'desconocido'
 
-    // Casos especiales
-    if (type.toLowerCase() === 'desafío' || type.toLowerCase() === 'problem') return '#EF4444';
-    if (type.toLowerCase() === 'solución' || type.toLowerCase() === 'solution') return '#22C55E';
-    if (type.toLowerCase() === 'conceptual_quote') return '#3B82F6';
-    if (type.toLowerCase() === 'document') return '#64748B'; // slate-500 for documents
+    const normalized = type.toLowerCase();
+
+    // Casos especiales con color único
+    if (normalized === 'desafío' || normalized === 'problem') return '#EF4444';
+    if (normalized === 'solución' || normalized === 'solution') return '#22C55E';
+    if (normalized === 'conceptual_quote') return '#E74C3C';
+    if (normalized === 'document') return '#64748B'; // slate-500
+
+    // Tipos antropológicos con colores diferenciados
+    if (normalized === 'anthropological_quote') return '#F59E0B'; // amber
+    if (normalized === 'anthropological_code') return '#10B981'; // emerald
+    if (normalized === 'anthropological_category') return '#06B6D4'; // cyan
 
     const hash = type.split('').reduce((acc, char) =>
         char.charCodeAt(0) + ((acc << 5) - acc), 0);

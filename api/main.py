@@ -3,11 +3,10 @@ import logging
 import asyncio # Added
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request, status, Depends
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse, Response, FileResponse
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 from core.middleware.audit import AuditMiddleware
 import json
 import os
@@ -17,9 +16,10 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from utils.limiter import limiter
-
 # Aplicar parches de estabilidad antes de cualquier otra cosa
 apply_patches()
+
+
 
 
 from api.auth import router as auth_router
@@ -56,6 +56,7 @@ from typing import Optional
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func # Importar func
 from sqlalchemy.ext.asyncio import AsyncSession
+from prometheus_client import Counter, Histogram, Gauge, generate_latest, REGISTRY
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -444,6 +445,12 @@ try:
 except Exception as e:
     logger.warning(f"No se pudo cargar el router de kognito_chat: {e}")
 
+try:
+    from extensions.growth.backend.router import router as growth_router
+    app.include_router(growth_router)
+except Exception as e:
+    logger.warning(f"No se pudo cargar el router de growth: {e}")
+
 
 
 
@@ -553,6 +560,18 @@ async def manual_cleanup_files(
 @app.get("/test-connection")
 async def test_connection():
     return {"message": "Connection successful!"}
+
+# Métricas Prometheus
+http_requests_total = Counter('http_requests_total', 'Total de peticiones HTTP', ['method', 'endpoint', 'status'])
+http_request_duration_seconds = Histogram('http_request_duration_seconds', 'Duración de las peticiones HTTP', ['method', 'endpoint'])
+active_users = Gauge('active_users', 'Usuarios activos en el sistema')
+scheduled_tools_total = Gauge('scheduled_tools_total', 'Total de herramientas programadas')
+active_scheduled_tools = Gauge('active_scheduled_tools', 'Herramientas programadas activas')
+
+@app.get("/metrics")
+async def prometheus_metrics():
+    """Endpoint de métricas en formato Prometheus."""
+    return Response(content=generate_latest(REGISTRY), media_type="text/plain")
 
 if __name__ == "__main__":
     import uvicorn
