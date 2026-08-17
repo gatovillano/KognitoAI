@@ -85,6 +85,16 @@ class DeleteDocumentShareResponse(BaseModel):
     message: str
 
 
+class SaveAsCopyRequest(BaseModel):
+    source_url: Optional[str] = None
+    document_id: Optional[str] = None
+    filename: str
+    folder_id: Optional[str] = None
+    workspace_id: Optional[str] = None
+    target_extension: str = "pdf"
+
+
+
 async def _is_folder_publicly_shared_with_token(
     folder_id: Optional[uuid.UUID],
     db: AsyncSession,
@@ -2084,3 +2094,186 @@ async def update_document_content(
         "document_id": str(doc.id),
         "updated_at": doc.updated_at.isoformat()
     }
+
+
+@router.post("/save-as-copy")
+async def save_as_copy(
+    payload: SaveAsCopyRequest,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """Guarda una copia o archivo convertido dentro de una carpeta seleccionada de la nube."""
+    account_id_uuid = uuid.UUID(current_account_id)
+
+    # 1. Verificar carpeta de destino si se especificó
+    target_folder_id: Optional[uuid.UUID] = None
+    if payload.folder_id and payload.folder_id not in ("null", "root", "none", ""):
+        try:
+            target_folder_id = uuid.UUID(payload.folder_id)
+            folder = await db.get(DocumentFolder, target_folder_id)
+            if not folder or not await _can_access_folder(folder, current_account_id, db):
+                raise HTTPException(status_code=403, detail="No tienes acceso a la carpeta seleccionada")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="ID de carpeta inválido")
+
+    # 2. Verificar workspace de destino si se especificó
+    target_ws_id: Optional[uuid.UUID] = None
+    if payload.workspace_id and payload.workspace_id not in ("none", "null", ""):
+        try:
+            target_ws_id = uuid.UUID(payload.workspace_id)
+            if not await check_workspace_permission(current_account_id, str(target_ws_id), db, required_roles=["owner", "editor"]):
+                raise HTTPException(status_code=403, detail="No tienes permisos en el workspace seleccionado")
+        except ValueError:
+            raise HTTPException(status_code=400, detail="ID de workspace inválido")
+
+    # 3. Formatear extensión y nombre
+    target_ext = payload.target_extension.strip().lstrip('.').lower()
+    clean_name = payload.filename.strip()
+    if clean_name.lower().endswith(f".{target_ext}"):
+        filename = clean_name
+    else:
+        filename = f"{clean_name}.{target_ext}"
+
+    # 4. Obtener contenido binario del documento
+    file_bytes: Optional[bytes] = None
+
+    if payload.source_url:
+        try:
+            async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+                res = await client.get(payload.source_url)
+                res.raise_for_status()
+                file_bytes = res.content
+        except Exception as e:
+            logger.error(f"Error descargando archivo desde source_url {payload.source_url}: {e}")
+            raise HTTPException(status_code=400, detail=f"No se pudo descargar el archivo desde OnlyOffice: {str(e)}")
+
+    if not file_bytes and payload.document_id:
+        source_doc_id = uuid.UUID(payload.document_id)
+        source_doc = await db.get(Document, source_doc_id)
+        if not source_doc or not await _can_access_document(source_doc, current_account_id, db):
+            raise HTTPException(status_code=404, detail="Documento original no encontrado o sin acceso")
+
+        source_path = resolve_onlyoffice_file_path(
+            account_id=str(source_doc.account_id),
+            filename=source_doc.filename,
+            stored_filepath=source_doc.filepath,
+        )
+
+        if not os.path.exists(source_path):
+            raise HTTPException(status_code=404, detail="Archivo físico original no encontrado")
+
+        if source_doc.extension.lower() == target_ext:
+            with open(source_path, "rb") as f:
+                file_bytes = f.read()
+        else:
+            # Invocar ConvertService de OnlyOffice para conversión de formato
+            onlyoffice_api_url = os.getenv("ONLYOFFICE_URL", "/onlyoffice")
+            onlyoffice_internal_backend = os.getenv("ONLYOFFICE_INTERNAL_BACKEND", settings.internal_api_server_url)
+            backend_url = onlyoffice_internal_backend.rstrip('/')
+
+            source_file_url = f"{backend_url}/api/onlyoffice/download/{source_doc.id}"
+
+            convert_url = f"{onlyoffice_api_url.rstrip('/')}/ConvertService.ashx"
+            convert_payload = {
+                "async": False,
+                "filetype": source_doc.extension.lower(),
+                "key": f"{source_doc.id}-{datetime.utcnow().timestamp()}",
+                "outputtype": target_ext,
+                "title": filename,
+                "url": source_file_url
+            }
+
+            jwt_secret = os.getenv("ONLYOFFICE_JWT_SECRET")
+            headers = {"Accept": "application/json", "Content-Type": "application/json"}
+            if jwt_secret:
+                token = jwt.encode(convert_payload, jwt_secret, algorithm="HS256")
+                token_str = token if isinstance(token, str) else token.decode("utf-8")
+                convert_payload["token"] = token_str
+                headers["Authorization"] = f"Bearer {token_str}"
+
+            try:
+                async with httpx.AsyncClient(timeout=90.0) as client:
+                    c_res = await client.post(convert_url, json=convert_payload, headers=headers)
+                    c_res.raise_for_status()
+                    c_data = c_res.json()
+                    converted_url = c_data.get("fileUrl")
+                    if converted_url:
+                        dl_res = await client.get(converted_url)
+                        dl_res.raise_for_status()
+                        file_bytes = dl_res.content
+            except Exception as cv_err:
+                logger.warning(f"ConvertService no disponible ({cv_err}), realizando copia directa: {cv_err}")
+                with open(source_path, "rb") as f:
+                    file_bytes = f.read()
+
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="No se pudo obtener ni generar el contenido del archivo")
+
+    # 5. Almacenar archivo físicamente
+    unique_filename = f"{uuid.uuid4()}.{target_ext}"
+    account_obj = await db.get(Account, account_id_uuid)
+    cloud_storage_path = getattr(account_obj, "cloud_storage_path", None)
+    user_dir = ensure_onlyoffice_account_dir(current_account_id, cloud_storage_path=cloud_storage_path)
+    file_path = user_dir / unique_filename
+
+    with open(file_path, "wb") as f:
+        f.write(file_bytes)
+
+    rel_path = build_onlyoffice_relative_path(current_account_id, unique_filename)
+
+    # 6. Crear entrada Document en la BD
+    new_doc = Document(
+        account_id=account_id_uuid,
+        folder_id=target_folder_id,
+        workspace_id=target_ws_id,
+        filename=filename,
+        file_path=rel_path,
+        extension=target_ext,
+        updated_at=datetime.utcnow()
+    )
+    db.add(new_doc)
+    await db.commit()
+    await db.refresh(new_doc)
+
+    # 7. RAG Indexing
+    try:
+        extracted_text, parser_metadata = extract_text_and_metadata_from_document(str(file_path))
+        if extracted_text and extracted_text.strip():
+            metadata = {
+                "document_id": str(new_doc.id),
+                "workspace_id": str(new_doc.workspace_id) if new_doc.workspace_id else None,
+                "folder_id": str(new_doc.folder_id) if new_doc.folder_id else None,
+                "extension": new_doc.extension,
+                "created_at": new_doc.created_at.isoformat() if new_doc.created_at else None,
+                "file_name": new_doc.filename,
+            }
+            if parser_metadata:
+                metadata.update(parser_metadata)
+
+            topic = "general_documents"
+            if target_folder_id:
+                folder = await db.get(DocumentFolder, target_folder_id)
+                if folder and folder.name:
+                    topic = folder.name
+
+            await process_document_for_rag(
+                file_name=new_doc.filename,
+                extracted_text=extracted_text,
+                topic=topic,
+                account_id=current_account_id,
+                metadata=metadata,
+                workspace_id=str(new_doc.workspace_id) if new_doc.workspace_id else None
+            )
+    except Exception as rag_err:
+        logger.warning(f"Error procesando RAG para {filename}: {rag_err}")
+
+    return {
+        "id": str(new_doc.id),
+        "filename": new_doc.filename,
+        "extension": new_doc.extension,
+        "folder_id": str(new_doc.folder_id) if new_doc.folder_id else None,
+        "workspace_id": str(new_doc.workspace_id) if new_doc.workspace_id else None,
+        "created_at": new_doc.created_at.isoformat(),
+        "file_size": len(file_bytes)
+    }
+

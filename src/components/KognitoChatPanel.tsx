@@ -6,7 +6,6 @@ import apiClient from '@/lib/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Badge } from '@/components/ui/badge';
 import {
   MessageSquare,
   Users,
@@ -15,6 +14,7 @@ import {
   Plus,
   Send,
   Search,
+  UserCheck,
   CheckCircle2,
   RefreshCw,
   Video,
@@ -23,12 +23,7 @@ import {
   Volume2,
   Copy,
   Check,
-  GitFork,
-  Clock,
-  UserCheck,
-  UserX,
-  Shield,
-  X,
+  Link as LinkIcon,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -46,8 +41,6 @@ interface Participant {
   name?: string;
   username?: string;
   email?: string;
-  status: string; // 'active' | 'waiting_in_lobby' | 'rejected'
-  role: string;   // 'host' | 'participant' | 'listener'
   joined_at: string;
 }
 
@@ -67,7 +60,6 @@ interface Room {
   is_group: boolean;
   room_type?: string;
   active_document_id?: string | null;
-  parent_room_id?: string | null;
   created_by_id?: string;
   created_at: string;
   updated_at: string;
@@ -85,11 +77,6 @@ export default function KognitoChatPanel() {
   const [loadingMessages, setLoadingMessages] = useState<boolean>(false);
   const [sending, setSending] = useState<boolean>(false);
   const [copiedHeaderLink, setCopiedHeaderLink] = useState<boolean>(false);
-
-  // Sub-salas
-  const [subrooms, setSubrooms] = useState<Room[]>([]);
-  const [showSubroomModal, setShowSubroomModal] = useState<boolean>(false);
-  const [subroomName, setSubroomName] = useState<string>('');
 
   // Estado para videollamada nativa WebRTC (Nextcloud Talk Style)
   const [activeCall, setActiveCall] = useState<boolean>(false);
@@ -152,17 +139,7 @@ export default function KognitoChatPanel() {
     }
   }, []);
 
-  // Cargar sub-salas pertenecientes a la sala activa
-  const fetchSubrooms = async (roomId: string) => {
-    try {
-      const res = await apiClient.get<Room[]>(`/api/kognito-chat/rooms/${roomId}/subrooms`);
-      setSubrooms(res.data || []);
-    } catch (e) {
-      console.error('Error buscando sub-salas:', e);
-    }
-  };
-
-  // Cargar mensajes y sub-salas cuando cambia la sala activa
+  // Cargar mensajes cuando cambia la sala activa
   useEffect(() => {
     if (!activeRoomId) return;
 
@@ -179,7 +156,6 @@ export default function KognitoChatPanel() {
     };
 
     fetchMessages();
-    fetchSubrooms(activeRoomId);
 
     // Establecer WebSocket en tiempo real para esta sala
     if (wsRef.current) {
@@ -204,6 +180,15 @@ export default function KognitoChatPanel() {
               if (prev.some((m) => m.id === data.message.id)) return prev;
               return [...prev, data.message];
             });
+
+            setRooms((prevRooms) =>
+              prevRooms.map((r) => {
+                if (r.id === activeRoomId) {
+                  return { ...r, last_message: data.message, updated_at: data.message.created_at };
+                }
+                return r;
+              })
+            );
           } else if (data.type === 'kai_stream_start') {
             setMessages((prev) => [
               ...prev,
@@ -225,10 +210,6 @@ export default function KognitoChatPanel() {
                 return m;
               })
             );
-          } else if (data.type === 'lobby_user_joined' || data.type === 'lobby_user_admitted' || data.type === 'lobby_user_rejected') {
-            fetchRooms();
-          } else if (data.type === 'subroom_created') {
-            fetchSubrooms(activeRoomId);
           } else if (data.type === 'call_initiate' && data.sender_account_id !== user?.id) {
             setIncomingCall({
               callerName: data.caller_name || 'Un participante',
@@ -291,34 +272,6 @@ export default function KognitoChatPanel() {
     }
   };
 
-  // Crear Sub-sala
-  const handleCreateSubroom = async () => {
-    if (!activeRoomId || !subroomName.trim()) return;
-    try {
-      const res = await apiClient.post<Room>(`/api/kognito-chat/rooms/${activeRoomId}/subrooms`, {
-        name: subroomName,
-        room_type: 'default',
-      });
-      setShowSubroomModal(false);
-      setSubroomName('');
-      await fetchSubrooms(activeRoomId);
-      setActiveRoomId(res.data.id);
-    } catch (e) {
-      console.error('Error creando sub-sala:', e);
-    }
-  };
-
-  // Moderar usuario en Sala de Espera (Lobby)
-  const handleLobbyAction = async (participantAccountId: string, action: 'admit' | 'reject') => {
-    if (!activeRoomId) return;
-    try {
-      await apiClient.post(`/api/kognito-chat/rooms/${activeRoomId}/lobby/${participantAccountId}`, { action });
-      await fetchRooms();
-    } catch (e) {
-      console.error('Error moderando sala de espera:', e);
-    }
-  };
-
   // Enviar mensaje
   const handleSendMessage = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -368,10 +321,6 @@ export default function KognitoChatPanel() {
   };
 
   const activeRoom = rooms.find((r) => r.id === activeRoomId);
-  const currentParticipant = activeRoom?.participants.find((p) => p.account_id === user?.id);
-  const isInLobby = currentParticipant?.status === 'waiting_in_lobby';
-  const isHost = activeRoom?.created_by_id === user?.id || currentParticipant?.role === 'host';
-  const waitingParticipants = activeRoom?.participants.filter((p) => p.status === 'waiting_in_lobby') || [];
 
   const getRoomDisplayName = (room: Room) => {
     if (room.is_group && room.name) return room.name;
@@ -433,10 +382,7 @@ export default function KognitoChatPanel() {
                   </Avatar>
                   <div className="flex-1 min-w-0">
                     <div className="flex justify-between items-baseline">
-                      <h4 className="font-semibold text-sm truncate text-foreground flex items-center gap-1.5">
-                        <span>{displayName}</span>
-                        {room.room_type === 'webinar' && <Badge className="bg-purple-600 text-[9px] px-1 py-0">Webinar</Badge>}
-                      </h4>
+                      <h4 className="font-semibold text-sm truncate text-foreground">{displayName}</h4>
                       {lastMsg && (
                         <span className="text-[10px] text-muted-foreground ml-2 shrink-0">
                           {new Date(lastMsg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -472,14 +418,7 @@ export default function KognitoChatPanel() {
                 </AvatarFallback>
               </Avatar>
               <div>
-                <h3 className="font-bold text-base text-foreground leading-tight flex items-center gap-2">
-                  <span>{getRoomDisplayName(activeRoom)}</span>
-                  {activeRoom.room_type && (
-                    <Badge className="bg-indigo-600 text-white uppercase text-[9px] font-mono">
-                      {activeRoom.room_type}
-                    </Badge>
-                  )}
-                </h3>
+                <h3 className="font-bold text-base text-foreground leading-tight">{getRoomDisplayName(activeRoom)}</h3>
                 <p className="text-xs text-muted-foreground flex items-center gap-1.5 mt-0.5">
                   <Users className="w-3 h-3 text-indigo-500" />
                   <span>{activeRoom.participants.length} participante(s)</span>
@@ -493,18 +432,6 @@ export default function KognitoChatPanel() {
 
             {/* Acciones rápidas */}
             <div className="flex items-center gap-2">
-              {/* Botón de Crear Sub-sala */}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowSubroomModal(true)}
-                className="text-xs gap-1.5 border-indigo-300 text-indigo-600 dark:text-indigo-400"
-                title="Crear una sub-sala (breakout room) en esta reunión"
-              >
-                <GitFork className="w-3.5 h-3.5 text-indigo-500" />
-                <span>+ Sub-sala</span>
-              </Button>
-
               <Button
                 variant="outline"
                 size="sm"
@@ -539,140 +466,78 @@ export default function KognitoChatPanel() {
             </div>
           </div>
 
-          {/* BARRA DE SUB-SALAS DISPONIBLES */}
-          {subrooms.length > 0 && (
-            <div className="px-4 py-2 bg-indigo-50/50 dark:bg-indigo-950/30 border-b border-indigo-200 dark:border-indigo-900 flex items-center gap-2 overflow-x-auto text-xs">
-              <span className="font-semibold text-indigo-700 dark:text-indigo-300 flex items-center gap-1 shrink-0">
-                <GitFork className="w-3.5 h-3.5" /> Sub-salas activas:
-              </span>
-              {subrooms.map((sub) => (
-                <Button
-                  key={sub.id}
-                  variant={sub.id === activeRoomId ? 'secondary' : 'outline'}
-                  size="sm"
-                  onClick={() => setActiveRoomId(sub.id)}
-                  className="h-6 text-[10px] px-2.5 rounded-full"
-                >
-                  {sub.name}
-                </Button>
-              ))}
-            </div>
-          )}
-
-          {/* BARRA DE MODERACIÓN DE SALA DE ESPERA (LOBBY PARA EL ANFITRIÓN) */}
-          {isHost && waitingParticipants.length > 0 && (
-            <div className="p-3 bg-purple-900/20 border-b border-purple-500/30 flex items-center justify-between">
-              <div className="flex items-center gap-2 text-xs text-purple-300">
-                <Clock className="w-4 h-4 text-purple-400 animate-pulse" />
-                <span>
-                  <strong>{waitingParticipants.length} usuario(s)</strong> esperando en la Sala de Espera (Lobby).
-                </span>
+          {/* Hilo de mensajes */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-muted/10">
+            {loadingMessages ? (
+              <div className="flex justify-center items-center h-full text-muted-foreground gap-2">
+                <RefreshCw className="w-5 h-5 animate-spin text-indigo-500" />
+                <span className="text-sm">Cargando historial...</span>
               </div>
-              <div className="flex items-center gap-2">
-                {waitingParticipants.map((p) => (
-                  <div key={p.account_id} className="flex items-center gap-1 bg-background border border-border px-2 py-1 rounded-md text-xs">
-                    <span className="font-medium">{p.name || p.username || 'Invitado'}</span>
-                    <Button size="icon" variant="ghost" onClick={() => handleLobbyAction(p.account_id, 'admit')} className="h-5 w-5 text-emerald-500 hover:bg-emerald-950">
-                      <UserCheck className="w-3.5 h-3.5" />
-                    </Button>
-                    <Button size="icon" variant="ghost" onClick={() => handleLobbyAction(p.account_id, 'reject')} className="h-5 w-5 text-rose-500 hover:bg-rose-950">
-                      <UserX className="w-3.5 h-3.5" />
-                    </Button>
-                  </div>
-                ))}
+            ) : messages.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full text-muted-foreground text-center space-y-2">
+                <MessageSquare className="w-12 h-12 stroke-1 text-muted-foreground/50" />
+                <p className="text-sm font-medium">Esta sala aún no tiene mensajes.</p>
+                <p className="text-xs">¡Escribe tu primer mensaje o menciona a <strong>@KAI</strong> para consultar al asistente de IA!</p>
               </div>
-            </div>
-          )}
+            ) : (
+              messages.map((msg) => {
+                const isMe = msg.sender_id === user?.id;
+                const isKai = msg.is_kai;
 
-          {/* PANTALLA DE SALA DE ESPERA (LOBBY) PARA INVITADOS */}
-          {isInLobby ? (
-            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-background space-y-4">
-              <div className="w-16 h-16 rounded-full bg-purple-500/20 border-2 border-purple-500 flex items-center justify-center animate-pulse">
-                <Clock className="w-8 h-8 text-purple-400" />
-              </div>
-              <div>
-                <h3 className="text-xl font-bold text-foreground">Estás en la Sala de Espera (Lobby)</h3>
-                <p className="text-sm text-muted-foreground max-w-md mt-1">
-                  El anfitrión del Webinar debe aprobar tu solicitud antes de ingresar al chat y videollamada.
-                </p>
-              </div>
-              <Badge variant="secondary" className="bg-purple-950 text-purple-300 border-purple-500/30">
-                Esperando autorización del anfitrión...
-              </Badge>
-            </div>
-          ) : (
-            /* HILO DE MENSAJES (RENDERIZADO COMPLETO EN MARKDOWN) */
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-muted/10">
-              {loadingMessages ? (
-                <div className="flex justify-center items-center h-full text-muted-foreground gap-2">
-                  <RefreshCw className="w-5 h-5 animate-spin text-indigo-500" />
-                  <span className="text-sm">Cargando historial...</span>
-                </div>
-              ) : messages.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full text-muted-foreground text-center space-y-2">
-                  <MessageSquare className="w-12 h-12 stroke-1 text-muted-foreground/50" />
-                  <p className="text-sm font-medium">Esta sala aún no tiene mensajes.</p>
-                  <p className="text-xs">¡Escribe tu primer mensaje o menciona a <strong>@KAI</strong> para consultar al asistente de IA!</p>
-                </div>
-              ) : (
-                messages.map((msg) => {
-                  const isMe = msg.sender_id === user?.id;
-                  const isKai = msg.is_kai;
+                return (
+                  <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
+                    <div className="flex items-center gap-1.5 mb-1 px-1">
+                      <span className="text-xs font-semibold text-foreground flex items-center gap-1">
+                        {isKai && <Bot className="w-3.5 h-3.5 text-indigo-500 inline" />}
+                        {msg.sender_name}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground">
+                        {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
 
-                  return (
-                    <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
-                      <div className="flex items-center gap-1.5 mb-1 px-1">
-                        <span className="text-xs font-semibold text-foreground flex items-center gap-1">
-                          {isKai && <Bot className="w-3.5 h-3.5 text-indigo-500 inline" />}
-                          {msg.sender_name}
-                        </span>
-                        <span className="text-[10px] text-muted-foreground">
-                          {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                      </div>
-
-                      <div
-                        className={`max-w-[75%] p-3 rounded-2xl text-sm leading-relaxed shadow-sm ${
-                          isMe
-                            ? 'bg-indigo-600 text-white rounded-tr-none'
-                            : isKai
-                            ? 'bg-indigo-950/20 border border-indigo-500/30 text-foreground rounded-tl-none'
-                            : 'bg-card border border-border text-foreground rounded-tl-none'
-                        }`}
-                      >
-                        {/* RENDERIZADO MARKDOWN COMPLETO PARA TODOS LOS MENSAJES */}
-                        <div className={`prose text-xs max-w-none break-words ${isMe ? 'prose-invert text-white' : 'dark:prose-invert text-foreground'}`}>
+                    <div
+                      className={`max-w-[75%] p-3 rounded-2xl text-sm leading-relaxed shadow-sm ${
+                        isMe
+                          ? 'bg-indigo-600 text-white rounded-tr-none'
+                          : isKai
+                          ? 'bg-indigo-950/20 border border-indigo-500/30 text-foreground rounded-tl-none'
+                          : 'bg-card border border-border text-foreground rounded-tl-none'
+                      }`}
+                    >
+                      {isKai ? (
+                        <div className="prose dark:prose-invert text-xs max-w-none">
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
                         </div>
-                      </div>
+                      ) : (
+                        <p className="whitespace-pre-wrap">{msg.content}</p>
+                      )}
                     </div>
-                  );
-                })
-              )}
-              <div ref={messagesEndRef} />
-            </div>
-          )}
+                  </div>
+                );
+              })
+            )}
+            <div ref={messagesEndRef} />
+          </div>
 
           {/* Caja de Entrada de Texto */}
-          {!isInLobby && (
-            <form onSubmit={handleSendMessage} className="p-3 border-t border-border bg-card flex items-center gap-2">
-              <Input
-                value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
-                placeholder="Escribe tu mensaje en Markdown... (Menciona a @KAI para consultar la IA)"
-                className="flex-1 text-sm bg-background border-border"
-                disabled={sending}
-              />
-              <Button
-                type="submit"
-                disabled={!inputText.trim() || sending}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 shrink-0 gap-1.5"
-              >
-                <Send className="w-4 h-4" />
-                <span>Enviar</span>
-              </Button>
-            </form>
-          )}
+          <form onSubmit={handleSendMessage} className="p-3 border-t border-border bg-card flex items-center gap-2">
+            <Input
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              placeholder="Escribe tu mensaje... (Menciona a @KAI para consultar la IA)"
+              className="flex-1 text-sm bg-background border-border"
+              disabled={sending}
+            />
+            <Button
+              type="submit"
+              disabled={!inputText.trim() || sending}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 shrink-0 gap-1.5"
+            >
+              <Send className="w-4 h-4" />
+              <span>Enviar</span>
+            </Button>
+          </form>
         </div>
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-background">
@@ -759,7 +624,7 @@ export default function KognitoChatPanel() {
                     <span>Webinar</span>
                   </div>
                   <p className="text-[10px] text-muted-foreground mt-1 leading-tight">
-                    Conversación restringida con sala de espera (Lobby) para invitados.
+                    Conversación restringida con sala de espera, ideal para seminarios públicos.
                   </p>
                 </div>
 
@@ -777,7 +642,7 @@ export default function KognitoChatPanel() {
                     <span>Presentación</span>
                   </div>
                   <p className="text-[10px] text-muted-foreground mt-1 leading-tight">
-                    Presentaciones internas con carga directa de documentos OnlyOffice/Drive.
+                    Presentaciones internas con carga directa de documentos OnlyOffice.
                   </p>
                 </div>
 
@@ -884,38 +749,6 @@ export default function KognitoChatPanel() {
                 className="bg-indigo-600 hover:bg-indigo-700 text-white"
               >
                 {selectedUserIds.length === 0 ? 'Crear Sala por Enlace' : 'Crear Chat'}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL PARA CREAR SUB-SALA */}
-      {showSubroomModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-card border border-border rounded-xl shadow-2xl max-w-sm w-full p-6 space-y-4">
-            <h3 className="text-lg font-bold flex items-center gap-2">
-              <GitFork className="w-5 h-5 text-indigo-500" />
-              Crear Sub-sala (Breakout Room)
-            </h3>
-            <p className="text-xs text-muted-foreground">
-              Las sub-salas permiten dividir a los participantes en grupos de trabajo secundarios sin salir de la reunión principal.
-            </p>
-            <div>
-              <label className="text-xs font-medium mb-1 block">Nombre de la Sub-sala</label>
-              <Input
-                value={subroomName}
-                onChange={(e) => setSubroomName(e.target.value)}
-                placeholder="Ej. Grupo 1 - Discusión Técnica"
-                className="text-sm"
-              />
-            </div>
-            <div className="flex justify-end gap-2 pt-2 border-t border-border">
-              <Button variant="ghost" size="sm" onClick={() => setShowSubroomModal(false)}>
-                Cancelar
-              </Button>
-              <Button size="sm" onClick={handleCreateSubroom} disabled={!subroomName.trim()} className="bg-indigo-600 hover:bg-indigo-700 text-white">
-                Crear Sub-sala
               </Button>
             </div>
           </div>

@@ -66,6 +66,14 @@ AVAILABLE_EXTENSIONS = [
         "icon": "FlaskConical",
         "requires_db": False,
         "requires_pip": False
+    },
+    {
+        "id": "growth",
+        "name": "KogniGrowth",
+        "category": "Growth / AI",
+        "description": "Suite de 6 agentes IA para Investigación de Mercado, Copywriting, Outreach, Lanzamiento, Finanzas y Customer Success.",
+        "icon": "TrendingUp",
+        "requires_db": True
     }
 ]
 
@@ -199,6 +207,31 @@ async def install_extension(
             # No requiere instalación adicional de base de datos ni pip.
             # El registro en account.installed_extensions es suficiente para activarla.
             logger.info("Activando extensión Investigación Antropológica (ya integrada en el core)")
+
+        elif ext_id == "growth":
+            try:
+                import extensions.growth.backend.models  # noqa: F401
+            except ImportError:
+                logger.warning("No se pudo importar el modelo de growth")
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            
+            api_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.dirname(api_dir)
+            install_script = os.path.join(project_root, "extensions", "growth", "install.py")
+            python_bin = sys.executable if (sys.executable and os.path.exists(sys.executable)) else os.path.join(project_root, "venv_host", "bin", "python")
+            if os.path.exists(install_script):
+                try:
+                    subprocess.Popen(
+                        [python_bin, install_script],
+                        cwd=project_root,
+                        stdout=open(os.path.join(project_root, "logs", "growth_install.log"), "a"),
+                        stderr=subprocess.STDOUT,
+                        start_new_session=True,
+                    )
+                    logger.info("KogniGrowth install.py lanzado en segundo plano")
+                except Exception as install_err:
+                    logger.warning(f"No se pudo ejecutar install.py de KogniGrowth: {install_err}")
 
         # 2. Registrar como instalada en la cuenta
         installed.append(ext_id)

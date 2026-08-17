@@ -263,6 +263,110 @@ export const NodeDetailsSidebar: React.FC<NodeDetailsSidebarProps> = ({
                     </div>
                 );
 
+            case 'ANTHROPOLOGICAL_QUOTE':
+                return (
+                    <div className="space-y-4">
+                        <div>
+                            <h4 className="font-semibold text-sm mb-2 flex items-center gap-2 text-amber-600 dark:text-amber-400">
+                                <FileText className="h-4 w-4" />
+                                Cita Etnográfica (Corpus)
+                            </h4>
+                            <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/50 p-3 rounded-md text-sm italic leading-relaxed">
+                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                    {properties.full_text || properties.description || node.label}
+                                </ReactMarkdown>
+                            </div>
+                        </div>
+
+                        {properties.code && (
+                            <div>
+                                <h4 className="font-semibold text-sm mb-1 flex items-center gap-2">
+                                    <Tag className="h-4 w-4 text-purple-500" />
+                                    Código Asignado (1:N)
+                                </h4>
+                                <Badge className="bg-purple-600 text-white font-mono text-xs">{properties.code}</Badge>
+                            </div>
+                        )}
+
+                        {properties.code_explanation && (
+                            <div>
+                                <h4 className="font-semibold text-sm mb-1">Justificación del Código</h4>
+                                <p className="text-xs text-muted-foreground">{properties.code_explanation}</p>
+                            </div>
+                        )}
+
+                        {properties.analytical_level && (
+                            <div>
+                                <h4 className="font-semibold text-sm mb-1">Nivel Analítico</h4>
+                                <Badge variant="outline" className="capitalize">{properties.analytical_level}</Badge>
+                            </div>
+                        )}
+
+                        {properties.source_document && (
+                            <div>
+                                <h4 className="font-semibold text-sm mb-1">Documento Origen</h4>
+                                <p className="text-xs text-muted-foreground">{properties.source_document}</p>
+                            </div>
+                        )}
+                    </div>
+                );
+
+            case 'ANTHROPOLOGICAL_CODE':
+                return (
+                    <div className="space-y-4">
+                        <div>
+                            <h4 className="font-semibold text-sm mb-2 flex items-center gap-2 text-purple-600 dark:text-purple-400">
+                                <Brain className="h-4 w-4" />
+                                Código Atómico Antropológico (Contenedor 1:N)
+                            </h4>
+                            <Badge className="bg-purple-700 text-white font-mono text-sm px-3 py-1 mb-2">
+                                {properties.code_name || node.label}
+                            </Badge>
+                            <p className="text-sm text-muted-foreground bg-muted p-3 rounded-md">
+                                {properties.description || 'Sin descripción'}
+                            </p>
+                        </div>
+
+                        {properties.quotes_count !== undefined && (
+                            <div>
+                                <h4 className="font-semibold text-sm mb-1">Citas Agrupadas</h4>
+                                <Badge variant="secondary">{properties.quotes_count} cita(s) contenida(s)</Badge>
+                            </div>
+                        )}
+                    </div>
+                );
+
+            case 'ANTHROPOLOGICAL_CATEGORY':
+                return (
+                    <div className="space-y-4">
+                        <div>
+                            <h4 className="font-semibold text-sm mb-2 flex items-center gap-2 text-blue-600 dark:text-blue-400">
+                                <Tag className="h-4 w-4" />
+                                Categoría Analítica Superior (Perfil de Idea)
+                            </h4>
+                            <Badge className="bg-blue-600 text-white text-sm px-3 py-1 mb-3">
+                                {properties.category_name || node.label}
+                            </Badge>
+                            <div className="text-sm text-foreground bg-muted p-4 rounded-md prose prose-sm dark:prose-invert max-w-none leading-relaxed">
+                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                    {properties.description || 'Sin descripción'}
+                                </ReactMarkdown>
+                            </div>
+                        </div>
+
+                        {properties.theoretical_connection && (
+                            <div>
+                                <h4 className="font-semibold text-sm mb-2 text-primary">Conexión Teórica y Respuesta a Hipótesis</h4>
+                                <div className="text-sm text-foreground bg-blue-50 dark:bg-blue-950/30 p-4 rounded-md border border-blue-200 dark:border-blue-900/40 prose prose-sm dark:prose-invert max-w-none leading-relaxed">
+                                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                        {properties.theoretical_connection}
+                                    </ReactMarkdown>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                );
+
             default:
                 return (
                     <div className="space-y-4">

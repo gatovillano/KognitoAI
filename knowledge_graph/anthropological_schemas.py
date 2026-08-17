@@ -29,11 +29,26 @@ class AnthropologicalExhaustiveExtractionOutput(BaseModel):
 
 
 class CategoryGroupingItem(BaseModel):
-    """Esquema para agrupar códigos atómicos en una categoría analítica superior."""
-    category_name: str = Field(..., description="Nombre de la categoría analítica superior")
+    """Esquema para agrupar códigos atómicos en una categoría analítica superior con un desarrollo denso, riguroso y teóricamente articulado."""
+    category_name: str = Field(..., description="Nombre de la categoría analítica superior (en formato conceptual conciso y relevante)")
     codes: List[str] = Field(..., description="Lista de nombres exactos de los códigos atómicos pertenecientes a esta categoría")
-    category_description: str = Field(..., description="Descripción detallada de la categoría y su relevancia cualitativa")
-    theoretical_connection: str = Field(..., description="Explicación de cómo esta categoría dialoga con el marco teórico o responde a la pregunta de investigación/hipótesis")
+    category_description: str = Field(
+        ...,
+        description=(
+            "Desarrollo teórico-analítico exhaustivo, denso y profundo de la categoría (estilo perfil de ideas centrales). "
+            "Debe articular con rigor académico los conceptos teóricos que sintetizan los códigos, explicitar los mecanismos y dinámicas "
+            "socio-culturales o estructurales observados en el campo, analizar las tensiones/ambivalencias emic-etic y detallar el significado "
+            "antropológico subyacente del fenómeno."
+        )
+    )
+    theoretical_connection: str = Field(
+        ...,
+        description=(
+            "Fundamentación y discusión teórica profunda: elabora cómo la categoría dialoga con los postulados, autores y paradigmas "
+            "del marco teórico de referencia, cómo responde directamente a la pregunta de investigación y de qué manera operacionaliza "
+            "o pone a prueba la hipótesis de trabajo."
+        )
+    )
 
 
 class AnthropologicalGroupingOutput(BaseModel):
@@ -41,4 +56,19 @@ class AnthropologicalGroupingOutput(BaseModel):
     categories: List[CategoryGroupingItem] = Field(
         default_factory=list, 
         description="Lista de categorías superiores que agrupan los códigos atómicos"
+    )
+
+
+class CodeConsolidationItem(BaseModel):
+    """Esquema para unificar códigos atómicos similares en un código canónico contenedor (1:N)."""
+    canonical_code: str = Field(..., description="Nombre del código atómico canónico unificado")
+    description: str = Field(..., description="Descripción sintética del significado del código canónico")
+    merged_codes: List[str] = Field(default_factory=list, description="Lista de nombres exactos de códigos creados preliminarmente que se unifican bajo este código canónico")
+
+
+class AnthropologicalCodeConsolidationOutput(BaseModel):
+    """Esquema para la consolidación de códigos atómicos en taxonomías compactas y reutilizables."""
+    consolidated_codes: List[CodeConsolidationItem] = Field(
+        default_factory=list,
+        description="Lista de códigos canónicos unificados que agrupan múltiples citas"
     )

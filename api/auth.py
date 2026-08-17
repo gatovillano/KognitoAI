@@ -274,7 +274,7 @@ def verify_telegram_hash(data: TelegramLoginRequest, bot_token: str) -> bool:
 
 
 
-@router.post("/auth/telegram/callback", response_model=TokenResponse, summary="Callback de Login Social de Telegram")
+@router.post("/auth/telegram/callback", response_model=TokenResponse, summary="Callback de autenticación de Telegram")
 @limiter.limit("10/minute")
 async def handle_telegram_login(request: Request, login_data: TelegramLoginRequest, db: AsyncSession = Depends(get_db_session)):
     """Maneja el callback de autenticación social de Telegram, crea o vincula la cuenta y devuelve un token."""

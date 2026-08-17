@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from core.dependencies import get_db_session
 from utils.security import get_current_account_id
 from utils.helpers import clean_nan_values
+from core.database import UserTable, UserTableRow
 
 logger = logging.getLogger(__name__)
 

@@ -38,6 +38,7 @@ import {
   Link2,
   UserPlus,
   FolderOutput,
+  FolderPlus,
   Eye,
   FileImage,
   FileSpreadsheet,
@@ -178,6 +179,16 @@ export default function DocumentsPage() {
   const [privateSuggestions, setPrivateSuggestions] = useState<ShareUserSuggestion[]>([]);
   const [selectedPrivateUser, setSelectedPrivateUser] = useState<ShareUserSuggestion | null>(null);
   const [shareCanEdit, setShareCanEdit] = useState(true);
+  
+  // Save As / Convert Modal states
+  const [isSaveAsDialogOpen, setIsSaveAsDialogOpen] = useState(false);
+  const [saveAsSourceUrl, setSaveAsSourceUrl] = useState<string | null>(null);
+  const [saveAsDocId, setSaveAsDocId] = useState<string | null>(null);
+  const [saveAsFilename, setSaveAsFilename] = useState("");
+  const [saveAsTargetExtension, setSaveAsTargetExtension] = useState("pdf");
+  const [saveAsTargetFolderId, setSaveAsTargetFolderId] = useState("null");
+  const [saveAsTargetWorkspaceId, setSaveAsTargetWorkspaceId] = useState("none");
+  const [isSavingAs, setIsSavingAs] = useState(false);
   const [isChatSidebarOpen, setIsChatSidebarOpen] = useState(false);
   const [currentChatThreadId, setCurrentChatThreadId] = useState<string | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(450);
@@ -871,17 +882,108 @@ export default function DocumentsPage() {
     }
   };
 
+  const openSaveAsModalForDoc = (doc: OnlyOfficeDoc) => {
+    setSaveAsSourceUrl(null);
+    setSaveAsDocId(doc.id);
+    const baseName = doc.filename.lastIndexOf('.') > 0 
+      ? doc.filename.substring(0, doc.filename.lastIndexOf('.')) 
+      : doc.filename;
+    setSaveAsFilename(baseName);
+    setSaveAsTargetExtension(doc.extension.toLowerCase() === 'docx' ? 'pdf' : doc.extension.toLowerCase());
+    setSaveAsTargetFolderId(doc.folder_id || "null");
+    setSaveAsTargetWorkspaceId(doc.workspace_id || "none");
+    setIsSaveAsDialogOpen(true);
+    fetchAllFolders();
+  };
+
+  const handleSaveAsSubmit = async () => {
+    if (!saveAsFilename.trim()) {
+      toast.error("Por favor ingresa un nombre para el archivo");
+      return;
+    }
+    setIsSavingAs(true);
+    try {
+      const payload: any = {
+        filename: saveAsFilename.trim(),
+        target_extension: saveAsTargetExtension,
+        folder_id: saveAsTargetFolderId === "null" ? null : saveAsTargetFolderId,
+        workspace_id: saveAsTargetWorkspaceId === "none" ? null : saveAsTargetWorkspaceId,
+      };
+
+      if (saveAsSourceUrl) {
+        payload.source_url = saveAsSourceUrl;
+      }
+      if (saveAsDocId) {
+        payload.document_id = saveAsDocId;
+      }
+
+      await apiClient.post("/api/onlyoffice/save-as-copy", payload);
+      toast.success("Documento guardado exitosamente en la carpeta seleccionada");
+      setIsSaveAsDialogOpen(false);
+      fetchDocuments();
+      fetchAllFolders();
+    } catch (error: any) {
+      console.error("Error al guardar como copia:", error);
+      const detail = error.response?.data?.detail || "Error al guardar el documento";
+      toast.error(detail);
+    } finally {
+      setIsSavingAs(false);
+    }
+  };
+
+  const handleCreateFolderInSaveAs = async (folderName: string) => {
+    try {
+      const formData = new FormData();
+      formData.append("name", folderName);
+      if (saveAsTargetFolderId && saveAsTargetFolderId !== "null") {
+        formData.append("parent_id", saveAsTargetFolderId);
+      }
+      if (saveAsTargetWorkspaceId && saveAsTargetWorkspaceId !== "none") {
+        formData.append("workspace_id", saveAsTargetWorkspaceId);
+      }
+      const response = await apiClient.post('/api/onlyoffice/folders', formData);
+      toast.success(`Carpeta "${folderName}" creada`);
+      await fetchAllFolders();
+      if (response.data?.id) {
+        setSaveAsTargetFolderId(response.data.id);
+      }
+    } catch (error) {
+      toast.error("Error al crear la carpeta");
+    }
+  };
+
   const initEditor = useCallback((config: any) => {
     try {
+      const fullConfig = {
+        ...config,
+        events: {
+          ...(config.events || {}),
+          onRequestSaveAs: (event: any) => {
+            if (event?.data?.url) {
+              setSaveAsSourceUrl(event.data.url);
+              setSaveAsDocId(editingDoc?.id || null);
+              const title = event.data.title || editingDoc?.filename || "documento_copia";
+              const ext = title.split('.').pop()?.toLowerCase() || "pdf";
+              const baseName = title.lastIndexOf('.') > 0 
+                ? title.substring(0, title.lastIndexOf('.')) 
+                : title;
+              setSaveAsFilename(baseName);
+              setSaveAsTargetExtension(ext);
+              setIsSaveAsDialogOpen(true);
+              fetchAllFolders();
+            }
+          }
+        }
+      };
       // @ts-ignore
-      editorRef.current = new window.DocsAPI.DocEditor("onlyoffice-placeholder", config);
+      editorRef.current = new window.DocsAPI.DocEditor("onlyoffice-placeholder", fullConfig);
       setIsOpeningEditor(false);
     } catch (err) {
       console.error("Editor init failed", err);
       toast.error("Error al inicializar el editor de OnlyOffice");
       setIsOpeningEditor(false);
     }
-  }, []);
+  }, [editingDoc, fetchAllFolders]);
 
   const openEditor = useCallback(async (doc: OnlyOfficeDoc) => {
     setIsOpeningEditor(true);
@@ -1727,6 +1829,16 @@ export default function DocumentsPage() {
                                 <span className="font-medium">Duplicar Documento</span>
                               </DropdownMenuItem>
                               <DropdownMenuItem 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openSaveAsModalForDoc(doc);
+                                }}
+                                className="gap-2 cursor-pointer py-2 px-3"
+                              >
+                                <FolderOutput className="h-4 w-4 text-blue-500" />
+                                <span className="font-medium text-blue-600 dark:text-blue-400">Guardar como / Convertir...</span>
+                              </DropdownMenuItem>
+                              <DropdownMenuItem 
                                 onClick={() => handleVectorize(doc)}
                                 className="gap-2 cursor-pointer py-2 px-3"
                               >
@@ -2078,6 +2190,16 @@ export default function DocumentsPage() {
                             <span className="font-medium">Duplicar Documento</span>
                           </DropdownMenuItem>
                           <DropdownMenuItem 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openSaveAsModalForDoc(doc);
+                            }}
+                            className="gap-2 cursor-pointer py-2 px-3"
+                          >
+                            <FolderOutput className="h-4 w-4 text-blue-500" />
+                            <span className="font-medium text-blue-600 dark:text-blue-400">Guardar como / Convertir...</span>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem 
                             onClick={(e) => { e.stopPropagation(); handleVectorize(doc); }}
                             className="gap-2 cursor-pointer py-2 px-3"
                           >
@@ -2225,6 +2347,142 @@ export default function DocumentsPage() {
             >
               {isCreatingDoc ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Plus className="h-4 w-4 mr-2" />}
               Crear Documento
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Save As / Convert Modal */}
+      <Dialog open={isSaveAsDialogOpen} onOpenChange={setIsSaveAsDialogOpen}>
+        <DialogContent className="sm:max-w-lg rounded-[2rem] border-primary/10 shadow-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold flex items-center gap-3">
+              <div className="p-2.5 rounded-2xl bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                <FolderOutput className="h-6 w-6" />
+              </div>
+              Guardar copia en la nube
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="py-4 space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Elige el nombre, formato y la carpeta de destino donde deseas guardar este documento en tu nube de Documentos.
+            </p>
+
+            <div className="space-y-2">
+              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Nombre del archivo
+              </label>
+              <Input
+                value={saveAsFilename}
+                onChange={(e) => setSaveAsFilename(e.target.value)}
+                placeholder="Nombre del documento"
+                className="h-12 rounded-xl"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  Formato de salida
+                </label>
+                <Select value={saveAsTargetExtension} onValueChange={setSaveAsTargetExtension}>
+                  <SelectTrigger className="h-12 rounded-xl">
+                    <SelectValue placeholder="Formato" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="pdf">📄 PDF (.pdf)</SelectItem>
+                    <SelectItem value="docx">📝 Word (.docx)</SelectItem>
+                    <SelectItem value="xlsx">📊 Excel (.xlsx)</SelectItem>
+                    <SelectItem value="pptx">🖥️ PowerPoint (.pptx)</SelectItem>
+                    <SelectItem value="txt">📑 Texto (.txt)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  Workspace
+                </label>
+                <Select value={saveAsTargetWorkspaceId} onValueChange={setSaveAsTargetWorkspaceId}>
+                  <SelectTrigger className="h-12 rounded-xl">
+                    <SelectValue placeholder="Workspace" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Sin Workspace</SelectItem>
+                    {workspaces.map((ws: any) => (
+                      <SelectItem key={ws.id} value={ws.id}>
+                        {ws.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  Carpeta de Destino
+                </label>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    const folderName = prompt("Nombre de la nueva carpeta:");
+                    if (folderName && folderName.trim()) {
+                      handleCreateFolderInSaveAs(folderName.trim());
+                    }
+                  }}
+                  className="h-7 text-xs text-primary gap-1 px-2"
+                >
+                  <FolderPlus className="h-3.5 w-3.5" />
+                  Nueva Carpeta
+                </Button>
+              </div>
+              <Select value={saveAsTargetFolderId} onValueChange={setSaveAsTargetFolderId}>
+                <SelectTrigger className="h-12 rounded-xl border-primary/20">
+                  <SelectValue placeholder="Carpeta destino" />
+                </SelectTrigger>
+                <SelectContent className="max-h-[250px]">
+                  <SelectItem value="null">
+                    <div className="flex items-center gap-2 font-bold">
+                      <FileBox className="h-4 w-4" />
+                      Inicio (Raíz)
+                    </div>
+                  </SelectItem>
+                  {allFolders.map((f: any) => (
+                    <SelectItem key={f.id} value={f.id}>
+                      <div className="flex items-center gap-2">
+                        <Folder className="h-4 w-4 text-orange-500" />
+                        {f.name}
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <DialogFooter className="sm:justify-end gap-3">
+            <Button
+              variant="ghost"
+              onClick={() => setIsSaveAsDialogOpen(false)}
+              className="rounded-xl h-12 px-6"
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleSaveAsSubmit}
+              disabled={isSavingAs || !saveAsFilename.trim()}
+              className="rounded-xl h-12 px-8 bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-lg shadow-blue-500/20"
+            >
+              {isSavingAs ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : (
+                <FolderOutput className="h-4 w-4 mr-2" />
+              )}
+              Guardar en Nube
             </Button>
           </DialogFooter>
         </DialogContent>

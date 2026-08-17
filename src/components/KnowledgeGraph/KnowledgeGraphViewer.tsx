@@ -41,76 +41,146 @@ const KnowledgeGraphViewerInner = ({ graphData, onNodeSelect, selectedWorkspace 
   const { fitView } = useReactFlow();
   const { play, stop, isLoading: isTtsLoading, isPlaying: isTtsPlaying, activeText } = useTextToSpeech();
 
-  // Colores por tipo de entidad
-  const nodeColors = useMemo(() => ({
-    'CONCEPTUAL_QUOTE': '#FF6B6B', // Color para nodos de citas conceptuales
-    'IDEA_PROFILE': '#4ECDC4',     // Color para nodos de perfiles de ideas
-    'default': '#DDA0DD'           // Color por defecto para otros tipos de nodos
+  // Paleta de colores por tipo de entidad — cada tipo con color, borde y tamaño únicos
+  const NODE_STYLES = useMemo(() => ({
+    'ANTHROPOLOGICAL_CATEGORY': {
+      background: '#F0A500',   // Dorado/Ámbar — nivel superior jerárquico
+      border: '3px solid #B07600',
+      color: '#1a1a1a',
+      fontSize: '13px',
+      fontWeight: '800',
+      minWidth: '160px',
+      borderRadius: '12px',
+      padding: '10px 14px',
+      boxShadow: '0 4px 12px rgba(240,165,0,0.4)',
+      label: 'Categoría',
+      emoji: '🎯',
+    },
+    'ANTHROPOLOGICAL_CODE': {
+      background: '#27AE60',   // Verde esmeralda — nivel intermedio
+      border: '2px solid #1A7A42',
+      color: '#ffffff',
+      fontSize: '12px',
+      fontWeight: '700',
+      minWidth: '130px',
+      borderRadius: '8px',
+      padding: '8px 12px',
+      boxShadow: '0 3px 8px rgba(39,174,96,0.35)',
+      label: 'Código',
+      emoji: '🏷️',
+    },
+    'ANTHROPOLOGICAL_QUOTE': {
+      background: '#2980B9',   // Azul — nivel base (citas)
+      border: '2px solid #1A5E8A',
+      color: '#ffffff',
+      fontSize: '11px',
+      fontWeight: '600',
+      minWidth: '120px',
+      borderRadius: '6px',
+      padding: '6px 10px',
+      boxShadow: '0 2px 6px rgba(41,128,185,0.3)',
+      label: 'Cita',
+      emoji: '💬',
+    },
+    'CONCEPTUAL_QUOTE': {
+      background: '#E74C3C',
+      border: '2px solid #A93226',
+      color: '#ffffff',
+      fontSize: '11px',
+      fontWeight: '600',
+      minWidth: '120px',
+      borderRadius: '6px',
+      padding: '6px 10px',
+      boxShadow: '0 2px 6px rgba(231,76,60,0.3)',
+      label: 'Cita conceptual',
+      emoji: '💡',
+    },
+    'IDEA_PROFILE': {
+      background: '#8E44AD',
+      border: '2px solid #6C3483',
+      color: '#ffffff',
+      fontSize: '12px',
+      fontWeight: '700',
+      minWidth: '130px',
+      borderRadius: '10px',
+      padding: '8px 12px',
+      boxShadow: '0 3px 8px rgba(142,68,173,0.35)',
+      label: 'Perfil de ideas',
+      emoji: '🧠',
+    },
+    'default': {
+      background: '#7F8C8D',
+      border: '2px solid #566573',
+      color: '#ffffff',
+      fontSize: '11px',
+      fontWeight: '600',
+      minWidth: '110px',
+      borderRadius: '6px',
+      padding: '6px 10px',
+      boxShadow: 'none',
+      label: 'Nodo',
+      emoji: '●',
+    },
   }), []);
+
+  // Compatibilidad hacia atrás para MiniMap
+  const nodeColors = useMemo(() => Object.fromEntries(
+    Object.entries(NODE_STYLES).map(([k, v]) => [k, v.background])
+  ), [NODE_STYLES]);
 
   const convertGraphData = useCallback((data: any) => {
     console.log("🔵 convertGraphData: Datos de entrada:", data);
-    // Asegurarse de que data.nodes y data.edges existan
     if (!data || !data.nodes || !data.edges) {
       console.warn("🟡 convertGraphData: Datos de grafo incompletos o ausentes.");
       return { nodes: [], edges: [] };
     }
 
-    // Convertir nodos del backend a formato ReactFlow
     const flowNodes: Node[] = data.nodes.map((node: any, index: number) => {
-      const nodeType = node.type || 'default'; // Usar 'type' del nodo
+      const nodeType = node.type || 'default';
+      const style = NODE_STYLES[nodeType as keyof typeof NODE_STYLES] || NODE_STYLES.default;
+      const { label: _l, emoji: _e, ...cssStyle } = style; // extraer solo props CSS
       return {
         id: node.id || `node_${index}`,
-        type: 'default', // Tipo de nodo de ReactFlow (puede ser 'input', 'output', 'default')
+        type: 'default',
         position: { x: Math.random() * 800, y: Math.random() * 600 },
         data: {
-          label: node.label || 'Sin nombre',
-          type: node.type || 'default',
+          label: `${style.emoji} ${node.label || 'Sin nombre'}`,
+          type: nodeType,
           description: node.description || node.title || node.label || '',
           confidence: node.confidence || node.properties?.confidence || 0,
           source: node.source || node.properties?.source || 'Desconocido',
         },
         style: {
-          background: nodeColors[nodeType as keyof typeof nodeColors] || nodeColors.default,
-          color: '#333',
-          border: '2px solid #222',
-          borderRadius: '8px',
-          fontSize: '12px',
-          fontWeight: 'bold',
-          padding: '8px',
-          minWidth: '120px',
-          textAlign: 'center'
+          ...cssStyle,
+          textAlign: 'center' as const,
         }
       };
     });
-    console.log("🟢 convertGraphData: Nodos convertidos:", flowNodes.length, flowNodes);
+    console.log("🟢 convertGraphData: Nodos convertidos:", flowNodes.length);
 
-    const maxEdges = 1000; // Limitar el número de aristas para evitar sobrecarga
-    // Convertir aristas del backend a formato ReactFlow
+    const maxEdges = 1000;
     const flowEdges: Edge[] = (data.edges || [])
       .slice(0, maxEdges)
       .map((edge: any, index: number) => ({
         id: edge.id || `edge_${index}`,
-        source: edge.source,
-        target: edge.target,
-        type: 'smoothstep', // Tipo de arista de ReactFlow
-        animated: edge.properties?.confidence > 0.8,
-        style: {
-          stroke: edge.properties?.confidence > 0.8 ? '#FF6B6B' : '#999',
-          strokeWidth: Math.max(1, (edge.properties?.confidence || 0.5) * 3),
-        },
-        label: edge.label || 'RELACIONADO',
-        labelStyle: { fontSize: '10px', fontWeight: 'bold', fill: '#666' },
+        // La API devuelve 'from'/'to'; ReactFlow espera 'source'/'target'
+        source: edge.source || edge.from,
+        target: edge.target || edge.to,
+        type: 'smoothstep',
+        animated: false,
+        style: { stroke: '#aaaaaa', strokeWidth: 1.5 },
+        label: edge.label || '',
+        labelStyle: { fontSize: '9px', fill: '#888' },
         data: {
           type: edge.type || 'RELACIONADO',
           description: edge.title || '',
         }
       }))
-      .filter((edge: Edge) => edge.source && edge.target); // Filtrar aristas inválidas
-    console.log("🟢 convertGraphData: Aristas convertidas:", flowEdges.length, flowEdges);
+      .filter((edge: Edge) => edge.source && edge.target);
+    console.log("🟢 convertGraphData: Aristas convertidas:", flowEdges.length);
 
     return { nodes: flowNodes, edges: flowEdges };
-  }, [nodeColors]);
+  }, [NODE_STYLES]);
 
   const hasInitialFittedRef = React.useRef(false);
 

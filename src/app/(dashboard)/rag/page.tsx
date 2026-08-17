@@ -416,17 +416,44 @@ export default function RagCollectionsPage() {
 
       const response = await apiClient.post('/api/knowledge-graph/process-anthropologically', payload);
       if (response.data?.success) {
-        const counts = response.data?.data || {};
+        const taskId = response.data?.data?.task_id;
         toast.success(
-          `Procesamiento antropológico completado: ${counts.quotes?.length || 0} citas, ${counts.codes?.length || 0} códigos, ${counts.categories?.length || 0} categorías`,
-          { id: toastId }
+          "⚡ Análisis antropológico iniciado en segundo plano. Puedes continuar usando la plataforma normalmente.",
+          { id: toastId, duration: 5000 }
         );
         updateAnalysisTask(tempTaskId, {
-          phase: 'completed',
-          is_complete: true,
-          progress_percent: 100,
-          message: 'Procesamiento antropológico completado'
+          phase: 'processing',
+          is_complete: false,
+          progress_percent: 15,
+          message: 'Análisis antropológico en ejecución en segundo plano'
         });
+
+        if (taskId) {
+          const pollInterval = setInterval(async () => {
+            try {
+              const statusRes = await apiClient.get(`/api/knowledge-graph/progress/${taskId}`);
+              if (statusRes.data?.success && statusRes.data?.data) {
+                const prog = statusRes.data.data;
+                updateAnalysisTask(tempTaskId, {
+                  phase: prog.phase,
+                  is_complete: prog.is_complete,
+                  progress_percent: prog.progress_percent,
+                  message: prog.message
+                });
+
+                if (prog.is_complete) {
+                  clearInterval(pollInterval);
+                  toast.success("🎉 Grafo antropológico completado y persistido en Neo4j con éxito.");
+                } else if (prog.has_error) {
+                  clearInterval(pollInterval);
+                  toast.error(`❌ Error en procesamiento antropológico: ${prog.error}`);
+                }
+              }
+            } catch (err) {
+              console.error("Error al verificar progreso antropológico:", err);
+            }
+          }, 3000);
+        }
       } else {
         throw new Error(response.data?.error || 'Respuesta sin éxito del servidor');
       }

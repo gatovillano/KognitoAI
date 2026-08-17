@@ -7,10 +7,10 @@ import * as THREE from 'three';
 import { getNodeColor } from '@/utils/graphUtils';
 import { GraphMetadata } from '@/types/graph';
 import { Button } from '@/components/ui/button';
-import { RotateCw, Maximize2, Sparkles, FilterX } from 'lucide-react';
+import { RotateCw, Maximize2, Sparkles, FilterX, GitFork, AlertCircle } from 'lucide-react';
 
 // Dynamic import of ForceGraph3D to prevent SSR window/document issues in Next.js
-const ForceGraph3D = dynamic(() => import('react-force-graph-3d'), {
+const ForceGraph3D = dynamic(() => import('react-force-graph-3d').then(mod => mod.default || mod), {
   ssr: false,
   loading: () => (
     <div className="flex justify-center items-center h-full min-h-[500px] text-muted-foreground">
@@ -63,7 +63,18 @@ interface GraphVisualizationProps {
   onEdgeClick?: (edge: VisGraphEdge) => void;
   savedNodeIds?: Set<string | number>;
   focusedNodeId?: string | number | null;
+  isolationDepth?: 1 | 2;
+  onToggleIsolationDepth?: () => void;
 }
+
+const normalizeId = (value: any): string => {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'object') {
+    if (value.id !== undefined && value.id !== null) return String(value.id);
+    if (value.name !== undefined && value.name !== null) return String(value.name);
+  }
+  return String(value);
+};
 
 export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisualizationProps>(({
   graphData,
@@ -75,13 +86,43 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
   onEdgeClick,
   savedNodeIds = new Set(),
   focusedNodeId = null,
+  isolationDepth = 1,
+  onToggleIsolationDepth,
 }, ref) => {
   const fgRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const [enableRotation, setEnableRotation] = useState(false);
   const [showParticles, setShowParticles] = useState(true);
+  const [webglError, setWebglError] = useState<string | null>(null);
   const lastClickTimeRef = useRef<{ id: string | number; time: number } | null>(null);
+
+  // Detect WebGL availability and GPU context early to give useful feedback
+  useEffect(() => {
+    try {
+      const canvas = document.createElement('canvas');
+      const gl: WebGLRenderingContext | WebGL2RenderingContext | null =
+        (canvas.getContext('webgl2') as WebGL2RenderingContext | null) ||
+        (canvas.getContext('webgl') as WebGLRenderingContext | null) ||
+        (canvas.getContext('experimental-webgl') as WebGLRenderingContext | null);
+      if (!gl) {
+        setWebglError('WebGL no está disponible en este navegador. El grafo 3D requiere aceleración por hardware (GPU).');
+      } else {
+        // WEBGL_debug_renderer_info no está en los tipos estándar de TypeScript para WebGLRenderingContext,
+        // por lo que necesitamos un cast a `any` para acceder a esta extensión no estándar.
+        // El tipado fuerte se mantiene en todo el resto del código.
+        const debugInfo = (gl as any).getExtension?.('WEBGL_debug_renderer_info');
+        const renderer = debugInfo ? (gl as any).getParameter((debugInfo as any).UNMASKED_RENDERER_WEBGL) : 'desconocido';
+        console.log('[GraphVisualization] WebGL Renderer detectado:', renderer);
+        // If falling back to software (llvmpipe/swiftshader), warn but allow attempt
+        if (renderer && /llvmpipe|swiftshader|software/i.test(renderer)) {
+          console.warn('[GraphVisualization] WebGL usando renderizador por software (sin GPU). El rendimiento será pobre y puede fallar.');
+        }
+      }
+    } catch (err: any) {
+      setWebglError('Error al inicializar WebGL: ' + (err?.message || 'desconocido'));
+    }
+  }, []);
 
   // Resize handler for responsive 3D Canvas
   useEffect(() => {
@@ -115,8 +156,8 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
 
     graphData.nodes.forEach(node => {
       if (!node || node.id === undefined || node.id === null) return;
-      const strId = String(node.id);
-      if (nodeMap.has(strId)) return; // Deduplicate
+      const strId = normalizeId(node.id);
+      if (!strId || nodeMap.has(strId)) return; // Deduplicate or skip empty
 
       const fullLabel = node.properties?.name || node.properties?.title || node.label || strId;
       const truncatedLabel = truncateText(fullLabel);
@@ -145,10 +186,10 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
         const rawSource = edge.from !== undefined ? edge.from : edge.source;
         const rawTarget = edge.to !== undefined ? edge.to : edge.target;
 
-        if (rawSource === undefined || rawSource === null || rawTarget === undefined || rawTarget === null) return null;
+        const sourceId = normalizeId(rawSource);
+        const targetId = normalizeId(rawTarget);
 
-        const sourceId = String(rawSource);
-        const targetId = String(rawTarget);
+        if (!sourceId || !targetId) return null;
 
         // Ensure both endpoints exist in nodeMap
         if (!nodeMap.has(sourceId) || !nodeMap.has(targetId)) {
@@ -176,32 +217,65 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
   const connectedNodeIds = useMemo(() => {
     if (focusedNodeId === null || focusedNodeId === undefined) return null;
     const set = new Set<string>();
-    const focusedStr = String(focusedNodeId);
+    const focusedStr = normalizeId(focusedNodeId);
     set.add(focusedStr);
 
+    const hop1Nodes = new Set<string>();
+
     formattedData.links.forEach((link: any) => {
-      const sId = String(link.source?.id !== undefined ? link.source.id : link.source);
-      const tId = String(link.target?.id !== undefined ? link.target.id : link.target);
-      if (sId === focusedStr) set.add(tId);
-      if (tId === focusedStr) set.add(sId);
+      const sId = normalizeId(link.source);
+      const tId = normalizeId(link.target);
+      if (sId === focusedStr && tId) hop1Nodes.add(tId);
+      if (tId === focusedStr && sId) hop1Nodes.add(sId);
     });
-    return set;
-  }, [focusedNodeId, formattedData.links]);
 
-  // Configure 3D physics forces for greater node separation (only reheat when graph nodes count changes)
-  useEffect(() => {
-    if (fgRef.current) {
-      fgRef.current.d3Force('charge')?.strength(-320);
-      fgRef.current.d3Force('link')?.distance(130);
-      fgRef.current.d3ReheatSimulation();
+    hop1Nodes.forEach(id => set.add(id));
+
+    if (isolationDepth === 2) {
+      formattedData.links.forEach((link: any) => {
+        const sId = normalizeId(link.source);
+        const tId = normalizeId(link.target);
+        if (hop1Nodes.has(sId) && tId) set.add(tId);
+        if (hop1Nodes.has(tId) && sId) set.add(sId);
+      });
     }
-  }, [graphData?.nodes?.length]);
 
-  // Handle auto-rotation
+    return set;
+  }, [focusedNodeId, formattedData.links, isolationDepth]);
+
+  // Configure 3D physics forces for greater node separation safely
   useEffect(() => {
     if (fgRef.current) {
-      fgRef.current.controls().autoRotate = enableRotation;
-      fgRef.current.controls().autoRotateSpeed = 0.8;
+      try {
+        const chargeForce = fgRef.current.d3Force('charge');
+        if (chargeForce && typeof chargeForce.strength === 'function') {
+          chargeForce.strength(-320);
+        }
+        const linkForce = fgRef.current.d3Force('link');
+        if (linkForce && typeof linkForce.distance === 'function') {
+          linkForce.distance(130);
+        }
+        if (typeof fgRef.current.d3ReheatSimulation === 'function') {
+          fgRef.current.d3ReheatSimulation();
+        }
+      } catch (err) {
+        console.warn('Error configuring 3D forces:', err);
+      }
+    }
+  }, [formattedData.nodes.length]);
+
+  // Handle auto-rotation safely
+  useEffect(() => {
+    if (fgRef.current) {
+      try {
+        const controls = fgRef.current.controls?.();
+        if (controls) {
+          controls.autoRotate = enableRotation;
+          controls.autoRotateSpeed = 0.8;
+        }
+      } catch (err) {
+        console.warn('Error setting autoRotate:', err);
+      }
     }
   }, [enableRotation]);
 
@@ -319,6 +393,20 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
     return <div className="flex justify-center items-center h-full text-red-500">{error}</div>;
   }
 
+  if (webglError) {
+    return (
+      <div className="flex flex-col items-center justify-center p-8 text-center h-full">
+        <AlertCircle className="h-10 w-10 text-destructive mb-4" />
+        <h3 className="text-xl font-semibold text-destructive mb-2">Error de WebGL</h3>
+        <p className="text-muted-foreground mb-4 max-w-md">{webglError}</p>
+        <p className="text-sm text-muted-foreground max-w-md">
+          El visor 3D requiere aceleración GPU. Verifica que tu navegador tenga habilitada la aceleración por hardware
+          (chrome://settings → Sistema → "Usar aceleración de hardware cuando esté disponible") y que los drivers de GPU estén instalados.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div ref={containerRef} className="w-full h-full relative overflow-hidden bg-slate-950 rounded-lg min-h-[500px]">
       {/* 3D Canvas Controls Toolbar */}
@@ -333,6 +421,18 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
           >
             <FilterX className="h-3.5 w-3.5" />
             Ver todo
+          </Button>
+        )}
+        {focusedNodeId && onToggleIsolationDepth && (
+          <Button
+            size="sm"
+            variant={isolationDepth === 2 ? "secondary" : "outline"}
+            onClick={onToggleIsolationDepth}
+            title={isolationDepth === 2 ? "Mostrar solo 1er nivel" : "Integrar relaciones de 2º nivel (vecinos de los demás nodos)"}
+            className="h-8 px-2 text-xs gap-1.5 text-slate-200 border-slate-700"
+          >
+            <GitFork className="h-3.5 w-3.5 text-sky-400" />
+            {isolationDepth === 2 ? '2º Nivel (Vecinos)' : '+ 2º Nivel'}
           </Button>
         )}
         <Button
@@ -402,20 +502,29 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
         onLinkClick={handleLinkClick}
         linkWidth={(link: any) => {
           if (focusedNodeId !== null && focusedNodeId !== undefined) {
-            const sId = String(link.source?.id !== undefined ? link.source.id : link.source);
-            const tId = String(link.target?.id !== undefined ? link.target.id : link.target);
-            const focusedStr = String(focusedNodeId);
-            return (sId === focusedStr || tId === focusedStr) ? 3.5 : 0.4;
+            const sId = normalizeId(link.source);
+            const tId = normalizeId(link.target);
+            const focusedStr = normalizeId(focusedNodeId);
+            if (sId === focusedStr || tId === focusedStr) {
+              return 3.5;
+            }
+            if (isolationDepth === 2) {
+              return 1.2;
+            }
+            return 0.4;
           }
           return 1.5;
         }}
         linkColor={(link: any) => {
           if (focusedNodeId !== null && focusedNodeId !== undefined) {
-            const sId = String(link.source?.id !== undefined ? link.source.id : link.source);
-            const tId = String(link.target?.id !== undefined ? link.target.id : link.target);
-            const focusedStr = String(focusedNodeId);
+            const sId = normalizeId(link.source);
+            const tId = normalizeId(link.target);
+            const focusedStr = normalizeId(focusedNodeId);
             if (sId === focusedStr || tId === focusedStr) {
               return '#38bdf8';
+            }
+            if (isolationDepth === 2) {
+              return '#64748b';
             }
             return 'rgba(30, 41, 59, 0.15)';
           }
@@ -423,16 +532,28 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
         }}
         linkDirectionalParticles={(link: any) => {
           if (focusedNodeId !== null && focusedNodeId !== undefined) {
-            const sId = String(link.source?.id !== undefined ? link.source.id : link.source);
-            const tId = String(link.target?.id !== undefined ? link.target.id : link.target);
-            const focusedStr = String(focusedNodeId);
-            return (sId === focusedStr || tId === focusedStr) ? 4 : 0;
+            const sId = normalizeId(link.source);
+            const tId = normalizeId(link.target);
+            const focusedStr = normalizeId(focusedNodeId);
+            if (sId === focusedStr || tId === focusedStr) {
+              return 4;
+            }
+            if (isolationDepth === 2) {
+              return showParticles ? 1 : 0;
+            }
+            return 0;
           }
           return showParticles ? 3 : 0;
         }}
         linkDirectionalParticleWidth={2}
         linkDirectionalParticleSpeed={0.006}
         linkDirectionalParticleColor={() => '#60A5FA'}
+        rendererConfig={{
+          powerPreference: "high-performance",
+          failIfMajorPerformanceCaveat: false,
+          antialias: true,
+          alpha: false
+        }}
         backgroundColor="#090d16"
         showNavInfo={false}
       />
