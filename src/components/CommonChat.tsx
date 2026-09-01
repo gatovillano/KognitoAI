@@ -10,7 +10,7 @@ import { useUserSettings } from '@/contexts/UserSettingsContext';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { ArrowLeft, FolderKanban, Bot, BrainCircuit, Search, X, Folder, File as FileIcon, Share2, Zap, ArrowUpRight } from 'lucide-react';
+import { ArrowLeft, ArrowDown, FolderKanban, Bot, BrainCircuit, Search, X, Folder, File as FileIcon, Share2, Zap, ArrowUpRight } from 'lucide-react';
 import { ChatMessage } from '@/components/ChatMessage';
 import ChatInputBar from '@/components/ChatInputBar';
 import { stripMarkdown } from '@/lib/chatUtils';
@@ -1796,7 +1796,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
   return (
     <div className="flex h-full bg-transparent overflow-hidden">
       <div className="flex flex-col h-full w-full overflow-hidden">
-        <div ref={scrollAreaRef} className="flex-1 overflow-y-auto min-h-0 relative custom-scrollbar pr-1">
+        <div className="flex-1 min-h-0 relative flex flex-col">
           {/* Share Button */}
           {threadId && (
             <motion.button
@@ -1810,21 +1810,49 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
               <Share2 className="w-4 h-4" />
             </motion.button>
           )}
-          <div className="px-2 py-4 sm:px-6 sm:py-6 space-y-4 sm:space-y-6 w-full md:max-w-4xl lg:max-w-5xl mx-auto">
-            <div>
-              {(hasMoreMessages || hasMoreRenderedMessages) && (
-                <div ref={topSentinelRef} className="flex justify-center p-4">
-                  {hasMoreRenderedMessages && !isLoadingMore && <p className="text-xs text-muted-foreground/60 font-medium">Mostrando mensajes recientes. Desplaza arriba para cargar más.</p>}
-                  {isLoadingMore && <p className="text-xs text-muted-foreground/60 font-medium">Cargando más mensajes...</p>}
-                </div>
-              )}
-              {chatRenderItems.map((item) => {
-                if (item.type === 'single') {
+
+          <div ref={scrollAreaRef} className="flex-1 overflow-y-auto min-h-0 custom-scrollbar pr-1">
+            <div className="px-2 py-4 sm:px-6 sm:py-6 space-y-4 sm:space-y-6 w-full md:max-w-4xl lg:max-w-5xl mx-auto">
+              <div>
+                {(hasMoreMessages || hasMoreRenderedMessages) && (
+                  <div ref={topSentinelRef} className="flex justify-center p-4">
+                    {hasMoreRenderedMessages && !isLoadingMore && <p className="text-xs text-muted-foreground/60 font-medium">Mostrando mensajes recientes. Desplaza arriba para cargar más.</p>}
+                    {isLoadingMore && <p className="text-xs text-muted-foreground/60 font-medium">Cargando más mensajes...</p>}
+                  </div>
+                )}
+                {chatRenderItems.map((item) => {
+                  if (item.type === 'single') {
+                    return (
+                      <div key={item.key} className="py-1">
+                        <ChatMessage
+                          index={item.index}
+                          msg={item.message}
+                          handleCopyMessage={handleCopyMessage}
+                          handleRetry={handleRetry}
+                          handleDeleteMessage={handleDeleteMessage}
+                          handlePlayAudio={handlePlayAudio}
+                          isAudioLoading={isAudioLoading}
+                          playingMessageIndex={playingMessageIndex}
+                          isAudioPaused={isAudioPaused}
+                          onSourceClick={handleSourceClick as (source: Source) => void}
+                          scrollToBottom={scrollToBottom}
+                        />
+                      </div>
+                    );
+                  }
+
+                  const totalResponses = item.responses.length;
+                  const activeResponseIndex = Math.min(
+                    activeRetryResponseMap[item.key] ?? Math.max(0, totalResponses - 1),
+                    Math.max(0, totalResponses - 1)
+                  );
+                  const activeResponse = totalResponses > 0 ? item.responses[activeResponseIndex] : null;
+
                   return (
-                    <div key={item.key} className="py-1">
+                    <div key={item.key} className="py-1 space-y-1">
                       <ChatMessage
-                        index={item.index}
-                        msg={item.message}
+                        index={item.userIndex}
+                        msg={item.userMessage}
                         handleCopyMessage={handleCopyMessage}
                         handleRetry={handleRetry}
                         handleDeleteMessage={handleDeleteMessage}
@@ -1835,91 +1863,66 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                         onSourceClick={handleSourceClick as (source: Source) => void}
                         scrollToBottom={scrollToBottom}
                       />
+
+                      {activeResponse && (
+                        <ChatMessage
+                          index={activeResponse.index}
+                          msg={activeResponse.message}
+                          handleCopyMessage={handleCopyMessage}
+                          handleRetry={handleRetry}
+                          handleDeleteMessage={handleDeleteMessage}
+                          handlePlayAudio={handlePlayAudio}
+                          isAudioLoading={isAudioLoading}
+                          playingMessageIndex={playingMessageIndex}
+                          isAudioPaused={isAudioPaused}
+                          onSourceClick={handleSourceClick as (source: Source) => void}
+                          scrollToBottom={scrollToBottom}
+                          responsePosition={{
+                            current: activeResponseIndex + 1,
+                            total: totalResponses,
+                          }}
+                          onPrevResponse={() => {
+                            setActiveRetryResponseMap((prev) => ({
+                              ...prev,
+                              [item.key]: Math.max(0, activeResponseIndex - 1),
+                            }));
+                          }}
+                          onNextResponse={() => {
+                            setActiveRetryResponseMap((prev) => ({
+                              ...prev,
+                              [item.key]: Math.min(totalResponses - 1, activeResponseIndex + 1),
+                            }));
+                          }}
+                        />
+                      )}
                     </div>
                   );
-                }
-
-                const totalResponses = item.responses.length;
-                const activeResponseIndex = Math.min(
-                  activeRetryResponseMap[item.key] ?? Math.max(0, totalResponses - 1),
-                  Math.max(0, totalResponses - 1)
-                );
-                const activeResponse = totalResponses > 0 ? item.responses[activeResponseIndex] : null;
-
-                return (
-                  <div key={item.key} className="py-1 space-y-1">
-                    <ChatMessage
-                      index={item.userIndex}
-                      msg={item.userMessage}
-                      handleCopyMessage={handleCopyMessage}
-                      handleRetry={handleRetry}
-                      handleDeleteMessage={handleDeleteMessage}
-                      handlePlayAudio={handlePlayAudio}
-                      isAudioLoading={isAudioLoading}
-                      playingMessageIndex={playingMessageIndex}
-                      isAudioPaused={isAudioPaused}
-                      onSourceClick={handleSourceClick as (source: Source) => void}
-                      scrollToBottom={scrollToBottom}
-                    />
-
-                    {activeResponse && (
-                      <ChatMessage
-                        index={activeResponse.index}
-                        msg={activeResponse.message}
-                        handleCopyMessage={handleCopyMessage}
-                        handleRetry={handleRetry}
-                        handleDeleteMessage={handleDeleteMessage}
-                        handlePlayAudio={handlePlayAudio}
-                        isAudioLoading={isAudioLoading}
-                        playingMessageIndex={playingMessageIndex}
-                        isAudioPaused={isAudioPaused}
-                        onSourceClick={handleSourceClick as (source: Source) => void}
-                        scrollToBottom={scrollToBottom}
-                        responsePosition={{
-                          current: activeResponseIndex + 1,
-                          total: totalResponses,
-                        }}
-                        onPrevResponse={() => {
-                          setActiveRetryResponseMap((prev) => ({
-                            ...prev,
-                            [item.key]: Math.max(0, activeResponseIndex - 1),
-                          }));
-                        }}
-                        onNextResponse={() => {
-                          setActiveRetryResponseMap((prev) => ({
-                            ...prev,
-                            [item.key]: Math.min(totalResponses - 1, activeResponseIndex + 1),
-                          }));
-                        }}
+                })}
+                {(isResponding || toolName || isDeepResearchActive) && (
+                  <div className="-mt-4">
+                    {isDeepResearchActive ? (
+                      <DeepResearchVisualizer
+                        progress={researchProgress}
+                        statusText={researchStatus}
+                      />
+                    ) : (
+                      <LoadingIndicator
+                        isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
+                        isKnowledgeAnalysisActive={isKnowledgeAnalysisActive}
+                        isDeepResearchActive={isDeepResearchActive}
+                        toolName={toolName}
+                        reactState={reactState}
                       />
                     )}
                   </div>
-                );
-              })}
-              {(isResponding || toolName || isDeepResearchActive) && (
-                <div className="-mt-4">
-                  {isDeepResearchActive ? (
-                    <DeepResearchVisualizer
-                      progress={researchProgress}
-                      statusText={researchStatus}
-                    />
-                  ) : (
-                    <LoadingIndicator
-                      isComprehensiveAnalysisActive={isComprehensiveAnalysisActive}
-                      isKnowledgeAnalysisActive={isKnowledgeAnalysisActive}
-                      isDeepResearchActive={isDeepResearchActive}
-                      toolName={toolName}
-                      reactState={reactState}
-                    />
-                  )}
-                </div>
-              )}
-              {backgroundTasks.map((task) => (
-                <div key={task.taskId}>
-                  <BackgroundTaskIndicator task={task} />
-                </div>
-              ))}
-              <div ref={messagesEndRef} className="h-4 w-full" />
+                )}
+                {backgroundTasks.map((task) => (
+                  <div key={task.taskId}>
+                    <BackgroundTaskIndicator task={task} />
+                  </div>
+                ))}
+                <div ref={messagesEndRef} className="h-4 w-full" />
+              </div>
             </div>
           </div>
           
@@ -1931,11 +1934,12 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: 10, scale: 0.8 }}
                 onClick={() => scrollToBottom('smooth')}
-                className="absolute bottom-4 right-4 z-50 p-2.5 rounded-full bg-primary text-primary-foreground shadow-lg border border-border/20 hover:bg-primary/90 transition-all hover:scale-105 flex items-center justify-center group"
-                aria-label="Ir al final"
+                className="absolute bottom-4 right-6 z-50 p-2.5 rounded-full bg-primary text-primary-foreground shadow-lg border border-border/20 hover:bg-primary/90 transition-all hover:scale-105 flex items-center justify-center group"
+                aria-label="Ir al final del chat"
+                title="Ir al final del chat"
               >
                 <div className="relative flex items-center justify-center">
-                  <ArrowLeft className="w-5 h-5 -rotate-90 stroke-[3px]" />
+                  <ArrowDown className="w-5 h-5 stroke-[2.5px]" />
                   {isResponding && (
                     <span className="absolute -top-1 -right-1 flex h-3 w-3">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary/40 opacity-75"></span>

@@ -9,7 +9,7 @@ import { ChatAvatar } from './ChatAvatar';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTrigger } from '@/components/ui/dialog';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { BrainCircuit, ChevronDown, ChevronUp, Check, X, Edit3, ChevronLeft, ChevronRight, Trash2, ExternalLink } from 'lucide-react';
+import { BrainCircuit, ChevronDown, ChevronUp, Check, X, Edit3, ChevronLeft, ChevronRight, Trash2, ExternalLink, ArrowDown } from 'lucide-react';
 import { Copy, Play, Loader2, Pause, RefreshCw, Folder, File as FileIcon, Network, Download } from 'lucide-react';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 import { Source, SourceButton, ContentPart } from '@/components/SourceButton';
@@ -439,6 +439,17 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
             </div>
           </div>
           <div className="flex items-center gap-1 mt-1 mr-4 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all">
+            {scrollToBottom && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 w-7 p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/40 rounded-lg transition-all"
+                onClick={() => scrollToBottom('smooth')}
+                title="Ir al final del chat"
+              >
+                <ArrowDown className="h-3.5 w-3.5" />
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="sm"
@@ -635,6 +646,17 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
                       <ChevronRight className="h-3.5 w-3.5" />
                     </Button>
                   </div>
+                )}
+                {scrollToBottom && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 w-8 p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/40 rounded-lg transition-all"
+                    onClick={() => scrollToBottom('smooth')}
+                    title="Ir al final del chat"
+                  >
+                    <ArrowDown className="h-3.5 w-3.5" />
+                  </Button>
                 )}
                 <Button
                   variant="ghost"

@@ -9,6 +9,7 @@ from core.config import settings
 from core.repositories.secret_repository import SecretRepository
 from core.database import SessionLocal, Account
 from utils.security import get_current_account_id
+from utils.url_safety import SSRFValidationError, require_safe_llm_api_base
 
 from api.llm_providers.registry import provider_registry
 
@@ -76,23 +77,34 @@ async def get_provider_models(
     Obtiene la lista de modelos disponibles directamente desde el proveedor.
     Permite opcionalmente pasar una api_base personalizada (útil para previsualización antes de guardar).
     """
-    provider = provider.lower()
+    provider_clean = provider.lower()
     now = time.time()
 
     # Verificar caché (solo si no se pide refresh)
-    if not refresh and provider in _models_cache:
-        cache_entry = _models_cache[provider]
+    if not refresh and provider_clean in _models_cache:
+        cache_entry = _models_cache[provider_clean]
         # Para Ollama/local, el cache es mucho más corto (5 min) para detectar cambios locales
-        ttl = 300 if provider == "ollama" else CACHE_TTL
+        ttl = 300 if "ollama" in provider_clean else CACHE_TTL
         if now - cache_entry["timestamp"] < ttl:
-            logger.info("Retornando modelos de %s desde caché.", provider)
+            logger.info("Retornando modelos de %s desde caché.", provider_clean)
             return cache_entry["models"]
 
     try:
-        user_api_key = await get_user_api_key(current_account_id, provider)
-        user_api_base = api_base if api_base is not None else await get_user_api_base(current_account_id)
+        user_api_key = await get_user_api_key(current_account_id, provider_clean)
+        raw_api_base = api_base if api_base is not None else await get_user_api_base(current_account_id)
+        user_api_base = raw_api_base.strip() if (raw_api_base and raw_api_base.strip()) else None
 
-        provider_instance = provider_registry._providers.get(provider)
+        if user_api_base:
+            try:
+                user_api_base = require_safe_llm_api_base(user_api_base, provider_clean)
+            except SSRFValidationError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        provider_instance = (
+            provider_registry._providers.get(provider_clean)
+            or provider_registry._providers.get(provider_clean.replace("-", "_"))
+            or provider_registry._providers.get(provider_clean.replace("_", "-"))
+        )
         if not provider_instance:
             raise HTTPException(status_code=404, detail=f"Proveedor '{provider}' no soportado")
 
@@ -103,7 +115,7 @@ async def get_provider_models(
 
         # Guardar en caché si obtuvimos resultados
         if models:
-            _models_cache[provider] = {
+            _models_cache[provider_clean] = {
                 "timestamp": now,
                 "models": models,
             }

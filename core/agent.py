@@ -2326,7 +2326,7 @@ async def call_model_node(state: AgentState):
                     try:
                         admin_llm = _get_global_llm_for_purpose("vision" if has_images else "main") or get_main_llm()
                         if admin_llm:
-                            admin_chain = admin_llm.bind_tools(tools) if tools else admin_llm
+                            admin_chain = prompt | (admin_llm.bind_tools(tools) if tools else admin_llm)
                             if has_images:
                                 admin_chain = admin_chain.with_config(tags=["vision_model"])
                             admin_res = await admin_chain.ainvoke({"messages": cleaned_messages})

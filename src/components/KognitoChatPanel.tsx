@@ -100,6 +100,8 @@ export default function KognitoChatPanel() {
 
   // Modal para nuevo chat
   const [showNewChatModal, setShowNewChatModal] = useState<boolean>(false);
+  const [showSubroomModal, setShowSubroomModal] = useState<boolean>(false);
+  const [subroomName, setSubroomName] = useState<string>('');
   const [availableUsers, setAvailableUsers] = useState<UserSummary[]>([]);
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
   const [groupName, setGroupName] = useState<string>('');
@@ -285,6 +287,26 @@ export default function KognitoChatPanel() {
       setActiveRoomId(res.data.id);
     } catch (err) {
       console.error('Error creando sala:', err);
+    }
+  };
+
+  const handleCreateSubroom = async () => {
+    if (!subroomName.trim() || !activeRoomId) return;
+    try {
+      const parentRoom = rooms.find((r) => r.id === activeRoomId);
+      const participantIds = parentRoom ? parentRoom.participants.map((p) => p.account_id) : [];
+      const res = await apiClient.post<Room>('/api/kognito-chat/rooms', {
+        participant_ids: participantIds,
+        name: subroomName.trim(),
+        is_group: true,
+        room_type: 'subroom',
+      });
+      setShowSubroomModal(false);
+      setSubroomName('');
+      await fetchRooms();
+      setActiveRoomId(res.data.id);
+    } catch (err) {
+      console.error('Error creando sub-sala:', err);
     }
   };
 
@@ -831,6 +853,43 @@ export default function KognitoChatPanel() {
                 className="bg-indigo-600 hover:bg-indigo-700 text-white"
               >
                 {selectedUserIds.length === 0 ? 'Crear Sala por Enlace' : 'Crear Chat'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL PARA CREAR SUB-SALA */}
+      {showSubroomModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-card border border-border rounded-xl shadow-2xl max-w-sm w-full p-6 space-y-4">
+            <h3 className="text-lg font-bold flex items-center gap-2">
+              <GitFork className="w-5 h-5 text-indigo-500" />
+              Crear Sub-sala (Breakout Room)
+            </h3>
+            <p className="text-xs text-muted-foreground">
+              Las sub-salas permiten dividir a los participantes en grupos de trabajo secundarios sin salir de la reunión principal.
+            </p>
+            <div>
+              <label className="text-xs font-medium mb-1 block">Nombre de la Sub-sala</label>
+              <Input
+                value={subroomName}
+                onChange={(e) => setSubroomName(e.target.value)}
+                placeholder="Ej. Grupo 1 - Discusión Técnica"
+                className="text-sm"
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2 border-t border-border">
+              <Button variant="ghost" size="sm" onClick={() => setShowSubroomModal(false)}>
+                Cancelar
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleCreateSubroom}
+                disabled={!subroomName.trim()}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white"
+              >
+                Crear Sub-sala
               </Button>
             </div>
           </div>

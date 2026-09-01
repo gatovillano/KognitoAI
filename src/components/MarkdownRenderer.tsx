@@ -53,6 +53,7 @@ const PtyTerminalDynamic = dynamic(() => import('@/components/terminal/PtyTermin
   ssr: false,
 });
 import { SourceButton, Source, ContentPart } from './SourceButton'; // Importar SourceButton, Source, ContentPart
+import { sanitizeMarkdownHtml } from '@/lib/sanitizeHtml';
 
 
 
@@ -226,7 +227,7 @@ const MarkdownRendererComponent = ({ content, contentParts, fontSize, isStreamin
       }
 
       if (!contentParts) {
-        return html;
+        return sanitizeMarkdownHtml(html);
       }
 
       const citationMap = new Map(contentParts
@@ -245,11 +246,11 @@ const MarkdownRendererComponent = ({ content, contentParts, fontSize, isStreamin
         return match;
       });
 
-      return finalHtml; // Return the raw HTML string
+      return sanitizeMarkdownHtml(finalHtml);
 
     } catch (error: any) {
       console.error("Error parsing markdown:", error);
-      return `<p>Error rendering content: ${error.message || error}</p>`;
+      return sanitizeMarkdownHtml(`<p>Error rendering content: ${error.message || error}</p>`);
     }
 
   }, [content, contentParts, inline]);

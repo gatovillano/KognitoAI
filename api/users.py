@@ -277,6 +277,21 @@ async def update_user_settings(
     update_data = settings_update.dict(exclude_unset=True)
     email_password_secret = update_data.pop("email_password_secret", None)
 
+    if update_data.get("llm_api_base"):
+        provider = (
+            update_data.get("llm_provider")
+            or account.llm_provider
+            or "openai"
+        )
+        try:
+            from utils.url_safety import SSRFValidationError, require_safe_llm_api_base
+
+            update_data["llm_api_base"] = require_safe_llm_api_base(
+                update_data["llm_api_base"], provider
+            )
+        except SSRFValidationError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
     # Extraer campos de correo electrónico para manejarlos por separado
     email_fields_map = {
         "email_provider": "provider",
@@ -539,7 +554,7 @@ async def set_user_secret(
         updated_at=secret_obj.updated_at.isoformat()
     )
 
-@router.delete("/users/me/secrets/{key_name}", summary="Eliminar un secreto")
+@router.delete("/users/me/secrets/{key_name:path}", summary="Eliminar un secreto")
 async def delete_user_secret(
     key_name: str,
     current_account_id: str = Depends(get_current_account_id),

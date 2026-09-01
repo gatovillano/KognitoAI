@@ -4,7 +4,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Loader2, Lock, Copy, Check, AlertTriangle, Send, ArrowLeft, Share2 } from 'lucide-react';
+import { Loader2, Lock, Copy, Check, AlertTriangle, Send, ArrowLeft, ArrowDown, Share2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -565,71 +565,73 @@ export default function SharedChatPage() {
                 </div>
             )}
 
-            <div ref={scrollAreaRef} className="flex-1 overflow-y-auto min-h-0 relative">
-                <div className="p-2 sm:p-4 md:p-6 space-y-2 sm:space-y-4 md:space-y-6 w-full md:max-w-6xl mx-auto">
-                    {skip < total && (
-                        <div className="flex justify-center p-2 sm:p-4">
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={loadMoreMessages}
-                                disabled={loadingMore}
-                                className="rounded-full text-xs sm:text-sm"
-                            >
-                                {loadingMore && <Loader2 className="mr-1.5 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4 animate-spin" />}
-                                <span className="hidden sm:inline">Cargar mensajes anteriores</span>
-                                <span className="sm:hidden">Cargar más</span>
-                            </Button>
-                        </div>
-                    )}
-
-                    {messages.map((msg, index) => {
-                        return (
-                            <div key={`${index}-${msg.created_at}`}>
-                                <ChatMessageItem
-                                    index={index}
-                                    msg={msg}
-                                    handleCopyMessage={handleCopyMessage}
-                                    handleRetry={handleRetry}
-                                    handleDeleteMessage={handleDeleteMessage}
-                                    handlePlayAudio={handlePlayAudio}
-                                    isAudioLoading={isAudioLoading}
-                                    playingMessageIndex={playingMessageIndex}
-                                    isAudioPaused={isAudioPaused}
-                                    onSourceClick={handleSourceClick}
-                                    scrollToBottom={scrollToBottom}
-                                />
+            <div className="flex-1 min-h-0 relative flex flex-col">
+                <div ref={scrollAreaRef} className="flex-1 overflow-y-auto min-h-0 custom-scrollbar">
+                    <div className="p-2 sm:p-4 md:p-6 space-y-2 sm:space-y-4 md:space-y-6 w-full md:max-w-6xl mx-auto">
+                        {skip < total && (
+                            <div className="flex justify-center p-2 sm:p-4">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={loadMoreMessages}
+                                    disabled={loadingMore}
+                                    className="rounded-full text-xs sm:text-sm"
+                                >
+                                    {loadingMore && <Loader2 className="mr-1.5 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4 animate-spin" />}
+                                    <span className="hidden sm:inline">Cargar mensajes anteriores</span>
+                                    <span className="sm:hidden">Cargar más</span>
+                                </Button>
                             </div>
-                        );
-                    })}
+                        )}
 
-                    {isWaitingResponse && (
-                        <div className="-mt-4">
-                            <div className="flex flex-col items-center space-y-2 sm:space-y-3 py-2 sm:py-4 w-full">
-                                <div className="flex space-x-1.5 sm:space-x-2">
-                                    <div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-[#3B82F6] shadow-sm shadow-blue-500/50 animate-bounce" />
-                                    <div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-[#6366F1] shadow-sm shadow-indigo-500/50 animate-bounce [animation-delay:150ms]" />
-                                    <div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-[#8B5CF6] shadow-sm shadow-violet-500/50 animate-bounce [animation-delay:300ms]" />
+                        {messages.map((msg, index) => {
+                            return (
+                                <div key={`${index}-${msg.created_at}`}>
+                                    <ChatMessageItem
+                                        index={index}
+                                        msg={msg}
+                                        handleCopyMessage={handleCopyMessage}
+                                        handleRetry={handleRetry}
+                                        handleDeleteMessage={handleDeleteMessage}
+                                        handlePlayAudio={handlePlayAudio}
+                                        isAudioLoading={isAudioLoading}
+                                        playingMessageIndex={playingMessageIndex}
+                                        isAudioPaused={isAudioPaused}
+                                        onSourceClick={handleSourceClick}
+                                        scrollToBottom={scrollToBottom}
+                                    />
                                 </div>
-                                <p className="text-xs sm:text-sm font-medium text-muted-foreground/80 tracking-wide">Kognito esta pensando</p>
+                            );
+                        })}
+
+                        {isWaitingResponse && (
+                            <div className="-mt-4">
+                                <div className="flex flex-col items-center space-y-2 sm:space-y-3 py-2 sm:py-4 w-full">
+                                    <div className="flex space-x-1.5 sm:space-x-2">
+                                        <div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-[#3B82F6] shadow-sm shadow-blue-500/50 animate-bounce" />
+                                        <div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-[#6366F1] shadow-sm shadow-indigo-500/50 animate-bounce [animation-delay:150ms]" />
+                                        <div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full bg-[#8B5CF6] shadow-sm shadow-violet-500/50 animate-bounce [animation-delay:300ms]" />
+                                    </div>
+                                    <p className="text-xs sm:text-sm font-medium text-muted-foreground/80 tracking-wide">Kognito esta pensando</p>
+                                </div>
                             </div>
-                        </div>
-                    )}
+                        )}
 
-                    {loading && messages.length === 0 && (
-                        <div className="flex justify-center py-8">
-                            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                        </div>
-                    )}
+                        {loading && messages.length === 0 && (
+                            <div className="flex justify-center py-8">
+                                <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                            </div>
+                        )}
 
-                    {error && messages.length > 0 && (
-                        <Alert variant="destructive" className="max-w-md mx-auto">
-                            <AlertTriangle className="h-4 w-4" />
-                            <AlertDescription>{error}</AlertDescription>
-                        </Alert>
-                    )}
+                        {error && messages.length > 0 && (
+                            <Alert variant="destructive" className="max-w-md mx-auto">
+                                <AlertTriangle className="h-4 w-4" />
+                                <AlertDescription>{error}</AlertDescription>
+                            </Alert>
+                        )}
 
-                    <div ref={messagesEndRef} />
+                        <div ref={messagesEndRef} />
+                    </div>
                 </div>
 
                 <AnimatePresence>
@@ -639,10 +641,11 @@ export default function SharedChatPage() {
                             animate={{ opacity: 1, y: 0, scale: 1 }}
                             exit={{ opacity: 0, y: 10, scale: 0.8 }}
                             onClick={() => scrollToBottom('smooth', true)}
-                            className="absolute bottom-3 right-3 sm:bottom-4 sm:right-4 z-50 p-2 sm:p-3 rounded-full bg-[#3B82F6] text-white shadow-lg hover:bg-blue-600 transition-all hover:scale-110 flex items-center justify-center"
-                            aria-label="Ir al final"
+                            className="absolute bottom-3 right-3 sm:bottom-4 sm:right-6 z-50 p-2 sm:p-3 rounded-full bg-[#3B82F6] text-white shadow-lg hover:bg-blue-600 transition-all hover:scale-110 flex items-center justify-center"
+                            aria-label="Ir al final del chat"
+                            title="Ir al final del chat"
                         >
-                            <ArrowLeft className="w-4 h-4 sm:w-5 sm:h-5 -rotate-90 stroke-[3px]" />
+                            <ArrowDown className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.5px]" />
                         </motion.button>
                     )}
                 </AnimatePresence>

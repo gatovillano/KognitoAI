@@ -36,7 +36,11 @@ def normalize_ollama_base_url(base_url: Optional[str]) -> str:
     if os.path.exists("/.dockerenv") and any(token in raw_url for token in ["localhost", "127.0.0.1"]):
         raw_url = raw_url.replace("localhost", "host.docker.internal").replace("127.0.0.1", "host.docker.internal")
 
-    return raw_url.rstrip("/")
+    raw_url = raw_url.rstrip("/")
+    if raw_url.endswith("/v1"):
+        raw_url = raw_url[:-3]
+
+    return raw_url
 
 
 def _coerce_stop_sequences(stop: Optional[Union[str, Sequence[str]]]) -> Optional[List[str]]:
@@ -213,8 +217,13 @@ def _convert_messages_openai_to_ollama(messages: Sequence[Dict[str, Any]]) -> Li
 
 def convert_openai_payload_to_ollama(payload: Dict[str, Any]) -> Dict[str, Any]:
     options = dict(payload.get("options") or {})
+    raw_model = str(payload.get("model") or "")
+    for prefix in ["ollama_chat/", "ollama-cloud/", "ollama/"]:
+        if raw_model.startswith(prefix):
+            raw_model = raw_model[len(prefix):]
+
     converted: Dict[str, Any] = {
-        "model": payload.get("model"),
+        "model": raw_model,
         "messages": _convert_messages_openai_to_ollama(payload.get("messages") or []),
         "stream": bool(payload.get("stream", False)),
     }
@@ -418,6 +427,15 @@ class OllamaDirectChatModel(BaseChatModel):
     api_key: Optional[str] = None
 
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="allow")
+
+    def __init__(self, **data: Any):
+        if "model_name" in data and isinstance(data["model_name"], str):
+            clean_name = data["model_name"].strip()
+            for prefix in ["ollama_chat/", "ollama-cloud/", "ollama/"]:
+                if clean_name.startswith(prefix):
+                    clean_name = clean_name[len(prefix):]
+            data["model_name"] = clean_name
+        super().__init__(**data)
 
     def _build_auth_headers(self) -> Dict[str, str]:
         """Construye el header de autenticación Bearer para Ollama Cloud."""

@@ -12,6 +12,7 @@ import { CreateNoteScreen } from '../screens/CreateNoteScreen';
 import { ChatScreen } from '../screens/ChatScreen';
 import { InboxScreen } from '../screens/InboxScreen';
 import { InboxDetailScreen } from '../screens/InboxDetailScreen';
+import { SettingsScreen } from '../screens/SettingsScreen';
 import { ActivityIndicator, View } from 'react-native';
 import { colors } from '../theme/colors';
 
@@ -45,6 +46,7 @@ export const Navigation = () => {
                         <Stack.Screen name="CreateNote" component={CreateNoteScreen} />
                         <Stack.Screen name="Inbox" component={InboxScreen} />
                         <Stack.Screen name="InboxDetail" component={InboxDetailScreen} />
+                        <Stack.Screen name="Settings" component={SettingsScreen} />
                     </>
                 )}
             </Stack.Navigator>

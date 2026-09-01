@@ -3,6 +3,7 @@ import httpx
 import logging
 from typing import List, Dict, Any, Optional
 from .base import LLMProviderStrategy
+from utils.url_safety import SAFE_HTTPX_CLIENT_OPTIONS
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +15,7 @@ class OpenAICompatibleProvider(LLMProviderStrategy):
         
         if base_url:
             try:
-                async with httpx.AsyncClient() as client:
+                async with httpx.AsyncClient(**SAFE_HTTPX_CLIENT_OPTIONS) as client:
                     headers = {}
                     if key:
                         headers["Authorization"] = f"Bearer {key}"

@@ -18,6 +18,7 @@ from core.llm_manager import (
     SYSTEM_ACCOUNT_ID,
     ensure_system_account
 )
+from utils.url_safety import SSRFValidationError, require_safe_llm_api_base
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +116,20 @@ async def update_global_llm_settings_endpoint(
             
     # 2. Mezclar actualizaciones
     update_data = request.model_dump(exclude_unset=True)
+
+    if update_data.get("llm_api_base"):
+        provider = (
+            update_data.get("llm_provider")
+            or current_data.get("llm_provider")
+            or "openai"
+        )
+        try:
+            update_data["llm_api_base"] = require_safe_llm_api_base(
+                update_data["llm_api_base"], provider
+            )
+        except SSRFValidationError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
     for k, v in update_data.items():
         current_data[k] = v
         
@@ -196,7 +211,7 @@ async def set_global_secret_endpoint(
         updated_at=secret_obj.updated_at.isoformat()
     )
 
-@router.delete("/admin/llm-settings/secrets/{key_name}", summary="Eliminar un secreto global")
+@router.delete("/admin/llm-settings/secrets/{key_name:path}", summary="Eliminar un secreto global")
 async def delete_global_secret_endpoint(
     key_name: str,
     admin_account: Account = Depends(get_current_admin_account),
