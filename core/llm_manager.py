@@ -23,11 +23,23 @@ from langchain_core.messages import (
 from core.config import settings
 from core.database import SessionLocal, Account, UserSecret
 from core.repositories.secret_repository import SecretRepository
+from utils.url_safety import SSRFValidationError, require_safe_llm_api_base
 import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 SYSTEM_ACCOUNT_ID = uuid.UUID("00000000-0000-0000-0000-000000000000")
+
+
+class UnsafeLlmApiBaseError(ValueError):
+    """api_base de usuario/admin rechazada por controles anti-SSRF."""
+
+
+def _user_api_base(api_base: Optional[str], provider: str) -> Optional[str]:
+    try:
+        return require_safe_llm_api_base(api_base, provider)
+    except SSRFValidationError as exc:
+        raise UnsafeLlmApiBaseError(str(exc)) from exc
 
 
 async def ensure_system_account(db: AsyncSession) -> Account:
@@ -827,8 +839,13 @@ async def get_llm_for_user(
                 # LiteLLM requiere una api_key aunque el servidor no la necesite
                 if not llm_kwargs.get("api_key"):
                     llm_kwargs["api_key"] = "local-key"
-                if account.llm_api_base:
-                    llm_kwargs["api_base"] = account.llm_api_base.rstrip("/")
+                validated_base = _user_api_base(account.llm_api_base, provider_target)
+                if validated_base:
+                    llm_kwargs["api_base"] = validated_base
+                elif account.llm_api_base:
+                    raise UnsafeLlmApiBaseError(
+                        "api_base no permitida para openai-compatible."
+                    )
                 else:
                     logger.warning(
                         "openai-compatible requiere una API Base URL pero no está configurada."
@@ -841,104 +858,50 @@ async def get_llm_for_user(
                 )
 
             elif provider_target.lower().replace("_", "-") == "ollama-cloud":
-                # Ollama Cloud: https://docs.ollama.com/cloud
-                # API base: https://api.ollama.com/v1 (o la personalizada del usuario)
+                from core.ollama_direct import OllamaDirectChatModel, normalize_ollama_base_url
 
-                api_base_str = account.llm_api_base
-                if api_base_str:
-                    if not api_base_str.startswith("http"):
-                        # Si no tiene protocolo, detectar si es local o público
-                        is_likely_local = any(
-                            x in api_base_str.lower()
-                            for x in [
-                                "localhost",
-                                "127.0.0.1",
-                                "host.docker.internal",
-                                "192.168.",
-                                "10.",
-                                "172.",
-                            ]
-                        )
-                        protocol = "http" if is_likely_local else "https"
-                        api_base_str = f"{protocol}://{api_base_str}"
-                    api_base_str = api_base_str.rstrip("/")
-
-                    logger.info(f"☁️ Ollama URL final: {api_base_str}")
-
-                    llm_kwargs["api_base"] = api_base_str
-                else:
-                    llm_kwargs["api_base"] = "https://api.ollama.com/v1"
-
-                # Autenticación: Bearer token en header
-                if api_key:
-                    llm_kwargs["headers"] = {"Authorization": f"Bearer {api_key}"}
-                    logger.info(
-                        f"☁️ Ollama Cloud: API Key configurada (len={len(api_key)})"
-                    )
-                else:
-                    logger.warning("☁️ Ollama Cloud: SIN API Key!")
-
-                # Usar ollama_chat/ para forzar endpoint /api/chat
-                # Pero el modelo real debe enviarse en el campo "model"
+                api_base_str = normalize_ollama_base_url(
+                    _user_api_base(account.llm_api_base, "ollama-cloud")
+                    or "https://api.ollama.com"
+                )
                 actual_model = model_target.split("/")[-1].strip()
-                llm_kwargs["model_name"] = f"ollama_chat/{actual_model}"
-                llm_kwargs["custom_llm_provider"] = "ollama"
-                # Forzar que el modelo real se envíe a Ollama
-                llm_kwargs["extra_body"] = {"model": actual_model}
 
                 logger.info(
-                    f"☁️ Ollama Cloud: model={llm_kwargs['model_name']}, actual={actual_model}, base={llm_kwargs.get('api_base')}"
+                    f"☁️ Ollama Cloud (Direct): model={actual_model}, base={api_base_str}"
                 )
 
-            elif "ollama" in provider_target.lower():
-                # Usar la URL configurada en settings como fallback para ollama local
-                logger.info(
-                    f"DEBUG OLLAMA: account.llm_api_base={account.llm_api_base}, settings.ollama_api_url={settings.ollama_api_url}"
+                llm_instance = OllamaDirectChatModel(
+                    model_name=actual_model,
+                    base_url=api_base_str,
+                    fallback_base_url=getattr(settings, "ollama_direct_api_url", None),
+                    api_key=api_key,
+                    timeout=settings.llm_request_timeout,
                 )
-                api_base_str = (
-                    account.llm_api_base
+                _llm_cache[cache_key] = (llm_instance, time.time())
+                return llm_instance
+
+            elif "ollama" in provider_target.lower() or "ollama" in model_target.lower():
+                from core.ollama_direct import OllamaDirectChatModel, normalize_ollama_base_url
+
+                api_base_str = normalize_ollama_base_url(
+                    _user_api_base(account.llm_api_base, "ollama")
                     or settings.ollama_api_url
                     or "http://host.docker.internal:11434"
                 )
-
-                if api_base_str and not api_base_str.startswith("http"):
-                    # Si no tiene protocolo, detectar si es local o público
-                    is_likely_local = any(
-                        x in api_base_str.lower()
-                        for x in [
-                            "localhost",
-                            "127.0.0.1",
-                            "host.docker.internal",
-                            "192.168.",
-                            "10.",
-                            "172.",
-                        ]
-                    )
-                    protocol = "http" if is_likely_local else "https"
-                    api_base_str = f"{protocol}://{api_base_str}"
-
-                api_base_str = api_base_str.rstrip("/")
-
-                logger.info(f"☁️ Ollama Local URL: {api_base_str}")
-
-                llm_kwargs["api_base"] = api_base_str
-
-                # Usar ollama_chat/ para forzar endpoint /api/chat
                 actual_model = model_target.split("/")[-1].strip()
-                llm_kwargs["model_name"] = f"ollama_chat/{actual_model}"
-                llm_kwargs["custom_llm_provider"] = "ollama"
-                # Forzar que el modelo real se envíe a Ollama
-                llm_kwargs["extra_body"] = {"model": actual_model}
 
                 logger.info(
-                    f"☁️ Ollama Local URL: {api_base_str}, model: {llm_kwargs['model_name']}, actual: {actual_model}"
+                    f"☁️ Ollama Local (Direct): model={actual_model}, base={api_base_str}"
                 )
 
-                # Si el usuario NO está usando ollama-cloud pero proporcionó una API Key,
-                # a veces es mejor NO enviarla si es local para evitar errores de 401.
-                if api_key:
-                    logger.info("ℹ️ Ignorando API Key para Ollama local.")
-                    llm_kwargs.pop("api_key", None)
+                llm_instance = OllamaDirectChatModel(
+                    model_name=actual_model,
+                    base_url=api_base_str,
+                    fallback_base_url=getattr(settings, "ollama_direct_api_url", None),
+                    timeout=settings.llm_request_timeout,
+                )
+                _llm_cache[cache_key] = (llm_instance, time.time())
+                return llm_instance
 
             elif provider_target.lower() == "kilocode":
                 # Kilocode Gateway - API unificada de IA (OpenAI-compatible)
@@ -968,7 +931,10 @@ async def get_llm_for_user(
 
             elif provider_target.lower() == "nvidia":
                 # NVIDIA AI Catalog / NIM API (OpenAI-compatible)
-                llm_kwargs["api_base"] = account.llm_api_base or "https://integrate.api.nvidia.com/v1"
+                llm_kwargs["api_base"] = (
+                    _user_api_base(account.llm_api_base, "nvidia")
+                    or "https://integrate.api.nvidia.com/v1"
+                )
 
                 if api_key:
                     llm_kwargs["api_key"] = api_key
@@ -999,9 +965,13 @@ async def get_llm_for_user(
                 )
 
             elif account.llm_api_base and ("http" in account.llm_api_base):
-                # Solo usar api_base si parece una URL válida (contiene http)
-                # Esto previene el uso de valores accidentales como correos electrónicos
-                llm_kwargs["api_base"] = account.llm_api_base
+                validated_base = _user_api_base(account.llm_api_base, provider_target)
+                if validated_base:
+                    llm_kwargs["api_base"] = validated_base
+                else:
+                    raise UnsafeLlmApiBaseError(
+                        f"api_base no permitida para {provider_target}."
+                    )
 
             # Configuraciones específicas por proveedor (LiteLLM)
             if (
@@ -1193,7 +1163,15 @@ async def initialize_llms():
         if global_llm_temperature is not None
         else settings.llm_temperature
     )
-    eff_llm_api_base = global_llm_api_base or settings.llm_api_base
+    if global_llm_api_base:
+        provider_for_base = eff_llm_provider or detect_provider_from_model(
+            eff_llm_model or "openai"
+        )
+        eff_llm_api_base = require_safe_llm_api_base(
+            global_llm_api_base, provider_for_base
+        )
+    else:
+        eff_llm_api_base = settings.llm_api_base
 
     eff_fast_llm_model = global_fast_llm_model or settings.fast_llm_model
     eff_fast_llm_provider = get_provider_from_model_or_fallback(
@@ -1398,19 +1376,39 @@ async def initialize_llms():
             llm_kwargs["model_name"] = f"openai/{actual_model}"
             llm_kwargs["custom_llm_provider"] = "openai"
 
-        # --- FIX: Sanitize kwargs to prevent UnicodeEncodeError in headers ---
-        llm_kwargs = _sanitize_llm_kwargs(llm_kwargs)
+        eff_provider_str = (eff_llm_provider or "").lower()
+        if "ollama" in model_lower or "ollama" in eff_provider_str:
+            logger.info("🔧 Applying Ollama specific config for main LLM (Direct).")
+            from core.ollama_direct import OllamaDirectChatModel, normalize_ollama_base_url
 
-        main_llm = ChatLiteLLM(**llm_kwargs)
-        # Patch the instance explicitly if LiteLLM didn't pick it up
-        if hasattr(main_llm, "custom_llm_provider") and llm_kwargs.get(
-            "custom_llm_provider"
-        ):
-            main_llm.custom_llm_provider = llm_kwargs["custom_llm_provider"]
-        elif "openrouter" in model_lower:
-            main_llm.custom_llm_provider = "openrouter"
-        _main_agent_llm_instance = main_llm
-        logger.info("Modelo LLM Principal listo.")
+            actual_model = eff_llm_model.split("/")[-1].strip()
+            api_base_str = (
+                eff_llm_api_base
+                or settings.ollama_api_url
+                or "http://host.docker.internal:11434"
+            )
+            api_base_str = normalize_ollama_base_url(api_base_str)
+            _main_agent_llm_instance = OllamaDirectChatModel(
+                model_name=actual_model,
+                base_url=api_base_str,
+                fallback_base_url=getattr(settings, "ollama_direct_api_url", None),
+                timeout=settings.llm_request_timeout,
+            )
+            logger.info(f"Modelo LLM Principal (Ollama Direct) listo: {actual_model} en {api_base_str}")
+        else:
+            # --- FIX: Sanitize kwargs to prevent UnicodeEncodeError in headers ---
+            llm_kwargs = _sanitize_llm_kwargs(llm_kwargs)
+
+            main_llm = ChatLiteLLM(**llm_kwargs)
+            # Patch the instance explicitly if LiteLLM didn't pick it up
+            if hasattr(main_llm, "custom_llm_provider") and llm_kwargs.get(
+                "custom_llm_provider"
+            ):
+                main_llm.custom_llm_provider = llm_kwargs["custom_llm_provider"]
+            elif "openrouter" in model_lower:
+                main_llm.custom_llm_provider = "openrouter"
+            _main_agent_llm_instance = main_llm
+            logger.info("Modelo LLM Principal listo.")
 
     except Exception as e:
         logger.error(f"❌ FATAL: Failed to initialize the main LLM: {e}", exc_info=True)
@@ -1496,19 +1494,39 @@ async def initialize_llms():
             fast_llm_kwargs["model_name"] = f"openai/{actual_model}"
             fast_llm_kwargs["custom_llm_provider"] = "openai"
 
-        # --- FIX: Sanitize kwargs to prevent UnicodeEncodeError in headers ---
-        fast_llm_kwargs = _sanitize_llm_kwargs(fast_llm_kwargs)
+        eff_fast_provider_str = (eff_fast_llm_provider or "").lower()
+        if "ollama" in fast_model_lower or "ollama" in eff_fast_provider_str:
+            logger.info("🔧 Applying Ollama specific config for fast LLM (Direct).")
+            from core.ollama_direct import OllamaDirectChatModel, normalize_ollama_base_url
 
-        fast_llm = ChatLiteLLM(**fast_llm_kwargs)
-        # Patch the instance explicitly if LiteLLM didn't pick it up
-        if hasattr(fast_llm, "custom_llm_provider") and fast_llm_kwargs.get(
-            "custom_llm_provider"
-        ):
-            fast_llm.custom_llm_provider = fast_llm_kwargs["custom_llm_provider"]
-        elif "openrouter" in fast_model_lower:
-            fast_llm.custom_llm_provider = "openrouter"
-        _fast_task_llm_instance = fast_llm
-        logger.info("Modelo LLM Rápido listo.")
+            actual_model = eff_fast_llm_model.split("/")[-1].strip()
+            api_base_str = (
+                eff_llm_api_base
+                or settings.ollama_api_url
+                or "http://host.docker.internal:11434"
+            )
+            api_base_str = normalize_ollama_base_url(api_base_str)
+            _fast_task_llm_instance = OllamaDirectChatModel(
+                model_name=actual_model,
+                base_url=api_base_str,
+                fallback_base_url=getattr(settings, "ollama_direct_api_url", None),
+                timeout=settings.llm_request_timeout,
+            )
+            logger.info(f"Modelo LLM Rápido (Ollama Direct) listo: {actual_model} en {api_base_str}")
+        else:
+            # --- FIX: Sanitize kwargs to prevent UnicodeEncodeError in headers ---
+            fast_llm_kwargs = _sanitize_llm_kwargs(fast_llm_kwargs)
+
+            fast_llm = ChatLiteLLM(**fast_llm_kwargs)
+            # Patch the instance explicitly if LiteLLM didn't pick it up
+            if hasattr(fast_llm, "custom_llm_provider") and fast_llm_kwargs.get(
+                "custom_llm_provider"
+            ):
+                fast_llm.custom_llm_provider = fast_llm_kwargs["custom_llm_provider"]
+            elif "openrouter" in fast_model_lower:
+                fast_llm.custom_llm_provider = "openrouter"
+            _fast_task_llm_instance = fast_llm
+            logger.info("Modelo LLM Rápido listo.")
     except Exception as e:
         logger.warning(
             f"⚠️ Failed to initialize the fast task LLM. The main LLM will be used as a fallback: {e}"
@@ -1586,19 +1604,39 @@ async def initialize_llms():
             vision_llm_kwargs["model_name"] = f"openai/{actual_model}"
             vision_llm_kwargs["custom_llm_provider"] = "openai"
 
-        # --- FIX: Sanitize kwargs to prevent UnicodeEncodeError in headers ---
-        vision_llm_kwargs = _sanitize_llm_kwargs(vision_llm_kwargs)
+        eff_vision_provider_str = (eff_vision_llm_provider or "").lower()
+        if "ollama" in vision_model_lower or "ollama" in eff_vision_provider_str:
+            logger.info("🔧 Applying Ollama specific config for vision LLM (Direct).")
+            from core.ollama_direct import OllamaDirectChatModel, normalize_ollama_base_url
 
-        vision_llm = ChatLiteLLM(**vision_llm_kwargs)
-        # Patch the instance explicitly if LiteLLM didn't pick it up
-        if hasattr(vision_llm, "custom_llm_provider") and vision_llm_kwargs.get(
-            "custom_llm_provider"
-        ):
-            vision_llm.custom_llm_provider = vision_llm_kwargs["custom_llm_provider"]
-        elif "openrouter" in vision_model_lower:
-            vision_llm.custom_llm_provider = "openrouter"
-        _vision_llm_instance = vision_llm
-        logger.info("Modelo LLM Visión listo.")
+            actual_model = eff_vision_llm_model.split("/")[-1].strip()
+            api_base_str = (
+                eff_llm_api_base
+                or settings.ollama_api_url
+                or "http://host.docker.internal:11434"
+            )
+            api_base_str = normalize_ollama_base_url(api_base_str)
+            _vision_llm_instance = OllamaDirectChatModel(
+                model_name=actual_model,
+                base_url=api_base_str,
+                fallback_base_url=getattr(settings, "ollama_direct_api_url", None),
+                timeout=settings.llm_request_timeout,
+            )
+            logger.info(f"Modelo LLM Visión (Ollama Direct) listo: {actual_model} en {api_base_str}")
+        else:
+            # --- FIX: Sanitize kwargs to prevent UnicodeEncodeError in headers ---
+            vision_llm_kwargs = _sanitize_llm_kwargs(vision_llm_kwargs)
+
+            vision_llm = ChatLiteLLM(**vision_llm_kwargs)
+            # Patch the instance explicitly if LiteLLM didn't pick it up
+            if hasattr(vision_llm, "custom_llm_provider") and vision_llm_kwargs.get(
+                "custom_llm_provider"
+            ):
+                vision_llm.custom_llm_provider = vision_llm_kwargs["custom_llm_provider"]
+            elif "openrouter" in vision_model_lower:
+                vision_llm.custom_llm_provider = "openrouter"
+            _vision_llm_instance = vision_llm
+            logger.info("Modelo LLM Visión listo.")
     except Exception as e:
         logger.warning(
             f"⚠️ Failed to initialize the vision LLM. The main LLM will be used as a fallback: {e}"

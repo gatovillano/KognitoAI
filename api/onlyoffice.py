@@ -288,7 +288,14 @@ async def upload_document(
     await db.commit()
     await db.refresh(new_doc)
     
-    return {"message": "Documento subido correctamente", "id": new_doc.id, "filename": filename}
+    return {
+        "message": "Documento subido correctamente",
+        "id": str(new_doc.id),
+        "filename": filename,
+        "folder_id": str(new_doc.folder_id) if new_doc.folder_id else None,
+        "workspace_id": str(new_doc.workspace_id) if new_doc.workspace_id else None,
+        "updated_at": new_doc.updated_at.isoformat() if new_doc.updated_at else datetime.now().isoformat()
+    }
 
 @router.get("/list")
 async def list_documents(
@@ -528,17 +535,17 @@ async def update_document_meta(
             filename = f"{filename}.{doc.extension}"
         doc.filename = filename
 
-    if workspace_id:
-        doc.workspace_id = uuid.UUID(workspace_id) if workspace_id != "null" else None
+    if workspace_id is not None:
+        doc.workspace_id = uuid.UUID(workspace_id) if workspace_id and workspace_id != "null" else None
     
-    if folder_id:
-        if folder_id == "null":
+    if folder_id is not None:
+        if not folder_id or folder_id == "null":
             doc.folder_id = None
         else:
             fid = uuid.UUID(folder_id)
             doc.folder_id = fid
-            # Inherit workspace_id from folder if not explicitly provided
-            if not workspace_id:
+            # Inherit workspace_id from folder if workspace_id not explicitly provided
+            if workspace_id is None:
                 folder = await db.get(DocumentFolder, fid)
                 if folder:
                     doc.workspace_id = folder.workspace_id
@@ -571,19 +578,19 @@ async def update_folder_meta(
     if name:
         folder.name = name
 
-    if workspace_id:
-        folder.workspace_id = uuid.UUID(workspace_id) if workspace_id != "null" else None
+    if workspace_id is not None:
+        folder.workspace_id = uuid.UUID(workspace_id) if workspace_id and workspace_id != "null" else None
         # Recursively update all subfolders and documents inside this folder
         await update_folder_workspace_recursive(folder.id, folder.workspace_id, db)
     
-    if parent_id:
-        if parent_id == "null":
+    if parent_id is not None:
+        if not parent_id or parent_id == "null":
             folder.parent_id = None
         else:
             pid = uuid.UUID(parent_id)
             folder.parent_id = pid
             # Inherit workspace from parent folder if not explicitly provided
-            if not workspace_id:
+            if workspace_id is None:
                 parent_folder = await db.get(DocumentFolder, pid)
                 if parent_folder:
                     folder.workspace_id = parent_folder.workspace_id

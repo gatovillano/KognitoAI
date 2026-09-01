@@ -3,14 +3,12 @@ API endpoints for sharing conversation threads publicly.
 """
 import logging
 import secrets
-import hashlib
 import uuid
 import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict, Any
 
-import json
-from fastapi import APIRouter, HTTPException, Depends, Query, Body, BackgroundTasks, status
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Request, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +17,8 @@ from core.dependencies import get_db_session
 from core.database import ChatThread, SharedConversationLink
 from core.config import settings
 from utils.security import get_current_account_id
+from utils.limiter import limiter
+from utils.share_link_security import hash_share_link_password, verify_share_link_password
 from utils.postgres_chat_history import get_postgres_history_connection_url
 from langchain_community.chat_message_histories import PostgresChatMessageHistory
 from langchain_core.messages import HumanMessage, AIMessage
@@ -34,7 +34,7 @@ router = APIRouter()
 class ShareChatCreateRequest(BaseModel):
     """Request to create a shared chat link."""
     thread_id: str = Field(..., description="ID of the chat thread to share")
-    password: Optional[str] = Field(None, min_length=4, description="Optional password to protect the link")
+    password: Optional[str] = Field(None, min_length=8, description="Optional password to protect the link")
     expiry_days: Optional[int] = Field(None, gt=0, le=365, description="Days until link expires (1-365)")
     allow_reply: bool = Field(False, description="Allow public replies to the shared thread")
 
@@ -81,9 +81,25 @@ class SharedChatInfoResponse(BaseModel):
 
 # --- Helper Functions ---
 
-def hash_password(password: str) -> str:
-    """Hash a password using SHA-256."""
-    return hashlib.sha256(password.encode()).hexdigest()
+def _get_shared_link_or_404(shared_link: Optional[SharedConversationLink]) -> SharedConversationLink:
+    if not shared_link:
+        raise HTTPException(status_code=404, detail="Share link not found.")
+    return shared_link
+
+
+def _ensure_share_link_active(shared_link: SharedConversationLink) -> None:
+    now = datetime.now(timezone.utc)
+    if shared_link.expiry_date and shared_link.expiry_date < now:
+        raise HTTPException(status_code=403, detail="Share link has expired.")
+
+
+def _verify_share_password(shared_link: SharedConversationLink, password: Optional[str]) -> None:
+    if not shared_link.password_hash:
+        return
+    if not password:
+        raise HTTPException(status_code=401, detail="Password required.")
+    if not verify_share_link_password(password, shared_link.password_hash):
+        raise HTTPException(status_code=401, detail="Incorrect password.")
 
 
 # --- API Endpoints ---
@@ -111,7 +127,7 @@ async def create_share_chat_link(
 
         # Generate a unique token
         token = secrets.token_urlsafe(32)
-        password_hash = hash_password(request.password) if request.password else None
+        password_hash = hash_share_link_password(request.password) if request.password else None
         expiry_date = datetime.now(timezone.utc) + timedelta(days=request.expiry_days) if request.expiry_days else None
 
         shared_link = SharedConversationLink(
@@ -226,7 +242,9 @@ async def revoke_share_chat_link(
 
 
 @router.get("/{token}/info", response_model=SharedChatInfoResponse, summary="Get public info about a shared chat")
+@limiter.limit("60/minute")
 async def get_shared_chat_info(
+    request: Request,
     token: str,
     db: AsyncSession = Depends(get_db_session)
 ):
@@ -269,9 +287,11 @@ async def get_shared_chat_info(
 
 
 @router.post("/{token}/messages", response_model=PaginatedChatMessagesResponse, summary="Get messages from a shared chat")
+@limiter.limit("20/minute")
 async def get_shared_chat_messages(
+    request: Request,
     token: str,
-    request: ShareChatMessagesRequest,
+    body: ShareChatMessagesRequest,
     db: AsyncSession = Depends(get_db_session)
 ):
     """Get paginated messages from a shared chat thread. Password required if the link is protected."""
@@ -279,21 +299,9 @@ async def get_shared_chat_messages(
         # Validate token and get share link
         stmt = select(SharedConversationLink).where(SharedConversationLink.token == token)
         result = await db.execute(stmt)
-        shared_link = result.scalars().first()
-        if not shared_link:
-            raise HTTPException(status_code=404, detail="Share link not found.")
-
-        # Check expiry
-        now = datetime.now(timezone.utc)
-        if shared_link.expiry_date and shared_link.expiry_date < now:
-            raise HTTPException(status_code=403, detail="Share link has expired.")
-
-        # Verify password if required
-        if shared_link.password_hash:
-            if not request.password:
-                raise HTTPException(status_code=401, detail="Password required.")
-            if hash_password(request.password) != shared_link.password_hash:
-                raise HTTPException(status_code=401, detail="Incorrect password.")
+        shared_link = _get_shared_link_or_404(result.scalars().first())
+        _ensure_share_link_active(shared_link)
+        _verify_share_password(shared_link, body.password)
 
         # Get the thread
         thread = await db.get(ChatThread, shared_link.thread_id)
@@ -357,7 +365,7 @@ async def get_shared_chat_messages(
         real_messages.sort(key=lambda m: m.created_at)
 
         total = len(real_messages)
-        paginated = real_messages[request.skip : request.skip + request.limit]
+        paginated = real_messages[body.skip : body.skip + body.limit]
 
         return PaginatedChatMessagesResponse(total=total, messages=paginated)
     except ValueError:
@@ -369,7 +377,7 @@ async def get_shared_chat_messages(
 
 class ShareChatReplyRequest(BaseModel):
     """Request to send a reply to a shared chat thread."""
-    message: str = Field(..., min_length=1, description="The reply message")
+    message: str = Field(..., min_length=1, max_length=8000, description="The reply message")
     password: Optional[str] = None
 
 
@@ -385,9 +393,11 @@ _shared_reply_tasks: Dict[str, Dict[str, Any]] = {}
 
 
 @router.post("/{token}/reply", response_model=ShareChatReplyResponse, summary="Send a reply to a shared chat thread")
+@limiter.limit("5/minute")
 async def reply_to_shared_chat(
+    request: Request,
     token: str,
-    request: ShareChatReplyRequest,
+    body: ShareChatReplyRequest,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db_session)
 ):
@@ -396,25 +406,21 @@ async def reply_to_shared_chat(
         # Validate token
         stmt = select(SharedConversationLink).where(SharedConversationLink.token == token)
         result = await db.execute(stmt)
-        shared_link = result.scalars().first()
-        if not shared_link:
-            raise HTTPException(status_code=404, detail="Share link not found.")
-
-        # Check expiry
-        now = datetime.now(timezone.utc)
-        if shared_link.expiry_date and shared_link.expiry_date < now:
-            raise HTTPException(status_code=403, detail="Share link has expired.")
+        shared_link = _get_shared_link_or_404(result.scalars().first())
+        _ensure_share_link_active(shared_link)
 
         # Check allow_reply
         if not shared_link.allow_reply:
             raise HTTPException(status_code=403, detail="Replies are not allowed for this shared link.")
 
-        # Verify password if required
-        if shared_link.password_hash:
-            if not request.password:
-                raise HTTPException(status_code=401, detail="Password required.")
-            if hash_password(request.password) != shared_link.password_hash:
-                raise HTTPException(status_code=401, detail="Incorrect password.")
+        _verify_share_password(shared_link, body.password)
+
+        existing_task = _shared_reply_tasks.get(token)
+        if existing_task and existing_task.get("status") == "processing":
+            raise HTTPException(
+                status_code=429,
+                detail="Ya hay una respuesta en proceso para este enlace. Espera a que termine.",
+            )
 
         # Get the thread to find the owner's account_id
         thread = await db.get(ChatThread, shared_link.thread_id)
@@ -424,6 +430,7 @@ async def reply_to_shared_chat(
         account_id = str(thread.account_id)
         thread_id = str(thread.id)
         task_id = str(uuid.uuid4())
+        now = datetime.now(timezone.utc)
 
         # Track the task
         _shared_reply_tasks[token] = {
@@ -439,7 +446,7 @@ async def reply_to_shared_chat(
             account_id=account_id,
             thread_id=thread_id,
             task_id=task_id,
-            user_message=request.message,
+            user_message=body.message.strip(),
             token=token,
         )
 
@@ -484,7 +491,8 @@ async def _run_shared_reply(
 
 
 @router.get("/{token}/reply-status", summary="Check the status of a reply task")
-async def get_reply_status(token: str):
+@limiter.limit("60/minute")
+async def get_reply_status(request: Request, token: str):
     """Check if a reply task has completed processing."""
     task_info = _shared_reply_tasks.get(token)
     if not task_info:

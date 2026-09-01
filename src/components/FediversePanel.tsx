@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from "react";
+import { sanitizeFediverseHtml } from "@/lib/sanitizeHtml";
 import {
   Share2, Globe, Home, Bell, User, Plus, Loader2, Sparkles,
   Check, Send, FileText, MessageSquare, Heart, Repeat, ArrowLeft,
-  Search, UserPlus, UserCheck
+  Search, UserPlus, UserCheck, Eye, EyeOff, X, Maximize2, ExternalLink
 } from "lucide-react";
 
 interface FediversoAccount {
@@ -26,16 +27,40 @@ interface MastodonSearchAccount {
   url: string;
 }
 
+interface MediaAttachment {
+  id: string;
+  type: "image" | "gifv" | "video" | "audio" | "unknown";
+  url: string;
+  preview_url: string;
+  remote_url?: string | null;
+  description?: string | null;
+  blurhash?: string | null;
+}
+
+interface CardPreview {
+  url: string;
+  title: string;
+  description: string;
+  type: string;
+  image?: string | null;
+  provider_name?: string | null;
+}
+
 interface Toot {
   id: string;
   created_at: string;
   content: string;
+  spoiler_text?: string;
+  sensitive?: boolean;
   account: {
     username: string;
     acct: string;
     display_name: string;
     avatar: string;
   };
+  media_attachments?: MediaAttachment[];
+  card?: CardPreview | null;
+  reblog?: Toot | null;
   reblogs_count: number;
   favourites_count: number;
   replies_count: number;
@@ -49,6 +74,11 @@ export function FediversePanel() {
   const [loadingFeed, setLoadingFeed] = useState(false);
   const [loadingAccounts, setLoadingAccounts] = useState(true);
   
+  // Media & Lightbox state
+  const [selectedMedia, setSelectedMedia] = useState<{ url: string; alt?: string } | null>(null);
+  const [revealedSensitive, setRevealedSensitive] = useState<{ [key: string]: boolean }>({});
+  const [expandedSpoilers, setExpandedSpoilers] = useState<{ [key: string]: boolean }>({});
+  
   // Account search state
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<MastodonSearchAccount[]>([]);
@@ -59,6 +89,7 @@ export function FediversePanel() {
   const [showAddAccount, setShowAddAccount] = useState(false);
   const [instanceInput, setInstanceInput] = useState("");
   const [registeringInstance, setRegisteringInstance] = useState(false);
+  const [isConnectingOAuth, setIsConnectingOAuth] = useState(false);
 
   // Editor and AI state
   const [tootText, setTootText] = useState("");
@@ -69,14 +100,48 @@ export function FediversePanel() {
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [activeSummary, setActiveSummary] = useState<string | null>(null);
 
+  // Helper to obtain auth headers from localStorage token
+  const getAuthHeaders = (extra: Record<string, string> = {}) => {
+    const token = typeof window !== "undefined" ? localStorage.getItem("authToken") : null;
+    return {
+      ...extra,
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
+  };
+
   // Check URL parameters for OAuth Callback on mount
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const code = urlParams.get("code");
-    const client_id = urlParams.get("client_id");
-    const instance_url = urlParams.get("instance_url");
+    const state = urlParams.get("state");
+    let client_id = urlParams.get("client_id");
+    let instance_url = urlParams.get("instance_url");
+
+    if ((!client_id || !instance_url) && state) {
+      try {
+        const parsed = JSON.parse(decodeURIComponent(state));
+        instance_url = instance_url || parsed.instance_url || parsed.instance;
+        client_id = client_id || parsed.client_id;
+      } catch {
+        try {
+          const parsed = JSON.parse(state);
+          instance_url = instance_url || parsed.instance_url || parsed.instance;
+          client_id = client_id || parsed.client_id;
+        } catch (e) {
+          console.error("Error parsing OAuth state:", e);
+        }
+      }
+    }
+
+    if (!instance_url && typeof window !== "undefined") {
+      instance_url = localStorage.getItem("fediverso_temp_instance");
+    }
+    if (!client_id && typeof window !== "undefined") {
+      client_id = localStorage.getItem("fediverso_temp_client_id");
+    }
 
     if (code && client_id && instance_url) {
+      setIsConnectingOAuth(true);
       handleOAuthCallback(code, client_id, instance_url);
     } else {
       fetchAccounts();
@@ -95,7 +160,7 @@ export function FediversePanel() {
   const fetchAccounts = async () => {
     setLoadingAccounts(true);
     try {
-      const resp = await fetch("/api/fediverso/accounts");
+      const resp = await fetch("/api/fediverso/accounts", { headers: getAuthHeaders() });
       if (resp.ok) {
         const data = await resp.json();
         setAccounts(data);
@@ -111,13 +176,16 @@ export function FediversePanel() {
   };
 
   const handleOAuthCallback = async (code: string, client_id: string, instance_url: string) => {
+    const redirect_uri = `${window.location.origin}/fediverso`;
     try {
       const resp = await fetch("/api/fediverso/callback", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code, client_id, instance_url })
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ code, client_id, instance_url, redirect_uri })
       });
       if (resp.ok) {
+        localStorage.removeItem("fediverso_temp_instance");
+        localStorage.removeItem("fediverso_temp_client_id");
         // Clean URL params
         window.history.replaceState({}, document.title, window.location.pathname);
         await fetchAccounts();
@@ -127,6 +195,9 @@ export function FediversePanel() {
       }
     } catch (err) {
       console.error("Error handling OAuth callback:", err);
+      alert("Error al comunicarse con el servidor durante la autenticación");
+    } finally {
+      setIsConnectingOAuth(false);
     }
   };
 
@@ -136,31 +207,21 @@ export function FediversePanel() {
 
     setRegisteringInstance(true);
     try {
+      const redirect_uri = `${window.location.origin}/fediverso`;
       const resp = await fetch("/api/fediverso/register-instance", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ instance_url: instanceInput })
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ instance_url: instanceInput, redirect_uri })
       });
 
       if (resp.ok) {
         const data = await resp.json();
-        // Redirect user to instance OAuth authorize page, passing instance and client_id so we get it back
-        const returnUrl = `${data.authorize_url}&state=${encodeURIComponent(
-          JSON.stringify({ instance: data.instance_url, client_id: data.client_id })
-        )}`;
         
         // Save temporary client details in localStorage to verify on callback
         localStorage.setItem("fediverso_temp_instance", data.instance_url);
         localStorage.setItem("fediverso_temp_client_id", data.client_id);
         
-        // Append client_id and instance_url directly to redirect URI by dynamically changing location
-        const oauthUrl = data.authorize_url.replace(
-          "redirect_uri=http://localhost:3000/fediverso",
-          `redirect_uri=http://localhost:3000/fediverso?instance_url=${encodeURIComponent(
-            data.instance_url
-          )}%26client_id=${encodeURIComponent(data.client_id)}`
-        );
-        window.location.href = oauthUrl;
+        window.location.href = data.authorize_url;
       } else {
         const errData = await resp.json();
         alert(`Error al registrar instancia: ${errData.detail || "Fallo desconocido"}`);
@@ -175,7 +236,7 @@ export function FediversePanel() {
   const fetchFeed = async (accountId: string, type: string) => {
     setLoadingFeed(true);
     try {
-      const resp = await fetch(`/api/fediverso/feed?account_id=${accountId}&feed_type=${type}`);
+      const resp = await fetch(`/api/fediverso/feed?account_id=${accountId}&feed_type=${type}`, { headers: getAuthHeaders() });
       if (resp.ok) {
         const data = await resp.json();
         setFeed(data);
@@ -193,7 +254,7 @@ export function FediversePanel() {
 
     setLoadingSearch(true);
     try {
-      const resp = await fetch(`/api/fediverso/search/accounts?account_id=${activeAccount.id}&query=${encodeURIComponent(searchQuery)}`);
+      const resp = await fetch(`/api/fediverso/search/accounts?account_id=${activeAccount.id}&query=${encodeURIComponent(searchQuery)}`, { headers: getAuthHeaders() });
       if (resp.ok) {
         const data = await resp.json();
         setSearchResults(data);
@@ -215,7 +276,7 @@ export function FediversePanel() {
     try {
       const resp = await fetch(endpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           account_id: activeAccount.id,
           target_mastodon_account_id: targetAccountId
@@ -236,7 +297,7 @@ export function FediversePanel() {
     try {
       const resp = await fetch("/api/fediverso/toot", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           account_id: activeAccount.id,
           status: tootText,
@@ -263,7 +324,7 @@ export function FediversePanel() {
     try {
       const resp = await fetch("/api/fediverso/ai/compose", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           prompt: aiPrompt,
           context: inReplyTo ? `Respondiendo a ${inReplyTo.account.acct}: "${inReplyTo.content}"` : null
@@ -288,7 +349,7 @@ export function FediversePanel() {
     try {
       const resp = await fetch("/api/fediverso/ai/compose", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           prompt: `Reescribe y mejora este toot: "${tootText}"`
         })
@@ -313,7 +374,7 @@ export function FediversePanel() {
     try {
       const resp = await fetch("/api/fediverso/ai/summarize-thread", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           account_id: activeAccount.id,
           status_id: statusId
@@ -332,6 +393,22 @@ export function FediversePanel() {
       setSummaryLoading(false);
     }
   };
+
+  if (isConnectingOAuth) {
+    return (
+      <div className="flex h-[50vh] w-full flex-col items-center justify-center gap-4 bg-card/30 backdrop-blur-md border border-border/40 rounded-3xl p-8 shadow-xl text-center">
+        <div className="p-4 rounded-2xl bg-primary/10 text-primary">
+          <Loader2 className="h-10 w-10 animate-spin text-primary" />
+        </div>
+        <div className="space-y-1">
+          <h3 className="text-xl font-bold text-foreground">Conectando cuenta del Fediverso</h3>
+          <p className="text-sm text-muted-foreground">
+            Verificando credenciales y vinculando tu perfil de Mastodon...
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-[600px]">
@@ -506,7 +583,7 @@ export function FediversePanel() {
                     {acc.note && (
                       <div
                         className="text-xs text-foreground/80 leading-relaxed line-clamp-3 bg-secondary/15 rounded-lg p-2 border border-border/10"
-                        dangerouslySetInnerHTML={{ __html: acc.note }}
+                        dangerouslySetInnerHTML={{ __html: sanitizeFediverseHtml(acc.note) }}
                       />
                     )}
 
@@ -544,76 +621,238 @@ export function FediversePanel() {
                 <span className="text-sm">Cargando publicaciones...</span>
               </div>
             ) : feed.length > 0 ? (
-              feed.map((toot) => (
-                <div
-                  key={toot.id}
-                  className="bg-card/40 border border-border/30 hover:border-primary/20 hover:bg-card/60 transition-all duration-300 rounded-xl p-4 space-y-3 group shadow-sm hover:shadow-md"
-                >
-                  {/* Header */}
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-3">
-                      <img
-                        src={toot.account.avatar}
-                        alt={toot.account.username}
-                        className="h-10 w-10 rounded-full border border-border/20 object-cover"
-                      />
-                      <div>
-                        <h4 className="text-sm font-semibold text-foreground leading-tight">
-                          {toot.account.display_name || toot.account.username}
-                        </h4>
-                        <p className="text-xs text-muted-foreground">
-                          @{toot.account.acct}
-                        </p>
-                      </div>
-                    </div>
-                    <span className="text-[11px] text-muted-foreground">
-                      {new Date(toot.created_at).toLocaleDateString()}
-                    </span>
-                  </div>
+              feed.map((rawItem: any) => {
+                // Support both standard statuses and notification items
+                const toot: Toot = rawItem.status || rawItem;
+                const isReblog = !!toot.reblog;
+                const effectiveToot = toot.reblog || toot;
+                const isSensitive = effectiveToot.sensitive && !revealedSensitive[effectiveToot.id];
 
-                  {/* Content */}
+                return (
                   <div
-                    className="text-sm text-foreground/90 leading-relaxed break-words px-1"
-                    dangerouslySetInnerHTML={{ __html: toot.content }}
-                  />
+                    key={rawItem.id || toot.id}
+                    className="bg-card/40 border border-border/30 hover:border-primary/20 hover:bg-card/60 transition-all duration-300 rounded-2xl p-4 space-y-3 group shadow-sm hover:shadow-md"
+                  >
+                    {/* Reblog Header */}
+                    {isReblog && (
+                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-medium pb-1 border-b border-border/10">
+                        <Repeat className="h-3.5 w-3.5 text-emerald-500" />
+                        <span><strong>{toot.account.display_name || toot.account.username}</strong> compartió</span>
+                      </div>
+                    )}
 
-                  {/* Footer / Actions */}
-                  <div className="flex items-center justify-between pt-2 border-t border-border/10 text-xs text-muted-foreground">
-                    <div className="flex items-center space-x-4">
-                      <button
-                        onClick={() => {
-                          setInReplyTo(toot);
-                          setTootText(`@${toot.account.acct} `);
-                        }}
-                        className="flex items-center space-x-1 hover:text-primary transition-colors duration-200"
-                      >
-                        <MessageSquare className="h-4 w-4" />
-                        <span>{toot.replies_count}</span>
-                      </button>
-                      <button className="flex items-center space-x-1 hover:text-emerald-500 transition-colors duration-200">
-                        <Repeat className="h-4 w-4" />
-                        <span>{toot.reblogs_count}</span>
-                      </button>
-                      <button className="flex items-center space-x-1 hover:text-rose-500 transition-colors duration-200">
-                        <Heart className="h-4 w-4" />
-                        <span>{toot.favourites_count}</span>
-                      </button>
+                    {/* Header */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-3">
+                        <img
+                          src={effectiveToot.account.avatar}
+                          alt={effectiveToot.account.username}
+                          className="h-10 w-10 rounded-full border border-border/20 object-cover"
+                          onError={(e) => {
+                            (e.target as HTMLElement).style.display = "none";
+                          }}
+                        />
+                        <div>
+                          <h4 className="text-sm font-semibold text-foreground leading-tight">
+                            {effectiveToot.account.display_name || effectiveToot.account.username}
+                          </h4>
+                          <p className="text-xs text-muted-foreground">
+                            @{effectiveToot.account.acct}
+                          </p>
+                        </div>
+                      </div>
+                      <span className="text-[11px] text-muted-foreground">
+                        {new Date(effectiveToot.created_at).toLocaleDateString(undefined, {
+                          month: "short",
+                          day: "numeric",
+                          hour: "2-digit",
+                          minute: "2-digit"
+                        })}
+                      </span>
                     </div>
 
-                    <button
-                      onClick={() => handleSummarizeThread(toot.id)}
-                      className="flex items-center space-x-1 bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 px-2 py-1 rounded-lg transition-all duration-200"
-                    >
-                      {summaryLoading && activeSummary === toot.id ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    {/* Content Warning / Spoiler */}
+                    {effectiveToot.spoiler_text ? (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between p-2.5 rounded-xl bg-secondary/30 text-xs border border-border/20">
+                          <span className="font-medium text-foreground">{effectiveToot.spoiler_text}</span>
+                          <button
+                            onClick={() =>
+                              setExpandedSpoilers((prev) => ({
+                                ...prev,
+                                [effectiveToot.id]: !prev[effectiveToot.id]
+                              }))
+                            }
+                            className="text-xs text-primary font-semibold hover:underline"
+                          >
+                            {expandedSpoilers[effectiveToot.id] ? "Ocultar" : "Mostrar más"}
+                          </button>
+                        </div>
+                        {expandedSpoilers[effectiveToot.id] && (
+                          <div
+                            className="text-sm text-foreground/90 leading-relaxed break-words px-1"
+                            dangerouslySetInnerHTML={{ __html: sanitizeFediverseHtml(effectiveToot.content) }}
+                          />
+                        )}
+                      </div>
+                    ) : (
+                      <div
+                        className="text-sm text-foreground/90 leading-relaxed break-words px-1"
+                        dangerouslySetInnerHTML={{ __html: sanitizeFediverseHtml(effectiveToot.content) }}
+                      />
+                    )}
+
+                    {/* Media Attachments */}
+                    {effectiveToot.media_attachments && effectiveToot.media_attachments.length > 0 && (
+                      isSensitive ? (
+                        <div className="rounded-xl overflow-hidden bg-secondary/30 border border-border/30 p-6 flex flex-col items-center justify-center gap-2 text-center my-2">
+                          <EyeOff className="h-6 w-6 text-muted-foreground" />
+                          <p className="text-xs text-muted-foreground font-medium">Contenido marcado como sensible</p>
+                          <button
+                            onClick={() =>
+                              setRevealedSensitive((prev) => ({ ...prev, [effectiveToot.id]: true }))
+                            }
+                            className="text-xs bg-primary/20 text-primary hover:bg-primary/30 border border-primary/30 px-3 py-1.5 rounded-xl transition-colors font-medium flex items-center gap-1.5 mt-1"
+                          >
+                            <Eye className="h-3.5 w-3.5" /> Mostrar contenido
+                          </button>
+                        </div>
                       ) : (
-                        <Sparkles className="h-3.5 w-3.5" />
+                        <div
+                          className={`mt-2 rounded-xl overflow-hidden gap-2 ${
+                            effectiveToot.media_attachments.length === 1
+                              ? "grid grid-cols-1"
+                              : "grid grid-cols-2"
+                          }`}
+                        >
+                          {effectiveToot.media_attachments.map((media, idx) => (
+                            <div
+                              key={media.id || idx}
+                              className={`relative group/media overflow-hidden rounded-xl bg-black/20 border border-border/20 flex items-center justify-center ${
+                                effectiveToot.media_attachments?.length === 3 && idx === 0
+                                  ? "col-span-2 max-h-80"
+                                  : "max-h-64"
+                              }`}
+                            >
+                              {media.type === "video" ? (
+                                <video
+                                  src={media.url}
+                                  controls
+                                  className="w-full max-h-72 object-cover rounded-xl"
+                                />
+                              ) : media.type === "gifv" ? (
+                                <video
+                                  src={media.url}
+                                  autoPlay
+                                  loop
+                                  muted
+                                  playsInline
+                                  className="w-full max-h-72 object-cover rounded-xl"
+                                />
+                              ) : media.type === "audio" ? (
+                                <audio src={media.url} controls className="w-full p-2" />
+                              ) : (
+                                <div
+                                  onClick={() =>
+                                    setSelectedMedia({
+                                      url: media.url || media.preview_url,
+                                      alt: media.description || ""
+                                    })
+                                  }
+                                  className="relative cursor-pointer w-full h-full min-h-[140px] flex items-center justify-center overflow-hidden"
+                                >
+                                  <img
+                                    src={media.preview_url || media.url}
+                                    alt={media.description || "Imagen del post"}
+                                    className="w-full h-full object-cover max-h-72 hover:scale-[1.02] transition-transform duration-300 rounded-xl"
+                                    loading="lazy"
+                                  />
+                                  <div className="absolute inset-0 bg-black/0 group-hover/media:bg-black/25 transition-colors flex items-center justify-center opacity-0 group-hover/media:opacity-100">
+                                    <div className="p-2 rounded-full bg-black/60 text-white backdrop-blur-sm shadow-lg">
+                                      <Maximize2 className="h-4 w-4" />
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )
+                    )}
+
+                    {/* Link Card Preview (if no media attachments) */}
+                    {(!effectiveToot.media_attachments || effectiveToot.media_attachments.length === 0) &&
+                      effectiveToot.card &&
+                      effectiveToot.card.url && (
+                        <a
+                          href={effectiveToot.card.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-2 flex flex-col sm:flex-row overflow-hidden rounded-xl border border-border/30 bg-secondary/15 hover:bg-secondary/30 transition-all group/card"
+                        >
+                          {effectiveToot.card.image && (
+                            <img
+                              src={effectiveToot.card.image}
+                              alt={effectiveToot.card.title}
+                              className="h-32 sm:w-36 sm:h-auto object-cover shrink-0"
+                              loading="lazy"
+                            />
+                          )}
+                          <div className="p-3 flex flex-col justify-center space-y-1 overflow-hidden">
+                            <span className="text-[11px] text-muted-foreground flex items-center gap-1 font-medium">
+                              <ExternalLink className="h-3 w-3 text-primary" />{" "}
+                              {effectiveToot.card.provider_name || "Enlace externo"}
+                            </span>
+                            <h5 className="text-xs font-semibold text-foreground line-clamp-1 group-hover/card:text-primary transition-colors">
+                              {effectiveToot.card.title}
+                            </h5>
+                            {effectiveToot.card.description && (
+                              <p className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed">
+                                {effectiveToot.card.description}
+                              </p>
+                            )}
+                          </div>
+                        </a>
                       )}
-                      <span className="text-[11px] font-medium">Resumir Hilo</span>
-                    </button>
+
+                    {/* Footer / Actions */}
+                    <div className="flex items-center justify-between pt-2 border-t border-border/10 text-xs text-muted-foreground">
+                      <div className="flex items-center space-x-4">
+                        <button
+                          onClick={() => {
+                            setInReplyTo(effectiveToot);
+                            setTootText(`@${effectiveToot.account.acct} `);
+                          }}
+                          className="flex items-center space-x-1 hover:text-primary transition-colors duration-200"
+                        >
+                          <MessageSquare className="h-4 w-4" />
+                          <span>{effectiveToot.replies_count || 0}</span>
+                        </button>
+                        <button className="flex items-center space-x-1 hover:text-emerald-500 transition-colors duration-200">
+                          <Repeat className="h-4 w-4" />
+                          <span>{effectiveToot.reblogs_count || 0}</span>
+                        </button>
+                        <button className="flex items-center space-x-1 hover:text-rose-500 transition-colors duration-200">
+                          <Heart className="h-4 w-4" />
+                          <span>{effectiveToot.favourites_count || 0}</span>
+                        </button>
+                      </div>
+
+                      <button
+                        onClick={() => handleSummarizeThread(effectiveToot.id)}
+                        className="flex items-center space-x-1 bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 px-2 py-1 rounded-lg transition-all duration-200"
+                      >
+                        {summaryLoading && activeSummary === effectiveToot.id ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Sparkles className="h-3.5 w-3.5" />
+                        )}
+                        <span className="text-[11px] font-medium">Resumir Hilo</span>
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             ) : (
               <div className="flex flex-col items-center justify-center py-20 text-muted-foreground border border-dashed border-border/30 rounded-2xl">
                 <Share2 className="h-8 w-8 mb-2 opacity-40" />
@@ -649,7 +888,7 @@ export function FediversePanel() {
           {inReplyTo && (
             <div className="bg-secondary/25 border border-border/20 rounded-xl p-3 text-xs text-muted-foreground">
               Respondiendo a <strong>@{inReplyTo.account.acct}</strong>:
-              <div className="line-clamp-2 mt-1" dangerouslySetInnerHTML={{ __html: inReplyTo.content }} />
+              <div className="line-clamp-2 mt-1" dangerouslySetInnerHTML={{ __html: sanitizeFediverseHtml(inReplyTo.content) }} />
             </div>
           )}
 
@@ -740,6 +979,37 @@ export function FediversePanel() {
         </div>
 
       </div>
+
+      {/* Lightbox Modal para vista previa de imágenes */}
+      {selectedMedia && (
+        <div
+          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4"
+          onClick={() => setSelectedMedia(null)}
+        >
+          <div
+            className="relative max-w-5xl max-h-[90vh] flex flex-col items-center justify-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => setSelectedMedia(null)}
+              className="absolute -top-10 right-0 p-2 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors"
+              title="Cerrar"
+            >
+              <X className="h-5 w-5" />
+            </button>
+            <img
+              src={selectedMedia.url}
+              alt={selectedMedia.alt || "Imagen completa"}
+              className="max-h-[80vh] max-w-full rounded-2xl shadow-2xl object-contain"
+            />
+            {selectedMedia.alt && (
+              <p className="text-xs text-white/90 bg-black/60 px-4 py-2 rounded-xl mt-3 max-w-2xl text-center backdrop-blur-sm">
+                {selectedMedia.alt}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
 
     </div>
   );

@@ -1348,7 +1348,7 @@ class OnlyOfficeDocumentShare(Base):
 
     created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"), nullable=False)
 
-    document = relationship("Document", backref="share_entries")
+    document = relationship("Document", backref=backref("share_entries", cascade="all, delete-orphan", passive_deletes=True))
     owner_account = relationship("Account", foreign_keys=[owner_account_id])
     shared_with_account = relationship("Account", foreign_keys=[shared_with_account_id])
 
@@ -1374,7 +1374,7 @@ class OnlyOfficeFolderShare(Base):
 
     created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"), nullable=False)
 
-    folder = relationship("DocumentFolder", backref=backref("share_entries", cascade="all, delete-orphan"))
+    folder = relationship("DocumentFolder", backref=backref("share_entries", cascade="all, delete-orphan", passive_deletes=True))
     owner_account = relationship("Account", foreign_keys=[owner_account_id])
     shared_with_account = relationship("Account", foreign_keys=[shared_with_account_id])
 
@@ -1395,7 +1395,7 @@ class OnlyOfficeDocumentChat(Base):
     thread_id = Column(UUID(as_uuid=True), ForeignKey("chat_threads.id", ondelete='CASCADE'), nullable=False, unique=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"), nullable=False)
 
-    document = relationship("Document", backref=backref("document_chat", passive_deletes=True))
+    document = relationship("Document", backref=backref("document_chat", cascade="all, delete-orphan", passive_deletes=True))
     thread = relationship("ChatThread")
 
 

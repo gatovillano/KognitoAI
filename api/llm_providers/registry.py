@@ -36,13 +36,18 @@ class ProviderRegistry:
             "cerebras": CerebrasProvider(),
             "ollama": OllamaProvider(),
             "ollama_cloud": OllamaCloudProvider(),
+            "ollama-cloud": OllamaCloudProvider(),
             "openai_compatible": OpenAICompatibleProvider(),
+            "openai-compatible": OpenAICompatibleProvider(),
             "azure": AzureProvider(),
             "kilocode": KilocodeProvider(),
             "nvidia": NvidiaProvider(),
             "huggingface": HuggingFaceProvider(),
+            "hugging-face": HuggingFaceProvider(),
             # Alias para compatibilidad con llamadas existentes
             "google": GeminiProvider(),
+            "google_ai_studio": GeminiProvider(),
+            "google-ai-studio": GeminiProvider(),
         }
 
     def register_provider(self, name: str, provider: LLMProviderStrategy):
