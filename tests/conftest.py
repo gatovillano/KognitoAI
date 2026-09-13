@@ -53,7 +53,8 @@ class MockLoader(Loader):
 class SafeAutoMockFinder(MetaPathFinder):
     def find_spec(self, fullname, path, target=None):
         allowed_prefixes = (
-            "api", "core", "utils", "tests", "extensions", "config",
+            "api", "core", "utils", "tests", "extensions", "config", "skills",
+            "docx", "openpyxl", "pptx", "lxml",
             "fastapi", "starlette", "pydantic", "pydantic_core",
             "sqlalchemy", "asyncpg", "jwt", "passlib", "slowapi", "limits",
             "pytest", "unittest", "asyncio", "typing", "dataclasses",
