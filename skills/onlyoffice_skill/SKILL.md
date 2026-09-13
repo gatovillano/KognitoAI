@@ -114,83 +114,114 @@ Si prefieres un diseño único, puedes anular aspectos del tema seleccionado usa
 
 ---
 
+## Plantillas Maestras Premium (Master Templates)
+
+Al usar `create_onlyoffice_document_tool`, puedes inicializar un documento profesional completo especificando el parámetro `template` y opcionalmente `theme`, `title` y `subtitle`.
+
+| Formato | ID de Plantilla (`template`) | Nombre | Descripción y Componentes |
+|---|---|---|---|
+| **Word (.docx)** | `executive_report` | Informe Ejecutivo | Portada ejecutiva moderna, resumen ejecutivo, callout clave, tarjetas de KPI métricas, tabla financiera con totales y pie de página dinámico con numeración de páginas. |
+| **Word (.docx)** | `commercial_proposal` | Propuesta Comercial | Portada ejecutiva, alcance del proyecto, tabla de entregables, cronograma, presupuesto detallado y términos comerciales. |
+| **Word (.docx)** | `project_charter` | Acta de Constitución de Proyecto | Objetivos del proyecto, matriz de interesados/stakeholders, hitos clave, riesgos con callouts y presupuesto estimado. |
+| **Excel (.xlsx)** | `financial_budget` | Presupuesto Financiero | Tarjetas de KPI (Presupuesto Total, Ejecutado, Desviación), desglose mensual por partida, fórmulas `=SUM()`, formatos de moneda y columnas autoajustadas. |
+| **Excel (.xlsx)** | `sales_dashboard` | Tablero de Control de Ventas | Tarjetas superiores de KPI (Ventas, Meta, Cumplimiento, Ticket Promedio), tabla detallada por región/vendedor y formato condicional semafórico. |
+| **Excel (.xlsx)** | `project_tracker` | Seguimiento de Tareas y Proyectos | Tarjetas de KPI de progreso (Total Tareas, Completadas, En Riesgo), tabla con Estado/Prioridad y formato condicional automático de estados. |
+| **PowerPoint (.pptx)** | `pitch_deck` | Presentación de Inversión / Pitch Deck | 7 diapositivas 16:9 con diseño temático: Portada, Problema, Solución, Tarjetas de Métricas de Tracción, Modelo de Negocio (con tabla), Equipo y Llamado a la Acción. |
+| **PowerPoint (.pptx)** | `quarterly_review` | Revisión Trimestral (QBR) | 6 diapositivas 16:9: Portada, Agenda, Métricas del Trimestre (KPIs), Logros Principales, Desafíos y Objetivos para el Siguiente Cuatrimestre. |
+
+---
+
+## Paleta de 6 Temas Unificados (`theme`)
+
+Tanto al crear desde plantilla como al editar tablas, tarjetas o diapositivas, puedes especificar cualquiera de los 6 temas unificados:
+
+- **`corporate_blue`** (Por defecto): Azul Rey (`#1E3A8A`), acento Celeste (`#0284C7`), fondo blanco/hielo. Ideal para finanzas, corporativo y auditorías.
+- **`emerald_green`**: Verde Bosque (`#065F46`), acento Esmeralda (`#10B981`), fondo menta suave. Ideal para sustentabilidad, proyectos y salud.
+- **`dark_slate`**: Grafito/Pizarra Oscura (`#0F172A`), acento Índigo (`#6366F1`), fondo gris perla. Estilo tecnológico, moderno y premium.
+- **`sunset_amber`**: Ámbar/Terracota (`#9A3412`), acento Ámbar Cálido (`#F59E0B`), fondo arena claro. Ideal para marketing, creatividad y ventas.
+- **`violet_gold`**: Púrpura Imperial (`#581C87`), acento Oro cálido (`#D97706`), fondo lavanda tenue. Ideal para lujo, consultoría estratégica y conferencias.
+- **`minimalist_gray`**: Gris Carbón (`#374151`), acento Acero (`#6B7280`), bordes y fondos sutiles. Minimalismo ejecutivo nórdico.
+
+---
+
+## Cajas de Alerta y Callouts en Word (.docx)
+
+Al usar las acciones `append` o `clear_and_write` con texto Markdown, el motor traduce automáticamente las citas de alerta estilo GitHub a bloques visuales nativos con banda lateral de color y fondo destacado:
+
+```markdown
+> [!NOTE]
+> Este es un mensaje informativo o nota aclaratoria.
+
+> [!TIP]
+> Consejo o buena práctica recomendada para maximizar resultados.
+
+> [!IMPORTANT]
+> Información crítica o requisito fundamental que debe cumplirse.
+
+> [!WARNING]
+> Advertencia o aviso importante sobre posibles riesgos.
+
+> [!CAUTION]
+> Precaución o acción de alto riesgo que requiere atención inmediata.
+
+> [!QUOTE]
+> Cita textual relevante o testimonio destacado.
+```
+
+---
+
+## Acciones de edición para .docx (Word)
+
+| Acción | Descripción | Campos requeridos | Campos opcionales |
+|---|---|---|---|
+| `append` | Añade texto o Markdown completo al final (soporta callouts `> [!TIP]`, negrita, tablas, listas) | `text` | `style_theme`, `style_font_family`, `style_primary_color`, `style_secondary_color`, `style_text_color` |
+| `append_heading` | Añade un título nativo (H1/H2/H3) | `text`, `heading_level` | `style_theme`, `style_font_family`, `style_primary_color`, `style_secondary_color` |
+| `append_list` | Añade una lista de viñetas | `list_items` | `style_theme`, `style_font_family`, `style_text_color` |
+| `replace` | Busca y reemplaza texto | `search_text`, `text` | `style_theme`, `style_font_family`, `style_text_color` |
+| `replace_section` | Reemplaza el párrafo que empieza con `search_text` | `search_text`, `text` | `style_theme`, `style_font_family`, `style_text_color` |
+| `docx_add_cover_page` | Añade una **portada ejecutiva** al inicio del documento con tema visual y salto de página | | `text` (título), `search_text` (subtítulo), `theme`, `format_options` (`style`: `'modern'`, `'minimal'`, `'header_block'`, `author`, `organization`) |
+| `docx_add_kpi_cards` | Añade una **fila de tarjetas de métricas/KPI** destacadas | `table_data` o `format_options` (`cards`) | `theme` |
+| `insert_styled_table` | Inserta una tabla con tema visual premium, padding y totales | `table_data` (matriz 2D) | `theme`, `has_total_row`, `auto_calculate_totals`, `col_alignments`, `col_widths`, `cell_padding` |
+| `clear_and_write` | Borra todo el contenido y escribe nuevo texto/Markdown | `text` | `style_theme`, `style_font_family`, `style_primary_color` |
+| `set_page_layout` | Configura márgenes y orientación | | `page_margins` (dict), `page_orientation` (`portrait`/`landscape`) |
+| `add_header_footer` | Añade encabezado o pie de página (pie de página añade numeración dinámica `Página X de Y`) | `header_footer_type`, `header_footer_content` | |
+
+---
+
 ## Acciones de edición para .xlsx (Excel)
 
-### Gestión de pestañas/hojas
-
 | Acción | Descripción | Campos requeridos | Campos opcionales |
 |---|---|---|---|
-| `xlsx_create_sheet` | Crea una nueva pestaña (hoja de trabajo) en el libro | `sheet_name` | `tab_color` (ej: '1E3A8A'), `sheet_index` |
+| `xlsx_add_kpi_cards` | Añade **tarjetas métricas/KPI** superiores en la hoja | `table_data` o `format_options` (`cards`) | `theme`, `row_index`, `column_index` |
+| `xlsx_add_chart` | Inserta un **gráfico nativo Office** (`column`, `bar`, `line`, `pie`) vinculado a celdas | `range_address` (ej: `'B1:B10'`) | `search_text` o `format_options.chart_type`, `text` (título), `cell` (celda destino, ej: `'F2'`), `theme`, `width`, `height`, `format_options.categories_range` |
+| `xlsx_apply_conditional_formatting` | Aplica **formato condicional** (`status_highlights`, `color_scale`, `cell_is`) | `range_address` (ej: `'C2:C20'`) | `search_text` (tipo de regla), `format_options` |
+| `xlsx_create_table` | Crea una tabla estilizada con temas, formatos de columna y fórmulas de totales | `table_data` (matriz 2D) | `theme`, `has_total_row`, `total_formulas`, `column_formats`, `auto_fit_columns`, `start_cell`, `sheet_name` |
+| `xlsx_create_sheet` | Crea una nueva pestaña en el libro | `sheet_name` | `tab_color` (hex), `sheet_index` |
 | `xlsx_rename_sheet` | Renombra una pestaña existente | `sheet_name` (nuevo nombre) | `search_text` (nombre anterior), `tab_color` |
 | `xlsx_delete_sheet` | Elimina una pestaña | `sheet_name` | |
-| `xlsx_list_sheets` | Lista todas las pestañas disponibles en el archivo | | |
-| `xlsx_copy_sheet` | Copia una hoja a un nuevo nombre dentro del mismo libro | `sheet_name` (origen), `text` (nuevo nombre) | `sheet_index` (posición destino) |
-| `xlsx_move_sheet` | Mueve (reordena) una hoja a otra posición en el libro | `sheet_name`, `sheet_index` (0-based) | |
-| `xlsx_clear_sheet` | Borra **todo** el contenido de una hoja sin eliminarla (celdas, estilos, merges, tablas) | `sheet_name` | |
-| `xlsx_get_sheet_info` | Devuelve estadísticas de una hoja: filas, columnas, rango usado, celdas fusionadas, muestra de datos | `sheet_name` | |
-| `xlsx_freeze_panes` | Congela filas/columnas: `cell='B2'` congela la fila 1 y la columna A | `cell` (ej: 'B2'), `sheet_name` | |
-| `xlsx_protect_sheet` | Protege la hoja con contraseña para evitar edición manual en el editor | `sheet_name` | `text` (contraseña, opcional) |
-| `xlsx_set_sheet_tab_color` | Cambia el color de la pestaña de una hoja ya existente | `sheet_name`, `tab_color` (hex, ej: 'FF0000') | |
+| `xlsx_list_sheets` | Lista todas las pestañas disponibles | | |
+| `xlsx_write_cell` | Escribe un valor o fórmula en una celda | `cell` (ej: `'B3'`), `text` | `sheet_name` |
+| `xlsx_append_row` | Añade una fila al final (soporta números y fórmulas) | `row_data` (lista) | `sheet_name` |
+| `xlsx_freeze_panes` | Congela filas/columnas (`cell='B2'` congela fila 1 y col A) | `cell`, `sheet_name` | |
+| `xlsx_set_sheet_tab_color` | Cambia color de pestaña | `sheet_name`, `tab_color` (hex) | |
 
-### Edición de contenido
+---
+
+## Acciones de edición para .pptx (PowerPoint)
+
+Las presentaciones de PowerPoint se gestionan en formato panorámico **16:9** nativo:
 
 | Acción | Descripción | Campos requeridos | Campos opcionales |
 |---|---|---|---|
-| `xlsx_create_table` | Crea una tabla estilizada con temas, formatos de columna y fórmulas de totales | `table_data` (matriz 2D) | `theme`, `has_total_row`, `total_formulas`, `column_formats`, `auto_fit_columns`, `start_cell`, `sheet_name` |
-| `xlsx_write_cell` | Escribe un valor o fórmula en una celda (si `text` empieza con `=` se guarda como fórmula evaluable) | `cell` (ej: 'B3'), `text` | `sheet_name` |
-| `xlsx_append_row` | Añade una fila al final (convierte números y fórmulas) | `row_data` (lista de valores) | `sheet_name` |
-| `xlsx_write_range` | Escribe una matriz de valores/fórmulas en un rango | `range_address` (ej: 'A1:C5'), `range_data` | `sheet_name` |
-| `xlsx_format_cells` | Aplica formatos avanzados (fuente, relleno, alineación, bordes, number_format) | `range_address`, `format_options` | `sheet_name` |
-| `xlsx_insert_row` / `xlsx_delete_row` | Inserta o elimina filas | `row_index` | `sheet_name` |
-| `xlsx_insert_column` / `xlsx_delete_column` | Inserta o elimina columnas | `column_index` | `sheet_name` |
-| `xlsx_merge_cells` | Fusionar celdas en un rango | `range_address` | `sheet_name` |
-| `xlsx_set_column_width` / `xlsx_set_row_height` | Ajustar ancho de columna / alto de fila | `column_index`/`row_index`, `width`/`height` | `sheet_name` |
-
-> 💡 **Creación automática de pestañas**: Al ejecutar acciones de edición (`xlsx_create_table`, `xlsx_write_cell`, `xlsx_write_range`, etc.) indicando un `sheet_name` que no exista en el libro, la pestaña se creará automáticamente.
-
-> 💡 **Flujo recomendado para múltiples hojas**: Usa `xlsx_list_sheets` o `xlsx_get_sheet_info` primero para entender la estructura del libro antes de editar.
-
-
-
-### Temas de Diseño Premium (`theme`)
-- `corporate_blue` (Encabezado azul rey `#1E3A8A`, filas zebra slate, fila total acentuada con borde doble inferior)
-- `emerald_green` (Encabezado verde bosque `#065F46`, filas zebra esmeralda)
-- `dark_slate` (Encabezado pizarra oscuro `#0F172A`, filas zebra gris)
-- `sunset_amber` (Encabezado naranja/ámbar `#9A3412`, filas zebra ámbar)
-- `violet_gold` (Encabezado violeta `#581C87`, filas zebra purpúrea)
-- `minimalist_gray` (Encabezado gris oscuro `#374151`, filas zebra gris suave)
+| `pptx_add_slide` | Añade una nueva diapositiva con estructura tematizada | | `text` (título), `search_text` o `format_options.layout_type` (`title`, `agenda`, `content`, `two_columns`, `three_columns`, `kpi_metrics`, `conclusion`), `list_items` (puntos viñeta), `theme`, `format_options` (`speaker_notes`, `subtitle`, `cards`, `columns`) |
+| `pptx_add_table` | Añade una tabla estilizada con el tema activo a la última diapositiva | `table_data` (matriz 2D) | `theme`, `text` (título de la diapositiva si no existe) |
 
 ---
 
-## Fórmulas y Totales Automáticos
+## Notas de Uso y Buenas Prácticas
 
-Tanto en Word como en Excel, las celdas que comiencen con `=` (ej: `=SUM(B2:B10)`, `=AVERAGE(C2:C10)`) se guardan como fórmulas evaluables.
-En Excel con `xlsx_create_table` o en Word con `insert_styled_table`, habilitar `has_total_row=True` genera y formatea automáticamente la fila de totales calculando sumas de las columnas numéricas.
-
----
-
-## Tipos de documentos para crear
-
-Usa `create_onlyoffice_document_tool` con el parámetro `doc_type`:
-
-| `doc_type` | Archivo creado | Cuándo usarlo |
-|---|---|---|
-| `word` | `.docx` | Reportes, propuestas, contratos, documentos de texto con formato |
-| `excel` | `.xlsx` | Tablas de datos, presupuestos, planillas, cálculos |
-| `powerpoint` | `.pptx` | Presentaciones, slides |
-| `text` | `.txt` | Texto plano sin formato |
-
----
-
-## Limitaciones
-
-- La edición de `.pptx` (PowerPoint) no está soportada aún en `edit_onlyoffice_document_tool`
-- Los archivos se crean en el servidor de KAI, **no en el disco local del usuario**
-- Se crea un **respaldo automático** antes de cada edición
-- El usuario debe **recargar el editor de OnlyOffice (F5 o cerrar y abrir)** para ver los cambios aplicados por el agente
-- Estos archivos NO se indexan automáticamente en la base de conocimientos/RAG de KAI
-
----
-
-**IMPORTANTE**: Siempre lee el documento antes de editar para entender su estructura y evitar sobreescribir contenido valioso. Informa al usuario que debe recargar el editor para ver los cambios.
+1. **Recargar el Editor**: Los archivos se guardan directamente en el backend de OnlyOffice. El usuario debe recargar el editor (`F5` o volver a abrirlo) para visualizar los cambios aplicados por el agente.
+2. **Respaldo Automático**: Cada edición crea un respaldo previo en el directorio oculto `.backups/`.
+3. **Smart Defaults**: Si no se especifica tema o formato, el sistema aplica automáticamente `corporate_blue`, fuentes legibles del sistema y proporciones profesionales.
+4. **Fórmulas**: Cualquier valor que empiece con `=` en Excel o Word (ej: `=SUM(B2:B10)`) se inserta como fórmula nativa evaluable por OnlyOffice.
 

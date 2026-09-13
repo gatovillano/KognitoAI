@@ -40,8 +40,19 @@ try:
     from openpyxl.utils import get_column_letter
     import openpyxl.styles.numbers as numbers
     XLSX_AVAILABLE = True
-except ImportError:
+except Exception:
     XLSX_AVAILABLE = False
+
+try:
+    from pptx import Presentation
+    PPTX_AVAILABLE = True
+except Exception:
+    PPTX_AVAILABLE = False
+
+import skills.onlyoffice_skill.design.docx_engine as docx_eng
+import skills.onlyoffice_skill.design.xlsx_engine as xlsx_eng
+import skills.onlyoffice_skill.design.pptx_engine as pptx_eng
+from skills.onlyoffice_skill.design.themes import get_theme, DEFAULT_THEME
 
 logger = logging.getLogger(__name__)
 
@@ -430,6 +441,26 @@ def _parse_and_render_markdown(doc_obj, md_text: str):
                     _add_inline_formatted_text(p, content, default_font="Segoe UI", default_size=Pt(10.5), default_color=RGBColor(51, 65, 85))
             continue
             
+        # 6.5 Cajas de llamada / Callouts (> [!NOTE], > [!TIP], > [!WARNING], > [!IMPORTANT], > [!CAUTION], > Cita)
+        if stripped.startswith(">"):
+            callout_lines = []
+            while i < n and lines[i].strip().startswith(">"):
+                raw_c_line = lines[i].strip()[1:].strip()
+                callout_lines.append(raw_c_line)
+                i += 1
+            full_callout_text = "\n".join(callout_lines)
+            
+            m_alert = re.match(r'^\[!(NOTE|TIP|WARNING|IMPORTANT|CAUTION)\]\s*(.*)$', full_callout_text, re.DOTALL | re.IGNORECASE)
+            if m_alert:
+                alert_type = m_alert.group(1).upper()
+                alert_body = m_alert.group(2).strip()
+            else:
+                alert_type = "QUOTE"
+                alert_body = full_callout_text
+
+            docx_eng.render_callout(doc_obj, alert_type, alert_body)
+            continue
+
         # 7. Párrafo estándar (agrupamiento de líneas contiguas)
         para_lines = []
         while i < n:
@@ -440,6 +471,7 @@ def _parse_and_render_markdown(doc_obj, md_text: str):
             if (curr_stripped.startswith("```") or 
                 re.match(r'^(#{1,6})\s+(.*)$', curr_stripped) or 
                 curr_stripped.startswith("|") or 
+                curr_stripped.startswith(">") or 
                 re.match(r'^([\s]*)([-*+])\s+(.*)$', curr_line) or 
                 re.match(r'^([\s]*)(\d+)\.\s+(.*)$', curr_line) or
                 curr_stripped in ("---", "***", "___") or 
@@ -499,6 +531,16 @@ SUPPORTED_ACTIONS = [
     "xlsx_merge_cells",       # Fusionar celdas
     "xlsx_set_column_width",  # Establecer ancho de columna
     "xlsx_set_row_height",    # Establecer altura de fila
+    # DOCX Premium Design actions
+    "docx_add_cover_page",    # Añadir portada ejecutiva al inicio
+    "docx_add_kpi_cards",     # Añadir tarjetas de métricas/KPI
+    # XLSX Premium Design actions
+    "xlsx_add_kpi_cards",     # Añadir tarjetas de métricas/KPI superiores
+    "xlsx_add_chart",         # Añadir gráfico nativo (col, bar, line, pie)
+    "xlsx_apply_conditional_formatting", # Aplicar formato condicional
+    # PPTX actions
+    "pptx_add_slide",         # Añadir diapositiva estructurada (title, agenda, content, columns, kpis, conclusion)
+    "pptx_add_table",         # Añadir tabla nativa a diapositiva
 ]
 
 
@@ -716,7 +758,7 @@ class EditOnlyOfficeDocumentTool(BaseTool):
                         col_alignments, col_widths, cell_padding,
                         paragraph_index, image_path, image_width, image_height,
                         page_margins, page_orientation, header_footer_type, header_footer_content,
-                        cell_style, cell_coords, doc.filename
+                        cell_style, cell_coords, doc.filename, format_options
                     )
                 elif ext in ("xlsx", "xls"):
                     msg = await self._edit_xlsx(
@@ -728,10 +770,16 @@ class EditOnlyOfficeDocumentTool(BaseTool):
                         format_options, row_index, column_index, width, height,
                         doc.filename
                     )
+                elif ext in ("pptx", "ppt"):
+                    msg = await self._edit_pptx(
+                        file_path, action, text, search_text,
+                        list_items, table_data, theme, format_options,
+                        doc.filename
+                    )
                 else:
                     return (
                         f"❌ El tipo de archivo '.{ext}' no está soportado para edición. "
-                        "Se soportan: .docx (Word) y .xlsx (Excel)."
+                        "Se soportan: .docx (Word), .xlsx (Excel) y .pptx (PowerPoint)."
                     )
 
                 if msg.startswith("❌"):
@@ -775,6 +823,7 @@ class EditOnlyOfficeDocumentTool(BaseTool):
         cell_style: Optional[dict],
         cell_coords: Optional[str],
         filename: str,
+        format_options: Optional[dict] = None,
     ) -> str:
         if not DOCX_AVAILABLE:
             return f"❌ La librería 'python-docx' no está instalada. No se puede editar documentos Word. Error de importación: {DOCX_IMPORT_ERROR}"
@@ -874,6 +923,40 @@ class EditOnlyOfficeDocumentTool(BaseTool):
                 if not cell_style:
                     return "❌ La acción 'apply_cell_style' requiere 'cell_style' (diccionario con estilos)."
                 msg = self._handle_cell_style(doc_obj, cell_coords, cell_style)
+
+            elif action == "docx_add_cover_page":
+                cov_title = text or search_text or filename.rsplit(".", 1)[0]
+                cov_sub = (format_options.get("subtitle") if format_options else None) or search_text
+                cov_author = format_options.get("author") if format_options else None
+                cov_org = format_options.get("organization") if format_options else None
+                cov_style = (format_options.get("style") if format_options else "modern") or "modern"
+                docx_eng.add_cover_page(
+                    doc_obj,
+                    title=cov_title,
+                    subtitle=cov_sub,
+                    author=cov_author,
+                    organization=cov_org,
+                    theme_name=theme or "corporate_blue",
+                    style=cov_style
+                )
+                msg = f"✅ Portada ejecutiva (Estilo: {cov_style}) añadida al inicio de '{filename}'."
+
+            elif action == "docx_add_kpi_cards":
+                cards = []
+                if format_options and "cards" in format_options:
+                    cards = format_options["cards"]
+                elif table_data:
+                    for row in table_data:
+                        if len(row) >= 2:
+                            cards.append({
+                                "label": str(row[0]),
+                                "value": str(row[1]),
+                                "change": str(row[2]) if len(row) > 2 else ""
+                            })
+                if not cards:
+                    return "❌ 'docx_add_kpi_cards' requiere tarjetas métricas en 'format_options' o 'table_data'."
+                docx_eng.add_kpi_cards(doc_obj, cards, theme_name=theme or "corporate_blue")
+                msg = f"✅ {len(cards)} tarjetas de métricas/KPI añadidas a '{filename}'."
 
             else:
                 return (
@@ -1504,6 +1587,54 @@ class EditOnlyOfficeDocumentTool(BaseTool):
                     return "❌ La acción 'xlsx_set_sheet_tab_color' requiere 'tab_color' (código hex, ej: 'FF0000')."
                 msg = self._xlsx_set_sheet_tab_color(ws, tab_color, filename, sheet_name)
 
+            elif action == "xlsx_add_kpi_cards":
+                cards = []
+                if format_options and "cards" in format_options:
+                    cards = format_options["cards"]
+                elif table_data:
+                    for row in table_data:
+                        if len(row) >= 2:
+                            cards.append({
+                                "label": str(row[0]),
+                                "value": str(row[1]),
+                                "change": str(row[2]) if len(row) > 2 else ""
+                            })
+                if not cards:
+                    return "❌ 'xlsx_add_kpi_cards' requiere tarjetas métricas en 'format_options' o 'table_data'."
+                start_r = row_index if row_index is not None else 2
+                start_c = column_index if column_index is not None else 2
+                xlsx_eng.add_kpi_cards(ws, cards, theme_name=theme or "corporate_blue", start_row=start_r, start_col=start_c)
+                msg = f"✅ {len(cards)} tarjetas de métricas/KPI añadidas a la hoja '{ws.title}'."
+
+            elif action == "xlsx_add_chart":
+                if not range_address:
+                    return "❌ 'xlsx_add_chart' requiere 'range_address' (rango de datos del gráfico, ej. 'B1:B10')."
+                c_type = (format_options.get("chart_type") if format_options else None) or search_text or "column"
+                c_title = text or (format_options.get("title") if format_options else None) or "Gráfico"
+                c_categories = format_options.get("categories_range") if format_options else None
+                target_c = cell or start_cell or "F8"
+                c_w = width if width is not None else 15
+                c_h = height if height is not None else 10
+                xlsx_eng.add_chart(
+                    ws,
+                    chart_type=c_type,
+                    data_range=range_address,
+                    categories_range=c_categories,
+                    target_cell=target_c,
+                    title=c_title,
+                    theme_name=theme or "corporate_blue",
+                    width=c_w,
+                    height=c_h
+                )
+                msg = f"✅ Gráfico '{c_title}' ({c_type}) insertado en la celda {target_c} de la hoja '{ws.title}'."
+
+            elif action == "xlsx_apply_conditional_formatting":
+                if not range_address:
+                    return "❌ 'xlsx_apply_conditional_formatting' requiere 'range_address'."
+                rule_t = search_text or (format_options.get("rule_type") if format_options else None) or "status_highlights"
+                xlsx_eng.apply_conditional_formatting(ws, range_address, rule_type=rule_t, options=format_options)
+                msg = f"✅ Formato condicional ({rule_t}) aplicado al rango {range_address} de la hoja '{ws.title}'."
+
             else:
                 return (
                     f"❌ Acción '{action}' no válida para .xlsx. "
@@ -1517,6 +1648,69 @@ class EditOnlyOfficeDocumentTool(BaseTool):
         except Exception as e:
             logger.error(f"Error procesando XLSX: {e}")
             return f"❌ Error al procesar el archivo Excel: {str(e)}"
+
+    # ------------------------------------------------------------------ #
+    #  PPTX Editing
+    # ------------------------------------------------------------------ #
+    async def _edit_pptx(
+        self,
+        file_path: str,
+        action: str,
+        text: Optional[str],
+        search_text: Optional[str],
+        list_items: Optional[List[str]],
+        table_data: Optional[List[List[str]]],
+        theme: Optional[str],
+        format_options: Optional[dict],
+        filename: str,
+    ) -> str:
+        if not PPTX_AVAILABLE:
+            return "❌ Error: La librería 'python-pptx' no está disponible en el servidor."
+
+        try:
+            prs = Presentation(file_path)
+            pptx_eng._ensure_widescreen(prs)
+
+            if action == "pptx_add_slide":
+                layout_type = search_text or (format_options.get("layout_type") if format_options else None) or "content"
+                slide_data = dict(format_options) if format_options else {}
+                if text:
+                    slide_data.setdefault("title", text)
+                if list_items:
+                    slide_data.setdefault("bullets", list_items)
+                notes = format_options.get("speaker_notes") if format_options else None
+
+                slide = pptx_eng.add_slide(
+                    prs,
+                    layout_type=layout_type,
+                    data=slide_data,
+                    theme_name=theme or "corporate_blue",
+                    speaker_notes=notes
+                )
+                msg = f"✅ Diapositiva '{slide_data.get('title', layout_type)}' (Layout: {layout_type}) añadida a '{filename}'. Total diapositivas: {len(prs.slides)}."
+
+            elif action == "pptx_add_table":
+                if not table_data:
+                    return "❌ 'pptx_add_table' requiere 'table_data' (matriz 2D)."
+                if not prs.slides:
+                    pptx_eng.add_slide(prs, layout_type="content", data={"title": text or "Tabla de Datos"}, theme_name=theme or "corporate_blue")
+                target_slide = prs.slides[-1]
+                pptx_eng.add_table_to_slide(target_slide, table_data, theme_name=theme or "corporate_blue")
+                msg = f"✅ Tabla de {len(table_data)} filas añadida a la diapositiva {len(prs.slides)} en '{filename}'."
+
+            else:
+                return (
+                    f"❌ Acción '{action}' no reconocida para .pptx. "
+                    f"Acciones disponibles: 'pptx_add_slide', 'pptx_add_table'."
+                )
+
+            self._backup_file(file_path)
+            prs.save(file_path)
+            return msg
+
+        except Exception as e:
+            logger.error(f"Error procesando PPTX: {e}", exc_info=True)
+            return f"❌ Error al procesar la presentación PowerPoint: {str(e)}"
 
     # ------------------------------------------------------------------ #
     #  XLSX Helper Methods

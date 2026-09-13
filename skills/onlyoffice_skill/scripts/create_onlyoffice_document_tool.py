@@ -1,7 +1,8 @@
 # skills/onlyoffice_skill/scripts/create_onlyoffice_document_tool.py
 
 """
-Herramienta para crear nuevos documentos de OnlyOffice (Word, Excel, PowerPoint, Texto) desde cero.
+Herramienta para crear nuevos documentos de OnlyOffice (Word, Excel, PowerPoint, Texto) desde cero
+o a partir de Plantillas Maestras con diseño premium.
 """
 
 import os
@@ -12,6 +13,13 @@ from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 from core.database import SessionLocal, Document
 from core.onlyoffice_storage import build_onlyoffice_relative_path, ensure_onlyoffice_account_dir, get_onlyoffice_docs_root
+from skills.onlyoffice_skill.design.template_registry import (
+    create_from_template,
+    get_template_info,
+    list_templates,
+)
+from skills.onlyoffice_skill.design.themes import DEFAULT_THEME, get_theme
+from skills.onlyoffice_skill.design.pptx_engine import _ensure_widescreen
 
 # Librerías de procesamiento de documentos (Office)
 try:
@@ -38,14 +46,37 @@ logger = logging.getLogger(__name__)
 DOCUMENTS_ROOT = str(get_onlyoffice_docs_root())
 os.makedirs(DOCUMENTS_ROOT, exist_ok=True)
 
+
 class CreateOnlyOfficeInput(BaseModel):
     name: str = Field(..., description="Nombre del archivo (con o sin extensión).")
-    doc_type: str = Field(
-        ..., 
-        description="Tipo de documento a crear: 'word' (.docx), 'excel' (.xlsx), 'powerpoint' (.pptx) o 'text' (.txt)."
+    doc_type: Optional[str] = Field(
+        None, 
+        description="Tipo de documento a crear: 'word' (.docx), 'excel' (.xlsx), 'powerpoint' (.pptx) o 'text' (.txt). Si se pasa 'template', se deduce automáticamente."
+    )
+    template: Optional[str] = Field(
+        None,
+        description=(
+            "ID de plantilla maestra para inicializar el documento con diseño premium estructurado. "
+            "Opciones: 'executive_report' (Word), 'commercial_proposal' (Word), 'project_charter' (Word), "
+            "'financial_budget' (Excel), 'sales_dashboard' (Excel), 'project_tracker' (Excel), "
+            "'pitch_deck' (PowerPoint), 'quarterly_review' (PowerPoint)."
+        )
+    )
+    theme: Optional[str] = Field(
+        None,
+        description="Tema visual premium ('corporate_blue', 'emerald_green', 'dark_slate', 'sunset_amber', 'violet_gold', 'minimalist_gray')."
+    )
+    title: Optional[str] = Field(
+        None,
+        description="Título principal para inicializar la portada o encabezado del documento."
+    )
+    subtitle: Optional[str] = Field(
+        None,
+        description="Subtítulo o descripción secundaria para la portada o presentación."
     )
     workspace_id: Optional[str] = Field(None, description="ID del workspace (opcional).")
     folder_id: Optional[str] = Field(None, description="ID de la carpeta (opcional).")
+
 
 class CreateOnlyOfficeDocumentTool(BaseTool):
     name: str = "create_onlyoffice_document"
@@ -53,6 +84,8 @@ class CreateOnlyOfficeDocumentTool(BaseTool):
         "[MÓDULO ONLYOFFICE DE KAI] Crea un nuevo documento en el módulo de documentos de la plataforma KAI. "
         "El archivo resultante aparecerá en la sección 'Documentos' de la interfaz de KAI y podrá abrirse "
         "con el editor online de OnlyOffice. Soporta: Word (.docx), Excel (.xlsx), PowerPoint (.pptx) y Texto (.txt). "
+        "Permite inicializar documentos directamente desde plantillas maestras ('template') con portadas ejecutivas, "
+        "tarjetas de KPI, gráficos nativos y diapositivas completas con temas visuales ('theme'). "
         "ÚSALA SOLO SI el usuario quiere un documento editable en KAI (Word/Excel/PPT). "
         "NO uses esta herramienta para: crear archivos en el disco local del usuario o servidor "
         "(usa developer_tools_skill), generar PDFs descargables (usa create_pdf_tool), "
@@ -65,7 +98,11 @@ class CreateOnlyOfficeDocumentTool(BaseTool):
     async def _arun(
         self, 
         name: str, 
-        doc_type: str, 
+        doc_type: Optional[str] = None, 
+        template: Optional[str] = None,
+        theme: Optional[str] = None,
+        title: Optional[str] = None,
+        subtitle: Optional[str] = None,
         workspace_id: Optional[str] = None, 
         folder_id: Optional[str] = None, 
         **kwargs: Any
@@ -73,8 +110,21 @@ class CreateOnlyOfficeDocumentTool(BaseTool):
         try:
             acc_id = uuid.UUID(self.account_id)
             
+            # Si se pasa plantilla, validar y deducir doc_type
+            if template:
+                template_clean = template.strip().lower()
+                tpl_info = get_template_info(template_clean)
+                if not tpl_info:
+                    available_tpls = ", ".join(t["id"] for t in list_templates())
+                    return f"❌ Plantilla '{template}' no encontrada. Plantillas disponibles: {available_tpls}"
+                if not doc_type:
+                    doc_type = tpl_info["doc_type"]
+
+            if not doc_type:
+                return "❌ Debes especificar 'doc_type' ('word', 'excel', 'powerpoint', 'text') o un 'template' válido."
+
             # Determinar extensión y validar librerías
-            doc_type = doc_type.lower()
+            doc_type = doc_type.lower().strip()
             extension = ""
             if doc_type == 'word':
                 if not DOCX_AVAILABLE:
@@ -104,20 +154,32 @@ class CreateOnlyOfficeDocumentTool(BaseTool):
             user_dir = ensure_onlyoffice_account_dir(self.account_id)
             file_path = user_dir / unique_filename
 
-            # Crear archivo físico
+            # Crear archivo físico (con plantilla o base)
             try:
-                if doc_type == 'word':
-                    doc = docx.Document()
-                    doc.save(file_path)
-                elif doc_type == 'excel':
-                    wb = Workbook()
-                    wb.save(file_path)
-                elif doc_type == 'powerpoint':
-                    prs = Presentation()
-                    prs.save(file_path)
-                elif doc_type == 'text':
-                    with open(file_path, "w", encoding="utf-8") as f:
-                        f.write("")
+                if template:
+                    created = create_from_template(
+                        template_id=template.strip().lower(),
+                        file_path=str(file_path),
+                        title=title or full_filename.rsplit(".", 1)[0],
+                        subtitle=subtitle,
+                        theme_name=theme or DEFAULT_THEME
+                    )
+                    if not created:
+                        return f"❌ Error al crear documento desde la plantilla '{template}'."
+                else:
+                    if doc_type == 'word':
+                        doc = docx.Document()
+                        doc.save(file_path)
+                    elif doc_type == 'excel':
+                        wb = Workbook()
+                        wb.save(file_path)
+                    elif doc_type == 'powerpoint':
+                        prs = Presentation()
+                        _ensure_widescreen(prs)
+                        prs.save(file_path)
+                    elif doc_type == 'text':
+                        with open(file_path, "w", encoding="utf-8") as f:
+                            f.write("")
             except Exception as e:
                 logger.error(f"Error al crear archivo físico OnlyOffice: {e}")
                 return f"❌ Error al crear el archivo físico en el servidor: {str(e)}"
@@ -136,10 +198,11 @@ class CreateOnlyOfficeDocumentTool(BaseTool):
                 await db.commit()
                 await db.refresh(new_doc)
                 
+                tpl_msg = f" a partir de la plantilla '{template}' (Tema: {theme or DEFAULT_THEME})" if template else ""
                 return (
-                    f"✅ Documento '{full_filename}' creado con éxito.\n"
+                    f"✅ Documento '{full_filename}' creado con éxito{tpl_msg}.\n"
                     f"ID: {new_doc.id}\n"
-                    "Ahora puedes usar 'edit_onlyoffice_document' para añadir contenido."
+                    "Ahora puedes abrirlo en el editor de OnlyOffice o usar 'edit_onlyoffice_document' para ampliarlo."
                 )
 
         except Exception as e:
