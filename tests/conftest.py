@@ -52,14 +52,18 @@ class MockLoader(Loader):
 
 class SafeAutoMockFinder(MetaPathFinder):
     def find_spec(self, fullname, path, target=None):
+        top_name = fullname.split(".")[0]
+        if hasattr(sys, "stdlib_module_names") and top_name in sys.stdlib_module_names:
+            return None
+        if top_name in sys.builtin_module_names:
+            return None
         allowed_prefixes = (
             "api", "core", "utils", "tests", "extensions", "config", "skills",
-            "docx", "openpyxl", "pptx", "lxml", "numpy",
+            "docx", "openpyxl", "pptx", "lxml", "numpy", "et_xmlfile",
             "fastapi", "starlette", "pydantic", "pydantic_core",
             "sqlalchemy", "asyncpg", "jwt", "passlib", "slowapi", "limits",
             "pytest", "unittest", "asyncio", "typing", "dataclasses",
-            "os", "sys", "uuid", "datetime", "logging", "json", "hashlib",
-            "hmac", "re", "math", "time", "contextlib", "inspect", "langchain",
+            "langchain", "langchain_core", "langchain_community",
             "openai", "aiofiles", "psycopg", "psycopg_pool", "psycopg_binary",
             "pgvector", "bleach", "xml", "bcrypt", "types", "importlib", "collections",
             "python_multipart", "multipart", "httpx", "greenlet", "_greenlet", "secrets", "test_"
