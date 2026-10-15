@@ -95,6 +95,23 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"❌ No se pudieron registrar los comandos de autocompletado en Telegram: {e}")
 
+    # Configurar el botón de menú inferior (Menu Button WebApp)
+    if config.webapp_url:
+        try:
+            from telegram import MenuButtonWebApp, WebAppInfo
+            raw_url = config.webapp_url.strip()
+            base_url = raw_url.rstrip("/")
+            if not ("/telegram-panel" in base_url or "/telegram-table" in base_url):
+                panel_url = f"{base_url}/telegram-panel"
+            else:
+                panel_url = base_url
+            await ptb_app.bot.set_chat_menu_button(
+                menu_button=MenuButtonWebApp(text="🚀 Panel", web_app=WebAppInfo(url=panel_url))
+            )
+            logger.info(f"✅ Botón de menú WebApp configurado globalmente apuntando a: {panel_url}")
+        except Exception as e:
+            logger.error(f"❌ Error al configurar el MenuButtonWebApp: {e}")
+
     # Re-programar recordatorios pendientes (API-based, no DB directa)
     await reschedule_pending_reminders(ptb_app)
 

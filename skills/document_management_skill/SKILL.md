@@ -6,7 +6,13 @@ description: Use when creating, editing, updating metadata, or generating profes
 
 # Document Management Skill
 
-Herramienta para generar PDFs de calidad profesional.
+Gestión de documentos de la **Base de Conocimiento RAG** y generación de PDFs de calidad profesional.
+
+> ⚠️ **DIFERENCIACIÓN IMPORTANTE DE HERRAMIENTAS:**
+> - `get_document_content_tool`: Lee documentos indexados en la **Base de Conocimiento RAG** (usando `file_name`). NO USAR para OnlyOffice.
+> - `get_document_list_tool`: Lista documentos de la **Base de Conocimiento RAG**. NO USAR para OnlyOffice.
+> - `create_pdf_tool`: Genera PDFs profesionales descargables.
+> - Para editar o leer documentos ofimáticos editables (Word .docx, Excel .xlsx, PPT .pptx), usa **`onlyoffice_skill`** (`read_onlyoffice_document`, `edit_onlyoffice_document`, `create_onlyoffice_document`).
 
 Los documentos PDF generados con esta herramienta se guardan automáticamente en la nube de Documentos (OnlyOffice) dentro de una carpeta dedicada y identificada visualmente: **`🤖 Documentos PDF (Agente)`**.
 

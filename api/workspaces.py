@@ -100,7 +100,7 @@ async def list_workspaces(
     current_account_id: str = Depends(get_current_account_id),
     db: AsyncSession = Depends(get_db_session),
     skip: int = Query(0, ge=0, description="Número de elementos a omitir"),
-    limit: int = Query(10, ge=1, le=100, description="Número máximo de elementos a devolver")
+    limit: Optional[int] = Query(None, ge=1, description="Número máximo de elementos a devolver")
 ):
     account_uuid = uuid.UUID(current_account_id)
     
@@ -113,7 +113,9 @@ async def list_workspaces(
     total_workspaces = total_result.scalar_one()
 
     # Consulta para los workspaces paginados
-    stmt = select(Workspace).where(Workspace.id.in_(permission_stmt)).order_by(Workspace.created_at.asc()).offset(skip).limit(limit)
+    stmt = select(Workspace).where(Workspace.id.in_(permission_stmt)).order_by(Workspace.created_at.asc()).offset(skip)
+    if limit is not None:
+        stmt = stmt.limit(limit)
     result = await db.execute(stmt)
     workspaces = result.scalars().all()
     

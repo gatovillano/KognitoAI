@@ -5,8 +5,10 @@ from typing import List, Optional, Dict, Any
 import asyncio
 import uuid
 
-# Para el modelo interno
-from sentence_transformers import SentenceTransformer
+try:
+    from sentence_transformers import SentenceTransformer
+except ImportError:
+    SentenceTransformer = None
 
 # Para LiteLLM (Capa Genérica)
 import litellm
@@ -60,6 +62,8 @@ class KognitoInternalEmbeddingService(EmbeddingService):
                 logger.info(f"⚙️ Cargando modelo de embeddings en dispositivo configurado: {device}")
             else:
                 logger.info(f"⚙️ Cargando modelo de embeddings con dispositivo automático (GPU si está disponible)")
+            if SentenceTransformer is None:
+                raise RuntimeError("sentence_transformers is not installed")
             try:
                 KognitoInternalEmbeddingService._model = SentenceTransformer(self.model_name, device=device)
                 if self.use_fp16:

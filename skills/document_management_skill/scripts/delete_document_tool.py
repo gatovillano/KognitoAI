@@ -59,9 +59,10 @@ class DeleteDocumentTool(BaseTool):
     """
     name: str = "delete_document_tool"
     description: str = (
-        "Útil para eliminar permanentemente un documento por su nombre de archivo, o todos los documentos "
-        "asociados a un tema de la base de conocimiento del usuario. "
-        "Dado que esta es una acción destructiva, el agente debe confirmar explícitamente con el usuario antes de usar esta herramienta."
+        "[BASE DE CONOCIMIENTO RAG] Elimina permanentemente fragmentos y vectores de un documento por su 'file_name', "
+        "o todos los documentos asociados a un 'topic' de la base de conocimiento vectorial del usuario. "
+        "NO elimina documentos de OnlyOffice (Word/Excel/PPT editables). "
+        "Dado que es una acción destructiva, confirma explícitamente con el usuario antes de ejecutarla."
     )
     args_schema: Type[BaseModel] = DeleteDocumentInput
     return_direct: bool = False

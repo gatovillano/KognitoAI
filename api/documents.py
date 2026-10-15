@@ -93,7 +93,8 @@ async def get_or_create_onlyoffice_folder(
 async def upload_document_endpoint(
     background_tasks: BackgroundTasks,
     current_account_id: str = Depends(get_current_account_id),
-    files: List[UploadFile] = File(...),
+    files: Optional[List[UploadFile]] = File(None),
+    file: Optional[UploadFile] = File(None),
     topic: str = Form(...),
     workspace_id: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_db_session)
@@ -106,21 +107,28 @@ async def upload_document_endpoint(
         if not await check_workspace_permission(current_account_id, workspace_id, db, required_roles=["owner", "editor"]):
             raise HTTPException(status_code=403, detail="No tienes permiso para subir documentos a este workspace.")
 
+    # Aceptar tanto 'files' (múltiples) como 'file' (único)
+    all_files = list(files or [])
+    if file:
+        all_files.append(file)
+    if not all_files:
+        raise HTTPException(status_code=400, detail="No se proporcionaron archivos.")
+
     # Leer y almacenar los datos de los archivos
     file_data_list = []
     file_names = []
 
-    for file in files:
+    for file_item in all_files:
         try:
-            content_bytes = await file.read()
+            content_bytes = await file_item.read()
             file_data_list.append({
-                'filename': file.filename,
+                'filename': file_item.filename,
                 'content': content_bytes
             })
-            file_names.append(file.filename)
+            file_names.append(file_item.filename)
         except Exception as e:
-            logger.error(f"Error al leer archivo {file.filename}: {e}", exc_info=True)
-            raise HTTPException(status_code=400, detail=f"Error al leer archivo {file.filename}")
+            logger.error(f"Error al leer archivo {file_item.filename}: {e}", exc_info=True)
+            raise HTTPException(status_code=400, detail=f"Error al leer archivo {file_item.filename}")
 
     if not file_data_list:
         raise HTTPException(status_code=400, detail="No se pudieron leer los archivos.")
@@ -243,6 +251,7 @@ async def upload_chat_document_endpoint(
         raise HTTPException(status_code=500, detail=f"Error al procesar el archivo: {str(e)}")
 
 @router.get("/list-documents")
+@router.post("/list-documents")
 async def list_documents_endpoint(
     current_account_id: str = Depends(get_current_account_id),
     db: AsyncSession = Depends(get_db_session),

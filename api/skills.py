@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from core.dependencies import get_db_session
 from sqlalchemy.ext.asyncio import AsyncSession
 from utils.security import get_current_user
-from core.skill_manager import SkillManager
+from core.skill_manager import get_skill_manager
 
 logger = logging.getLogger(__name__)
 
@@ -13,18 +13,49 @@ router = APIRouter()
 
 @router.get("/available", summary="Listar todas las habilidades disponibles")
 async def list_available_skills(
+    workspace_name: Optional[str] = None,
+    force_refresh: bool = False,
     current_user: dict = Depends(get_current_user)
 ):
     """
     Lista todas las habilidades (Skills) descubiertas por el SkillManager.
-    Devuelve sus nombres y descripciones extraídas de los archivos .md.
+    Devuelve sus nombres, descripciones y tipos extraídos de los archivos .md.
     """
     try:
-        skill_manager = SkillManager()
-        skills_info = await skill_manager.get_skills_metadata()
+        skill_manager = get_skill_manager()
+        skills_info = await skill_manager.get_skills_metadata(
+            account_id=current_user.get("account_id"),
+            workspace_name=workspace_name,
+            force_refresh=force_refresh
+        )
         return {"skills": skills_info}
     except Exception as e:
         logger.error(f"Error listando habilidades disponibles: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/reload", summary="Recargar e invalidar la caché de habilidades")
+async def reload_skills(
+    workspace_name: Optional[str] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Invalida el caché de skills y vuelve a escanear todos los directorios.
+    """
+    try:
+        skill_manager = get_skill_manager()
+        skills_info = await skill_manager.get_skills_metadata(
+            account_id=current_user.get("account_id"),
+            workspace_name=workspace_name,
+            force_refresh=True
+        )
+        return {
+            "status": "success",
+            "message": "Skills reloaded successfully",
+            "count": len(skills_info),
+            "skills": skills_info
+        }
+    except Exception as e:
+        logger.error(f"Error recargando habilidades: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 class ToolRunRequest(BaseModel):

@@ -14,6 +14,55 @@ if skill_dir not in sys.path:
 logger = logging.getLogger(__name__)
 
 
+def _load_skill_agent(short_name: str, relative_path: str, class_name: str):
+    """Carga una clase de agente de la skill evitando colisiones top-level."""
+    for import_stmt in (
+        f"skills.kai_ethno_skill.{relative_path.replace('/', '.')}",
+        f"agents.{short_name}",
+    ):
+        try:
+            import importlib as _il
+
+            mod = _il.import_module(import_stmt)
+            return getattr(mod, class_name)
+        except ImportError:
+            continue
+    try:
+        if short_name == "ethnograph":
+            from ..agents.ethnograph import EthnographAgent  # type: ignore
+
+            if class_name == "EthnographAgent":
+                return EthnographAgent
+        elif short_name == "pattern_finder":
+            from ..agents.pattern_finder import PatternFinderAgent  # type: ignore
+
+            if class_name == "PatternFinderAgent":
+                return PatternFinderAgent
+    except (ImportError, ValueError):
+        pass
+    import importlib.util
+
+    unique_name = f"kai_ethno_agents_{short_name}"
+    if unique_name in sys.modules:
+        return getattr(sys.modules[unique_name], class_name)
+    file_path = os.path.join(skill_dir, *relative_path.split("/"), "agent.py")
+    spec = importlib.util.spec_from_file_location(unique_name, file_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"No se pudo cargar {class_name} desde {file_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[unique_name] = module
+    spec.loader.exec_module(module)
+    return getattr(module, class_name)
+
+
+def _get_ethnograph_class():
+    return _load_skill_agent("ethnograph", "agents/ethnograph", "EthnographAgent")
+
+
+def _get_pattern_finder_class():
+    return _load_skill_agent("pattern_finder", "agents/pattern_finder", "PatternFinderAgent")
+
+
 class AnalyzeEthnographicDataInput(BaseModel):
     text_content: str = Field(
         ...,
@@ -54,8 +103,8 @@ class AnalyzeEthnographicDataTool(BaseTool):
             return await self._arun_plain_text(text_content, anonymize_pii, coding_framework)
 
         try:
-            from agents.ethnograph import EthnographAgent
-            from agents.pattern_finder import PatternFinderAgent
+            EthnographAgent = _get_ethnograph_class()
+            PatternFinderAgent = _get_pattern_finder_class()
 
             ethnograph = EthnographAgent()
             pattern_finder = PatternFinderAgent()
@@ -174,8 +223,8 @@ class AnalyzeEthnographicDataTool(BaseTool):
     async def _arun_plain_text(self, text_content, anonymize_pii, coding_framework):
         """Fallback que retorna texto plano si citation_models no está disponible."""
         try:
-            from agents.ethnograph import EthnographAgent
-            from agents.pattern_finder import PatternFinderAgent
+            EthnographAgent = _get_ethnograph_class()
+            PatternFinderAgent = _get_pattern_finder_class()
             ethnograph = EthnographAgent()
             pattern_finder = PatternFinderAgent()
             source_item = {"id": "user_input_transcript", "title": "Transcripción", "abstract": text_content, "content": text_content}

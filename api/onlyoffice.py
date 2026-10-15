@@ -8,8 +8,8 @@ import secrets
 import httpx
 import jwt
 from datetime import datetime
-from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Request
+from typing import List, Optional, Dict, Any
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Request, BackgroundTasks
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, or_
@@ -36,7 +36,12 @@ from core.onlyoffice_storage import (
     resolve_onlyoffice_file_path,
 )
 from utils.document_parser import extract_text_and_metadata_from_document
-from core.memory_manager import delete_document_chunks, process_document_for_rag
+from core.memory_manager import (
+    delete_document_chunks,
+    process_document_for_rag,
+    process_multiple_documents_for_rag,
+    create_empty_collection,
+)
 
 def check_office_libs():
     """Verifica dinámicamente qué librerías de oficina están instaladas."""
@@ -274,6 +279,41 @@ async def upload_document(
         folder = await db.get(DocumentFolder, fid)
         if folder:
             ws_id = folder.workspace_id
+
+    # Comprobar si ya existe un documento con el mismo nombre en la misma carpeta/workspace
+    existing_stmt = select(Document).where(
+        Document.account_id == account_id_uuid,
+        Document.workspace_id == ws_id,
+        Document.folder_id == fid,
+        Document.filename == filename
+    )
+    existing_res = await db.execute(existing_stmt)
+    existing_doc = existing_res.scalars().first()
+
+    if existing_doc:
+        # Eliminar archivo físico anterior si es diferente
+        try:
+            old_physical = resolve_onlyoffice_file_path(existing_doc.file_path)
+            if old_physical.exists() and old_physical != file_path:
+                old_physical.unlink(missing_ok=True)
+        except Exception as e:
+            logger.warning(f"No se pudo limpiar archivo físico anterior de OnlyOffice: {e}")
+
+        existing_doc.file_path = build_onlyoffice_relative_path(current_account_id, unique_filename)
+        existing_doc.extension = extension
+        existing_doc.updated_at = datetime.now()
+        await db.commit()
+        await db.refresh(existing_doc)
+
+        logger.info(f"Documento '{filename}' ya existía (ID: {existing_doc.id}). Actualizado sin duplicar.")
+        return {
+            "message": "Documento actualizado correctamente",
+            "id": str(existing_doc.id),
+            "filename": filename,
+            "folder_id": str(existing_doc.folder_id) if existing_doc.folder_id else None,
+            "workspace_id": str(existing_doc.workspace_id) if existing_doc.workspace_id else None,
+            "updated_at": existing_doc.updated_at.isoformat() if existing_doc.updated_at else datetime.now().isoformat()
+        }
 
     # Guardar metadatos en la base de datos
     new_doc = Document(
@@ -638,6 +678,167 @@ async def delete_folder(
     await db.delete(folder)
     await db.commit()
     return {"message": "Carpeta y contenido eliminados con éxito"}
+
+
+async def _async_vectorize_folder_task(
+    topic: str,
+    folder_id: uuid.UUID,
+    workspace_id: Optional[uuid.UUID],
+    doc_items: List[Dict[str, Any]],
+    account_id: str
+):
+    """Tarea en segundo plano para procesar e indexar múltiples documentos de una carpeta."""
+    from core.memory_manager import delete_document_chunks, process_multiple_documents_for_rag
+    from utils.document_parser import extract_text_and_metadata_from_document
+    from core.websocket_manager import send_personal_message
+
+    documents_to_process = []
+    skipped_count = 0
+
+    for item in doc_items:
+        try:
+            file_full_path_str = item["file_full_path"]
+            filename = item["filename"]
+            with open(file_full_path_str, "rb") as f:
+                file_content = f.read()
+
+            extracted_text, parser_metadata = await extract_text_and_metadata_from_document(filename, file_content)
+
+            if not extracted_text or not extracted_text.strip():
+                logger.warning(f"Doc {filename} sin texto extraíble, omitiendo.")
+                skipped_count += 1
+                continue
+
+            await delete_document_chunks(
+                account_id=account_id,
+                file_name=filename,
+                workspace_id=str(workspace_id) if workspace_id else None
+            )
+
+            metadata = {
+                "document_id": str(item["id"]),
+                "workspace_id": str(workspace_id) if workspace_id else None,
+                "folder_id": str(folder_id),
+                "extension": item["extension"],
+                "created_at": item["created_at_iso"],
+                "file_name": filename,
+            }
+            if parser_metadata:
+                metadata.update(parser_metadata)
+
+            documents_to_process.append({
+                "file_name": filename,
+                "extracted_text": extracted_text,
+                "topic": topic,
+                "account_id": account_id,
+                "metadata": metadata,
+                "workspace_id": str(workspace_id) if workspace_id else None,
+            })
+        except Exception as doc_err:
+            logger.error(f"Error preparando doc {item.get('filename')} para memoria: {doc_err}", exc_info=True)
+            skipped_count += 1
+
+    total_chunks = 0
+    processed_count = 0
+    if documents_to_process:
+        chunk_counts = await process_multiple_documents_for_rag(documents_to_process)
+        total_chunks = sum(c for c in chunk_counts if isinstance(c, int) and c > 0)
+        processed_count = sum(1 for c in chunk_counts if isinstance(c, int) and c > 0)
+
+    logger.info(f"Carpeta '{topic}' vectorizada: {processed_count} documentos, {total_chunks} fragmentos.")
+    await send_personal_message(account_id, {
+        "type": "folder_vectorization_completed",
+        "topic": topic,
+        "message": f"Carpeta '{topic}' indexada: {processed_count} de {len(doc_items)} documentos añadidos a la memoria ({total_chunks} fragmentos).",
+        "processed_count": processed_count,
+        "total_documents": len(doc_items),
+        "chunks_processed": total_chunks
+    })
+
+
+@router.post("/folders/{folder_id}/vectorize")
+async def vectorize_folder(
+    folder_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """Inicia la vectorización de todos los documentos de una carpeta en segundo plano."""
+    folder = await db.get(DocumentFolder, folder_id)
+    if not folder:
+        raise HTTPException(status_code=404, detail="Carpeta no encontrada")
+
+    if not await _can_access_folder(folder, current_account_id, db):
+        raise HTTPException(status_code=403, detail="No tienes acceso a esta carpeta")
+
+    topic = folder.name
+
+    # 1. Crear o asegurar la colección de conocimientos en UserDocumentTopic
+    try:
+        await create_empty_collection(
+            account_id=current_account_id,
+            topic_name=topic,
+            description=f"Colección creada a partir de la carpeta '{topic}'",
+            workspace_id=str(folder.workspace_id) if folder.workspace_id else None
+        )
+    except Exception as e:
+        logger.warning(f"No se pudo crear/verificar colección vacía '{topic}': {e}")
+
+    # 2. Obtener todas las carpetas descendientes (incluyendo la actual)
+    async def _get_all_subfolder_ids(fid: uuid.UUID) -> list[uuid.UUID]:
+        fids = [fid]
+        subfolders_stmt = select(DocumentFolder.id).where(DocumentFolder.parent_id == fid)
+        subfolder_ids = (await db.execute(subfolders_stmt)).scalars().all()
+        for sub_fid in subfolder_ids:
+            fids.extend(await _get_all_subfolder_ids(sub_fid))
+        return fids
+
+    folder_ids = await _get_all_subfolder_ids(folder.id)
+
+    # 3. Obtener todos los documentos dentro de esas carpetas
+    docs_stmt = select(Document).where(Document.folder_id.in_(folder_ids))
+    docs = (await db.execute(docs_stmt)).scalars().all()
+
+    if not docs:
+        return {
+            "message": f"Colección '{topic}' creada en la memoria, pero la carpeta no contiene documentos.",
+            "processed_count": 0,
+            "total_documents": 0,
+            "chunks_processed": 0,
+            "topic": topic
+        }
+
+    doc_items = []
+    for doc in docs:
+        try:
+            file_full_path = resolve_onlyoffice_file_path(doc.file_path)
+            if file_full_path.exists():
+                doc_items.append({
+                    "id": doc.id,
+                    "filename": doc.filename,
+                    "extension": doc.extension,
+                    "created_at_iso": doc.created_at.isoformat() if doc.created_at else None,
+                    "file_full_path": str(file_full_path)
+                })
+        except Exception as e:
+            logger.warning(f"No se pudo resolver ruta para doc {doc.id}: {e}")
+
+    background_tasks.add_task(
+        _async_vectorize_folder_task,
+        topic,
+        folder.id,
+        folder.workspace_id,
+        doc_items,
+        current_account_id
+    )
+
+    return {
+        "message": f"Vectorización de la carpeta '{topic}' ({len(doc_items)} documentos) iniciada en segundo plano.",
+        "status": "processing",
+        "total_documents": len(doc_items),
+        "topic": topic
+    }
+
 
 @router.get("/config/{document_id}")
 async def get_onlyoffice_config(
@@ -1460,6 +1661,7 @@ def get_document_type(ext: str) -> str:
     if ext in ['doc', 'docx', 'rtf', 'txt', 'odt', 'md']: return 'word'
     if ext in ['xls', 'xlsx', 'csv', 'ods']: return 'cell'
     if ext in ['ppt', 'pptx', 'odp']: return 'slide'
+    if ext in ['pdf', 'djvu', 'xps', 'oxps']: return 'pdf'
     return 'word'
 
 async def _get_document_by_id_or_key(
@@ -1911,13 +2113,116 @@ async def delete_document(
     return {"message": "Documento eliminado con éxito."}
 
 
+async def _async_vectorize_document_task(
+    doc_id: uuid.UUID,
+    doc_filename: str,
+    doc_workspace_id: Optional[uuid.UUID],
+    doc_folder_id: Optional[uuid.UUID],
+    doc_extension: str,
+    doc_created_at_iso: Optional[str],
+    file_full_path_str: str,
+    account_id: str
+):
+    """Tarea en segundo plano que extrae texto, ejecuta OCR acelerado por GPU e indexa en RAG."""
+    from core.database import SessionLocal, DocumentFolder
+    from utils.document_parser import extract_text_and_metadata_from_document
+    from core.memory_manager import delete_document_chunks, process_document_for_rag
+    from core.websocket_manager import send_personal_message
+
+    try:
+        with open(file_full_path_str, "rb") as f:
+            file_content = f.read()
+
+        async def on_ocr_progress(current_page: int, total_pages: int, percent: float, eta_str: str):
+            try:
+                await send_personal_message(account_id, {
+                    "type": "document_ocr_progress",
+                    "filename": doc_filename,
+                    "current_page": current_page,
+                    "total_pages": total_pages,
+                    "percent": round(percent, 1),
+                    "eta": eta_str
+                })
+            except Exception:
+                pass
+
+        extracted_text, parser_metadata = await extract_text_and_metadata_from_document(
+            doc_filename,
+            file_content,
+            progress_callback=on_ocr_progress
+        )
+
+        if not extracted_text or not extracted_text.strip():
+            logger.warning(f"El documento {doc_filename} no contiene texto extraíble.")
+            await send_personal_message(account_id, {
+                "type": "document_vectorization_failed",
+                "filename": doc_filename,
+                "message": f"El documento '{doc_filename}' no contiene texto extraíble o legible."
+            })
+            return
+
+        topic = "general_documents"
+        async with SessionLocal() as db_session:
+            if doc_folder_id:
+                folder = await db_session.get(DocumentFolder, doc_folder_id)
+                if folder and folder.name:
+                    topic = folder.name
+
+        # Eliminar chunks previos del mismo documento para evitar duplicados
+        await delete_document_chunks(
+            account_id=account_id,
+            file_name=doc_filename,
+            workspace_id=str(doc_workspace_id) if doc_workspace_id else None
+        )
+
+        metadata = {
+            "document_id": str(doc_id),
+            "workspace_id": str(doc_workspace_id) if doc_workspace_id else None,
+            "folder_id": str(doc_folder_id) if doc_folder_id else None,
+            "extension": doc_extension,
+            "created_at": doc_created_at_iso,
+            "file_name": doc_filename,
+        }
+        if parser_metadata:
+            metadata.update(parser_metadata)
+
+        chunks_processed = await process_document_for_rag(
+            file_name=doc_filename,
+            extracted_text=extracted_text,
+            topic=topic,
+            account_id=account_id,
+            metadata=metadata,
+            workspace_id=str(doc_workspace_id) if doc_workspace_id else None
+        )
+
+        logger.info(f"Documento '{doc_filename}' vectorizado exitosamente ({chunks_processed} fragmentos).")
+        await send_personal_message(account_id, {
+            "type": "document_vectorization_success",
+            "filename": doc_filename,
+            "message": f"Documento '{doc_filename}' añadido a la memoria correctamente ({chunks_processed} fragmentos).",
+            "chunks_processed": chunks_processed,
+            "topic": topic
+        })
+    except Exception as e:
+        logger.error(f"Error vectorizando documento {doc_filename} en segundo plano: {e}", exc_info=True)
+        try:
+            await send_personal_message(account_id, {
+                "type": "document_vectorization_failed",
+                "filename": doc_filename,
+                "message": f"Error al procesar '{doc_filename}': {str(e)}"
+            })
+        except Exception:
+            pass
+
+
 @router.post("/{document_id}/vectorize")
 async def vectorize_document(
     document_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
     current_account_id: str = Depends(get_current_account_id),
     db: AsyncSession = Depends(get_db_session)
 ):
-    """Vectoriza e indexa un documento de OnlyOffice en el sistema RAG."""
+    """Inicia la vectorización e indexación de un documento de OnlyOffice en segundo plano."""
     doc = await db.get(Document, document_id)
     if not doc:
         raise HTTPException(status_code=404, detail="Documento no encontrado")
@@ -1934,69 +2239,24 @@ async def vectorize_document(
     if not file_full_path.exists():
         raise HTTPException(status_code=404, detail="Archivo físico no encontrado")
 
-    try:
-        with open(file_full_path, "rb") as f:
-            file_content = f.read()
-    except Exception as e:
-        logger.error(f"Error al leer el archivo para vectorización: {e}")
-        raise HTTPException(status_code=500, detail="Error al leer el archivo en el servidor")
-
-    from utils.document_parser import extract_text_and_metadata_from_document
-    from core.memory_manager import delete_document_chunks, process_document_for_rag
-
-    try:
-        extracted_text, parser_metadata = await extract_text_and_metadata_from_document(doc.filename, file_content)
-    except Exception as e:
-        logger.error(f"Error al extraer texto del documento: {e}")
-        raise HTTPException(status_code=500, detail="Error al extraer texto del documento")
-
-    if not extracted_text or not extracted_text.strip():
-        raise HTTPException(
-            status_code=400,
-            detail="El documento no contiene texto extraíble. Verifique que no esté vacío o que el formato sea soportado (ej. DOCX)."
-        )
-
-    # Determinar el topic (colección)
-    topic = "general_documents"
-    if doc.folder_id:
-        folder = await db.get(DocumentFolder, doc.folder_id)
-        if folder and folder.name:
-            topic = folder.name
-
-    # Eliminar chunks previos del mismo documento para evitar duplicados
-    await delete_document_chunks(
-        account_id=current_account_id,
-        file_name=doc.filename,
-        workspace_id=str(doc.workspace_id) if doc.workspace_id else None
-    )
-
-    # Preparar metadatos para el RAG
-    metadata = {
-        "document_id": str(doc.id),
-        "workspace_id": str(doc.workspace_id) if doc.workspace_id else None,
-        "folder_id": str(doc.folder_id) if doc.folder_id else None,
-        "extension": doc.extension,
-        "created_at": doc.created_at.isoformat() if doc.created_at else None,
-        "file_name": doc.filename,
-    }
-    if parser_metadata:
-        metadata.update(parser_metadata)
-
-    # Llamar a la función de procesamiento RAG
-    chunks_processed = await process_document_for_rag(
-        file_name=doc.filename,
-        extracted_text=extracted_text,
-        topic=topic,
-        account_id=current_account_id,
-        metadata=metadata,
-        workspace_id=str(doc.workspace_id) if doc.workspace_id else None
+    background_tasks.add_task(
+        _async_vectorize_document_task,
+        doc.id,
+        doc.filename,
+        doc.workspace_id,
+        doc.folder_id,
+        doc.extension,
+        doc.created_at.isoformat() if doc.created_at else None,
+        str(file_full_path),
+        current_account_id
     )
 
     return {
-        "message": "Documento vectorizado e indexado correctamente",
-        "chunks_processed": chunks_processed,
-        "topic": topic
+        "message": f"Procesamiento de '{doc.filename}' iniciado en segundo plano.",
+        "status": "processing",
+        "document_id": str(doc.id)
     }
+
 
 
 @router.put("/{document_id}")

@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { AlbumResponse } from '@/types/gallery'; // Assuming a common type definition
+import { photoFileUrl } from '@/lib/api';
 
 // A more generic album type to be compatible with different API responses
 interface GenericAlbum extends Omit<AlbumResponse, 'photos'> {
@@ -87,7 +88,7 @@ export const AlbumCard = ({ album, onEditClick, onDeleteClick, onLinkProfileClic
             <div className="relative w-full aspect-square bg-muted rounded-md overflow-hidden mb-3">
               {coverPhoto ? (
                 <Image
-                  src={`${process.env.NEXT_PUBLIC_API_URL}/media/${coverPhoto.file_path}`}
+                  src={photoFileUrl(coverPhoto.id)}
                   alt={album.name || 'cover photo'}
                   width={500}
                   height={500}

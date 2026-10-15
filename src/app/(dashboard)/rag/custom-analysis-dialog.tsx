@@ -18,9 +18,10 @@ interface CustomAnalysisDialogProps {
   topic: string; // La colección actual
   onAnalysisStart: (taskId: string) => void; // Para notificar el inicio del análisis
   documentFileName?: string; // Opcional: si el análisis es para un documento específico
+  workspaceId?: string;
 }
 
-export function CustomAnalysisDialog({ isOpen, onOpenChange, topic, onAnalysisStart, documentFileName }: CustomAnalysisDialogProps) {
+export function CustomAnalysisDialog({ isOpen, onOpenChange, topic, onAnalysisStart, documentFileName, workspaceId }: CustomAnalysisDialogProps) {
   const [objective, setObjective] = useState('');
   const [expectedResult, setExpectedResult] = useState('');
   const [extension, setExtension] = useState('standard'); // 'brief', 'standard', 'detailed'
@@ -61,13 +62,16 @@ export function CustomAnalysisDialog({ isOpen, onOpenChange, topic, onAnalysisSt
 
     setIsLoading(true);
     try {
-      const payload = {
+      const payload: any = {
         file_name: documentFileName || `Colección: ${topic}`, // Usar el nombre del documento o la colección
         objective,
         expected_result: expectedResult || undefined,
         extension,
         fields: fields.filter(f => f.name.trim() && f.description.trim()), // Asegurarse de enviar solo campos válidos
       };
+      if (workspaceId) {
+        payload.workspace_id = workspaceId;
+      }
 
       const response = await apiClient.post('/api/start-custom-analysis', payload);
       onAnalysisStart(response.data.task_id);

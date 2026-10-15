@@ -8,7 +8,7 @@ from langchain_core.tools import BaseTool
 
 from knowledge_graph.graph_database import GraphDB
 from core.config import settings
-from core.llm_manager import get_main_llm
+from core.llm_manager import get_main_llm, get_llm_for_user
 from knowledge_graph.entity_quality_reviewer import EntityQualityReviewer
 
 logger = logging.getLogger(__name__)
@@ -54,7 +54,9 @@ class CleanKnowledgeGraphTool(BaseTool):
                 password=str(settings.neo4j_password)
             )
             db.connect()
-            llm = get_main_llm()
+            llm = (await get_llm_for_user(self.account_id, purpose="main")) if self.account_id else None
+            if not llm:
+                llm = get_main_llm()
             
             reviewer = EntityQualityReviewer(graph_db=db, llm=llm)
             

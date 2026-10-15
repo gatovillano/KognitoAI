@@ -40,7 +40,7 @@ class OpenRouterProvider(LLMProviderStrategy):
         
         if not models:
             models = [
-                {"id": "openrouter/meta-llama/llama-3.3-70b-instruct:free", "name": "Llama 3.3 70B Instruct (Free)"},
+                {"id": "openrouter/meta-llama/llama-3.3-70b-instruct", "name": "Llama 3.3 70B Instruct"},
                 {"id": "openrouter/google/gemini-2.5-flash:free", "name": "Gemini 2.5 Flash (Free)"},
                 {"id": "openrouter/deepseek/deepseek-chat", "name": "DeepSeek V3"},
                 {"id": "openrouter/anthropic/claude-3.5-sonnet", "name": "Claude 3.5 Sonnet"},

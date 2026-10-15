@@ -22,10 +22,9 @@ class ScopedRagAnalysisTool(BaseTool):
     name: str = Field(default="scoped_rag_analysis", description="Nombre de la herramienta")
     name = "scoped_rag_analysis"
     description: str = (
-        "Útil para iniciar un análisis profundo de la base de conocimiento de un usuario, "
-        "permitiendo especificar los tipos de contenido (notas, documentos) y, opcionalmente, "
-        "un tema o palabras clave para un análisis RAG altamente focalizado. Además, permite al usuario "
-        "definir el formato o el objetivo del análisis resultante (ej. informe de conceptos, plan de trabajo, resumen ejecutivo)."
+        "[BASE DE CONOCIMIENTO RAG] Inicia un análisis profundo de la base de conocimiento vectorial del usuario, "
+        "permitiendo especificar tipos de contenido (notas, documentos RAG) y, opcionalmente, un tema o palabras clave "
+        "para un análisis RAG altamente focalizado. NO opera sobre documentos de OnlyOffice."
     )
     args_schema: Type[BaseModel] = ScopedRagAnalysisInput
     account_id: Optional[str] = Field(None, description="El identificador único de la cuenta del usuario, inyectado automáticamente.")

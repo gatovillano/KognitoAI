@@ -17,9 +17,9 @@ class SearchOnlyOfficeInput(BaseModel):
 class SearchOnlyOfficeDocumentsTool(BaseTool):
     name: str = "search_onlyoffice_documents"
     description: str = (
-        "Busca y lista documentos y carpetas en el módulo OnlyOffice del usuario. "
-        "Úsala para encontrar el ID exacto de un archivo o para ver qué archivos hay disponibles "
-        "antes de intentar leer uno. Puedes filtrar por nombre o por workspace."
+        "[MÓDULO ONLYOFFICE DE KAI] Busca y lista documentos y carpetas en el módulo OnlyOffice del usuario. "
+        "Úsala para encontrar el ID exacto (UUID) o nombre de un archivo editable antes de leerlo o editarlo. "
+        "NO busca en la base de conocimiento RAG ni en memorias vectoriales; para listar documentos RAG usa 'get_document_list_tool'."
     )
     args_schema: Type[BaseModel] = SearchOnlyOfficeInput
     

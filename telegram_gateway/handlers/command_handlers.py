@@ -48,6 +48,21 @@ async def start(update: Update, context: CallbackContext) -> None:
         if jwt_token:
             context.chat_data['jwt_token'] = jwt_token
 
+        # Actualizar Menu Button individual con su token para acceso instantáneo
+        if config.webapp_url and jwt_token:
+            try:
+                from telegram import MenuButtonWebApp
+                raw_url = config.webapp_url.strip().rstrip('/')
+                panel_url = f"{raw_url}/telegram-panel" if not ("/telegram-panel" in raw_url or "/telegram-table" in raw_url) else raw_url
+                delimiter = '&' if '?' in panel_url else '?'
+                auth_panel_url = f"{panel_url}{delimiter}token={jwt_token}"
+                await context.bot.set_chat_menu_button(
+                    chat_id=user.id,
+                    menu_button=MenuButtonWebApp(text="🚀 Panel", web_app=WebAppInfo(url=auth_panel_url))
+                )
+            except Exception as e_btn:
+                logger.warning(f"No se pudo actualizar MenuButton individual para {user.id}: {e_btn}")
+
         welcome_message = (
             f"¡Hola {user.first_name}! 👋 Soy Kognito, tu asistente de IA personal. "
             "Puedes empezar a chatear conmigo directamente, "
@@ -120,11 +135,21 @@ async def open_documents_panel(update: Update, context: CallbackContext) -> None
         return
 
     # La URL de nuestra WebApp.
-    web_app_url = config.webapp_url
-    if not web_app_url:
+    raw_url = (config.webapp_url or "https://kognitoai.cloud").strip()
+    if not raw_url:
         logger.error("❌ TELEGRAM_WEBAPP_URL no está configurada en .env. No se puede abrir el panel.")
         await update.message.reply_text("La función del panel de control no está configurada en este momento.")
         return
+
+    base_url = raw_url.rstrip("/")
+    if not ("/telegram-panel" in base_url or "/telegram-table" in base_url):
+        web_app_url = f"{base_url}/telegram-panel"
+    else:
+        web_app_url = base_url
+
+    if jwt_token:
+        delimiter = "&" if "?" in web_app_url else "?"
+        web_app_url = f"{web_app_url}{delimiter}token={jwt_token}"
 
     logger.info(f"Generando enlace a WebApp para {user.id} en la URL: {web_app_url}")
 

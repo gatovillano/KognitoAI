@@ -16,6 +16,7 @@ import apiClient from '@/lib/api';
 import { Brain, Zap, Image as ImageIcon, RefreshCw, Key, Shield, Trash2, ArrowLeft, Plus } from 'lucide-react';
 
 const LLM_PROVIDERS = [
+  { id: 'antigravity', name: '🛸 Google Antigravity', env_key: null },
   { id: 'gemini', name: 'Google AI Studio', env_key: 'GOOGLE_API_KEY' },
   { id: 'openai', name: 'OpenAI (GPT)', env_key: 'OPENAI_API_KEY' },
   { id: 'anthropic', name: 'Anthropic (Claude)', env_key: 'ANTHROPIC_API_KEY' },
@@ -26,9 +27,18 @@ const LLM_PROVIDERS = [
   { id: 'mistral', name: 'Mistral AI', env_key: 'MISTRAL_API_KEY' },
   { id: 'kilocode', name: '🚀 Kilocode Gateway', env_key: 'KILOCODE_API_KEY' },
   { id: 'nvidia', name: '🟢 NVIDIA AI Catalog', env_key: 'NVIDIA_API_KEY' },
+  { id: 'inceptionlabs', name: '🔮 Inception Labs', env_key: 'INCEPTIONLABS_API_KEY' },
 ];
 
 const MODELS_BY_PROVIDER: Record<string, string[]> = {
+  antigravity: [
+    'antigravity/gemini-3-flash',
+    'antigravity/gemini-3-pro',
+    'antigravity/gemini-2.5-flash',
+    'antigravity/gemini-2.5-pro',
+    'antigravity/claude-sonnet-4-6',
+    'antigravity/claude-opus-4-6-thinking',
+  ],
   gemini: ['gemini/gemini-2.0-flash', 'gemini/gemini-1.5-flash', 'gemini/gemini-1.5-pro', 'gemini/gemini-2.0-flash-exp'],
   openai: ['openai/gpt-4o', 'openai/gpt-4o-mini', 'openai/gpt-4-turbo'],
   anthropic: ['anthropic/claude-3-5-sonnet-20240620', 'anthropic/claude-3-opus-20240229', 'anthropic/claude-3-haiku-20240307'],
@@ -51,6 +61,7 @@ const MODELS_BY_PROVIDER: Record<string, string[]> = {
     'nvidia/deepseek-ai/deepseek-r1',
     'nvidia/qwen/qwen2.5-72b-instruct',
   ],
+  inceptionlabs: [],
 };
 
 interface GlobalSecret {
@@ -170,14 +181,20 @@ export default function AdminSettingsPage() {
     const isGemini = currentProvider === 'gemini' || id.startsWith('gemini/');
     const isOpenRouter = currentProvider === 'openrouter' || id.startsWith('openrouter/');
     const isKilocode = currentProvider === 'kilocode' || id.startsWith('kilocode/');
+    const isAntigravity = currentProvider === 'antigravity' || id.startsWith('antigravity/');
 
-    if (isOpenRouter || isGemini || isKilocode) {
+    if (isOpenRouter || isGemini || isKilocode || isAntigravity) {
       let badgeColor = "bg-blue-500/10 text-blue-500 border-blue-500/20";
-      let badgeText = isKilocode ? "KiloCode" : "OpenRouter";
-      let borderColor = "border-blue-500";
-      let bgColor = "bg-blue-500/5";
+      let badgeText = isKilocode ? "KiloCode" : isAntigravity ? "Antigravity" : "OpenRouter";
+      let borderColor = isAntigravity ? "border-emerald-500" : "border-blue-500";
+      let bgColor = isAntigravity ? "bg-emerald-500/5" : "bg-blue-500/5";
 
-      if (isGemini) {
+      if (isAntigravity) {
+        badgeText = "Antigravity";
+        badgeColor = "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
+        borderColor = "border-emerald-500";
+        bgColor = "bg-emerald-500/5";
+      } else if (isGemini) {
         badgeText = "Google";
         badgeColor = "bg-red-500/10 text-red-500 border-red-500/20";
         borderColor = "border-red-500";

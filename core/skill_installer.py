@@ -105,6 +105,7 @@ class SkillInstaller:
             metadata.installed_at = datetime.now().isoformat()
             self.registry[metadata.name] = metadata
             self._save_registry()
+            self._clear_manager_cache()
             
             return True
         
@@ -113,6 +114,15 @@ class SkillInstaller:
             if dest_path.exists():
                 shutil.rmtree(dest_path)
             return False
+
+    def _clear_manager_cache(self):
+        try:
+            from core.skill_manager import get_skill_manager
+            get_skill_manager().clear_skill_md_cache()
+            import importlib
+            importlib.invalidate_caches()
+        except Exception:
+            pass
 
     def install_from_identifier(self, identifier: str, force: bool = False) -> bool:
         """

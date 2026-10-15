@@ -159,9 +159,14 @@ export const GraphVisualization = forwardRef<GraphVisualizationRef, GraphVisuali
       const strId = normalizeId(node.id);
       if (!strId || nodeMap.has(strId)) return; // Deduplicate or skip empty
 
-      const fullLabel = node.properties?.name || node.properties?.title || node.label || strId;
+      const isAnthroQuote = node.type === 'ANTHROPOLOGICAL_QUOTE';
+      const fullLabel = (isAnthroQuote && node.properties?.description)
+        ? node.properties.description
+        : (node.properties?.name || node.properties?.title || node.label || strId);
       const truncatedLabel = truncateText(fullLabel);
-      const description = node.properties?.description || node.properties?.text || fullLabel;
+      const description = (isAnthroQuote && node.properties?.name)
+        ? node.properties.name
+        : (node.properties?.description || node.properties?.text || fullLabel);
       const nodeType = node.type || 'Desconocido';
 
       const formattedNode = {

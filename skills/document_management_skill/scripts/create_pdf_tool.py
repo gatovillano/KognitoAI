@@ -11,7 +11,7 @@ import os
 import uuid
 import re
 import base64
-from typing import Any, Type, Optional
+from typing import Any, Type, Optional, Union
 from datetime import datetime
 
 from pydantic import BaseModel, Field
@@ -107,8 +107,8 @@ class CreatePDFTool(BaseTool):
     )
     
     # Standard context attributes
-    account_id: Optional[str] = Field(None, description="User account ID.")
-    workspace_id: Optional[str] = Field(None, description="Current workspace ID.")
+    account_id: Optional[Union[str, int]] = Field(None, description="User account ID.")
+    workspace_id: Optional[Union[str, int]] = Field(None, description="Current workspace ID.")
     
     args_schema: Type[BaseModel] = CreatePDFInput
     return_direct: bool = False
@@ -684,16 +684,21 @@ class CreatePDFTool(BaseTool):
             
             # 3. Process content based on is_html flag
             
-            # Robust auto-detection: If it has clear HTML tags, treat as HTML
+            # Robust auto-detection: If it has markdown indicators, prioritize Markdown (supports inline HTML)
             has_html_tags = re.search(r'<\s*[a-z!/]', content, re.IGNORECASE)
-            has_markdown_indicators = re.search(r'^#{1,6}\s|\n#{1,6}\s|\*\*|---|^\s*[\*\-\+]\s|\n\s*[\*\-\+]\s', content, re.MULTILINE)
-            
-            if is_html and has_markdown_indicators and not has_html_tags:
-                logger.warning("Content marked as HTML but looks like Markdown. Forcing Markdown processing.")
-                is_html = False
-            elif not is_html and has_html_tags:
-                logger.info("Content contains HTML tags. Treating as HTML.")
+            has_markdown_indicators = re.search(r'^#{1,6}\s|\n#{1,6}\s|\*\*|---|^\s*[\*\-\+]\s|\n\s*[\*\-\+]\s|\|.+\|', content, re.MULTILINE)
+            is_full_html = re.search(r'<(html|body|doctype|head)', content, re.IGNORECASE)
+
+            if is_full_html:
                 is_html = True
+            elif has_markdown_indicators:
+                is_html = False
+            elif is_html:
+                is_html = True
+            elif has_html_tags:
+                is_html = True
+            else:
+                is_html = False
 
             # Generate the dynamic base CSS block
             modern_css = self._get_modern_css(
@@ -789,77 +794,116 @@ class CreatePDFTool(BaseTool):
             if self.account_id:
                 try:
                     import shutil
-                    from core.database import SessionLocal, Document
+                    from core.database import SessionLocal, Document, Account
                     from core.config import settings
+                    from core.onlyoffice_storage import ensure_onlyoffice_account_dir, build_onlyoffice_relative_path
                     
-                    onlyoffice_docs_root = settings.onlyoffice_docs_root
-                    onlyoffice_user_dir = os.path.join(onlyoffice_docs_root, self.account_id)
-                    os.makedirs(onlyoffice_user_dir, exist_ok=True)
+                    try:
+                        acc_id = uuid.UUID(str(self.account_id))
+                    except (ValueError, TypeError):
+                        acc_id = None
                     
-                    onlyoffice_unique_filename = f"{uuid.uuid4().hex}.pdf"
-                    onlyoffice_file_path = os.path.join(onlyoffice_user_dir, onlyoffice_unique_filename)
-                    
-                    # Copy the generated PDF file to OnlyOffice documents path
-                    shutil.copy2(file_path, onlyoffice_file_path)
-                    
-                    # DB Registration
-                    acc_id = uuid.UUID(self.account_id)
-                    wsp_id = None
-                    if self.workspace_id and self.workspace_id != "null":
-                        try:
-                            wsp_id = uuid.UUID(self.workspace_id)
-                        except ValueError:
-                            pass
-                    
-                    display_filename = filename
-                    if not display_filename.lower().endswith(".pdf"):
-                        display_filename = f"{display_filename}.pdf"
-                    
-                    AGENT_PDF_FOLDER_NAME = "🤖 Documentos PDF (Agente)"
+                    if acc_id:
+                        wsp_id = None
+                        if self.workspace_id and str(self.workspace_id) not in ("null", "none", ""):
+                            try:
+                                wsp_id = uuid.UUID(str(self.workspace_id))
+                            except ValueError:
+                                pass
+                        
+                        display_filename = filename
+                        if not display_filename.lower().endswith(".pdf"):
+                            display_filename = f"{display_filename}.pdf"
+                        
+                        AGENT_PDF_FOLDER_NAME = "🤖 Documentos PDF (Agente)"
 
-                    async with SessionLocal() as db:
-                        from sqlalchemy import select
-                        from core.database import DocumentFolder
+                        async with SessionLocal() as db:
+                            from sqlalchemy import select
+                            from core.database import DocumentFolder
 
-                        # Find or create dedicated folder for agent-generated PDFs
-                        stmt = select(DocumentFolder).where(
-                            DocumentFolder.account_id == acc_id,
-                            DocumentFolder.name == AGENT_PDF_FOLDER_NAME,
-                            DocumentFolder.parent_id == None
-                        )
-                        if wsp_id:
-                            stmt = stmt.where(DocumentFolder.workspace_id == wsp_id)
-                        else:
-                            stmt = stmt.where(DocumentFolder.workspace_id == None)
+                            account_obj = await db.get(Account, acc_id)
+                            cloud_storage_path = getattr(account_obj, "cloud_storage_path", None)
+                            if not isinstance(cloud_storage_path, str):
+                                cloud_storage_path = None
 
-                        res = await db.execute(stmt)
-                        agent_folder = res.scalars().first()
+                            user_dir = ensure_onlyoffice_account_dir(str(acc_id), cloud_storage_path=cloud_storage_path)
 
-                        if not agent_folder:
-                            agent_folder = DocumentFolder(
+                            onlyoffice_unique_filename = f"{uuid.uuid4().hex}.pdf"
+                            onlyoffice_file_path = user_dir / onlyoffice_unique_filename
+                            
+                            # Copy the generated PDF file to OnlyOffice documents path
+                            shutil.copy2(file_path, str(onlyoffice_file_path))
+
+                            # Find or create dedicated folder for agent-generated PDFs
+                            stmt = select(DocumentFolder).where(
+                                DocumentFolder.account_id == acc_id,
+                                DocumentFolder.name == AGENT_PDF_FOLDER_NAME,
+                                DocumentFolder.parent_id == None
+                            )
+                            if wsp_id:
+                                stmt = stmt.where(DocumentFolder.workspace_id == wsp_id)
+                            else:
+                                stmt = stmt.where(DocumentFolder.workspace_id == None)
+
+                            res = await db.execute(stmt)
+                            agent_folder = res.scalars().first()
+
+                            if not agent_folder:
+                                agent_folder = DocumentFolder(
+                                    account_id=acc_id,
+                                    workspace_id=wsp_id,
+                                    parent_id=None,
+                                    name=AGENT_PDF_FOLDER_NAME
+                                )
+                                db.add(agent_folder)
+                                await db.commit()
+                                await db.refresh(agent_folder)
+
+                            rel_file_path = build_onlyoffice_relative_path(str(acc_id), onlyoffice_unique_filename)
+                            new_doc = Document(
                                 account_id=acc_id,
                                 workspace_id=wsp_id,
-                                parent_id=None,
-                                name=AGENT_PDF_FOLDER_NAME
+                                folder_id=agent_folder.id if agent_folder else None,
+                                filename=display_filename,
+                                extension="pdf",
+                                file_path=rel_file_path
                             )
-                            db.add(agent_folder)
+                            db.add(new_doc)
                             await db.commit()
-                            await db.refresh(agent_folder)
+                            await db.refresh(new_doc)
+                            onlyoffice_saved = True
+                            onlyoffice_doc_id = str(new_doc.id)
+                            logger.info(f"PDF automatically saved to OnlyOffice documents cloud in folder '{AGENT_PDF_FOLDER_NAME}'. ID: {new_doc.id}")
 
-                        new_doc = Document(
-                            account_id=acc_id,
-                            workspace_id=wsp_id,
-                            folder_id=agent_folder.id,
-                            filename=display_filename,
-                            extension="pdf",
-                            file_path=os.path.join(self.account_id, onlyoffice_unique_filename)
-                        )
-                        db.add(new_doc)
-                        await db.commit()
-                        await db.refresh(new_doc)
-                        onlyoffice_saved = True
-                        onlyoffice_doc_id = str(new_doc.id)
-                        logger.info(f"PDF automatically saved to OnlyOffice documents cloud in folder '{AGENT_PDF_FOLDER_NAME}'. ID: {new_doc.id}")
+                            # RAG Indexing
+                            try:
+                                from utils.document_parser import extract_text_and_metadata_from_document
+                                from core.memory_manager import process_document_for_rag
+                                with open(onlyoffice_file_path, "rb") as f_pdf:
+                                    pdf_bytes = f_pdf.read()
+                                extracted_text, parser_metadata = await extract_text_and_metadata_from_document(new_doc.filename, pdf_bytes)
+                                if extracted_text and extracted_text.strip():
+                                    rag_metadata = {
+                                        "document_id": str(new_doc.id),
+                                        "workspace_id": str(new_doc.workspace_id) if new_doc.workspace_id else None,
+                                        "folder_id": str(new_doc.folder_id) if new_doc.folder_id else None,
+                                        "extension": new_doc.extension,
+                                        "created_at": new_doc.created_at.isoformat() if new_doc.created_at else None,
+                                        "file_name": new_doc.filename,
+                                    }
+                                    if parser_metadata:
+                                        rag_metadata.update(parser_metadata)
+                                    await process_document_for_rag(
+                                        account_id=str(acc_id),
+                                        file_name=new_doc.filename,
+                                        extracted_text=extracted_text,
+                                        topic="documentos_pdf_agente",
+                                        metadata=rag_metadata,
+                                        workspace_id=str(wsp_id) if wsp_id else None
+                                    )
+                            except Exception as rag_err:
+                                logger.warning(f"Error indexing generated PDF in RAG: {rag_err}")
+
                 except Exception as oo_err:
                     logger.error(f"Error automatically saving PDF to OnlyOffice documents cloud: {oo_err}", exc_info=True)
 
@@ -889,7 +933,8 @@ class CreatePDFTool(BaseTool):
                             "file_path": file_path,
                             "generated_at": datetime.now().isoformat(),
                             "size_hint": "A4",
-                            "onlyoffice_document_id": onlyoffice_doc_id if onlyoffice_saved else None
+                            "onlyoffice_document_id": onlyoffice_doc_id if onlyoffice_saved else None,
+                            "saved_to_documents": onlyoffice_saved
                         }
                     }
                 ]

@@ -127,3 +127,52 @@ async def get_provider_models(
     except Exception as e:
         logger.error("Error al obtener modelos de %s: %s", provider, e, exc_info=True)
         raise HTTPException(status_code=500, detail=f"No se pudieron obtener los modelos de {provider}")
+
+
+@router.get("/llm/antigravity/auth/status")
+async def get_antigravity_auth_status(
+    current_account_id: str = Depends(get_current_account_id),
+):
+    """
+    Obtiene el estado actual de autenticación OAuth de Google Antigravity.
+    """
+    from core.antigravity_client import AntigravityOAuthManager
+    return AntigravityOAuthManager.get_status()
+
+
+@router.post("/llm/antigravity/auth/start")
+async def start_antigravity_auth(
+    current_account_id: str = Depends(get_current_account_id),
+):
+    """
+    Inicia el listener local de callback en puerto 36742 y genera la URL de autorización de Google.
+    """
+    from core.antigravity_client import AntigravityOAuthManager
+    result = AntigravityOAuthManager.start_login_flow()
+    return result
+
+
+@router.post("/llm/antigravity/auth/cancel")
+async def cancel_antigravity_auth(
+    current_account_id: str = Depends(get_current_account_id),
+):
+    """
+    Cancela el flujo de autenticación pendiente y detiene el listener local.
+    """
+    from core.antigravity_client import AntigravityOAuthManager
+    AntigravityOAuthManager.cancel_login_flow()
+    return {"status": "cancelled"}
+
+
+@router.post("/llm/antigravity/auth/disconnect")
+async def disconnect_antigravity_auth(
+    current_account_id: str = Depends(get_current_account_id),
+):
+    """
+    Cierra la sesión y elimina el token de Google Antigravity.
+    """
+    from core.antigravity_client import AntigravityOAuthManager
+    success = AntigravityOAuthManager.disconnect()
+    _models_cache.pop("antigravity", None)
+    return {"success": success}
+

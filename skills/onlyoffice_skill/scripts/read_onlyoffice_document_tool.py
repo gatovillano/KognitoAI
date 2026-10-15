@@ -31,9 +31,10 @@ class ReadOnlyOfficeInput(BaseModel):
 class ReadOnlyOfficeDocumentTool(BaseTool):
     name: str = "read_onlyoffice_document"
     description: str = (
-        "Lee el contenido textual completo de un documento almacenado en el servidor. "
-        "Soporta PDF (incluyendo escaneados con OCR), Word (.docx), Excel (.xlsx), "
-        "PowerPoint (.pptx), CSV y TXT. Úsala cuando tengas el ID UUID del documento."
+        "[MÓDULO ONLYOFFICE DE KAI] Lee el contenido textual completo y estructura de un documento editable "
+        "de OnlyOffice (Word .docx, Excel .xlsx, PowerPoint .pptx, CSV, TXT) mediante su 'document_id' (UUID). "
+        "ÚSALA EXCLUSIVAMENTE para documentos del módulo OnlyOffice. "
+        "NO LA USES para documentos de la base de conocimiento RAG; para leer documentos RAG usa 'get_document_content_tool' con su 'file_name'."
     )
     args_schema: Type[BaseModel] = ReadOnlyOfficeInput
     account_id: str = Field(..., description="ID de cuenta del usuario, inyectado automáticamente.")

@@ -1,19 +1,45 @@
 import logging
 import uuid
 import asyncio
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+import re
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request
 from pydantic import BaseModel
 from typing import Dict, Any, List, Union, Optional
 from langchain_core.messages import HumanMessage, AIMessage
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from core.agents.deep_researcher import compile_deep_researcher_graph
-from core.llm_manager import get_main_llm, get_llm_for_user
+from core.llm_manager import get_main_llm, get_llm_for_user, set_active_account_id
 from core.utils.llm_utils import safe_bind_tools  # OpenRouter compatibility
 from langchain_core.language_models.base import BaseLanguageModel
-from langchain_core.messages import BaseMessage 
+from langchain_core.messages import BaseMessage
 from langchain_core.prompts import ChatPromptTemplate
-from skills.document_management_skill.scripts.create_pdf_tool import CreatePDFTool 
-from utils.security import get_current_account_id
+from skills.document_management_skill.scripts.create_pdf_tool import CreatePDFTool
+from utils.security import get_current_account_id, decode_access_token
+from core.websocket_manager import manager as websocket_manager
+
+
+def _resolve_effective_account_id(request: Optional[Request], body_account_id: Optional[str]) -> str:
+    """Prioriza el account_id del JWT (modelo configurado en frontend por usuario).
+
+    Antes se usaba solo el account_id del body (por defecto "api_user"),
+    lo que hacía que deep_research usara el LLM global (.env) en vez del
+    modelo configurado por el usuario.
+    """
+    if request is not None:
+        try:
+            auth = request.headers.get("Authorization", "")
+            if auth.startswith("Bearer "):
+                payload = decode_access_token(auth[len("Bearer "):].strip())
+                sub = (payload or {}).get("sub")
+                if sub:
+                    if body_account_id and body_account_id not in ("api_user", sub):
+                        logger.warning(
+                            f"account_id del body ('{body_account_id}') difiere del JWT ('{sub}'). Usando JWT."
+                        )
+                    return sub
+        except Exception as e:
+            logger.warning(f"No se pudo resolver account_id desde JWT, usando body: {e}")
+    return body_account_id or "api_user"
 
 logger = logging.getLogger(__name__)
 
@@ -46,10 +72,47 @@ class DeepResearchPDFExportRequest(BaseModel):
     final_report: str
     sources: List[dict] = []
     recommendations: List[str] = []
+    workspace_id: Optional[str] = None
+    kai_synthesis: Optional[str] = None
+    visual_schema: Optional[str] = None
     # account_id se obtiene del token, no del body
 
 async def _run_deep_research_background(run_id: str, inputs: dict, config: dict):
     logger.info(f"Background Task: Invoking Deep Research graph with run_id: {run_id}")
+    account_id = inputs.get("account_id") or config.get("configurable", {}).get("account_id")
+    thread_id = config.get("configurable", {}).get("thread_id")
+    if account_id:
+        set_active_account_id(account_id)
+        try:
+            await get_llm_for_user(account_id, purpose="fast")
+            await get_llm_for_user(account_id, purpose="main")
+        except Exception as warm_err:
+            logger.warning(f"Error pre-warming user LLMs: {warm_err}")
+
+    async def api_progress_callback(progress: int, message: str, current_node: str = "main"):
+        if run_id in research_jobs:
+            research_jobs[run_id]["progress"] = progress
+            research_jobs[run_id]["message"] = message
+        if account_id:
+            payload = {
+                "type": "progress",
+                "progress": progress,
+                "message": message,
+                "current_node": current_node,
+                "tool_name": "deep_research",
+                "taskId": run_id,
+            }
+            if thread_id:
+                payload["thread_id"] = str(thread_id)
+            try:
+                await websocket_manager.send_personal_message(payload, account_id)
+            except Exception as e:
+                logger.warning(f"Error sending ws progress in api_deep_research: {e}")
+
+    config.setdefault("configurable", {})["progress_callback"] = api_progress_callback
+    config.setdefault("configurable", {})["base_progress"] = 0
+    config.setdefault("configurable", {})["max_sub_progress"] = 100
+
     try:
         max_retries = 5
         final_state = None
@@ -120,7 +183,8 @@ async def _run_deep_research_background(run_id: str, inputs: dict, config: dict)
 @router.post("/deep_research/async")
 async def run_deep_research_async(
     request: DeepResearchRequest,
-    background_tasks: BackgroundTasks
+    background_tasks: BackgroundTasks,
+    http_request: Request = None,
 ):
     """
     Inicia una investigación profunda en segundo plano y devuelve un run_id inmediatamente.
@@ -128,18 +192,19 @@ async def run_deep_research_async(
     if deep_researcher_graph is None:
         raise HTTPException(status_code=500, detail="Deep Researcher agent is not available.")
 
-    logger.info(f"Received async deep research request for: '{request.query}' by account '{request.account_id}'")
-    
+    effective_account_id = _resolve_effective_account_id(http_request, request.account_id)
+    logger.info(f"Received async deep research request for: '{request.query}' by account '{effective_account_id}'")
+
     run_id = str(uuid.uuid4())
     config = {
         "configurable": {
-            "account_id": request.account_id,
+            "account_id": effective_account_id,
             "thread_id": run_id,
         }
     }
     inputs = {
         "messages": [HumanMessage(content=request.query)],
-        "account_id": request.account_id,
+        "account_id": effective_account_id,
         "workspace_id": request.workspace_id
     }
 
@@ -164,7 +229,8 @@ async def get_deep_research_status(run_id: str):
 
 @router.post("/deep_research/")
 async def run_deep_research(
-    request: DeepResearchRequest
+    request: DeepResearchRequest,
+    http_request: Request = None,
 ):
     """
     Ejecuta una investigación profunda sobre una consulta dada utilizando el agente LangGraph.
@@ -172,22 +238,54 @@ async def run_deep_research(
     if deep_researcher_graph is None:
         raise HTTPException(status_code=500, detail="Deep Researcher agent is not available.")
 
-    logger.info(f"Received deep research request for: '{request.query}' by account '{request.account_id}'")
+    effective_account_id = _resolve_effective_account_id(http_request, request.account_id)
+    if effective_account_id:
+        set_active_account_id(effective_account_id)
+        try:
+            await get_llm_for_user(effective_account_id, purpose="fast")
+            await get_llm_for_user(effective_account_id, purpose="main")
+        except Exception as warm_err:
+            logger.warning(f"Error pre-warming user LLMs: {warm_err}")
+    logger.info(f"Received deep research request for: '{request.query}' by account '{effective_account_id}'")
     
     try:
         # Configuración para el grafo
         run_id = str(uuid.uuid4())
+        
+        async def api_progress_callback(progress: int, message: str, current_node: str = "main"):
+            if run_id in research_jobs:
+                research_jobs[run_id]["progress"] = progress
+                research_jobs[run_id]["message"] = message
+            if effective_account_id:
+                payload = {
+                    "type": "progress",
+                    "progress": progress,
+                    "message": message,
+                    "current_node": current_node,
+                    "tool_name": "deep_research",
+                    "taskId": run_id,
+                }
+                if run_id:
+                    payload["thread_id"] = str(run_id)
+                try:
+                    await websocket_manager.send_personal_message(payload, effective_account_id)
+                except Exception as e:
+                    logger.warning(f"Error sending ws progress in run_deep_research: {e}")
+
         config = {
             "configurable": {
-                "account_id": request.account_id,
+                "account_id": effective_account_id,
                 "thread_id": run_id,
+                "progress_callback": api_progress_callback,
+                "base_progress": 0,
+                "max_sub_progress": 100,
             }
         }
-        
+
         # Entradas para el grafo
         inputs = {
             "messages": [HumanMessage(content=request.query)],
-            "account_id": request.account_id
+            "account_id": effective_account_id
         }
 
         logger.info(f"Invoking Deep Research graph with run_id: {run_id}")
@@ -227,7 +325,7 @@ async def run_deep_research(
             try:
                 from utils.deep_research_word_saver import save_deep_research_as_word
                 await save_deep_research_as_word(
-                    account_id=request.account_id,
+                    account_id=effective_account_id,
                     query=request.query,
                     report_text=final_state.get("final_report"),
                     workspace_id=request.workspace_id
@@ -261,7 +359,8 @@ async def run_deep_research(
 
 @router.post("/deep_research/clarify")
 async def clarify_deep_research(
-    request: ClarificationResponse
+    request: ClarificationResponse,
+    http_request: Request = None,
 ):
     """
     Proporciona una respuesta a una pregunta de clarificación para una investigación profunda en curso.
@@ -269,21 +368,29 @@ async def clarify_deep_research(
     if deep_researcher_graph is None:
         raise HTTPException(status_code=500, detail="Deep Researcher agent is not available.")
 
+    effective_account_id = _resolve_effective_account_id(http_request, request.account_id)
+    if effective_account_id:
+        set_active_account_id(effective_account_id)
+        try:
+            await get_llm_for_user(effective_account_id, purpose="fast")
+            await get_llm_for_user(effective_account_id, purpose="main")
+        except Exception as warm_err:
+            logger.warning(f"Error pre-warming user LLMs: {warm_err}")
     logger.info(f"Received clarification response for run_id: {request.run_id} with response: '{request.user_response}'")
 
     try:
         config = {
             "configurable": {
-                "account_id": request.account_id,
+                "account_id": effective_account_id,
                 "thread_id": request.run_id,
             }
         }
-        
+
         # El grafo se reanuda desde el último estado.
         # Añadimos la respuesta del usuario a los mensajes.
         inputs = {
             "messages": [HumanMessage(content=request.user_response)],
-            "account_id": request.account_id 
+            "account_id": effective_account_id
         }
 
         logger.info(f"Re-invoking Deep Research graph with run_id: {request.run_id} after clarification.")
@@ -323,7 +430,7 @@ async def clarify_deep_research(
                     original_query = final_state["messages"][0].content
                 from utils.deep_research_word_saver import save_deep_research_as_word
                 await save_deep_research_as_word(
-                    account_id=request.account_id,
+                    account_id=effective_account_id,
                     query=original_query,
                     report_text=final_state.get("final_report"),
                     workspace_id=None
@@ -359,123 +466,107 @@ async def export_deep_research_pdf(
     current_account_id: str = Depends(get_current_account_id)
 ):
     """
-    Genera un PDF profesional a partir de los resultados de una investigación profunda
-    utilizando un LLM para formatear el contenido y la herramienta CreatePDFTool.
+    Genera un PDF profesional con el contenido EXACTO E IDÉNTICO de la investigación profunda
+    utilizando CreatePDFTool, garantizando que todo el informe, capítulos, análisis, recomendaciones
+    y fuentes se preserven íntegramente (1:1) sin resúmenes, omisiones ni alteraciones por LLM,
+    y se guarde en la nube del usuario en Documentos.
     """
     try:
-        # 1. Obtener el LLM configurado para el usuario específico
-        llm_instance = await get_llm_for_user(current_account_id, purpose="main")
-        if not llm_instance:
-            logger.error(f"❌ No se pudo obtener LLM para account_id: {current_account_id}")
-            raise HTTPException(status_code=500, detail="Could not initialize LLM for your account. Please check your LLM configuration.")
+        report_content = request.final_report.strip() if request.final_report else ""
+        if not report_content or len(report_content) < 10:
+            raise HTTPException(status_code=400, detail="El contenido del informe de investigación está vacío.")
 
-        # Log del modelo en uso
-        model_name = getattr(llm_instance, "model_name", getattr(llm_instance, "model", "unknown"))
-        logger.info(f"🤖 Export PDF: Using LLM model '{model_name}' for account {current_account_id}")
+        title = request.title.strip() if request.title else "Informe de Investigación Profunda"
 
-        # 2. Preparar las herramientas
-        pdf_tool = CreatePDFTool()
-        
-        # 3. Configurar el LLM con la herramienta
-        # Usamos bind_tools para que el LLM sepa que puede usar esta herramienta
-        llm_with_tools = safe_bind_tools(llm_instance, [pdf_tool])
-        
-        # 4. Construir el prompt para el LLM
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", """Eres un experto en diseño y maquetación de documentos profesionales.
-Tu tarea es tomar la información de una investigación profunda y formatearla en un documento HTML elegante y bien estructurado.
-DEBES usar la herramienta 'create_pdf_tool' para generar el PDF final.
+        # Construir el documento con fidelidad 1:1, asegurando que nada sea resumido ni omitido
+        parts = []
 
-INSTRUCCIONES DE FORMATO HTML:
-- Usa etiquetas HTML semánticas (h1, h2, ul, li, p, strong).
-- El título del documento ({title}) debe ser un <h1> centrado.
-- Incluye una sección 'Resumen Ejecutivo' (h2).
-- Si hay 'Hallazgos Clave', inclúyelos en una lista o secciones claras.
-- Si hay 'Recomendaciones', úsalas para una sección de 'Próximos Pasos' o 'Recomendaciones'.
-- Al final, agrega una sección 'Fuentes Consultadas' (h2) con una lista de enlaces.
-- Usa estilos CSS en línea sutiles si es necesario, pero la herramienta ya aplica estilos modernos.
-- NO agregues etiquetas <html>, <head> o <body>, solo el contenido del cuerpo (divs, h1, etc.), ya que la herramienta agrega la estructura base.
+        # Título principal si no está ya como encabezado al inicio del reporte
+        lower_report = report_content.lower()
+        has_title_header = report_content.startswith("# ") or f"# {title.lower()}" in lower_report[:200]
+        if not has_title_header:
+            parts.append(f"# {title}\n")
 
-INSTRUCCIONES DE HERRAMIENTA:
-- DEBES llamar a 'create_pdf_tool'.
-- Argumento 'is_html': True
-- Argumento 'content': Tu código HTML generado.
-- Argumento 'title': El título del reporte.
-- Argumento 'filename': Un nombre de archivo seguro basado en el título.
-"""),
-            ("user", """Genera el PDF para este reporte:
+        # El cuerpo EXACTO e ÍNTEGRO del informe final de la investigación (fidelidad absoluta 1:1)
+        parts.append(report_content)
 
-Título: {title}
+        # Recomendaciones si fueron pasadas y no están ya en el texto del informe
+        if request.recommendations and len(request.recommendations) > 0:
+            first_rec = request.recommendations[0][:30].strip() if len(request.recommendations) > 0 else ""
+            if not first_rec or first_rec.lower() not in lower_report:
+                rec_section = "\n\n## Recomendaciones Estratégicas\n\n"
+                for r in request.recommendations:
+                    rec_section += f"- {r.strip()}\n"
+                parts.append(rec_section)
 
-Resumen del Reporte:
-{summary}
+        # Fuentes consultadas si no están ya listadas en el cuerpo del informe
+        if request.sources and len(request.sources) > 0:
+            if "fuentes consultadas" not in lower_report and "bibliografía" not in lower_report and "referencias de investigación" not in lower_report:
+                sources_section = "\n\n## Referencias y Fuentes Consultadas\n\n"
+                for idx, s in enumerate(request.sources, 1):
+                    source_id = s.get("id", idx)
+                    s_title = s.get("title") or s.get("name") or f"Fuente {source_id}"
+                    s_url = s.get("url") or s.get("link") or ""
+                    s_snippet = s.get("snippet") or s.get("content") or ""
+                    
+                    if s_url and s_url != "#":
+                        sources_section += f"**[{source_id}]** [{s_title}]({s_url})\n\n"
+                    else:
+                        sources_section += f"**[{source_id}]** {s_title}\n\n"
+                    
+                    if s_snippet:
+                        clean_snippet = s_snippet.replace("\n", " ").strip()
+                        if len(clean_snippet) > 300:
+                            clean_snippet = clean_snippet[:300] + "..."
+                        sources_section += f"> *{clean_snippet}*\n\n"
+                parts.append(sources_section)
 
-Recomendaciones:
-{recommendations}
+        # Perspectiva de Inteligencia (KAI) si está disponible y no está ya en el texto
+        if request.kai_synthesis and request.kai_synthesis.strip():
+            if request.kai_synthesis[:30].lower() not in lower_report:
+                kai_section = f"\n\n## Perspectiva de Inteligencia (KAI)\n\n> *{request.kai_synthesis.strip()}*\n"
+                parts.append(kai_section)
 
-Fuentes:
-{sources}
+        full_document = "\n\n".join(parts)
 
-Procede a generar el PDF.""")
-        ])
-        
-        # Formatear datos para el prompt
-        sources_text = "\n".join([f"- {s.get('title', 'Fuente')}: {s.get('url', '#')}" for s in request.sources])
-        recommendations_text = "\n".join([f"- {r}" for r in request.recommendations])
-        
-        logger.info(f"Invoking LLM to generate PDF for research: {request.title}")
-        
-        chain = prompt | llm_with_tools
-        
-        max_retries = 5
-        for attempt in range(max_retries):
-            try:
-                result = await chain.ainvoke({
-                    "title": request.title,
-                    "summary": request.final_report,
-                    "recommendations": recommendations_text,
-                    "sources": sources_text
-                })
-                break
-            except Exception as e:
-                error_str = f"{type(e).__name__}: {str(e)} {repr(e)}"
-                if ("MidStreamFallbackError" in error_str or "APIError" in error_str or "OpenrouterException" in error_str or "unmapped" in error_str) and attempt < max_retries - 1:
-                    wait_time = (attempt + 1) * 3
-                    logger.warning(f"LLM API Error detected in PDF export (attempt {attempt + 1}/{max_retries}): {error_str}. Retrying in {wait_time}s...")
-                    await asyncio.sleep(wait_time)
-                    continue
-                raise e
-        
-        # 5. Procesar la respuesta (buscar tool call)
-        # El resultado será un AIMessage que puede contener tool_calls
-        if hasattr(result, 'tool_calls') and result.tool_calls:
-            tool_call = result.tool_calls[0] # Tomamos la primera llamada
-            if tool_call['name'] == 'create_pdf_tool':
-                tool_args = tool_call['args']
-                logger.info("LLM decided to call create_pdf_tool. Executing...")
-                
-                # Ejecutar la herramienta
-                tool_output = await pdf_tool._arun(**tool_args)
-                
-                # create_pdf_tool devuelve un dict con 'context_for_llm' y 'sources'
-                # En 'sources' viene el PDF generado con su URL
-                
-                if tool_output and "sources" in tool_output and tool_output["sources"]:
-                    pdf_source = tool_output["sources"][0]
-                    return {
-                        "status": "success",
-                        "url": pdf_source["url"],
-                        "filename": pdf_source["metadata"].get("filename", "document.pdf")
-                    }
-                else:
-                     # Fallback: a veces la herramienta falla silenciosamente o devuelve otro formato
-                     logger.error(f"Tool executed but returned unexpected format: {tool_output}")
-                     raise HTTPException(status_code=500, detail="Tool execution failed to return a PDF URL.")
-        
-        # Si no hubo llamada a herramienta
-        logger.warning("LLM did not call the CreatePDFTool. Result content: " + str(result.content))
-        return {"status": "error", "detail": "LLM failed to generate PDF call. It might have just replied with text."}
+        # Preparar la herramienta CreatePDFTool configurada con el usuario y workspace
+        pdf_tool = CreatePDFTool(
+            account_id=current_account_id,
+            workspace_id=request.workspace_id
+        )
 
+        clean_filename = re.sub(r'[^\w\s-]', '', title).strip().replace(" ", "_")
+        if not clean_filename:
+            clean_filename = "investigacion_profunda"
+        filename = f"{clean_filename[:50]}.pdf"
+
+        logger.info(f"Generando PDF idéntico para '{title}' (longitud: {len(full_document)} caracteres)...")
+
+        tool_output = await pdf_tool._arun(
+            content=full_document,
+            is_html=False,
+            title=title,
+            filename=filename,
+            theme="modern"
+        )
+
+        if tool_output and "sources" in tool_output and tool_output["sources"]:
+            pdf_source = tool_output["sources"][0]
+            metadata = pdf_source.get("metadata", {})
+            doc_id = metadata.get("onlyoffice_document_id")
+            return {
+                "status": "success",
+                "url": pdf_source.get("url"),
+                "filename": metadata.get("filename", filename),
+                "document_id": doc_id,
+                "saved_to_documents": bool(doc_id)
+            }
+        else:
+            logger.error(f"Error generando PDF idéntico: {tool_output}")
+            raise HTTPException(status_code=500, detail="Error al generar el PDF idéntico.")
+
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error generating PDF: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error generando PDF idéntico: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error al generar el PDF: {str(e)}")

@@ -243,7 +243,23 @@ async def invoke_structured_output(
 def is_token_limit_exceeded(exception: Exception, model_name: str = None) -> bool:
     """Determine if an exception indicates a token/context limit was exceeded."""
     err_str = str(exception).lower()
-    return "maximum context length" in err_str or "context_length_exceeded" in err_str
+    token_limit_keywords = (
+        "maximum context length",
+        "context_length_exceeded",
+        "context length exceeded",
+        "too many tokens",
+        "max_tokens",
+        "token limit",
+        "tokens limit",
+        "string too long",
+        "input too long",
+        "exceeds the maximum allowed length",
+        "prompt is too long",
+        "request is too large",
+        "model's maximum context",
+        "provider returned error",
+    )
+    return any(kw in err_str for kw in token_limit_keywords)
 
 
 def remove_up_to_last_ai_message(
@@ -351,7 +367,7 @@ async def prune_messages_to_fit_token_limit(
         from langchain_core.messages import SystemMessage
         from langchain_core.prompts import ChatPromptTemplate
 
-        summarizer_llm = get_fast_llm()
+        summarizer_llm = llm or get_fast_llm()
         if not summarizer_llm:
             logger.error(
                 "❌ [LLM Utils] Fast LLM not available for summarization. Skipping summarization."

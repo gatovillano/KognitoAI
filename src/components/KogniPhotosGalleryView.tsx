@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import apiClient from '@/lib/api';
+import apiClient, { photoFileUrl } from '@/lib/api';
 import {
   Image as ImageIcon,
   Search,
@@ -74,7 +74,7 @@ const PhotoThumbnail: React.FC<PhotoThumbnailProps> = ({ photo, apiBase }) => {
   const [failed, setFailed] = useState(false);
   const src = (photo.thumbnail_path && !failed)
     ? `${apiBase}/thumbnails/${photo.thumbnail_path}`
-    : `${apiBase}/media/${photo.file_path}`;
+    : photoFileUrl(photo.id);
 
   return (
     <img
@@ -498,7 +498,7 @@ export const KogniPhotosGalleryView: React.FC = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
               {filteredAlbums.map((album) => {
                 const cover = album.cover_photo || album.photos.find(p => p.id === album.cover_photo_id) || album.photos[0];
-                const coverUrl = cover ? `${apiBase}/media/${cover.file_path}` : null;
+                const coverUrl = cover ? photoFileUrl(cover.id) : null;
 
                 return (
                   <motion.div
@@ -764,7 +764,7 @@ export const KogniPhotosGalleryView: React.FC = () => {
         <Lightbox
           open={lightboxOpen}
           close={() => setLightboxOpen(false)}
-          slides={selectedAlbum.photos.map(p => ({ src: `${apiBase}/media/${p.file_path}` }))}
+          slides={selectedAlbum.photos.map(p => ({ src: photoFileUrl(p.id) }))}
           index={lightboxIndex}
         />
       )}

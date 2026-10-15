@@ -64,14 +64,47 @@ class SkillManager:
     y carga dinámicamente las herramientas listas para ser usadas por el agente.
     """
     
-    def __init__(self, skills_dir: str = "skills"):
+    def __init__(self, skills_dir: str = "skills", global_skills_dirs: Optional[List[str]] = None):
         # Resolvemos el directorio relativo al directorio principal de KognitoAI
         current_dir = os.path.dirname(os.path.abspath(__file__))
         project_root = os.path.dirname(current_dir)
-        self.skills_dir = os.path.join(project_root, skills_dir)
-        self.user_skills_dir = os.getenv("KOGNITO_USER_SKILLS_DIR", os.path.expanduser("~/.kognito/skills"))
+        default_skills_dir = os.path.join(project_root, "skills")
+
+        if not os.path.isabs(skills_dir):
+            self.skills_dir = os.path.join(project_root, skills_dir)
+        else:
+            self.skills_dir = skills_dir
+
+        if os.getenv("KOGNITO_USER_SKILLS_DIR"):
+            self.user_skills_dir = os.getenv("KOGNITO_USER_SKILLS_DIR")
+        elif self.skills_dir == default_skills_dir:
+            self.user_skills_dir = os.path.expanduser("~/.kognito/skills")
+        else:
+            self.user_skills_dir = os.path.join(self.skills_dir, "_user_skills_mock")
+
         self.skills_module_prefix = skills_dir.replace("/", ".")
         self._loaded_tools: Dict[str, BaseTool] = {}
+
+        # Directorios de skills globales (protocolo skills.sh, gemini, claude, etc.)
+        if global_skills_dirs is not None:
+            self.global_skills_dirs = [os.path.expanduser(g) for g in global_skills_dirs if g]
+        elif self.skills_dir == default_skills_dir and not os.getenv("KOGNITO_DISABLE_GLOBAL_SKILLS"):
+            default_global = [
+                os.path.expanduser("~/.agents/skills"),
+                os.path.expanduser("~/.gemini/config/skills"),
+                os.path.expanduser("~/.config/skills"),
+                os.path.expanduser("~/.claude/skills"),
+                self.user_skills_dir,
+            ]
+            env_global = os.getenv("KOGNITO_GLOBAL_SKILLS_DIRS") or os.getenv("GLOBAL_SKILLS_DIR")
+            if env_global:
+                for p in env_global.replace(";", ":").replace(",", ":").split(":"):
+                    p = p.strip()
+                    if p and p not in default_global:
+                        default_global.append(os.path.expanduser(p))
+            self.global_skills_dirs = [d for d in default_global if d]
+        else:
+            self.global_skills_dirs = []
         
         # Shared instances
         self._graph_db = None
@@ -93,40 +126,46 @@ class SkillManager:
                 "name": "",
                 "description": content,
                 "instructions": content,
+                "content": content,
                 "metadata": {}
             }
         
-        parts = content.split("---", 2)
-        if len(parts) < 3:
+        trimmed = content[3:]
+        parts = trimmed.split("---", 1)
+        if len(parts) < 2:
             return {
                 "name": "",
                 "description": content,
                 "instructions": content,
+                "content": content,
                 "metadata": {}
             }
         
+        raw_yaml = parts[0].strip()
+        body_content = parts[1].strip()
+
         try:
-            frontmatter = yaml.safe_load(parts[1]) or {}
+            frontmatter = yaml.safe_load(raw_yaml) or {}
         except Exception as e:
             logger.warning(f"Error parsing YAML frontmatter: {e}")
             frontmatter = {}
-            
+
         if not isinstance(frontmatter, dict):
             frontmatter = {}
-            
-        description = frontmatter.get("description", "").strip()
-        instructions = frontmatter.get("instructions", "").strip()
-        body_content = parts[2].strip()
+
+        name = str(frontmatter.get("name") or "").strip()
+        description = str(frontmatter.get("description") or "").strip()
+        instructions = str(frontmatter.get("instructions") or "").strip()
         if not instructions:
             instructions = body_content
         
         if not description:
-            description = instructions[:200]
-            if len(instructions) > 200:
+            description = body_content[:200]
+            if len(body_content) > 200:
                 description += "..."
                 
         return {
-            "name": frontmatter.get("name", ""),
+            "name": name,
             "description": description,
             "instructions": instructions,
             "content": body_content,
@@ -167,71 +206,45 @@ class SkillManager:
             return parsed["description"]
         return None
 
-    async def _load_skill_markdowns(self, account_id: Optional[str] = None, workspace_name: Optional[str] = None) -> List[Dict[str, Any]]:
+    async def _load_skill_markdowns(
+        self,
+        account_id: Optional[str] = None,
+        workspace_name: Optional[str] = None,
+        force_refresh: bool = False,
+    ) -> List[Dict[str, Any]]:
         """
-        Carga todos los archivos markdown de las skills buscando en categorías nativas
-        y en los scopes correspondientes al usuario y workspace.
+        Carga todos los archivos markdown de las skills desde metadatos descubiertos.
         """
         cache_key = (account_id, workspace_name)
-        if cache_key in self._skill_md_cache_dict:
+        if force_refresh:
+            self._skill_md_cache_dict.pop(cache_key, None)
+            self._skill_md_embeddings_dict.pop(cache_key, None)
+        elif cache_key in self._skill_md_cache_dict:
             return self._skill_md_cache_dict[cache_key]
             
-        metadata = await self.get_skills_metadata(account_id, workspace_name)
+        metadata = await self.get_skills_metadata(account_id, workspace_name, force_refresh=force_refresh)
         skill_mds = []
         
-        scopes = ["user_global"]
-        if account_id:
-            scopes.append(f"user_account_{account_id}")
-        if workspace_name:
-            scopes.append(f"user_workspace_{workspace_name}")
-            
         for entry in metadata:
             skill_id = entry["id"]
+            skill_path = entry.get("path")
             try:
-                # 1. Native
-                native_path = os.path.join(self.skills_dir, skill_id)
-                if os.path.exists(native_path):
-                    md_content = self._read_markdown_content(native_path, skill_id)
+                if skill_path and os.path.exists(skill_path):
+                    md_content = self._read_markdown_content(skill_path, skill_id)
                     if md_content:
                         parsed = self.parse_skill_markdown(md_content)
-                        has_scripts = os.path.exists(os.path.join(native_path, "scripts"))
-                        skill_type = parsed.get("metadata", {}).get("type") or ("tool" if has_scripts else "procedural")
+                        has_scripts = entry.get("has_scripts", os.path.exists(os.path.join(skill_path, "scripts")))
+                        skill_type = parsed.get("metadata", {}).get("type") or entry.get("type") or ("tool" if has_scripts else "procedural")
                         skill_mds.append({
                             "id": skill_id,
-                            "name": parsed["name"] or skill_id,
-                            "description": parsed["description"],
-                            "instructions": parsed["instructions"],
-                            "markdown": parsed["instructions"],
+                            "name": parsed.get("name") or skill_id,
+                            "description": parsed.get("description") or entry.get("description", ""),
+                            "instructions": parsed.get("instructions") or md_content,
+                            "markdown": parsed.get("instructions") or md_content,
                             "type": skill_type,
-                            "has_scripts": has_scripts
+                            "has_scripts": has_scripts,
+                            "path": skill_path
                         })
-                        continue
-                
-                # 2. Scopes
-                found = False
-                for scope in scopes:
-                    for base_dir in [self.user_skills_dir, self.skills_dir]:
-                        if not base_dir: continue
-                        scope_path = os.path.join(base_dir, scope, skill_id)
-                        if os.path.exists(scope_path):
-                            md_content = self._read_markdown_content(scope_path, skill_id)
-                            if md_content:
-                                parsed = self.parse_skill_markdown(md_content)
-                                has_scripts = os.path.exists(os.path.join(scope_path, "scripts"))
-                                skill_type = parsed.get("metadata", {}).get("type") or ("tool" if has_scripts else "procedural")
-                                skill_mds.append({
-                                    "id": skill_id,
-                                    "name": parsed["name"] or skill_id,
-                                    "description": parsed["description"],
-                                    "instructions": parsed["instructions"],
-                                    "markdown": parsed["instructions"],
-                                    "type": skill_type,
-                                    "has_scripts": has_scripts
-                                })
-                                found = True
-                                break
-                    if found:
-                        break
             except Exception as e:
                 logger.warning(f"[SKILL.md loader] Ignoring missing or broken skill '{skill_id}': {e}")
                 continue
@@ -239,67 +252,115 @@ class SkillManager:
         self._skill_md_cache_dict[cache_key] = skill_mds
         return skill_mds
 
-    async def _ensure_skill_md_embeddings(self, account_id: Optional[str] = None, workspace_name: Optional[str] = None):
+    async def _ensure_skill_md_embeddings(
+        self,
+        account_id: Optional[str] = None,
+        workspace_name: Optional[str] = None,
+        force_refresh: bool = False,
+    ):
         """
         Asegura que los embeddings para los markdowns estén calculados y cacheados.
         """
         cache_key = (account_id, workspace_name)
-        if cache_key in self._skill_md_embeddings_dict:
+        if force_refresh:
+            self._skill_md_embeddings_dict.pop(cache_key, None)
+        elif cache_key in self._skill_md_embeddings_dict:
             return
             
-        skill_mds = await self._load_skill_markdowns(account_id, workspace_name)
-        texts = [s["markdown"] for s in skill_mds]
+        skill_mds = await self._load_skill_markdowns(account_id, workspace_name, force_refresh=force_refresh)
+        texts = [
+            f"Skill ID: {s['id']}\nNombre: {s['name']}\nTipo: {s.get('type', 'procedural')}\nDescripción: {s['description']}\nInstrucciones:\n{s['instructions'][:2500]}"
+            for s in skill_mds
+        ]
         if not texts:
             import numpy as _np
             self._skill_md_embeddings_dict[cache_key] = _np.zeros((0, 384), dtype=_np.float32)
             return
 
-        _, _aembed_docs = _get_embed_fns()
-        embeddings = await _aembed_docs(texts)
-        import numpy as _np2
-        self._skill_md_embeddings_dict[cache_key] = _np2.array(embeddings)
+        try:
+            _, _aembed_docs = _get_embed_fns()
+            embeddings = await _aembed_docs(texts)
+            import numpy as _np2
+            self._skill_md_embeddings_dict[cache_key] = _np2.array(embeddings)
+        except Exception as e:
+            logger.warning(f"Embedding service unavailable for skills: {e}")
+            import numpy as _np3
+            self._skill_md_embeddings_dict[cache_key] = _np3.zeros((0, 384), dtype=_np3.float32)
 
-    async def search_skills_semantic(self, query: str, top_k: int = 3, account_id: Optional[str] = None, workspace_name: Optional[str] = None, skill_type: Optional[str] = None) -> List[Dict[str, Any]]:
+    async def search_skills_semantic(
+        self,
+        query: str,
+        top_k: int = 3,
+        account_id: Optional[str] = None,
+        workspace_name: Optional[str] = None,
+        skill_type: Optional[str] = None,
+        min_similarity: float = 0.25,
+        force_refresh: bool = False,
+    ) -> List[Dict[str, Any]]:
         """
         Realiza búsqueda semántica sobre todas las skills relevantes.
         Permite filtrar opcionalmente por skill_type ('procedural' o 'tool').
+        Utiliza min_similarity para descartar skills irrelevantes y no contaminar el prompt.
+        Si el modelo de embeddings no está disponible, realiza fallback por similitud léxica estricta.
         """
-        await self._ensure_skill_md_embeddings(account_id, workspace_name)
-        skill_mds = await self._load_skill_markdowns(account_id, workspace_name)
-        
-        if skill_type:
-            skill_mds = [s for s in skill_mds if s.get("type") == skill_type]
+        if force_refresh:
+            self.clear_skill_md_cache()
 
-        if not skill_mds:
+        await self._ensure_skill_md_embeddings(account_id, workspace_name, force_refresh=force_refresh)
+        all_mds = await self._load_skill_markdowns(account_id, workspace_name, force_refresh=force_refresh)
+        
+        if not all_mds:
             return []
+
+        if skill_type:
+            skill_mds = [s for s in all_mds if s.get("type") == skill_type]
+            if not skill_mds:
+                return []
+        else:
+            skill_mds = all_mds
 
         cache_key = (account_id, workspace_name)
         embeddings = self._skill_md_embeddings_dict.get(cache_key)
         
-        if embeddings is None or embeddings.shape[0] == 0:
-            return []
+        if embeddings is None or len(embeddings) == 0:
+            query_words = set(query.lower().split())
+            scored = []
+            for s in skill_mds:
+                text = f"{s['id']} {s['name']} {s['description']} {s['instructions']}".lower()
+                score = sum(1 for w in query_words if len(w) > 2 and w in text)
+                scored.append((score, s))
+            scored.sort(key=lambda x: x[0], reverse=True)
+            matches = [s for score, s in scored if score > 0]
+            return matches[:top_k]
 
-        # Si filtramos por skill_type, re-calculamos/filtramos los índices sobre la lista resultante
-        all_mds = await self._load_skill_markdowns(account_id, workspace_name)
-        if skill_type:
-            valid_indices = [i for i, s in enumerate(all_mds) if s.get("type") == skill_type]
-            if not valid_indices:
-                return []
-            skill_mds = [all_mds[i] for i in valid_indices]
-            embeddings = embeddings[valid_indices]
-            
-        _aembed_q, _ = _get_embed_fns()
-        query_emb = await _aembed_q(query)
-        import numpy as _np
-        query_emb = _np.array(query_emb)
+        try:
+            if skill_type:
+                valid_indices = [i for i, s in enumerate(all_mds) if s.get("type") == skill_type]
+                embeddings = embeddings[valid_indices]
 
-        # Normalizar y calcular similitud coseno
-        skill_embs_norm = embeddings / (_np.linalg.norm(embeddings, axis=1, keepdims=True) + 1e-8)
-        query_emb_norm = query_emb / (_np.linalg.norm(query_emb) + 1e-8)
-        sims = _np.dot(skill_embs_norm, query_emb_norm)
+            _aembed_q, _ = _get_embed_fns()
+            query_emb = await _aembed_q(query)
+            import numpy as _np
+            query_emb = _np.array(query_emb)
 
-        top_idx = _np.argsort(sims)[::-1][:top_k]
-        return [skill_mds[i] for i in top_idx]
+            # Normalizar y calcular similitud coseno
+            skill_embs_norm = embeddings / (_np.linalg.norm(embeddings, axis=1, keepdims=True) + 1e-8)
+            query_emb_norm = query_emb / (_np.linalg.norm(query_emb) + 1e-8)
+            sims = _np.dot(skill_embs_norm, query_emb_norm)
+
+            filtered_indices = [i for i in _np.argsort(sims)[::-1] if sims[i] >= min_similarity]
+            return [skill_mds[i] for i in filtered_indices[:top_k]]
+        except Exception as e:
+            logger.warning(f"Error durante la búsqueda por embeddings de skills, usando fallback por palabras clave: {e}")
+            query_words = set(query.lower().split())
+            scored = []
+            for s in skill_mds:
+                text = f"{s['id']} {s['name']} {s['description']} {s['instructions']}".lower()
+                score = sum(1 for w in query_words if len(w) > 2 and w in text)
+                scored.append((score, s))
+            scored.sort(key=lambda x: x[0], reverse=True)
+            matches = [s for score, s in scored if score > 0]
+            return matches[:top_k]
 
     def clear_skill_md_cache(self):
         self._skill_md_cache_dict.clear()
@@ -316,28 +377,48 @@ class SkillManager:
     def _get_tool_classes_from_module(self, module) -> List[Any]:
         """
         Extrae todas las clases que heredan de BaseTool en un módulo dado,
-        y también funciones públicas estándar (run, main, execute) como herramientas ejecutables.
+        y también funciones públicas con convención de herramienta (`run`,
+        `execute`) envueltas como StructuredTool reales (instancias de BaseTool).
+
+        NOTA: `main` se excluye a propósito — es la convención de entrypoint
+        CLI (`if __name__ == "__main__": sys.exit(main())`) de scripts de
+        desarrollo/validación (p.ej. music_theory_sanity_check.py), no una
+        herramienta LLM. Envolverlo producía objetos sin `__name__` que
+        `convert_to_openai_tool` no puede convertir
+        (`'FunctionTool' object has no attribute '__name__'`).
         """
-        tools = []
+        tools: List[Any] = []
         # Clases BaseTool
         for name, obj in inspect.getmembers(module, inspect.isclass):
             if issubclass(obj, BaseTool) and obj != BaseTool and obj.__module__ == module.__name__:
                 tools.append(obj)
-        # Funciones públicas estándar
-        for fname in ("run", "main", "execute"):
-            func = getattr(module, fname, None)
-            if callable(func):
-                # Envolver la función en una clase simple para compatibilidad
-                tool_name = getattr(module, "name", module.__name__)
-                tool_desc = getattr(module, "description", func.__doc__ or "Función ejecutable expuesta por el script.")
-                class FunctionTool:
-                    name = tool_name
-                    description = tool_desc
-                    def __init__(self, *args, **kwargs):
-                        pass
-                    def __call__(self, *args, **kwargs):
-                        return func(*args, **kwargs)
-                tools.append(FunctionTool)
+        # Funciones públicas con convención de herramienta -> StructuredTool real
+        try:
+            from langchain_core.tools import StructuredTool
+        except ImportError:
+            StructuredTool = None  # type: ignore
+        if StructuredTool is not None:
+            import re as _re
+            for fname in ("run", "execute"):
+                func = getattr(module, fname, None)
+                if not callable(func) or isinstance(func, type):
+                    continue
+                try:
+                    short_module = getattr(module, "__name__", "skill").split(".")[-1]
+                    raw_name = f"{short_module}_{fname}"
+                    safe_name = _re.sub(r"[^a-zA-Z0-9_-]", "_", raw_name)[:64].strip("_") or f"skill_{fname}"
+                    tool_desc = (
+                        getattr(module, "description", None)
+                        or (getattr(func, "__doc__", None) or "").strip()
+                        or "Función ejecutable expuesta por el script."
+                    )
+                    tools.append(
+                        StructuredTool.from_function(
+                            func, name=safe_name, description=tool_desc
+                        )
+                    )
+                except Exception as e:
+                    logger.debug(f"Skipping function tool '{fname}' in {getattr(module, '__name__', '?')}: {e}")
         return tools
 
     async def _instantiate_skill(
@@ -536,58 +617,91 @@ class SkillManager:
                 
         return tool_instance
 
-    async def get_skills_metadata(self, account_id: Optional[str] = None, workspace_name: Optional[str] = None) -> List[Dict[str, str]]:
+    async def get_skills_metadata(self, account_id: Optional[str] = None, workspace_name: Optional[str] = None, force_refresh: bool = False) -> List[Dict[str, Any]]:
         """
         Escanea el directorio de skills y devuelve una lista de diccionarios con
         el nombre base de la skill y su descripción (si existe).
+        Soporta categorías nativas, scopes de usuario y directorios globales (skills.sh).
         """
+        if force_refresh:
+            self.clear_skill_md_cache()
+            importlib.invalidate_caches()
+
         metadata = []
-        if not os.path.exists(self.skills_dir):
-            return metadata
+        seen_ids = set()
 
-        # 1. Identificar categorías nativas (todos los subdirectorios excepto user_*)
-        native_categories = []
-        for item in os.listdir(self.skills_dir):
-            item_path = os.path.join(self.skills_dir, item)
-            if os.path.isdir(item_path) and not item.startswith("user_") and not item.startswith("__"):
-                native_categories.append(item)
-
-        # 2. Agregar metadatos de categorías nativas
-        for category in native_categories:
-            category_path = os.path.join(self.skills_dir, category)
-            description = self._read_markdown_description(category_path, category)
-            has_scripts = os.path.exists(os.path.join(category_path, "scripts"))
-            metadata.append({
-                "id": category,
-                "description": description or "Sin descripción disponible.",
-                "type": "tool" if has_scripts else "procedural",
-                "has_scripts": has_scripts
-            })
-
-        # 3. Ahora buscamos en user_global, user_account_*, y user_workspace_*
+        # 1. Scopes de usuario (prioridad más alta)
         scopes = ["user_global"]
         if account_id:
             scopes.append(f"user_account_{account_id}")
         if workspace_name:
             scopes.append(f"user_workspace_{workspace_name}")
 
-        for scope in scopes:
+        for scope in reversed(scopes):
             for base_dir in [self.user_skills_dir, self.skills_dir]:
                 if not base_dir or not os.path.exists(base_dir): continue
                 scope_dir = os.path.join(base_dir, scope)
                 if not os.path.exists(scope_dir): continue
                 
                 for skill_folder in os.listdir(scope_dir):
+                    if skill_folder in seen_ids or skill_folder.startswith("__"):
+                        continue
                     skill_path = os.path.join(scope_dir, skill_folder)
-                    if os.path.isdir(skill_path) and not skill_folder.startswith("__"):
+                    if os.path.isdir(skill_path):
                         description = self._read_markdown_description(skill_path, skill_folder)
-                        has_scripts = os.path.exists(os.path.join(skill_path, "scripts"))
-                        metadata.append({
-                            "id": skill_folder,
-                            "description": description or "Sin descripción disponible.",
-                            "type": "tool" if has_scripts else "procedural",
-                            "has_scripts": has_scripts
-                        })
+                        if description is not None or os.path.exists(os.path.join(skill_path, "SKILL.md")):
+                            has_scripts = os.path.exists(os.path.join(skill_path, "scripts"))
+                            seen_ids.add(skill_folder)
+                            metadata.append({
+                                "id": skill_folder,
+                                "description": description or "Sin descripción disponible.",
+                                "type": "tool" if has_scripts else "procedural",
+                                "has_scripts": has_scripts,
+                                "path": skill_path
+                            })
+
+        # 2. Categorías nativas del proyecto (./skills)
+        if os.path.exists(self.skills_dir):
+            for item in os.listdir(self.skills_dir):
+                if item in seen_ids or item.startswith("user_") or item.startswith("__"):
+                    continue
+                item_path = os.path.join(self.skills_dir, item)
+                if os.path.isdir(item_path):
+                    description = self._read_markdown_description(item_path, item)
+                    has_scripts = os.path.exists(os.path.join(item_path, "scripts"))
+                    seen_ids.add(item)
+                    metadata.append({
+                        "id": item,
+                        "description": description or "Sin descripción disponible.",
+                        "type": "tool" if has_scripts else "procedural",
+                        "has_scripts": has_scripts,
+                        "path": item_path
+                    })
+
+        # 3. Directorios de skills globales (~/.agents/skills, ~/.gemini/config/skills, etc.)
+        for g_dir in getattr(self, "global_skills_dirs", []):
+            if not g_dir or not os.path.exists(g_dir):
+                continue
+            try:
+                for item in os.listdir(g_dir):
+                    if item in seen_ids or item.startswith(".") or item.startswith("__"):
+                        continue
+                    skill_path = os.path.join(g_dir, item)
+                    if os.path.isdir(skill_path):
+                        description = self._read_markdown_description(skill_path, item)
+                        if description is not None or os.path.exists(os.path.join(skill_path, "SKILL.md")):
+                            has_scripts = os.path.exists(os.path.join(skill_path, "scripts"))
+                            seen_ids.add(item)
+                            metadata.append({
+                                "id": item,
+                                "description": description or "Sin descripción disponible.",
+                                "type": "tool" if has_scripts else "procedural",
+                                "has_scripts": has_scripts,
+                                "path": skill_path
+                            })
+            except Exception as e:
+                logger.warning(f"Error reading global skills dir '{g_dir}': {e}")
+
         return metadata
 
     async def load_skills(
@@ -749,25 +863,43 @@ class SkillManager:
                     importlib.reload(module)
                 logger.debug(f"🔄 Module reloaded: {module_path}")
             else:
-                if "-" in module_path:
-                    spec = importlib.util.spec_from_file_location(module_path, file_path)
-                    if spec is None or spec.loader is None:
-                        raise ImportError(f"Could not load spec for {file_path}")
-                    module = importlib.util.module_from_spec(spec)
-                    sys.modules[module_path] = module
-                    spec.loader.exec_module(module)
-                    logger.debug(f"🆕 Module imported from file path (kebab-case support): {module_path}")
-                else:
-                    module = importlib.import_module(module_path)
-                    logger.debug(f"🆕 Module imported for the first time: {module_path}")
+                try:
+                    if "-" in module_path:
+                        spec = importlib.util.spec_from_file_location(module_path, file_path)
+                        if spec is None or spec.loader is None:
+                            raise ImportError(f"Could not load spec for {file_path}")
+                        module = importlib.util.module_from_spec(spec)
+                        sys.modules[module_path] = module
+                        spec.loader.exec_module(module)
+                        logger.debug(f"🆕 Module imported from file path (kebab-case support): {module_path}")
+                    else:
+                        module = importlib.import_module(module_path)
+                        logger.debug(f"🆕 Module imported for the first time: {module_path}")
+                except Exception as import_err:
+                    if file_path and os.path.exists(file_path):
+                        spec = importlib.util.spec_from_file_location(module_path, file_path)
+                        if spec is not None and spec.loader is not None:
+                            module = importlib.util.module_from_spec(spec)
+                            sys.modules[module_path] = module
+                            spec.loader.exec_module(module)
+                            logger.debug(f"🆕 Module imported via file_path fallback: {file_path}")
+                        else:
+                            raise import_err
+                    else:
+                        raise import_err
                 
             tool_classes = self._get_tool_classes_from_module(module)
             
             for ToolClass in tool_classes:
-                instance = await self._instantiate_skill(
-                    ToolClass, account_id, telegram_id, thread_id, 
-                    workspace_id, workspace_name, progress_callback
-                )
+                if isinstance(ToolClass, BaseTool):
+                    # Herramienta ya instanciada (p.ej. StructuredTool creado
+                    # desde run/execute): registrar directamente sin instanciar.
+                    instance = ToolClass
+                else:
+                    instance = await self._instantiate_skill(
+                        ToolClass, account_id, telegram_id, thread_id,
+                        workspace_id, workspace_name, progress_callback
+                    )
                 
                 if instance:
                     if skill_description:

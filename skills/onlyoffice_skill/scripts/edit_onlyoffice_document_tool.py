@@ -664,7 +664,7 @@ class EditOnlyOfficeInput(BaseModel):
 class EditOnlyOfficeDocumentTool(BaseTool):
     name: str = "edit_onlyoffice_document"
     description: str = (
-        "Edita documentos de OnlyOffice (Word .docx y Excel .xlsx) con operaciones avanzadas. "
+        "[MÓDULO ONLYOFFICE DE KAI] Edita documentos de OnlyOffice (Word .docx y Excel .xlsx) con operaciones avanzadas. "
         "Soporta añadir texto/Markdown completo con formatos complejos (negrita, cursiva, "
         "bloques de código, listas numeradas/viñetas, tablas estructuradas con diseño premium y fórmulas, títulos) "
         "que se traducen automáticamente a estilos nativos premium sin dejar caracteres crudos de Markdown. "
@@ -672,7 +672,7 @@ class EditOnlyOfficeDocumentTool(BaseTool):
         "buscar/reemplazar texto, poner texto en negrita, reescribir secciones o modificar celdas de Excel. "
         "Los cambios se guardan directamente en el servidor con respaldo automático. "
         "El usuario verá los cambios al recargar el editor. "
-        "Usa esta herramienta cuando el usuario pida redactar, corregir o dar formato a su documento."
+        "Usa esta herramienta cuando el usuario pida redactar, corregir o dar formato a su documento en OnlyOffice."
     )
     args_schema: Type[BaseModel] = EditOnlyOfficeInput
 

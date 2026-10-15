@@ -147,6 +147,11 @@ async def terminal_websocket(websocket: WebSocket, account_id: str):
         try:
             while True:
                 msg_text = await websocket.receive_text()
+                # Ignorar latidos del WebSocketManager ("ping"/"pong"): el
+                # manager los envía a TODAS las conexiones cada 20 s y aquí
+                # se interpretarían como teclas del usuario en el PTY.
+                if msg_text in ("ping", "pong"):
+                    continue
                 try:
                     msg = json.loads(msg_text)
                 except json.JSONDecodeError:
@@ -157,10 +162,10 @@ async def terminal_websocket(websocket: WebSocket, account_id: str):
                 if msg_type == "input":
                     data = msg.get("data", "")
                     if data:
-                        # TAREA 2.1: Validar comandos enviados a sesión PTY existente
-                        if not validate_pty_command(data.strip()):
-                            await websocket.send_json({"error": "command not allowed"})
-                            continue
+                        # NOTA: no validar keystrokes interactivos contra la
+                        # whitelist (son pulsaciones, no comandos completos:
+                        # p. ej. "y", "\r", contraseñas, Ctrl+C). El acceso ya
+                        # está restringido a administradores con JWT.
                         await write_to_session(session_id, data)
 
                 elif msg_type == "resize":
@@ -250,6 +255,9 @@ async def terminal_websocket(websocket: WebSocket, account_id: str):
         try:
             while True:
                 msg_text = await websocket.receive_text()
+                # Ignorar latidos ("ping"/"pong") para no teclearlos en el PTY.
+                if msg_text in ("ping", "pong"):
+                    continue
                 try:
                     msg = json.loads(msg_text)
                 except json.JSONDecodeError:

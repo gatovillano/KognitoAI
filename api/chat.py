@@ -101,15 +101,7 @@ def normalize_image_url(url_or_base64: Optional[str]) -> str:
 
 
 # --- Modelos para el Chat ---
-class Source(BaseModel):
-    """Define la estructura de datos para una fuente citada."""
-
-    id: Union[int, str]
-    title: str
-    url: str
-    snippet: str
-    type: str = "web"  # "web", "document", "memory", etc.
-    metadata: Optional[Dict[str, Any]] = None
+from core.citation_models import Source
 
 
 class ChatRequest(BaseModel):
@@ -443,8 +435,8 @@ async def get_messages_for_thread(
     current_account_id: str = Depends(get_current_account_id),
     db: AsyncSession = Depends(get_db_session),
     skip: int = Query(0, ge=0, description="Número de mensajes a omitir"),
-    limit: int = Query(
-        20, ge=1, le=100, description="Número máximo de mensajes a devolver"
+    limit: Optional[int] = Query(
+        None, ge=1, description="Número máximo de mensajes a devolver. Si es None, devuelve todos los mensajes."
     ),
 ):
     try:
@@ -540,7 +532,17 @@ async def get_messages_for_thread(
         real_messages.sort(key=lambda msg: msg.created_at)
 
         total_messages = len(real_messages)
-        paginated_messages = real_messages[skip : skip + limit]
+        if limit is not None:
+            if skip > 0:
+                paginated_messages = real_messages[skip : skip + limit]
+            else:
+                paginated_messages = (
+                    real_messages[-limit:]
+                    if total_messages > limit
+                    else real_messages
+                )
+        else:
+            paginated_messages = real_messages[skip:]
 
         return PaginatedChatMessagesResponse(
             total=total_messages, messages=paginated_messages
@@ -1763,6 +1765,139 @@ async def handle_chat_form(
     return {"thread_id": thread_id, "taskId": task_id}
 
 
+INTERRUPTED_SUFFIX = "\n\n[⚠️ Respuesta interrumpida — contenido parcial guardado para conservar contexto]"
+
+
+async def _persist_interrupted_message(
+    *,
+    thread_id: str,
+    task_id: str,
+    status: str,
+    error_message: Optional[str] = None,
+    chat_message_history: Optional[Any] = None,
+    human_message_pending: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """Persiste en el historial el mensaje parcial de una tarea interrumpida.
+
+    Garantiza que:
+    1. El HumanMessage del usuario quede guardado (si aún no lo estaba).
+    2. El AIMessage parcial (texto + reasoning + trazas de tools) quede guardado,
+       aunque sea con un marcador, para que el siguiente turno tenga contexto.
+    3. Nunca lanza: los fallos de persistencia solo se loguean.
+    Devuelve {"saved_text": str, "saved_reasoning": str}.
+    """
+    from core.websocket_manager import pop_partial
+    from core.agent import sanitize_json_content
+    from langchain_core.messages import AIMessage
+
+    saved_text = ""
+    saved_reasoning = ""
+    try:
+        partial_text, partial_reasoning, tool_traces = pop_partial(task_id)
+
+        # Reconstruir historial si no existe (el error pudo ocurrir antes de init).
+        history = chat_message_history
+        if history is None:
+            try:
+                db_sync_url = get_postgres_history_connection_url(
+                    settings.database_url
+                )
+                history = PostgresChatMessageHistory(
+                    connection_string=db_sync_url,
+                    session_id=thread_id,
+                    table_name="langchain_chat_history",
+                )
+            except Exception as hist_err:
+                logger.error(
+                    f"Error creando historial de fallback para interrupción {task_id}: {hist_err}"
+                )
+                history = None
+
+        if history is not None:
+            # 1. Asegurar mensaje del usuario (evita perder el turno completo
+            # si la interrupción ocurrió antes del aadd_messages inicial).
+            if human_message_pending is not None:
+                try:
+                    existing = await history.aget_messages()
+                    has_user_turn = any(
+                        getattr(m, "type", "") == "human"
+                        and str(getattr(m, "content", ""))[:200]
+                        == str(getattr(human_message_pending, "content", ""))[:200]
+                        for m in existing[-3:]
+                    )
+                    if not has_user_turn:
+                        await history.aadd_messages([human_message_pending])
+                except Exception as hum_err:
+                    logger.warning(
+                        f"No se pudo verificar/guardar HumanMessage en interrupción: {hum_err}"
+                    )
+                    try:
+                        await history.aadd_messages([human_message_pending])
+                    except Exception:
+                        pass
+
+            # 2. Construir texto parcial con trazas de herramientas para contexto.
+            parts: List[str] = []
+            if partial_text and partial_text.strip():
+                parts.append(partial_text)
+            else:
+                # Sin tokens: dejar constancia de que el turno existió y por qué se cortó.
+                parts.append(
+                    "[Respuesta interrumpida antes de generar contenido. "
+                    "El usuario pidió algo y el agente fue detenido por "
+                    f"{'el usuario' if status == 'cancelled' else 'un error'}; "
+                    "continuar desde aquí.]"
+                )
+            if tool_traces:
+                trace_block = "\n".join(f"- {t}" for t in tool_traces[-10:])
+                parts.append(f"[Herramientas ejecutadas antes de la interrupción]\n{trace_block}")
+            if error_message and status == "error":
+                parts.append(f"[Error: {error_message[:500]}]")
+            saved_text = "\n\n".join(parts)
+            # Sufijo explícito solo si hubo contenido real (no duplica el marcador).
+            if partial_text and partial_text.strip() and INTERRUPTED_SUFFIX not in saved_text:
+                saved_text = saved_text + INTERRUPTED_SUFFIX
+            saved_reasoning = partial_reasoning or ""
+
+            final_kwargs: Dict[str, Any] = {"status": status}
+            if saved_reasoning:
+                final_kwargs["reasoning"] = saved_reasoning
+            content_parts = []
+            if saved_reasoning:
+                content_parts.append({"type": "reasoning", "content": saved_reasoning})
+            if saved_text:
+                content_parts.append({"type": "text", "content": saved_text})
+            if content_parts:
+                final_kwargs["content_parts"] = content_parts
+
+            ai_msg = AIMessage(
+                content=sanitize_json_content(saved_text),
+                additional_kwargs=sanitize_json_content(final_kwargs),
+            )
+            await history.aadd_messages([ai_msg])
+            logger.info(
+                f"Mensaje parcial persistido. thread_id={thread_id} task_id={task_id} "
+                f"status={status} chars={len(saved_text)}"
+            )
+    except Exception as save_err:
+        logger.error(f"Error salvando mensaje parcial ({status}): {save_err}", exc_info=True)
+    return {"saved_text": saved_text, "saved_reasoning": saved_reasoning}
+
+
+async def _mark_chat_task_status(task_id: str, status: str) -> None:
+    """Actualiza el estado del ChatTask en DB sin romper el flujo ante fallos."""
+    try:
+        async with SessionLocal() as db:
+            await db.execute(
+                update(ChatTask)
+                .where(ChatTask.id == uuid.UUID(task_id))
+                .values(status=status, cancelled=(status == "cancelled"))
+            )
+            await db.commit()
+    except Exception as e:
+        logger.warning(f"No se pudo actualizar estado de ChatTask {task_id}: {e}")
+
+
 async def create_and_run_agent_streaming(
     account_id: str,
     thread_id: str,
@@ -2155,6 +2290,14 @@ async def create_and_run_agent_streaming(
         if root_pty_session:
             additional_kwargs["pty_session"] = root_pty_session
 
+        final_sources = (
+            final_ai_message.additional_kwargs.get("sources")
+            or final_node_output.get("sources")
+            or []
+        )
+        if final_sources:
+            additional_kwargs["sources"] = final_sources
+
         # Sanitizar el contenido del mensaje antes de guardarlo
         sanitized_additional_kwargs = sanitize_json_content(additional_kwargs)
         sanitized_ai_message = AIMessage(
@@ -2198,15 +2341,11 @@ async def create_and_run_agent_streaming(
             _asyncio.create_task(force_update_thread_title(thread_id))
 
         # --- Lógica de Extracción de Fuentes Finales ---
-        # Las fuentes ya deberían estar correctamente priorizadas y procesadas en el AIMessage final
-        # por la lógica en core/agent.py (específicamente en tool_node y call_model_node).
-        # Aquí, simplemente extraemos las fuentes del AIMessage final.
-        final_sources = final_ai_message.additional_kwargs.get("sources", [])
         final_reasoning = final_ai_message.additional_kwargs.get("reasoning", "")
         final_model_name = final_ai_message.additional_kwargs.get("model_name")
 
         logger.info(
-            f"DEBUG (create_and_run_agent_streaming): Fuentes finales extraídas del AIMessage: {final_sources}"
+            f"DEBUG (create_and_run_agent_streaming): Fuentes finales extraídas del AIMessage: {len(final_sources)} fuentes"
         )
 
         await send_personal_message(
@@ -2222,85 +2361,109 @@ async def create_and_run_agent_streaming(
             },
             connection_type=conn_type,
         )
+        await _mark_chat_task_status(task_id, "completed")
 
     except asyncio.CancelledError:
         logger.info(
             f"Chat task {task_id} cancelled by user. Guardando mensaje parcial."
         )
+        _hist = locals().get("chat_message_history")
+        _human = locals().get("sanitized_human_message")
+        _tgt = locals().get("target_account_id", account_id)
+        _conn = locals().get("conn_type")
+        saved = await _persist_interrupted_message(
+            thread_id=thread_id,
+            task_id=task_id,
+            status="cancelled",
+            chat_message_history=_hist,
+            human_message_pending=_human,
+        )
+        await _mark_chat_task_status(task_id, "cancelled")
+        # Avisar al frontend con el parcial para que lo renderice en vez de descartarlo.
         try:
-            from core.websocket_manager import (
-                partial_task_messages,
-                partial_task_reasoning,
+            await send_personal_message(
+                _tgt,
+                {
+                    "type": "stream_end",
+                    "thread_id": thread_id,
+                    "taskId": task_id,
+                    "text": saved.get("saved_text", ""),
+                    "reasoning": saved.get("saved_reasoning", ""),
+                    "sources": [],
+                    "interrupted": True,
+                    "status": "cancelled",
+                },
+                connection_type=_conn,
             )
-            from core.agent import sanitize_json_content
-            from langchain_core.messages import AIMessage
-
-            partial_text = partial_task_messages.pop(task_id, "")
-            partial_reasoning = partial_task_reasoning.pop(task_id, "")
-
-            if partial_text or partial_reasoning:
-                final_kwargs = {"status": "cancelled"}
-                if partial_reasoning:
-                    final_kwargs["reasoning"] = partial_reasoning
-
-                sanitized_ai_message = AIMessage(
-                    content=sanitize_json_content(partial_text),
-                    additional_kwargs=sanitize_json_content(final_kwargs),
-                )
-                if "chat_message_history" in locals() and chat_message_history:
-                    await chat_message_history.aadd_messages([sanitized_ai_message])
-        except Exception as save_err:
-            logger.error(f"Error salvando mensaje parcial: {save_err}")
+        except Exception as notify_err:
+            logger.warning(f"No se pudo notificar stream_end interrumpido: {notify_err}")
 
         raise  # Re-raise to ensure task is marked as cancelled
     except Exception as e:
         logger.error(f"Error en streaming agent LangGraph: {e}", exc_info=True)
-        try:
-            from core.websocket_manager import (
-                partial_task_messages,
-                partial_task_reasoning,
-            )
-            from core.agent import sanitize_json_content
-            from langchain_core.messages import AIMessage
-
-            partial_text = partial_task_messages.pop(task_id, "")
-            partial_reasoning = partial_task_reasoning.pop(task_id, "")
-
-            if partial_text or partial_reasoning:
-                final_kwargs = {"status": "error"}
-                if partial_reasoning:
-                    final_kwargs["reasoning"] = partial_reasoning
-
-                sanitized_ai_message = AIMessage(
-                    content=sanitize_json_content(partial_text),
-                    additional_kwargs=sanitize_json_content(final_kwargs),
-                )
-                if "chat_message_history" in locals() and chat_message_history:
-                    await chat_message_history.aadd_messages([sanitized_ai_message])
-        except Exception as save_err:
-            logger.error(f"Error salvando mensaje parcial tras excepcion: {save_err}")
+        _hist = locals().get("chat_message_history")
+        _human = locals().get("sanitized_human_message")
+        _tgt = locals().get("target_account_id", account_id)
+        _conn = locals().get("conn_type")
+        saved = await _persist_interrupted_message(
+            thread_id=thread_id,
+            task_id=task_id,
+            status="error",
+            error_message=str(e),
+            chat_message_history=_hist,
+            human_message_pending=_human,
+        )
+        await _mark_chat_task_status(task_id, "failed")
 
         await send_personal_message(
-            target_account_id,
+            _tgt,
             {
                 "type": "error",
                 "thread_id": thread_id,
                 "taskId": task_id,
                 "message": str(e),
+                # Incluir el parcial para que el frontend lo conserve y el
+                # siguiente turno tenga contexto aunque haya fallado.
+                "partial_text": saved.get("saved_text", ""),
+                "partial_reasoning": saved.get("saved_reasoning", ""),
+                "interrupted": True,
             },
-            connection_type=conn_type,
+            connection_type=_conn,
         )
 
 
 @router.post("/tasks/{task_id}/cancel")
 async def cancel_chat_task(
-    task_id: str, current_account_id: str = Depends(get_current_account_id)
+    task_id: str,
+    current_account_id: str = Depends(get_current_account_id),
+    db: AsyncSession = Depends(get_db_session),
 ):
     """
     Cancela una tarea de chat en ejecución.
+    Marca el flag en DB (para workers en otro proceso) y cancela la
+    tarea asyncio local si existe. El parcial ya acumulado se persiste
+    en el historial vía _persist_interrupted_message.
     """
+    # 1. Marcar cancelación en DB aunque la tarea no esté en este proceso.
+    try:
+        await db.execute(
+            update(ChatTask)
+            .where(ChatTask.id == uuid.UUID(task_id))
+            .values(cancelled=True, status="cancelled")
+        )
+        await db.commit()
+    except Exception as e:
+        logger.warning(f"No se pudo marcar ChatTask {task_id} como cancelada: {e}")
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+
     if task_id not in active_chat_tasks:
-        raise HTTPException(status_code=404, detail="Task not found")
+        # La tarea puede estar en otro worker; el flag DB la detendrá en el
+        # próximo chequeo de cancelación. Se devuelve 202, no 404, para que el
+        # frontend no lo trate como error.
+        return {"status": "cancellation_requested", "task_id": task_id}
 
     task_info = active_chat_tasks[task_id]
     if task_info["account_id"] != current_account_id:

@@ -56,6 +56,7 @@ export const LLM_PROVIDERS = [
   { id: 'mistral', name: 'Mistral AI', envKey: 'MISTRAL_API_KEY' },
   { id: 'kilocode', name: '🚀 Kilocode Gateway', envKey: 'KILOCODE_API_KEY' },
   { id: 'nvidia', name: '🟢 NVIDIA AI Catalog', envKey: 'NVIDIA_API_KEY' },
+  { id: 'inceptionlabs', name: '🔮 Inception Labs', envKey: 'INCEPTIONLABS_API_KEY' },
 ];
 
 export const DEFAULT_MODELS_BY_PROVIDER: Record<string, string[]> = {
@@ -81,6 +82,7 @@ export const DEFAULT_MODELS_BY_PROVIDER: Record<string, string[]> = {
     'nvidia/deepseek-ai/deepseek-r1',
     'nvidia/qwen/qwen2.5-72b-instruct',
   ],
+  inceptionlabs: [],
 };
 
 type ModelType = 'main' | 'fast' | 'vision';

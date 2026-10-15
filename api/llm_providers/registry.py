@@ -17,6 +17,8 @@ from .azure_provider import AzureProvider
 from .kilocode_provider import KilocodeProvider
 from .nvidia_provider import NvidiaProvider
 from .huggingface_provider import HuggingFaceProvider
+from .inceptionlabs_provider import InceptionLabsProvider
+from .antigravity_provider import AntigravityProvider
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +28,9 @@ class ProviderRegistry:
 
     def __init__(self):
         self._providers: Dict[str, LLMProviderStrategy] = {
+            "antigravity": AntigravityProvider(),
+            "google_antigravity": AntigravityProvider(),
+            "google-antigravity": AntigravityProvider(),
             "openrouter": OpenRouterProvider(),
             "openai": OpenAIProvider(),
             "anthropic": AnthropicProvider(),
@@ -44,6 +49,7 @@ class ProviderRegistry:
             "nvidia": NvidiaProvider(),
             "huggingface": HuggingFaceProvider(),
             "hugging-face": HuggingFaceProvider(),
+            "inceptionlabs": InceptionLabsProvider(),
             # Alias para compatibilidad con llamadas existentes
             "google": GeminiProvider(),
             "google_ai_studio": GeminiProvider(),

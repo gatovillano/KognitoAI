@@ -389,11 +389,11 @@ async def get_unprocessed_memories_count(account_id: str) -> int:
     async with DBSession(SessionLocal) as db:
         query = text("""
             SELECT COUNT(*) FROM langchain_pg_embedding
-            WHERE account_id = :account_id 
+            WHERE (account_id = CAST(:account_id AS uuid) OR cmetadata->>'account_id' = CAST(:account_id AS text))
             AND (is_graph_processed = false OR is_graph_processed IS NULL)
             AND cmetadata->>'type' IN ('user_memory', 'user_memory_proactive_llm', 'agent_memory', 'chat_summary')
         """)
-        result = await db.execute(query, {"account_id": account_id})
+        result = await db.execute(query, {"account_id": str(account_id)})
         return result.scalar_one_or_none() or 0
 
 async def get_unprocessed_memories(account_id: str, limit: int) -> List[Dict[str, Any]]:
@@ -401,13 +401,13 @@ async def get_unprocessed_memories(account_id: str, limit: int) -> List[Dict[str
     async with DBSession(SessionLocal) as db:
         query = text("""
             SELECT id, document, cmetadata FROM langchain_pg_embedding
-            WHERE account_id = :account_id 
+            WHERE (account_id = CAST(:account_id AS uuid) OR cmetadata->>'account_id' = CAST(:account_id AS text))
             AND (is_graph_processed = false OR is_graph_processed IS NULL)
             AND cmetadata->>'type' IN ('user_memory', 'user_memory_proactive_llm', 'agent_memory', 'chat_summary')
             ORDER BY cmetadata->>'created_at' ASC
             LIMIT :limit
         """)
-        result = await db.execute(query, {"account_id": account_id, "limit": limit})
+        result = await db.execute(query, {"account_id": str(account_id), "limit": limit})
         rows = result.mappings().all()
         return [dict(row) for row in rows]
 
@@ -421,13 +421,13 @@ async def reset_memories_processed_flag(account_id: str) -> int:
         query = text("""
             UPDATE langchain_pg_embedding
             SET is_graph_processed = false
-            WHERE account_id = :account_id
+            WHERE (account_id = CAST(:account_id AS uuid) OR cmetadata->>'account_id' = CAST(:account_id AS text))
               AND cmetadata->>'type' IN (
                 'user_memory', 'user_memory_proactive_llm',
                 'agent_memory', 'chat_summary'
               )
         """)
-        result = await db.execute(query, {"account_id": account_id})
+        result = await db.execute(query, {"account_id": str(account_id)})
         await db.commit()
         return result.rowcount
 

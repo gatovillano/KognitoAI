@@ -44,11 +44,26 @@ export const NodeDetailsSidebar: React.FC<NodeDetailsSidebarProps> = ({
         }
     };
 
+    const getNodeTitle = () => {
+        const properties = node.properties || {};
+        // Para citas antropológicas, 'name' contiene la cita textual completa del corpus,
+        // mientras que 'description' contiene la reseña de la cita en el marco de la solicitud.
+        // Mostramos la reseña en el título y la cita textual en el bloque de cita.
+        if (node.type === 'ANTHROPOLOGICAL_QUOTE') {
+            return properties.description || properties.code_explanation || properties.name || node.label || 'Cita Antropológica';
+        }
+        if (node.type === 'CONCEPTUAL_QUOTE' && properties.description && properties.description !== properties.name) {
+            return properties.description;
+        }
+        return properties.name || properties.title || node.label || 'Detalles del Nodo';
+    };
+
     const renderNodeDetails = () => {
         const properties = node.properties || {};
 
         switch (node.type) {
             case 'CONCEPTUAL_QUOTE':
+                const conceptualQuoteText = properties.name || properties.full_text || properties.text || properties.description || node.label || 'No hay cita conceptual disponible.';
                 return (
                     <div className="space-y-4">
                         <div className="flex items-center justify-between mb-2">
@@ -56,23 +71,22 @@ export const NodeDetailsSidebar: React.FC<NodeDetailsSidebarProps> = ({
                                 <FileText className="h-4 w-4" />
                                 Cita Conceptual
                             </h4>
-                            {(properties.full_text || properties.description || properties.text || node.label) && (
+                            {conceptualQuoteText && (
                                 <Button
                                     variant="ghost"
                                     size="sm"
                                     className="h-8 w-8 p-0 rounded-full hover:bg-primary/10 transition-all"
                                     onClick={() => {
-                                        const text = properties.full_text || properties.description || properties.text || node.label;
-                                        if (isTtsPlaying && activeText === text) {
+                                        if (isTtsPlaying && activeText === conceptualQuoteText) {
                                             stop();
                                         } else {
-                                            play(text);
+                                            play(conceptualQuoteText);
                                         }
                                     }}
                                 >
-                                    {isTtsLoading && activeText === (properties.full_text || properties.description || properties.text || node.label) ? (
+                                    {isTtsLoading && activeText === conceptualQuoteText ? (
                                         <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                                    ) : isTtsPlaying && activeText === (properties.full_text || properties.description || properties.text || node.label) ? (
+                                    ) : isTtsPlaying && activeText === conceptualQuoteText ? (
                                         <Square className="h-4 w-4 text-primary fill-primary" />
                                     ) : (
                                         <Volume2 className="h-4 w-4 text-primary" />
@@ -82,7 +96,7 @@ export const NodeDetailsSidebar: React.FC<NodeDetailsSidebarProps> = ({
                         </div>
                         <div className="bg-muted p-3 rounded-md text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
                             <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                {properties.full_text || properties.description || properties.text || node.label || 'No hay cita conceptual disponible.'}
+                                {conceptualQuoteText}
                             </ReactMarkdown>
                         </div>
 
@@ -264,16 +278,41 @@ export const NodeDetailsSidebar: React.FC<NodeDetailsSidebarProps> = ({
                 );
 
             case 'ANTHROPOLOGICAL_QUOTE':
+                const anthroQuoteText = properties.name || properties.full_text || properties.text || node.label || '';
                 return (
                     <div className="space-y-4">
                         <div>
-                            <h4 className="font-semibold text-sm mb-2 flex items-center gap-2 text-amber-600 dark:text-amber-400">
-                                <FileText className="h-4 w-4" />
-                                Cita Etnográfica (Corpus)
-                            </h4>
+                            <div className="flex items-center justify-between mb-2">
+                                <h4 className="font-semibold text-sm flex items-center gap-2 text-amber-600 dark:text-amber-400">
+                                    <FileText className="h-4 w-4" />
+                                    Cita Conceptual (Corpus)
+                                </h4>
+                                {anthroQuoteText && (
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-8 w-8 p-0 rounded-full hover:bg-primary/10 transition-all"
+                                        onClick={() => {
+                                            if (isTtsPlaying && activeText === anthroQuoteText) {
+                                                stop();
+                                            } else {
+                                                play(anthroQuoteText);
+                                            }
+                                        }}
+                                    >
+                                        {isTtsLoading && activeText === anthroQuoteText ? (
+                                            <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                                        ) : isTtsPlaying && activeText === anthroQuoteText ? (
+                                            <Square className="h-4 w-4 text-primary fill-primary" />
+                                        ) : (
+                                            <Volume2 className="h-4 w-4 text-primary" />
+                                        )}
+                                    </Button>
+                                )}
+                            </div>
                             <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900/50 p-3 rounded-md text-sm italic leading-relaxed">
                                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                    {properties.full_text || properties.description || node.label}
+                                    {anthroQuoteText || 'No hay cita textual disponible.'}
                                 </ReactMarkdown>
                             </div>
                         </div>
@@ -288,7 +327,7 @@ export const NodeDetailsSidebar: React.FC<NodeDetailsSidebarProps> = ({
                             </div>
                         )}
 
-                        {properties.code_explanation && (
+                        {properties.code_explanation && properties.code_explanation !== properties.description && (
                             <div>
                                 <h4 className="font-semibold text-sm mb-1">Justificación del Código</h4>
                                 <p className="text-xs text-muted-foreground">{properties.code_explanation}</p>
@@ -469,7 +508,7 @@ export const NodeDetailsSidebar: React.FC<NodeDetailsSidebarProps> = ({
                             <div className="min-w-0"> {/* Añadido para evitar truncamiento del título */}
                                 <h3 className="font-semibold text-base mb-2 max-w-full">
                                     <span style={{ wordBreak: 'break-word', whiteSpace: 'normal' }}>
-                                        {node.properties?.name || node.properties?.title || node.label}
+                                        {getNodeTitle()}
                                     </span>
                                 </h3>
                                 <Badge variant="secondary" className="mb-4">
@@ -512,17 +551,10 @@ export const NodeDetailsSidebar: React.FC<NodeDetailsSidebarProps> = ({
                                         <h4 className="font-semibold text-sm mb-3">Todas las Propiedades</h4>
                                         <div className="space-y-3">
                                             {Object.entries(node.properties).map(([key, value]) => {
-                                                // Excluir propiedades internas que no son relevantes para el usuario
-                                                // Mostrar todas las propiedades por defecto, a menos que sean propiedades internas del nodo que se manejan aparte.
-                                                // Excluir propiedades internas y 'description' que ya se muestran de forma prominente.
-                                                // Excluir solo las propiedades básicas que ya se muestran de forma prominente.
-                                                // Esto asegura que otras propiedades como 'category' y 'categories' sean visibles.
-                                                // La propiedad 'description' se mostrará aquí aunque también aparezca arriba,
-                                                // para cumplir con la solicitud de mostrar "absolutamente todas" las propiedades
-                                                // si no está específicamente excluida por el usuario.
-                                                // Excluir solo las propiedades básicas que ya se muestran de forma prominente,
-                                                // incluyendo 'description' para evitar duplicidad según el feedback del usuario.
                                                 if (['id', 'type', 'label', 'description'].includes(key)) {
+                                                    return null;
+                                                }
+                                                if ((node.type === 'ANTHROPOLOGICAL_QUOTE' || node.type === 'CONCEPTUAL_QUOTE') && ['name', 'full_text', 'text'].includes(key)) {
                                                     return null;
                                                 }
 

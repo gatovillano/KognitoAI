@@ -11,6 +11,56 @@ logger = logging.getLogger(__name__)
 
 partial_task_messages: Dict[str, str] = {}
 partial_task_reasoning: Dict[str, str] = {}
+# Trazas de herramientas ejecutadas por task_id (para preservar workflow en interrupciones)
+partial_task_tools: Dict[str, List[str]] = {}
+
+
+def track_partial_chunk(
+    task_id: Optional[str],
+    text_delta: str = "",
+    reasoning_delta: str = "",
+    tool_trace: Optional[str] = None,
+) -> None:
+    """Acumula de forma síncrona el contenido parcial de una tarea en curso.
+
+    Debe llamarse desde el bucle de streaming (core/agent.py) en cada chunk,
+    SIN pasar por create_task: las notificaciones WS usan asyncio.create_task
+    y se pierden al cancelar la tarea. El dict en cambio sobrevive a la
+    cancelación y api/chat.py lo lee en los handlers de CancelledError/Exception.
+    """
+    if not task_id:
+        return
+    try:
+        if text_delta:
+            partial_task_messages[task_id] = (
+                partial_task_messages.get(task_id, "") + text_delta
+            )
+        elif task_id not in partial_task_messages:
+            partial_task_messages.setdefault(task_id, "")
+        if reasoning_delta:
+            partial_task_reasoning[task_id] = (
+                partial_task_reasoning.get(task_id, "") + reasoning_delta
+            )
+        elif task_id not in partial_task_reasoning:
+            partial_task_reasoning.setdefault(task_id, "")
+        if tool_trace:
+            partial_task_tools.setdefault(task_id, []).append(tool_trace)
+    except Exception:
+        # Nunca romper el streaming por un fallo de tracking
+        pass
+
+
+def pop_partial(task_id: Optional[str]) -> tuple:
+    """Devuelve y limpia (texto, reasoning, tool_traces) acumulados de una tarea."""
+    if not task_id:
+        return "", "", []
+    try:
+        text = partial_task_messages.pop(task_id, "")
+        reasoning = partial_task_reasoning.pop(task_id, "")
+        tools = partial_task_tools.pop(task_id, [])
+        return text, reasoning, tools
+    except Exception:
+        return "", "", []
 
 class WebSocketManager:
     def __init__(self):

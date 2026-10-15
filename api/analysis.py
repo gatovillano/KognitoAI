@@ -222,26 +222,36 @@ async def get_saved_analyses_endpoint(
         ]
         
         # 2. Construimos la condición del WHERE
-        #    Queremos análisis cuyo 'file_name' sea uno de los archivos de la colección,
-        #    O que sea el análisis de la propia colección, O que sea un análisis semántico.
+        #    Queremos análisis cuyo 'file_name' sea uno de los archivos de la colección (o análisis personalizados de esos archivos),
+        #    O que sea el análisis de la propia colección, O análisis semántico, personalizado o de grafo de la colección.
         collection_reference_name = f"Colección: {req.topic}"
         semantic_reference_name = f"Resumen Semántico: {req.topic}"
-        custom_reference_name = f"Análisis Personalizado: Colección: {req.topic}"
+        semantic_analysis_name = f"Análisis Semántico: {req.topic}"
+        custom_collection_name = f"Análisis Personalizado: Colección: {req.topic}"
+        custom_topic_name = f"Análisis Personalizado: {req.topic}"
         graph_reference_name = f"Análisis de Grafo de Conocimiento: {req.topic}"
+        graph_simple_name = f"Grafo de Conocimiento: {req.topic}"
+
+        custom_doc_names = [f"Análisis Personalizado: {f}" for f in files_in_topic]
 
         # Usamos or_() para combinar las condiciones
         conditions = [
             AnalysisTask.file_name.in_(files_in_topic),
             AnalysisTask.file_name == collection_reference_name,
             AnalysisTask.file_name == semantic_reference_name,
-            AnalysisTask.file_name == custom_reference_name,
+            AnalysisTask.file_name == semantic_analysis_name,
+            AnalysisTask.file_name == custom_collection_name,
+            AnalysisTask.file_name == custom_topic_name,
             AnalysisTask.file_name == graph_reference_name,
-            AnalysisTask.file_name == req.topic  # Para compatibilidad con versiones anteriores o simplificadas
+            AnalysisTask.file_name == graph_simple_name,
+            AnalysisTask.file_name == req.topic,
+            and_(AnalysisTask.analysis_type == 'collection', AnalysisTask.file_name.ilike(f"%{req.topic}%"))
         ]
+        if custom_doc_names:
+            conditions.append(AnalysisTask.file_name.in_(custom_doc_names))
 
         final_stmt = base_stmt.where(or_(*conditions))
 
-        # No filtrar por workspace_id en la consulta SQL, lo haremos después
     elif req.all:
         # Si se pide 'all', no aplicamos más filtros.
         final_stmt = base_stmt
@@ -270,25 +280,36 @@ async def get_saved_analyses_endpoint(
                 elif 'workspace_id' in analysis.result_payload:
                     analysis_workspace_id = analysis.result_payload['workspace_id']
 
-            # Aplicar filtro de workspace_id
+            # Aplicar filtro de workspace_id:
+            # Si se especifica req.workspace_id:
+            # - Incluir si coincide explícitamente (analysis_workspace_id == req.workspace_id)
+            # - Incluir si analysis_workspace_id es None (análisis sin workspace asignado o previos, que pertenecen a los documentos/colección ya filtrados para ese workspace)
+            # - Solo excluir si tiene un workspace_id explícito DISTINTO al solicitado.
+            # Si req.workspace_id es None (vista global de la colección):
+            # - Incluir todos los análisis asociados a esta colección y sus documentos.
             if req.workspace_id:
-                # Para workspaces específicos, incluir solo análisis de ese workspace
-                if analysis_workspace_id == req.workspace_id:
+                if analysis_workspace_id == req.workspace_id or analysis_workspace_id is None:
                     filtered_analyses.append(analysis)
-            elif analysis_workspace_id is None: # Si req.workspace_id es None, incluir solo análisis sin workspace_id
+            else:
                 filtered_analyses.append(analysis)
-            # Si req.workspace_id está presente pero analysis_workspace_id no coincide, no se añade.
  
         return filtered_analyses[:50]  # Limitar a 50 después del filtrado
     else:
         # Si req.topic no está especificado, filtramos por workspace_id si se proporciona,
         # o solo por análisis sin workspace_id si req.workspace_id es None.
         if req.workspace_id:
-            return [a for a in all_analyses if a.result_payload and a.result_payload.get('workspace_id') == req.workspace_id][:50]
+            return [
+                a for a in all_analyses 
+                if a.result_payload and (
+                    a.result_payload.get('workspace_id') == req.workspace_id or 
+                    a.result_payload.get('analysis_metadata', {}).get('workspace_id') == req.workspace_id or
+                    (a.result_payload.get('workspace_id') is None and a.result_payload.get('analysis_metadata', {}).get('workspace_id') is None)
+                )
+            ][:50]
         elif req.workspace_id is None:
-            return [a for a in all_analyses if not a.result_payload or a.result_payload.get('workspace_id') is None][:50]
+            return [a for a in all_analyses if not a.result_payload or (a.result_payload.get('workspace_id') is None and a.result_payload.get('analysis_metadata', {}).get('workspace_id') is None)][:50]
         else:
-            return all_analyses[:50] # Esto no debería ocurrir si req.workspace_id es Optional[str]
+            return all_analyses[:50]
 
 class DeleteAnalysisRequest(BaseModel):
     task_id: uuid.UUID
@@ -770,8 +791,9 @@ async def start_notes_collection_analysis_endpoint(
 
 class AnalyzeDocumentRequest(BaseModel):
     file_name: str
+    workspace_id: Optional[str] = None
 
-async def run_document_analysis_and_save(task_id: str, account_id: str, file_name: str):
+async def run_document_analysis_and_save(task_id: str, account_id: str, file_name: str, workspace_id: Optional[str] = None):
     """Función pesada que se ejecuta en segundo plano."""
     async with DBSession(SessionLocal) as db_session: # type: ignore
         try:
@@ -931,11 +953,14 @@ async def run_document_analysis_and_save(task_id: str, account_id: str, file_nam
 
             # Agregar metadata de herramienta utilizada
             result_payload["tool_used"] = "advanced_text_analyzer.py"
+            if workspace_id:
+                result_payload["workspace_id"] = workspace_id
             result_payload["analysis_metadata"] = {
                 "tool_used": "advanced_text_analyzer.py",
                 "analysis_type": "document",
                 "file_name": file_name,
                 "title": document_title,
+                "workspace_id": workspace_id,
                 "created_at": datetime.now().isoformat()
             }
 
@@ -1008,7 +1033,7 @@ async def start_document_analysis_endpoint(
     await db.commit()
     await db.refresh(new_task)
     
-    background_tasks.add_task(run_document_analysis_and_save, str(new_task.id), current_account_id, req.file_name)
+    background_tasks.add_task(run_document_analysis_and_save, str(new_task.id), current_account_id, req.file_name, req.workspace_id)
     
     return {"task_id": str(new_task.id)}
 
@@ -1292,10 +1317,13 @@ async def run_collection_analysis_and_save(task_id: str, account_id: str, topic:
 
             result_payload = analysis_result.model_dump()
             result_payload["tool_used"] = "advanced_text_analyzer.py"
+            if workspace_id:
+                result_payload["workspace_id"] = workspace_id
             result_payload["analysis_metadata"] = {
                 "tool_used": "advanced_text_analyzer.py",
                 "analysis_type": "collection",
                 "topic": topic,
+                "workspace_id": workspace_id,
                 "documents_count": len(all_docs_in_topic),
                 "created_at": datetime.now().isoformat()
             }
@@ -1965,6 +1993,7 @@ async def run_semantic_summary_analysis(task_id: str, account_id: str, topic: st
                     "temas_identificados": len(semantic_analysis.cross_cutting_themes)
                 },
                 "tool_used": "semantic_summary_analysis",
+                **({"workspace_id": workspace_id} if workspace_id else {}),
                 "analysis_metadata": {
                     "tool_used": "semantic_summary_analysis",
                     "analysis_type": "semantic_summary",
@@ -2141,6 +2170,7 @@ class CustomAnalysisRequest(BaseModel):
     expected_result: Optional[str] = None
     extension: str  # 'brief', 'standard', 'detailed'
     fields: List[dict]  # Lista de campos con name y description
+    workspace_id: Optional[str] = None
 
 class GetAllAnalysisRequest(BaseModel):
     limit: Optional[int] = 20
@@ -2622,7 +2652,8 @@ async def start_custom_analysis_endpoint(
         req.objective,
         req.expected_result,
         req.extension,
-        req.fields
+        req.fields,
+        req.workspace_id
     )
 
     return {"task_id": str(new_task.id)}
@@ -3412,7 +3443,8 @@ async def run_custom_analysis_and_save(
     objective: str,
     expected_result: Optional[str],
     extension: str,
-    fields: List[dict]
+    fields: List[dict],
+    workspace_id: Optional[str] = None
 ):
     """
     Función en segundo plano para realizar análisis personalizado.
@@ -3506,10 +3538,12 @@ Realiza un análisis personalizado del siguiente documento con estas especificac
                     "fields": fields
                 },
                 "tool_used": "custom_analysis_tool",
+                **({"workspace_id": workspace_id} if workspace_id else {}),
                 "analysis_metadata": {
                     "tool_used": "custom_analysis_tool",
                     "analysis_type": "custom",
                     "file_name": file_name,
+                    "workspace_id": workspace_id,
                     "fields_count": len(fields),
                     "extension": extension,
                     "created_at": datetime.now().isoformat()

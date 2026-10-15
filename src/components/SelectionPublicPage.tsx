@@ -39,11 +39,14 @@ interface PhotoThumbnailProps {
   photo: PhotoResponse;
 }
 
-const PhotoThumbnail: React.FC<PhotoThumbnailProps> = ({ photo }) => {
+export const selectionPhotoFileUrl = (token: string, photoId: string) =>
+  `${process.env.NEXT_PUBLIC_API_URL || ''}/api/galleries/share/${token}/photos/${photoId}/file`;
+
+const PhotoThumbnail: React.FC<PhotoThumbnailProps & { token: string }> = ({ photo, token }) => {
   const [failed, setFailed] = useState(false);
   const src = (photo.thumbnail_path && !failed)
     ? `/thumbnails/${photo.thumbnail_path}`
-    : `/media/${photo.file_path}`;
+    : selectionPhotoFileUrl(token, photo.id);
 
   return (
     <img
@@ -266,7 +269,7 @@ export const SelectionPublicPage: React.FC<{ token: string }> = ({ token }) => {
             {data.album.photos.map((photo, index) => {
               const isSelected = selectedPhotos.has(photo.id);
               const photoComment = selectedPhotos.get(photo.id);
-              const imageSrc = photo.thumbnail_path ? `/thumbnails/${photo.thumbnail_path}` : `/media/${photo.file_path}`;
+              const imageSrc = photo.thumbnail_path ? `/thumbnails/${photo.thumbnail_path}` : selectionPhotoFileUrl(token, photo.id);
 
               return (
                 <div
@@ -276,7 +279,7 @@ export const SelectionPublicPage: React.FC<{ token: string }> = ({ token }) => {
                     isSelected ? 'border-primary ring-4 ring-primary/20' : 'border-border/60 hover:border-primary/40'
                   }`}
                 >
-                  <PhotoThumbnail photo={photo} />
+                  <PhotoThumbnail photo={photo} token={token} />
 
                   {/* Selection Overlay Checkmark */}
                   <div className={`absolute top-3 left-3 h-7 w-7 rounded-full flex items-center justify-center transition-all ${
@@ -368,7 +371,7 @@ export const SelectionPublicPage: React.FC<{ token: string }> = ({ token }) => {
         <Lightbox
           open={lightboxOpen}
           close={() => setLightboxOpen(false)}
-          slides={data.album.photos.map(p => ({ src: `/media/${p.file_path}` }))}
+          slides={data.album.photos.map(p => ({ src: selectionPhotoFileUrl(token, p.id) }))}
           index={lightboxIndex}
         />
       )}

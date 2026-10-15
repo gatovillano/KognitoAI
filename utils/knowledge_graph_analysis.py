@@ -132,7 +132,15 @@ async def perform_knowledge_graph_analysis_task(
                 "analysis_type": "knowledge_graph_analysis",
                 "graph_summary": graph_summary,
                 "nodes": all_extracted_nodes, # Devolver los nodos extraídos por el LLM
-                "relationships": all_extracted_relationships # Devolver las relaciones extraídas por el LLM
+                "relationships": all_extracted_relationships, # Devolver las relaciones extraídas por el LLM
+                **({"workspace_id": workspace_id} if workspace_id else {}),
+                "analysis_metadata": {
+                    "tool_used": "knowledge_graph_analysis",
+                    "analysis_type": "knowledge_graph_analysis",
+                    "topic": topic,
+                    "workspace_id": workspace_id,
+                    "created_at": datetime.now().isoformat()
+                }
             }
             # --- Fin de la lógica real ---
 

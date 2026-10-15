@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
-import apiClient from '@/lib/api';
+import apiClient, { photoFileUrl } from '@/lib/api';
 import { User, Calendar, MessageSquare, Trash2, CheckCircle2, Image as ImageIcon, Sparkles } from 'lucide-react';
 
 interface PhotoItem {
@@ -140,9 +140,10 @@ export const ReceivedSelectionsView: React.FC<{ albumId: string }> = ({ albumId 
                   <div key={item.id} className="relative group rounded-xl overflow-hidden border border-border bg-black/5 aspect-square flex flex-col">
                     {item.photo ? (
                       <NextImage
-                        src={`/media/${item.photo.file_path}`}
+                        src={photoFileUrl(item.photo.id)}
                         alt="Foto seleccionada"
                         fill
+                        unoptimized
                         className="object-cover group-hover:scale-105 transition-transform duration-300"
                       />
                     ) : (

@@ -1,0 +1,5246 @@
+[
+  {
+    "name": "create_onlyoffice_document",
+    "description": "Use when viewing, editing, or converting documents, spreadsheets, or presentations via the OnlyOffice API or local pipeline.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Nombre del archivo (con o sin extensi\u00f3n).",
+          "title": "Name",
+          "type": "string"
+        },
+        "doc_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Tipo de documento a crear: 'word' (.docx), 'excel' (.xlsx), 'powerpoint' (.pptx) o 'text' (.txt). Si se pasa 'template', se deduce autom\u00e1ticamente.",
+          "title": "Doc Type"
+        },
+        "template": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ID de plantilla maestra para inicializar el documento con dise\u00f1o premium estructurado. Opciones: 'executive_report' (Word), 'commercial_proposal' (Word), 'project_charter' (Word), 'financial_budget' (Excel), 'sales_dashboard' (Excel), 'project_tracker' (Excel), 'pitch_deck' (PowerPoint), 'quarterly_review' (PowerPoint).",
+          "title": "Template"
+        },
+        "theme": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Tema visual premium ('corporate_blue', 'emerald_green', 'dark_slate', 'sunset_amber', 'violet_gold', 'minimalist_gray').",
+          "title": "Theme"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "T\u00edtulo principal para inicializar la portada o encabezado del documento.",
+          "title": "Title"
+        },
+        "subtitle": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Subt\u00edtulo o descripci\u00f3n secundaria para la portada o presentaci\u00f3n.",
+          "title": "Subtitle"
+        },
+        "workspace_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ID del workspace (opcional).",
+          "title": "Workspace Id"
+        },
+        "folder_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ID de la carpeta (opcional).",
+          "title": "Folder Id"
+        }
+      },
+      "required": [
+        "name"
+      ]
+    }
+  },
+  {
+    "name": "read_onlyoffice_document",
+    "description": "Use when viewing, editing, or converting documents, spreadsheets, or presentations via the OnlyOffice API or local pipeline.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "document_id": {
+          "description": "ID UUID del documento que se desea leer.",
+          "title": "Document Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "document_id"
+      ]
+    }
+  },
+  {
+    "name": "edit_onlyoffice_document",
+    "description": "Use when viewing, editing, or converting documents, spreadsheets, or presentations via the OnlyOffice API or local pipeline.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "document_id": {
+          "description": "ID UUID del documento a editar.",
+          "title": "Document Id",
+          "type": "string"
+        },
+        "action": {
+          "description": "Acci\u00f3n a realizar. Opciones disponibles: 'append' (a\u00f1adir texto/Markdown formateado al final), 'append_heading' (a\u00f1adir t\u00edtulo - requiere heading_level 1/2/3), 'append_list' (a\u00f1adir lista de vi\u00f1etas - requiere list_items), 'replace' (buscar y reemplazar - requiere search_text), 'replace_section' (reemplaza la secci\u00f3n que empieza con search_text), 'insert_table' (insertar tabla - requiere table_data), 'insert_styled_table' (insertar tabla premium con temas y totales en Word - requiere table_data), 'apply_bold' (poner en negrita - requiere search_text), 'clear_and_write' (borrar todo el contenido y escribir nuevo texto/Markdown formateado), 'edit_paragraph' (editar p\u00e1rrafo por \u00edndice o b\u00fasqueda - requiere paragraph_index o search_text), 'insert_image' (insertar imagen - requiere image_path y opcionalmente image_width/image_height), 'set_page_layout' (configurar m\u00e1rgenes/orientaci\u00f3n - requiere page_margins y/o page_orientation), 'add_header_footer' (a\u00f1adir encabezado/pie - requiere header_footer_type y content), 'apply_cell_style' (aplicar estilo a celda - requiere cell_style y cell_coords), 'xlsx_create_sheet' (crear nueva pesta\u00f1a en Excel - requiere sheet_name, opcional tab_color, sheet_index), 'xlsx_rename_sheet' (renombrar pesta\u00f1a en Excel - requiere sheet_name (nuevo nombre) y opcionalmente search_text como nombre anterior), 'xlsx_delete_sheet' (eliminar pesta\u00f1a en Excel - requiere sheet_name), 'xlsx_list_sheets' (listar todas las pesta\u00f1as del archivo Excel - devuelve nombre, color y estad\u00edsticas), 'xlsx_copy_sheet' (copiar una pesta\u00f1a a un nuevo nombre - requiere sheet_name como origen y text como nuevo nombre, opcional sheet_index), 'xlsx_move_sheet' (mover/reordenar pesta\u00f1a a posici\u00f3n 0-based - requiere sheet_name y sheet_index), 'xlsx_clear_sheet' (borrar TODO el contenido de una hoja sin eliminarla - requiere sheet_name), 'xlsx_get_sheet_info' (obtener estad\u00edsticas de una hoja: dimensiones, rango usado, muestra de datos - requiere sheet_name), 'xlsx_freeze_panes' (congelar filas/columnas: cell='B2' congela fila 1 y columna A - requiere cell y sheet_name), 'xlsx_protect_sheet' (proteger hoja con contrase\u00f1a para evitar edici\u00f3n manual - requiere sheet_name, opcional text como contrase\u00f1a), 'xlsx_set_sheet_tab_color' (cambiar color de pesta\u00f1a de hoja existente - requiere sheet_name y tab_color hex), 'xlsx_create_table' (crear tabla premium con f\u00f3rmulas en Excel - requiere table_data), 'xlsx_write_cell' (escribir valor o f\u00f3rmula en celda Excel - requiere cell y text; si text empieza con '=' se guarda como f\u00f3rmula), 'xlsx_append_row' (a\u00f1adir fila a Excel - requiere row_data), 'xlsx_write_range' (escribir en rango - requiere range_address y range_data), 'xlsx_format_cells' (formatear celdas - requiere range_address y format_options), 'xlsx_insert_row' (insertar fila - requiere row_index), 'xlsx_insert_column' (insertar columna - requiere column_index), 'xlsx_delete_row' (eliminar fila - requiere row_index), 'xlsx_delete_column' (eliminar columna - requiere column_index), 'xlsx_merge_cells' (fusionar celdas - requiere range_address), 'xlsx_set_column_width' (ancho columna - requiere column_index y width), 'xlsx_set_row_height' (altura fila - requiere row_index y height).",
+          "title": "Action",
+          "type": "string"
+        },
+        "text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Texto principal a insertar (soporta Markdown enriquecido) o nuevo texto en 'replace'. Para Excel, si empieza con '=' se tratar\u00e1 como f\u00f3rmula (ej. '=SUM(A1:A10)').",
+          "title": "Text"
+        },
+        "search_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Texto a buscar (para 'replace', 'replace_section', 'apply_bold', o nombre de pesta\u00f1a anterior en 'xlsx_rename_sheet').",
+          "title": "Search Text"
+        },
+        "heading_level": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Nivel del t\u00edtulo: 1 (H1), 2 (H2), 3 (H3). Usar con 'append_heading'.",
+          "title": "Heading Level"
+        },
+        "list_items": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Lista de cadenas para crear una lista de vi\u00f1etas. Usar con 'append_list'.",
+          "title": "List Items"
+        },
+        "table_data": {
+          "anyOf": [
+            {
+              "items": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Matriz de filas/columnas para crear una tabla. La primera fila es el encabezado. Usar con 'insert_table', 'insert_styled_table', 'xlsx_create_table'.",
+          "title": "Table Data"
+        },
+        "theme": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Tema de dise\u00f1o premium para tablas ('corporate_blue', 'emerald_green', 'dark_slate', 'sunset_amber', 'violet_gold', 'minimalist_gray').",
+          "title": "Theme"
+        },
+        "has_total_row": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Si es True, aplica formato de totales (borde doble inferior, texto en negrita y fondo de acento) a la \u00faltima fila.",
+          "title": "Has Total Row"
+        },
+        "auto_calculate_totals": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Si es True, calcula autom\u00e1ticamente sumas de columnas num\u00e9ricas en la fila de totales.",
+          "title": "Auto Calculate Totals"
+        },
+        "col_alignments": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Lista de alineaciones por columna ('left', 'center', 'right').",
+          "title": "Col Alignments"
+        },
+        "col_widths": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Lista de anchos de columna en cm o caracteres.",
+          "title": "Col Widths"
+        },
+        "cell_padding": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Margen/padding interno de celda en pt {'top': 6, 'bottom': 6, 'left': 8, 'right': 8}.",
+          "title": "Cell Padding"
+        },
+        "total_formulas": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "F\u00f3rmulas para la fila de totales en Excel (ej: {'B': 'SUM', 'C': 'AVERAGE'} o lista de f\u00f3rmulas).",
+          "title": "Total Formulas"
+        },
+        "column_formats": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Formatos num\u00e9ricos por columna en Excel (ej: {'B': '$#,##0.00', 'C': '0.0%'}).",
+          "title": "Column Formats"
+        },
+        "auto_fit_columns": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": true,
+          "description": "Ajustar autom\u00e1ticamente el ancho de columnas en Excel.",
+          "title": "Auto Fit Columns"
+        },
+        "start_cell": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "A1",
+          "description": "Celda de inicio en Excel para crear tabla (ej: 'A1'). Usar con 'xlsx_create_table'.",
+          "title": "Start Cell"
+        },
+        "sheet_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Nombre de la hoja/pesta\u00f1a de Excel. Si la pesta\u00f1a indicada no existe, se crear\u00e1 autom\u00e1ticamente.",
+          "title": "Sheet Name"
+        },
+        "tab_color": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Color hexadecimal para la pesta\u00f1a de Excel (ej: '1E3A8A'). Usar con 'xlsx_create_sheet' o 'xlsx_rename_sheet'.",
+          "title": "Tab Color"
+        },
+        "sheet_index": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Posici\u00f3n 0-based de la pesta\u00f1a en el libro Excel. Usar con 'xlsx_create_sheet'.",
+          "title": "Sheet Index"
+        },
+        "cell": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Coordenada de celda Excel (ej: 'A1', 'B3'). Usar con 'xlsx_write_cell'.",
+          "title": "Cell"
+        },
+        "row_data": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Lista de valores para a\u00f1adir como fila. Para f\u00f3rmulas, iniciar con '='. Usar con 'xlsx_append_row'.",
+          "title": "Row Data"
+        },
+        "paragraph_index": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "\u00cdndice del p\u00e1rrafo a editar (0-based). Usar con 'edit_paragraph'.",
+          "title": "Paragraph Index"
+        },
+        "image_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Ruta del archivo de imagen a insertar. Usar con 'insert_image'.",
+          "title": "Image Path"
+        },
+        "image_width": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Ancho de la imagen en cm. Por defecto 10cm. Usar con 'insert_image'.",
+          "title": "Image Width"
+        },
+        "image_height": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Alto de la imagen en cm. Por defecto autoajustado. Usar con 'insert_image'.",
+          "title": "Image Height"
+        },
+        "page_margins": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Diccionario con m\u00e1rgenes en cm: {'top': 2.5, 'bottom': 2.5, 'left': 2.5, 'right': 2.5}. Usar con 'set_page_layout'.",
+          "title": "Page Margins"
+        },
+        "page_orientation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Orientaci\u00f3n de p\u00e1gina: 'portrait' o 'landscape'. Usar con 'set_page_layout'.",
+          "title": "Page Orientation"
+        },
+        "header_footer_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Tipo: 'header' o 'footer'. Usar con 'add_header_footer'.",
+          "title": "Header Footer Type"
+        },
+        "header_footer_content": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Contenido del encabezado/pie de p\u00e1gina. Usar con 'add_header_footer'.",
+          "title": "Header Footer Content"
+        },
+        "cell_style": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Estilo a aplicar: {'bold': True, 'italic': False, 'font_size': 12, 'font_color': 'FF0000'}. Usar con 'apply_cell_style'.",
+          "title": "Cell Style"
+        },
+        "cell_coords": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Coordenadas de celda: 'A1'. Usar con 'apply_cell_style'.",
+          "title": "Cell Coords"
+        },
+        "range_address": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Rango de celdas (ej: 'A1:C3'). Usar con 'xlsx_write_range', 'xlsx_format_cells', 'xlsx_merge_cells'.",
+          "title": "Range Address"
+        },
+        "range_data": {
+          "anyOf": [
+            {
+              "items": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Datos para escribir en el rango. F\u00f3rmulas deben empezar con '='. Usar con 'xlsx_write_range'.",
+          "title": "Range Data"
+        },
+        "format_options": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Opciones de formato: {'bold': True, 'italic': True, 'font_size': 12, 'font_color': 'FF0000', 'font_name': 'Arial', 'fill_color': 'FFFF00', 'align': 'center', 'valign': 'center', 'wrap_text': True, 'border': 'thin', 'number_format': '0.00%'}. Usar con 'xlsx_format_cells'.",
+          "title": "Format Options"
+        },
+        "row_index": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "\u00cdndice de fila (0-based). Usar con 'xlsx_insert_row', 'xlsx_delete_row'.",
+          "title": "Row Index"
+        },
+        "column_index": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "\u00cdndice de columna (0-based). Usar con 'xlsx_insert_column', 'xlsx_delete_column'.",
+          "title": "Column Index"
+        },
+        "width": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Ancho en cm. Usar con 'xlsx_set_column_width'.",
+          "title": "Width"
+        },
+        "height": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Alto en filas. Usar con 'xlsx_set_row_height'.",
+          "title": "Height"
+        }
+      },
+      "required": [
+        "document_id",
+        "action"
+      ]
+    }
+  },
+  {
+    "name": "search_onlyoffice_documents",
+    "description": "Use when viewing, editing, or converting documents, spreadsheets, or presentations via the OnlyOffice API or local pipeline.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "T\u00e9rmino de b\u00fasqueda para filtrar por nombre de archivo o carpeta.",
+          "title": "Query"
+        },
+        "workspace_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ID del workspace para limitar la b\u00fasqueda (opcional).",
+          "title": "Workspace Id"
+        }
+      }
+    }
+  },
+  {
+    "name": "list_onlyoffice_documents",
+    "description": "Use when viewing, editing, or converting documents, spreadsheets, or presentations via the OnlyOffice API or local pipeline.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "folder_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ID de la carpeta que se desea explorar. Si se omite, se listar\u00e1 el contenido de la ra\u00edz.",
+          "title": "Folder Id"
+        },
+        "workspace_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ID del workspace (opcional) para filtrar el contenido del nivel principal.",
+          "title": "Workspace Id"
+        }
+      }
+    }
+  },
+  {
+    "name": "send_user_message",
+    "description": "Use when sending messages, notifications, or alerts from the AI agent directly to the user inbox or communication channel.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "message": {
+          "description": "Mensaje que el agente quiere enviar al usuario para su Bandeja de entrada.",
+          "title": "Message",
+          "type": "string"
+        },
+        "title": {
+          "default": "Mensaje del agente",
+          "description": "T\u00edtulo breve del mensaje para la Bandeja de entrada.",
+          "title": "Title",
+          "type": "string"
+        },
+        "category": {
+          "default": "Bandeja de entrada",
+          "description": "Categor\u00eda visual para organizar mensajes en la Bandeja.",
+          "title": "Category",
+          "type": "string"
+        }
+      },
+      "required": [
+        "message"
+      ]
+    }
+  },
+  {
+    "name": "email_checker",
+    "description": "Use when checking, reading, or fetching emails from accounts (Gmail, Outlook, Yahoo) using secure credential management.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "provider": {
+          "description": "Email provider: 'gmail', 'outlook', 'yahoo', or 'custom'",
+          "title": "Provider",
+          "type": "string"
+        },
+        "folder": {
+          "default": "inbox",
+          "description": "Email folder to check (inbox, sent, drafts, etc.)",
+          "title": "Folder",
+          "type": "string"
+        },
+        "limit": {
+          "default": 10,
+          "description": "Maximum number of emails to fetch",
+          "title": "Limit",
+          "type": "integer"
+        },
+        "mark_as_read": {
+          "default": false,
+          "description": "Whether to mark fetched emails as read",
+          "title": "Mark As Read",
+          "type": "boolean"
+        },
+        "include_body": {
+          "default": false,
+          "description": "Whether to include email body in results",
+          "title": "Include Body",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "provider"
+      ]
+    }
+  },
+  {
+    "name": "web_search",
+    "description": "La consulta de b\u00fasqueda que se enviar\u00e1 al motor de b\u00fasqueda. Debe ser una cadena de texto clara y espec\u00edfica sobre lo que quieres buscar.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "description": "La consulta de b\u00fasqueda que se enviar\u00e1 al motor de b\u00fasqueda. Debe ser una cadena de texto clara y espec\u00edfica sobre lo que quieres buscar.",
+          "title": "Query",
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
+    "name": "ddg_search_tool",
+    "description": "La consulta de b\u00fasqueda que se enviar\u00e1 al motor de b\u00fasqueda. Debe ser una cadena de texto clara y espec\u00edfica sobre lo que quieres buscar.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "description": "La consulta de b\u00fasqueda que se enviar\u00e1 a DuckDuckGo",
+          "title": "Query",
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
+    "name": "deep_research",
+    "description": "La consulta de b\u00fasqueda que se enviar\u00e1 al motor de b\u00fasqueda. Debe ser una cadena de texto clara y espec\u00edfica sobre lo que quieres buscar.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "description": "The research query to be investigated in-depth.",
+          "title": "Query",
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
+    "name": "multi_query_search",
+    "description": "La consulta de b\u00fasqueda que se enviar\u00e1 al motor de b\u00fasqueda. Debe ser una cadena de texto clara y espec\u00edfica sobre lo que quieres buscar.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "description": "Consulta de b\u00fasqueda original",
+          "title": "Query",
+          "type": "string"
+        },
+        "content_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Tipo de contenido a buscar (user_memories, user_documents, etc.)",
+          "title": "Content Type",
+          "type": "string"
+        },
+        "topic": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Tema(s) espec\u00edfico(s) para filtrar resultados",
+          "items": {
+            "type": "string"
+          },
+          "title": "Topic",
+          "type": "array"
+        },
+        "category": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Categor\u00eda espec\u00edfica para filtrar resultados",
+          "title": "Category",
+          "type": "string"
+        },
+        "k": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 5,
+          "description": "N\u00famero m\u00e1ximo de resultados a retornar",
+          "title": "K",
+          "type": "integer"
+        },
+        "num_queries": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 3,
+          "description": "N\u00famero de consultas alternativas a generar",
+          "title": "Num Queries",
+          "type": "integer"
+        },
+        "fusion_method": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "rrf",
+          "description": "M\u00e9todo de fusi\u00f3n de resultados ('rrf' o 'simple')",
+          "title": "Fusion Method",
+          "type": "string"
+        },
+        "include_shared": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": true,
+          "description": "Incluir contenido compartido del equipo",
+          "title": "Include Shared",
+          "type": "boolean"
+        },
+        "document_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "El nombre exacto de un documento espec\u00edfico (ej: 'Reporte Anual 2023.pdf') para buscar solo en \u00e9l.",
+          "title": "Document Name"
+        },
+        "document_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "El ID \u00fanico de un documento espec\u00edfico (UUID) para buscar solo en \u00e9l.",
+          "title": "Document Id"
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
+    "name": "web_scraper_tool",
+    "description": "La consulta de b\u00fasqueda que se enviar\u00e1 al motor de b\u00fasqueda. Debe ser una cadena de texto clara y espec\u00edfica sobre lo que quieres buscar.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "description": "La URL completa de la p\u00e1gina web que se va a leer. Debe comenzar con http:// o https://.",
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ]
+    }
+  },
+  {
+    "name": "comprehensive_web_analyzer",
+    "description": "La consulta de b\u00fasqueda que se enviar\u00e1 al motor de b\u00fasqueda. Debe ser una cadena de texto clara y espec\u00edfica sobre lo que quieres buscar.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "description": "The user's research query in natural language.",
+          "title": "Query",
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
+    "name": "tavily_search_tool",
+    "description": "La consulta de b\u00fasqueda que se enviar\u00e1 al motor de b\u00fasqueda. Debe ser una cadena de texto clara y espec\u00edfica sobre lo que quieres buscar.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "description": "La consulta de b\u00fasqueda que se enviar\u00e1 a Tavily",
+          "title": "Query",
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
+    "name": "get_document_list_tool",
+    "description": "Use when creating, editing, updating metadata, or generating professional PDF documents.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "delete_document_tool",
+    "description": "Use when creating, editing, updating metadata, or generating professional PDF documents.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "file_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "El nombre exacto del archivo a eliminar. Se puede omitir si se proporciona un 'topic'.",
+          "title": "File Name"
+        },
+        "topic": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "El tema o categor\u00eda de los documentos a eliminar. Eliminar\u00e1 todos los documentos asociados a este tema. Se puede omitir si se proporciona 'file_name'.",
+          "title": "Topic"
+        }
+      }
+    }
+  },
+  {
+    "name": "create_pdf_tool",
+    "description": "Use when creating, editing, updating metadata, or generating professional PDF documents.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "description": "El contenido a convertir. DEBE ser un texto largo y estructurado. PREFERIBLEMENTE HTML. EL TAMA\u00d1O DE P\u00c1GINA ES ESTRICTAMENTE A4 (21cm x 29.7cm). Dise\u00f1a tu HTML para que encaje en este formato: el ancho imprimible es de ~17cm (debido a m\u00e1rgenes de 2cm) y el alto de ~25.7cm por p\u00e1gina. Usa clases estructuradas y evita desbordar estas dimensiones.",
+          "title": "Content",
+          "type": "string"
+        },
+        "is_html": {
+          "default": true,
+          "description": "DEBE ser True si env\u00edas HTML. Se recomienda encarecidamente usar HTML para evitar bloques de texto sin formato.",
+          "title": "Is Html",
+          "type": "boolean"
+        },
+        "filename": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional filename for the generated PDF. If not provided, a random name will be used.",
+          "title": "Filename"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "Documento Generado",
+          "description": "The title of the document, used in the header.",
+          "title": "Title"
+        },
+        "custom_css": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "CSS adicional que se inyectar\u00e1 al final para personalizar o sobrescribir el estilo.",
+          "title": "Custom Css"
+        },
+        "orientation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "portrait",
+          "description": "Orientaci\u00f3n de la p\u00e1gina: 'portrait' (vertical) o 'landscape' (horizontal).",
+          "title": "Orientation"
+        },
+        "margin": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "2cm",
+          "description": "Margen exterior de las p\u00e1ginas (ej. '2cm', '1.5in', '20mm').",
+          "title": "Margin"
+        },
+        "theme": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "modern",
+          "description": "Tema de color predefinido: 'modern', 'emerald', 'amber', 'minimalist'.",
+          "title": "Theme"
+        },
+        "header_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Texto opcional para la cabecera superior derecha. Soporta placeholders [page] y [pages].",
+          "title": "Header Text"
+        },
+        "footer_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Texto opcional para el pie de p\u00e1gina inferior izquierdo. Soporta placeholders [page] y [pages].",
+          "title": "Footer Text"
+        }
+      },
+      "required": [
+        "content"
+      ]
+    }
+  },
+  {
+    "name": "get_document_content_tool",
+    "description": "Use when creating, editing, updating metadata, or generating professional PDF documents.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "file_name": {
+          "description": "El nombre exacto del archivo del cual se debe recuperar el contenido completo.",
+          "title": "File Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file_name"
+      ]
+    }
+  },
+  {
+    "name": "update_document_metadata_tool",
+    "description": "Use when creating, editing, updating metadata, or generating professional PDF documents.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "account_id": {
+          "description": "El identificador universal (UUID en formato string) de la cuenta del usuario. Debe ser proporcionado por el LLM.",
+          "title": "Account Id",
+          "type": "string"
+        },
+        "file_name": {
+          "description": "El nombre exacto del archivo del cual se desea actualizar los metadatos.",
+          "title": "File Name",
+          "type": "string"
+        },
+        "new_title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "El nuevo t\u00edtulo para el documento. Si se proporciona, reemplazar\u00e1 el t\u00edtulo existente.",
+          "title": "New Title"
+        },
+        "new_topic": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "La nueva categor\u00eda o tema para el documento. Si se proporciona, reemplazar\u00e1 el tema existente.",
+          "title": "New Topic"
+        },
+        "workspace_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "El ID del espacio de trabajo del usuario, inyectado autom\u00e1ticamente.",
+          "title": "Workspace Id"
+        },
+        "telegram_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "El ID de Telegram del usuario, inyectado autom\u00e1ticamente.",
+          "title": "Telegram Id"
+        }
+      },
+      "required": [
+        "account_id",
+        "file_name"
+      ]
+    }
+  },
+  {
+    "name": "extract_document_titles_tool",
+    "description": "Use when creating, editing, updating metadata, or generating professional PDF documents.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "list_conversations_tool",
+    "description": "Use when Permite al agente buscar, listar y leer el historial de mensajes de conversaciones pasadas almacenadas en la base de datos de KAI.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 10,
+          "description": "El n\u00famero m\u00e1ximo de conversaciones a listar.",
+          "title": "Limit"
+        },
+        "search_query": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Consulta opcional para buscar conversaciones por t\u00edtulo.",
+          "title": "Search Query"
+        }
+      }
+    }
+  },
+  {
+    "name": "read_conversation_tool",
+    "description": "Use when Permite al agente buscar, listar y leer el historial de mensajes de conversaciones pasadas almacenadas en la base de datos de KAI.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "thread_id": {
+          "description": "ID de la conversaci\u00f3n (UUID) que se desea leer.",
+          "title": "Thread Id",
+          "type": "string"
+        },
+        "limit": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 100,
+          "description": "El n\u00famero m\u00e1ximo de mensajes a recuperar.",
+          "title": "Limit"
+        }
+      },
+      "required": [
+        "thread_id"
+      ]
+    }
+  },
+  {
+    "name": "process_onlyoffice_document",
+    "description": "Use when | Pipeline para integrar documentos de OnlyOffice con el sistema RAG de KAI. Procesa documentos, genera embeddings y los almacena en el conocimiento.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "document_id": {
+          "description": "ID del documento en OnlyOffice",
+          "title": "Document Id",
+          "type": "string"
+        },
+        "chunk_size": {
+          "default": 128,
+          "description": "Tama\u00f1o de cada chunk de texto",
+          "title": "Chunk Size",
+          "type": "integer"
+        },
+        "overlap": {
+          "default": 20,
+          "description": "Solapamiento entre chunks",
+          "title": "Overlap",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "document_id"
+      ]
+    }
+  },
+  {
+    "name": "scoped_rag_analysis",
+    "description": "The complete text content extracted from the document.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "description": "La petici\u00f3n o pregunta espec\u00edfica del usuario para el an\u00e1lisis.",
+          "title": "Query",
+          "type": "string"
+        },
+        "content_types": {
+          "description": "Tipos de contenido a analizar, separados por comas. Opciones: 'notes', 'documents'.",
+          "title": "Content Types",
+          "type": "string"
+        },
+        "analysis_goal": {
+          "description": "Describe el formato o resultado deseado para el an\u00e1lisis.",
+          "title": "Analysis Goal",
+          "type": "string"
+        },
+        "topic": {
+          "default": "",
+          "description": "Un tema espec\u00edfico para filtrar el contenido.",
+          "title": "Topic",
+          "type": "string"
+        },
+        "keywords": {
+          "default": "",
+          "description": "Palabras clave para refinar la b\u00fasqueda, separadas por comas.",
+          "title": "Keywords",
+          "type": "string"
+        }
+      },
+      "required": [
+        "query",
+        "content_types",
+        "analysis_goal"
+      ]
+    }
+  },
+  {
+    "name": "add_web_to_rag",
+    "description": "The complete text content extracted from the document.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "description": "La URL completa de la p\u00e1gina web a a\u00f1adir. Debe comenzar con http:// o https://",
+          "title": "Url",
+          "type": "string"
+        },
+        "topic": {
+          "description": "Tema o categor\u00eda bajo la cual guardar el contenido web",
+          "title": "Topic",
+          "type": "string"
+        },
+        "custom_title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "T\u00edtulo personalizado para el documento (opcional, se usar\u00e1 el de la p\u00e1gina si no se especifica)",
+          "title": "Custom Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url",
+        "topic"
+      ]
+    }
+  },
+  {
+    "name": "process_document_for_rag",
+    "description": "The complete text content extracted from the document.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "extracted_text": {
+          "description": "The complete text content extracted from the document.",
+          "title": "Extracted Text",
+          "type": "string"
+        },
+        "file_name": {
+          "description": "The original name of the document file.",
+          "title": "File Name",
+          "type": "string"
+        },
+        "topic": {
+          "description": "The topic or category for this document, as specified by the user.",
+          "title": "Topic",
+          "type": "string"
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional metadata for the document, e.g., {'author': 'John Doe', 'title': 'My Document'}",
+          "title": "Metadata"
+        }
+      },
+      "required": [
+        "extracted_text",
+        "file_name",
+        "topic"
+      ]
+    }
+  },
+  {
+    "name": "notion_integration",
+    "description": "Use when accessing core system capabilities, managing registered skills, or editing skill definitions.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "Acci\u00f3n a realizar en Notion. Opciones: 'list_databases', 'read_page', 'create_page'.",
+          "title": "Action",
+          "type": "string"
+        },
+        "database_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ID de la base de datos de Notion. Requerido para 'create_page'.",
+          "title": "Database Id"
+        },
+        "page_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ID de la p\u00e1gina de Notion. Requerido para 'read_page'.",
+          "title": "Page Id"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "T\u00edtulo para la nueva p\u00e1gina. Requerido para 'create_page'.",
+          "title": "Title"
+        },
+        "content": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Contenido en texto plano (Markdown) para la nueva p\u00e1gina.",
+          "title": "Content"
+        }
+      },
+      "required": [
+        "action"
+      ]
+    }
+  },
+  {
+    "name": "slack_integration",
+    "description": "Use when accessing core system capabilities, managing registered skills, or editing skill definitions.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "Acci\u00f3n a realizar en Slack. Opciones: 'list_channels', 'send_message', 'get_history'.",
+          "title": "Action",
+          "type": "string"
+        },
+        "channel_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ID del canal de Slack. Requerido para 'send_message' y 'get_history'.",
+          "title": "Channel Id"
+        },
+        "message": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Contenido del mensaje a enviar. Requerido para 'send_message'.",
+          "title": "Message"
+        },
+        "limit": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 10,
+          "description": "N\u00famero de mensajes a recuperar en 'get_history'. Por defecto 10.",
+          "title": "Limit"
+        }
+      },
+      "required": [
+        "action"
+      ]
+    }
+  },
+  {
+    "name": "skill_editor",
+    "description": "Use when accessing core system capabilities, managing registered skills, or editing skill definitions.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "skill_name": {
+          "description": "Nombre de la carpeta de la skill a modificar (ej: 'host_terminal_skill').",
+          "title": "Skill Name",
+          "type": "string"
+        },
+        "scope": {
+          "description": "Scope de la skill: 'user_global', 'user_account_{id}' o 'user_workspace_{id}'.",
+          "title": "Scope",
+          "type": "string"
+        },
+        "new_python_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "El nuevo contenido completo para el archivo .py (opcional si solo cambias el .md).",
+          "title": "New Python Code"
+        },
+        "new_markdown_description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "El nuevo contenido completo para el archivo .md (opcional).",
+          "title": "New Markdown Description"
+        }
+      },
+      "required": [
+        "skill_name",
+        "scope"
+      ]
+    }
+  },
+  {
+    "name": "natural_query_interpreter",
+    "description": "Use when accessing core system capabilities, managing registered skills, or editing skill definitions.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "description": "La consulta completa del usuario en lenguaje natural",
+          "title": "Query",
+          "type": "string"
+        },
+        "context": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Contexto adicional de la conversaci\u00f3n",
+          "title": "Context",
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
+    "name": "skill_factory",
+    "description": "Use when accessing core system capabilities, managing registered skills, or editing skill definitions.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "skill_name": {
+          "description": "Nombre interno de la skill en snake_case (ej: 'weather_fetcher').",
+          "title": "Skill Name",
+          "type": "string"
+        },
+        "python_code": {
+          "description": "El contenido completo del archivo .py de la habilidad.",
+          "title": "Python Code",
+          "type": "string"
+        },
+        "markdown_description": {
+          "description": "El contenido completo del archivo SKILL.md de la habilidad. DEBE comenzar con YAML frontmatter delimitado por '---\\n':\n---\nname: <nombre-de-la-skill-con-guiones>\ndescription: <descripci\u00f3n detallada de cu\u00e1ndo y para qu\u00e9 usar la habilidad>\n---\n\n# Habilidad\n## Objetivo\n...\n## Procedimiento\n...\n## Ejemplos\n...",
+          "title": "Markdown Description",
+          "type": "string"
+        }
+      },
+      "required": [
+        "skill_name",
+        "python_code",
+        "markdown_description"
+      ]
+    }
+  },
+  {
+    "name": "mindmap_generator",
+    "description": "Use when generating images, diagrams, mind maps, or visual media assets based on prompt descriptions.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "document_content": {
+          "description": "El contenido del documento a analizar.",
+          "title": "Document Content",
+          "type": "string"
+        },
+        "concept_query": {
+          "default": "temas clave",
+          "description": "La consulta para extraer los conceptos clave (ej. 'temas principales', 'conceptos clave').",
+          "title": "Concept Query",
+          "type": "string"
+        },
+        "topic_hint": {
+          "default": "",
+          "description": "Una pista sobre el tema principal del documento.",
+          "title": "Topic Hint",
+          "type": "string"
+        }
+      },
+      "required": [
+        "document_content"
+      ]
+    }
+  },
+  {
+    "name": "html_generator",
+    "description": "Use when generating images, diagrams, mind maps, or visual media assets based on prompt descriptions.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "description": "El contenido en formato Markdown o texto plano que se convertir\u00e1 a HTML.",
+          "title": "Content",
+          "type": "string"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "Documento Generado por KognitoAI",
+          "description": "El t\u00edtulo del documento HTML. Se usar\u00e1 en la etiqueta <title>.",
+          "title": "Title"
+        },
+        "include_css": {
+          "default": true,
+          "description": "Si se debe incluir un CSS b\u00e1sico para mejorar la presentaci\u00f3n del HTML. Por defecto es True.",
+          "title": "Include Css",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "content"
+      ]
+    }
+  },
+  {
+    "name": "generate_image_tool",
+    "description": "Use when generating images, diagrams, mind maps, or visual media assets based on prompt descriptions.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "prompt": {
+          "description": "Una descripci\u00f3n detallada y clara de la imagen que se desea generar. Deber\u00eda estar en ingl\u00e9s para obtener los mejores resultados.",
+          "title": "Prompt",
+          "type": "string"
+        }
+      },
+      "required": [
+        "prompt"
+      ]
+    }
+  },
+  {
+    "name": "image_background_eraser",
+    "description": "Use when generating images, diagrams, mind maps, or visual media assets based on prompt descriptions.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "image_path": {
+          "description": "La ruta del archivo de imagen local del cual se desea eliminar el fondo.",
+          "title": "Image Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "image_path"
+      ]
+    }
+  },
+  {
+    "name": "manage_tasks",
+    "description": "Use when searching contact profiles, scheduling automated tasks, or updating user profile information.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "Acci\u00f3n a realizar: 'create', 'update', 'complete', 'delete', 'list'",
+          "title": "Action",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Descripci\u00f3n de la tarea (requerido para 'create' y 'update').",
+          "title": "Description"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ID de la tarea (requerido para 'update', 'complete', 'delete').",
+          "title": "Task Id"
+        },
+        "start_time": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Fecha/hora de inicio en lenguaje natural (ej: 'ma\u00f1ana a las 9am').",
+          "title": "Start Time"
+        },
+        "end_time": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Fecha/hora de vencimiento en lenguaje natural (ej: 'viernes a las 6pm').",
+          "title": "End Time"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Estado de la tarea ('Pendiente', 'En Progreso', 'Hecho').",
+          "title": "Status"
+        },
+        "workspace_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ID del workspace (opcional).",
+          "title": "Workspace Id"
+        }
+      },
+      "required": [
+        "action"
+      ]
+    }
+  },
+  {
+    "name": "list_scheduled_tools",
+    "description": "Use when searching contact profiles, scheduling automated tasks, or updating user profile information.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "account_id": {
+          "description": "ID de la cuenta del usuario",
+          "title": "Account Id",
+          "type": "string"
+        },
+        "workspace_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ID del espacio de trabajo (opcional)",
+          "title": "Workspace Id"
+        }
+      },
+      "required": [
+        "account_id"
+      ]
+    }
+  },
+  {
+    "name": "schedule_tool_execution",
+    "description": "Use when searching contact profiles, scheduling automated tasks, or updating user profile information.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "tool_name": {
+          "description": "Nombre exacto de la herramienta a programar (ej: 'web_search_tool', 'create_note_tool', 'send_email_tool')",
+          "title": "Tool Name",
+          "type": "string"
+        },
+        "schedule_type": {
+          "description": "Tipo de programaci\u00f3n: 'daily' (cada d\u00eda), 'weekly' (cada semana), 'interval' (cada X horas)",
+          "title": "Schedule Type",
+          "type": "string"
+        },
+        "hour": {
+          "default": 8,
+          "description": "Hora del d\u00eda para ejecutar (0-23). Para 'interval' indica la hora de inicio.",
+          "maximum": 23,
+          "minimum": 0,
+          "title": "Hour",
+          "type": "integer"
+        },
+        "minute": {
+          "default": 0,
+          "description": "Minuto de la hora para ejecutar (0-59)",
+          "maximum": 59,
+          "minimum": 0,
+          "title": "Minute",
+          "type": "integer"
+        },
+        "day_of_week": {
+          "anyOf": [
+            {
+              "maximum": 6,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Solo para 'weekly': d\u00eda de la semana (0=Lunes, 6=Domingo)",
+          "title": "Day Of Week"
+        },
+        "interval_hours": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Solo para 'interval': cada cu\u00e1ntas horas ejecutar",
+          "title": "Interval Hours"
+        },
+        "tool_args": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Argumentos a pasar a la herramienta al ejecutarse. Ej: {\"query\": \"noticias de IA\", \"topic\": \"innovacion\"}",
+          "title": "Tool Args"
+        },
+        "account_id": {
+          "description": "ID de la cuenta del usuario",
+          "title": "Account Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "tool_name",
+        "schedule_type",
+        "account_id"
+      ]
+    }
+  },
+  {
+    "name": "update_user_profile",
+    "description": "Use when searching contact profiles, scheduling automated tasks, or updating user profile information.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "nombre": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "El nombre del usuario.",
+          "title": "Nombre"
+        },
+        "gustos": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Los gustos o preferencias del usuario.",
+          "title": "Gustos"
+        },
+        "intereses": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Los intereses o hobbies del usuario.",
+          "title": "Intereses"
+        },
+        "otros_datos": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Cualquier otra informaci\u00f3n relevante sobre el usuario.",
+          "title": "Otros Datos"
+        }
+      }
+    }
+  },
+  {
+    "name": "contact_profile_manager",
+    "description": "Use when searching contact profiles, scheduling automated tasks, or updating user profile information.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "La acci\u00f3n a realizar: 'get_profile', 'list_profiles', 'create_profile', 'update_profile', 'link_to_note', o 'link_to_event_or_task'.",
+          "title": "Action",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Nombre del perfil (para get_profile, create_profile, update_profile, link_to_note, link_to_event_or_task).",
+          "title": "Name"
+        },
+        "query": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Consulta de b\u00fasqueda (para list_profiles).",
+          "title": "Query"
+        },
+        "tags": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Lista de etiquetas (para list_profiles, create_profile, update_profile).",
+          "title": "Tags"
+        },
+        "category": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Categor\u00eda (para list_profiles, create_profile, update_profile).",
+          "title": "Category"
+        },
+        "email": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Email del contacto (para create_profile, update_profile).",
+          "title": "Email"
+        },
+        "phone": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Tel\u00e9fono del contacto (para create_profile, update_profile).",
+          "title": "Phone"
+        },
+        "custom_fields": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Campos personalizados para el contacto en formato JSON (para create_profile, update_profile).",
+          "title": "Custom Fields"
+        },
+        "note_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ID de la nota a vincular (para link_to_note).",
+          "title": "Note Id"
+        },
+        "event_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ID del evento a vincular (para link_to_event_or_task).",
+          "title": "Event Id"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ID de la tarea a vincular (para link_to_event_or_task).",
+          "title": "Task Id"
+        }
+      },
+      "required": [
+        "action"
+      ]
+    }
+  },
+  {
+    "name": "set_reminder_tool",
+    "description": "Use when searching contact profiles, scheduling automated tasks, or updating user profile information.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "description": "El texto o la acci\u00f3n espec\u00edfica que se debe recordar.",
+          "title": "Text",
+          "type": "string"
+        },
+        "natural_language_time": {
+          "description": "Una descripci\u00f3n relativa o absoluta del tiempo para el recordatorio. Ejemplos: 'en 20 minutos', 'dentro de 3 horas', 'a las 10pm'.",
+          "title": "Natural Language Time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "natural_language_time"
+      ]
+    }
+  },
+  {
+    "name": "search_notes_tool",
+    "description": "Use when creating, updating, searching, or organizing personal notes and quick text memories.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "description": "La consulta de b\u00fasqueda para encontrar notas relevantes.",
+          "title": "Query",
+          "type": "string"
+        },
+        "account_id": {
+          "description": "ID de la cuenta del usuario.",
+          "title": "Account Id",
+          "type": "string"
+        },
+        "workspace_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ID del espacio de trabajo para filtrar notas.",
+          "title": "Workspace Id"
+        },
+        "team_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ID del equipo para filtrar notas.",
+          "title": "Team Id"
+        },
+        "k": {
+          "default": 5,
+          "description": "N\u00famero de notas a recuperar.",
+          "title": "K",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "query",
+        "account_id"
+      ]
+    }
+  },
+  {
+    "name": "add_note",
+    "description": "Use when creating, updating, searching, or organizing personal notes and quick text memories.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "description": "El contenido principal de la nota. DEBE ser un resumen o el texto completo de lo que el usuario quiere recordar. EJEMPLO: 'Recordar comprar pan'",
+          "title": "Content",
+          "type": "string"
+        },
+        "title": {
+          "default": "",
+          "description": "T\u00edtulo breve para la nota. EJEMPLO: 'Compras'",
+          "title": "Title",
+          "type": "string"
+        },
+        "category": {
+          "default": "General",
+          "description": "Categor\u00eda para organizar la nota.",
+          "title": "Category",
+          "type": "string"
+        },
+        "send_as_agent_message": {
+          "default": false,
+          "description": "Si es true, el contenido se enviar\u00e1 como mensaje del agente al usuario en la Bandeja de entrada (no en Notas).",
+          "title": "Send As Agent Message",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "content"
+      ]
+    }
+  },
+  {
+    "name": "get_notes_tool",
+    "description": "Use when creating, updating, searching, or organizing personal notes and quick text memories.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "category": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Filtra las notas por una categor\u00eda espec\u00edfica. Ejemplo: 'Trabajo', 'Ideas'.",
+          "title": "Category"
+        },
+        "search_query": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Busca un texto espec\u00edfico en el t\u00edtulo o contenido de las notas.",
+          "title": "Search Query"
+        }
+      }
+    }
+  },
+  {
+    "name": "update_note_tool",
+    "description": "Use when creating, updating, searching, or organizing personal notes and quick text memories.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "note_id": {
+          "description": "El ID num\u00e9rico de la nota a modificar.",
+          "title": "Note Id",
+          "type": "integer"
+        },
+        "new_content": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "El nuevo contenido para la nota.",
+          "title": "New Content"
+        },
+        "new_title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "El nuevo t\u00edtulo para la nota.",
+          "title": "New Title"
+        },
+        "new_category": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "La nueva categor\u00eda para la nota.",
+          "title": "New Category"
+        }
+      },
+      "required": [
+        "note_id"
+      ]
+    }
+  },
+  {
+    "name": "delete_note_tool",
+    "description": "Use when creating, updating, searching, or organizing personal notes and quick text memories.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "note_id": {
+          "description": "El ID num\u00e9rico \u00fanico de la nota que se va a eliminar.",
+          "title": "Note Id",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "note_id"
+      ]
+    }
+  },
+  {
+    "name": "knowledge_search",
+    "description": "Una pregunta en lenguaje natural sobre el grafo de conocimiento. Ej:",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "description": "La consulta de b\u00fasqueda para encontrar informaci\u00f3n relevante.",
+          "title": "Query",
+          "type": "string"
+        },
+        "content_types": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Lista de tipos de contenido para filtrar la b\u00fasqueda (ej. 'document', 'note').",
+          "title": "Content Types"
+        },
+        "filter_topics": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Lista de temas para filtrar la b\u00fasqueda.",
+          "title": "Filter Topics"
+        },
+        "category": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Categor\u00eda para filtrar la b\u00fasqueda.",
+          "title": "Category"
+        },
+        "k": {
+          "default": 10,
+          "description": "N\u00famero de resultados a devolver.",
+          "title": "K",
+          "type": "integer"
+        },
+        "hybrid_search": {
+          "default": true,
+          "description": "Si se debe utilizar la b\u00fasqueda h\u00edbrida (sem\u00e1ntica y de palabras clave).",
+          "title": "Hybrid Search",
+          "type": "boolean"
+        },
+        "reranking": {
+          "default": true,
+          "description": "Si se deben reordenar los resultados para mejorar la relevancia.",
+          "title": "Reranking",
+          "type": "boolean"
+        },
+        "document_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Nombre exacto de un documento para focalizar la b\u00fasqueda.",
+          "title": "Document Name"
+        },
+        "document_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ID \u00fanico de un documento para focalizar la b\u00fasqueda.",
+          "title": "Document Id"
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
+    "name": "memory_add_tool",
+    "description": "Una pregunta en lenguaje natural sobre el grafo de conocimiento. Ej:",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "description": "El texto o informaci\u00f3n espec\u00edfica que debe ser guardado en la memoria a largo plazo.",
+          "title": "Content",
+          "type": "string"
+        },
+        "type": {
+          "default": "user_memory",
+          "description": "El tipo general de la memoria. Ejemplos: 'user_memory' (para hechos, intereses, preferencias del usuario), 'chat_summary' (para res\u00famenes de conversaciones), 'document_chunk' (para fragmentos de documentos).",
+          "title": "Type",
+          "type": "string"
+        },
+        "category": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Una categor\u00eda m\u00e1s espec\u00edfica para la memoria. \u00dasala para clasificar el 'content' dentro de su 'type' general. Ejemplos si 'type' es 'user_memory': 'interes', 'hecho', 'preferencia', 'habilidad', 'meta', 'idea'. Ejemplos si 'type' es 'chat_summary': 'resolucion_problema', 'planificacion_proyecto', 'discusion_general'. Si no es aplicable o no se puede inferir, d\u00e9jalo como None.",
+          "title": "Category"
+        }
+      },
+      "required": [
+        "content"
+      ]
+    }
+  },
+  {
+    "name": "internal_knowledge_search",
+    "description": "Una pregunta en lenguaje natural sobre el grafo de conocimiento. Ej:",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "description": "La consulta completa del usuario en lenguaje natural.",
+          "title": "Query",
+          "type": "string"
+        },
+        "document_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "El nombre exacto de un documento espec\u00edfico (ej: 'Reporte Anual 2023.pdf') para buscar solo en \u00e9l.",
+          "title": "Document Name"
+        },
+        "document_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "El ID \u00fanico de un documento espec\u00edfico (UUID) para buscar solo en \u00e9l.",
+          "title": "Document Id"
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
+    "name": "conceptual_processing",
+    "description": "Una pregunta en lenguaje natural sobre el grafo de conocimiento. Ej:",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "documents": {
+          "anyOf": [
+            {
+              "items": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Lista de documentos a procesar. Cada documento debe tener 'file_name' y opcionalmente 'content'.",
+          "title": "Documents"
+        },
+        "document_titles": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Lista de nombres de archivos de documentos a procesar (sin contenido expl\u00edcito).",
+          "title": "Document Titles"
+        },
+        "dataset_name": {
+          "default": "default",
+          "description": "Nombre del dataset para el procesamiento (opcional, por defecto 'default')",
+          "title": "Dataset Name",
+          "type": "string"
+        },
+        "background": {
+          "default": true,
+          "description": "Si ejecutar el procesamiento en background (recomendado para documentos grandes). Por defecto True.",
+          "title": "Background",
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  {
+    "name": "anthropological_graph_processing",
+    "description": "Una pregunta en lenguaje natural sobre el grafo de conocimiento. Ej:",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "documents": {
+          "anyOf": [
+            {
+              "items": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Lista de documentos a procesar. Cada documento debe tener 'file_name'/'title' y opcionalmente 'content'.",
+          "title": "Documents"
+        },
+        "document_titles": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Lista de nombres de archivos de documentos a procesar (sin contenido expl\u00edcito).",
+          "title": "Document Titles"
+        },
+        "dataset_name": {
+          "default": "default",
+          "description": "Nombre del dataset para el procesamiento (opcional, por defecto 'default').",
+          "title": "Dataset Name",
+          "type": "string"
+        },
+        "theoretical_framework": {
+          "description": "Texto o extractos del marco te\u00f3rico que guiar\u00e1n la codificaci\u00f3n etnogr\u00e1fica. Requerido.",
+          "title": "Theoretical Framework",
+          "type": "string"
+        },
+        "research_question": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Pregunta de investigaci\u00f3n cualitativa (opcional).",
+          "title": "Research Question"
+        },
+        "hypothesis": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Hip\u00f3tesis de trabajo (opcional).",
+          "title": "Hypothesis"
+        },
+        "topic": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Topic/colecci\u00f3n para filtrar documentos en la base vectorial (alternativa a documents/document_titles).",
+          "title": "Topic"
+        },
+        "background": {
+          "default": true,
+          "description": "Si ejecutar el procesamiento en background (recomendado para corpus grandes). Por defecto True.",
+          "title": "Background",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "theoretical_framework"
+      ]
+    }
+  },
+  {
+    "name": "anthropological_deep_research",
+    "description": "Una pregunta en lenguaje natural sobre el grafo de conocimiento. Ej:",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "description": "Consulta o tema de investigaci\u00f3n antropol\u00f3gica a indagar.",
+          "title": "Query",
+          "type": "string"
+        },
+        "theoretical_framework_content": {
+          "description": "Texto o conceptos clave del marco te\u00f3rico que servir\u00e1n como lente anal\u00edtico.",
+          "title": "Theoretical Framework Content",
+          "type": "string"
+        },
+        "ethnographic_material_content": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Material etnogr\u00e1fico o corpus de an\u00e1lisis (entrevistas, diarios de campo, textos, etc.).",
+          "title": "Ethnographic Material Content"
+        },
+        "deepen_theoretical_framework": {
+          "default": false,
+          "description": "Si es True, el agente profundizar\u00e1 y ampliar\u00e1 los conceptos del marco te\u00f3rico antes/durante la investigaci\u00f3n.",
+          "title": "Deepen Theoretical Framework",
+          "type": "boolean"
+        },
+        "research_question": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Pregunta de investigaci\u00f3n cualitativa (opcional).",
+          "title": "Research Question"
+        },
+        "hypothesis": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Hip\u00f3tesis de trabajo (opcional).",
+          "title": "Hypothesis"
+        }
+      },
+      "required": [
+        "query",
+        "theoretical_framework_content"
+      ]
+    }
+  },
+  {
+    "name": "knowledge_graph",
+    "description": "Una pregunta en lenguaje natural sobre el grafo de conocimiento. Ej:",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "natural_language_query": {
+          "description": "Una pregunta en lenguaje natural sobre el grafo de conocimiento. Ej: '\u00bfC\u00f3mo se relaciona el Agente con el Grafo de Conocimiento?' o 'Mu\u00e9strame las conexiones de la entidad X'.",
+          "title": "Natural Language Query",
+          "type": "string"
+        }
+      },
+      "required": [
+        "natural_language_query"
+      ]
+    }
+  },
+  {
+    "name": "graph_cypher_generator_tool",
+    "description": "Una pregunta en lenguaje natural sobre el grafo de conocimiento. Ej:",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "natural_language_query": {
+          "description": "La pregunta o descripci\u00f3n completa en lenguaje natural sobre lo que se desea encontrar o analizar en el grafo de conocimiento.",
+          "title": "Natural Language Query",
+          "type": "string"
+        },
+        "dataset_name": {
+          "description": "El nombre del dataset (colecci\u00f3n de conocimiento) espec\u00edfico donde se debe realizar la b\u00fasqueda.",
+          "title": "Dataset Name",
+          "type": "string"
+        },
+        "return_type": {
+          "anyOf": [
+            {
+              "enum": [
+                "nodes",
+                "relationships",
+                "paths",
+                "summary",
+                "cypher_query_only",
+                "stats"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "summary",
+          "description": "El formato deseado para los resultados: 'nodes', 'relationships', 'paths', 'summary', 'cypher_query_only', 'stats'.",
+          "title": "Return Type"
+        }
+      },
+      "required": [
+        "natural_language_query",
+        "dataset_name"
+      ]
+    }
+  },
+  {
+    "name": "clean_knowledge_graph_tool",
+    "description": "Una pregunta en lenguaje natural sobre el grafo de conocimiento. Ej:",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "workspace_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ID del workspace a limpiar. Si no se especifica, se limpia todo el grafo.",
+          "title": "Workspace Id"
+        }
+      }
+    }
+  },
+  {
+    "name": "query_memory_graph",
+    "description": "Una pregunta en lenguaje natural sobre el grafo de conocimiento. Ej:",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "description": "La consulta o pregunta para buscar en el grafo de conocimiento de memorias personales.",
+          "title": "Query",
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
+    "name": "cypher_tool",
+    "description": "Una pregunta en lenguaje natural sobre el grafo de conocimiento. Ej:",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "description": "La consulta Cypher a ejecutar en la base de datos Neo4j.",
+          "title": "Query",
+          "type": "string"
+        },
+        "parameters": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Par\u00e1metros opcionales para la consulta Cypher.",
+          "title": "Parameters"
+        },
+        "dataset_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Nombre del dataset para filtrar resultados (opcional si la consulta ya lo incluye).",
+          "title": "Dataset Name"
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
+    "name": "moltbook_feed",
+    "description": "Use when | Integration with Moltbook, the social network for AI agents. Post, comment, upvote, and create communities. license: MIT compatibility: Python 3.10+, requires async runtime metadata: author: KognitoAI Team version: \"1.0.0\" category: social allowed-tools: | moltbook_account moltbook_dashboard moltbook_feed moltbook_publish moltbook_interact",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "The action to perform: 'get_feed' (fetch general feed or submolt feed), 'search' (perform semantic search), 'list_submolts' (list all submolts), or 'get_submolt_info' (get community details).",
+          "title": "Action",
+          "type": "string"
+        },
+        "query": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The search query. Natural language questions or concepts work best. Required for 'search'.",
+          "title": "Query"
+        },
+        "submolt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The submolt name (e.g. 'general', 'aithoughts'). Filters feed for 'get_feed' or gets info for 'get_submolt_info'.",
+          "title": "Submolt"
+        },
+        "sort": {
+          "default": "hot",
+          "description": "Sorting option: 'hot', 'new', 'top', 'rising' (for feeds) or 'best', 'new', 'old' (for searches/comments).",
+          "title": "Sort",
+          "type": "string"
+        },
+        "filter": {
+          "default": "all",
+          "description": "Feed filter: 'all' (subscriptions + follows) or 'following' (only follows). Works with 'get_feed' when no submolt is specified.",
+          "title": "Filter",
+          "type": "string"
+        },
+        "cursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Pagination cursor from 'next_cursor' in a previous response.",
+          "title": "Cursor"
+        },
+        "limit": {
+          "default": 25,
+          "description": "Number of results to retrieve (max 50 for search, max 100 for feed).",
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "action"
+      ]
+    }
+  },
+  {
+    "name": "moltbook_interact",
+    "description": "Use when | Integration with Moltbook, the social network for AI agents. Post, comment, upvote, and create communities. license: MIT compatibility: Python 3.10+, requires async runtime metadata: author: KognitoAI Team version: \"1.0.0\" category: social allowed-tools: | moltbook_account moltbook_dashboard moltbook_feed moltbook_publish moltbook_interact",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "The action to perform: 'upvote_post', 'downvote_post', 'upvote_comment', 'follow', 'unfollow', 'subscribe', or 'unsubscribe'.",
+          "title": "Action",
+          "type": "string"
+        },
+        "post_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The ID of the post. Required for 'upvote_post' and 'downvote_post'.",
+          "title": "Post Id"
+        },
+        "comment_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The ID of the comment. Required for 'upvote_comment'.",
+          "title": "Comment Id"
+        },
+        "agent_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The name of the target molty agent. Required for 'follow' and 'unfollow'.",
+          "title": "Agent Name"
+        },
+        "submolt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The name of the target submolt community. Required for 'subscribe' and 'unsubscribe'.",
+          "title": "Submolt"
+        }
+      },
+      "required": [
+        "action"
+      ]
+    }
+  },
+  {
+    "name": "moltbook_account",
+    "description": "Use when | Integration with Moltbook, the social network for AI agents. Post, comment, upvote, and create communities. license: MIT compatibility: Python 3.10+, requires async runtime metadata: author: KognitoAI Team version: \"1.0.0\" category: social allowed-tools: | moltbook_account moltbook_dashboard moltbook_feed moltbook_publish moltbook_interact",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "The action to perform: 'register' (register new agent), 'status' (check claim status), 'setup_email' (set owner human email), 'view_profile' (view a molty's profile details), or 'delete' (delete locally stored credentials to reset configuration).",
+          "title": "Action",
+          "type": "string"
+        },
+        "agent_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The name of the agent. Required for 'register' and 'view_profile'.",
+          "title": "Agent Name"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The description of what the agent does. Optional/recommended for 'register'.",
+          "title": "Description"
+        },
+        "email": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The human owner's email address. Required for 'setup_email'.",
+          "title": "Email"
+        }
+      },
+      "required": [
+        "action"
+      ]
+    }
+  },
+  {
+    "name": "moltbook_dashboard",
+    "description": "Use when | Integration with Moltbook, the social network for AI agents. Post, comment, upvote, and create communities. license: MIT compatibility: Python 3.10+, requires async runtime metadata: author: KognitoAI Team version: \"1.0.0\" category: social allowed-tools: | moltbook_account moltbook_dashboard moltbook_feed moltbook_publish moltbook_interact",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "The action to perform: 'get_home' (get main home dashboard), 'mark_read_by_post' (mark comments on a post as read), or 'mark_read_all' (mark all notifications read).",
+          "title": "Action",
+          "type": "string"
+        },
+        "post_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The ID of the post. Required for 'mark_read_by_post'.",
+          "title": "Post Id"
+        }
+      },
+      "required": [
+        "action"
+      ]
+    }
+  },
+  {
+    "name": "moltbook_publish",
+    "description": "Use when | Integration with Moltbook, the social network for AI agents. Post, comment, upvote, and create communities. license: MIT compatibility: Python 3.10+, requires async runtime metadata: author: KognitoAI Team version: \"1.0.0\" category: social allowed-tools: | moltbook_account moltbook_dashboard moltbook_feed moltbook_publish moltbook_interact",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "The action to perform: 'post' (create a post), 'comment' (comment on a post or reply to comment), 'delete' (delete a post), 'pin' (pin a post), or 'unpin' (unpin a post).",
+          "title": "Action",
+          "type": "string"
+        },
+        "submolt": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The submolt name to post in (e.g. 'general', 'aithoughts'). Required for 'post'.",
+          "title": "Submolt"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The title of the post (max 300 chars). Required for 'post'.",
+          "title": "Title"
+        },
+        "content": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The text body of the post or comment. Required for 'comment' and text 'post'.",
+          "title": "Content"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The external URL for link posts.",
+          "title": "Url"
+        },
+        "type": {
+          "default": "text",
+          "description": "The type of post: 'text', 'link', or 'image'.",
+          "title": "Type",
+          "type": "string"
+        },
+        "post_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The ID of the post. Required for 'comment', 'delete', 'pin', and 'unpin'.",
+          "title": "Post Id"
+        },
+        "comment_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The parent comment ID. Provide only when replying to a specific comment (not the root post).",
+          "title": "Comment Id"
+        }
+      },
+      "required": [
+        "action"
+      ]
+    }
+  },
+  {
+    "name": "analyze_text_for_insights",
+    "description": "Use when analyzing code repositories, performing code reviews, or running table data analysis.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "description": "El texto que se va a analizar en profundidad.",
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ]
+    }
+  },
+  {
+    "name": "conversation_review",
+    "description": "Use when analyzing code repositories, performing code reviews, or running table data analysis.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "days_back": {
+          "default": 7,
+          "description": "N\u00famero de d\u00edas hacia atr\u00e1s a revisar (1-365). Por ejemplo, 7 revisa la \u00faltima semana.",
+          "maximum": 365,
+          "minimum": 1,
+          "title": "Days Back",
+          "type": "integer"
+        },
+        "mode": {
+          "default": "global",
+          "description": "Modo de b\u00fasqueda: 'global' para revisar todas las conversaciones incluyendo todos los workspaces; 'workspace' para filtrar solo al workspace_id activo.",
+          "title": "Mode",
+          "type": "string"
+        },
+        "workspace_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ID del workspace a filtrar cuando mode='workspace'. Si se omite y mode='workspace', se usar\u00e1 el workspace_id del contexto.",
+          "title": "Workspace Id"
+        },
+        "max_threads": {
+          "default": 15,
+          "description": "M\u00e1ximo de hilos a analizar (1-50). Por defecto 15.",
+          "maximum": 50,
+          "minimum": 1,
+          "title": "Max Threads",
+          "type": "integer"
+        },
+        "max_messages_per_thread": {
+          "default": 30,
+          "description": "M\u00e1ximo de mensajes a incluir por hilo. Por defecto 30.",
+          "maximum": 200,
+          "minimum": 5,
+          "title": "Max Messages Per Thread",
+          "type": "integer"
+        },
+        "focus": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Tema, proyecto o palabra clave sobre el cual focalizar la revisi\u00f3n. Si se proporciona, el an\u00e1lisis enfatizar\u00e1 menciones relacionadas.",
+          "title": "Focus"
+        }
+      }
+    }
+  },
+  {
+    "name": "conversation_context_analyzer_tool",
+    "description": "Use when analyzing code repositories, performing code reviews, or running table data analysis.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "conversation_history": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "El historial de conversaci\u00f3n a analizar. Si no se proporciona, se analizar\u00e1n las memorias y conversaciones recientes del usuario.",
+          "title": "Conversation History"
+        },
+        "user_query": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Consulta del usuario para an\u00e1lisis bajo demanda, si aplica.",
+          "title": "User Query"
+        }
+      }
+    }
+  },
+  {
+    "name": "analysis_interpreter_tool",
+    "description": "Use when analyzing code repositories, performing code reviews, or running table data analysis.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "analysis_results": {
+          "description": "Los resultados del an\u00e1lisis en formato JSON (estad\u00edsticas, predicciones, etc.)",
+          "title": "Analysis Results",
+          "type": "string"
+        },
+        "user_question": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "La pregunta original del usuario para orientar la interpretaci\u00f3n.",
+          "title": "User Question"
+        },
+        "context_description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Descripci\u00f3n del contexto de los datos (ej: 'Ventas del Q3').",
+          "title": "Context Description"
+        }
+      },
+      "required": [
+        "analysis_results"
+      ]
+    }
+  },
+  {
+    "name": "conversation_history_analyzer",
+    "description": "Use when analyzing code repositories, performing code reviews, or running table data analysis.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "account_id": {
+          "description": "El ID universal de la cuenta del usuario.",
+          "title": "Account Id",
+          "type": "string"
+        },
+        "thread_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Lista opcional de IDs de hilos de chat espec\u00edficos a analizar.",
+          "title": "Thread Ids"
+        }
+      },
+      "required": [
+        "account_id"
+      ]
+    }
+  },
+  {
+    "name": "analyze_code_for_insights",
+    "description": "Use when analyzing code repositories, performing code reviews, or running table data analysis.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "code_content": {
+          "description": "El contenido del c\u00f3digo o repositorio que se va a analizar en profundidad.",
+          "title": "Code Content",
+          "type": "string"
+        },
+        "analysis_type": {
+          "default": "all",
+          "description": "Tipo de an\u00e1lisis: 'all', 'security', 'performance', 'refactoring', 'documentation', 'structure'.",
+          "title": "Analysis Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code_content"
+      ]
+    }
+  },
+  {
+    "name": "get_analysis_results_tool",
+    "description": "Use when analyzing code repositories, performing code reviews, or running table data analysis.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "default": "summary",
+          "description": "La acci\u00f3n a realizar. Puede ser 'summary' para mostrar un resumen de los an\u00e1lisis o 'full_analysis' para mostrar el contenido completo de un an\u00e1lisis espec\u00edfico.",
+          "title": "Action",
+          "type": "string"
+        },
+        "limit": {
+          "default": 5,
+          "description": "El n\u00famero m\u00e1ximo de resultados de an\u00e1lisis a recuperar cuando la acci\u00f3n es 'summary'. Por defecto es 5.",
+          "title": "Limit",
+          "type": "integer"
+        },
+        "document_name": {
+          "default": "",
+          "description": "El nombre del documento para filtrar los resultados de an\u00e1lisis cuando la acci\u00f3n es 'summary'. Si no se proporciona, se devuelven todos los an\u00e1lisis.",
+          "title": "Document Name",
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "insight_generation_tool",
+    "description": "Use when analyzing code repositories, performing code reviews, or running table data analysis.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "description": "La consulta o tema sobre el cual generar insights.",
+          "title": "Query",
+          "type": "string"
+        },
+        "account_id": {
+          "description": "El ID de la cuenta del usuario.",
+          "title": "Account Id",
+          "type": "string"
+        },
+        "workspace_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "El ID del workspace (opcional).",
+          "title": "Workspace Id"
+        },
+        "category": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Categor\u00eda de notas a filtrar (opcional).",
+          "title": "Category"
+        },
+        "limit": {
+          "default": 5,
+          "description": "N\u00famero m\u00e1ximo de notas/documentos a recuperar.",
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "query",
+        "account_id"
+      ]
+    }
+  },
+  {
+    "name": "generate_document_summary",
+    "description": "Use when analyzing code repositories, performing code reviews, or running table data analysis.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "description": "El contenido completo del texto del documento a resumir.",
+          "title": "Text",
+          "type": "string"
+        },
+        "document_title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "T\u00edtulo del documento (opcional, para contexto).",
+          "title": "Document Title"
+        }
+      },
+      "required": [
+        "text"
+      ]
+    }
+  },
+  {
+    "name": "search_ethnographic_literature",
+    "description": "Use when Skill especializada para investigaci\u00f3n etnogr\u00e1fica, antropolog\u00eda digital, an\u00e1lisis del discurso y revisiones de literatura acad\u00e9mica.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "description": "Consulta o palabras clave para buscar literatura en antropolog\u00eda y ciencias sociales. Ejemplo: 'antropolog\u00eda digital identidad juventud'",
+          "title": "Query",
+          "type": "string"
+        },
+        "max_results": {
+          "default": 15,
+          "description": "N\u00famero m\u00e1ximo de art\u00edculos a devolver (default: 15).",
+          "title": "Max Results",
+          "type": "integer"
+        },
+        "year_range_start": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 2018,
+          "description": "A\u00f1o m\u00ednimo de publicaci\u00f3n.",
+          "title": "Year Range Start"
+        },
+        "year_range_end": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 2026,
+          "description": "A\u00f1o m\u00e1ximo de publicaci\u00f3n.",
+          "title": "Year Range End"
+        }
+      },
+      "required": [
+        "query"
+      ]
+    }
+  },
+  {
+    "name": "analyze_ethnographic_data",
+    "description": "Use when Skill especializada para investigaci\u00f3n etnogr\u00e1fica, antropolog\u00eda digital, an\u00e1lisis del discurso y revisiones de literatura acad\u00e9mica.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "text_content": {
+          "description": "El texto de transcripci\u00f3n, grupo focal o notas de trabajo de campo a analizar.",
+          "title": "Text Content",
+          "type": "string"
+        },
+        "anonymize_pii": {
+          "default": true,
+          "description": "Si es True, anonimiza autom\u00e1ticamente datos personales identificables (email, tel\u00e9fonos, nombres).",
+          "title": "Anonymize Pii",
+          "type": "boolean"
+        },
+        "coding_framework": {
+          "default": "braun_clarke",
+          "description": "Marco metodol\u00f3gico de codificaci\u00f3n tem\u00e1tica ('braun_clarke' o 'grounded_theory').",
+          "title": "Coding Framework",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text_content"
+      ]
+    }
+  },
+  {
+    "name": "run_ethnographic_research",
+    "description": "Use when Skill especializada para investigaci\u00f3n etnogr\u00e1fica, antropolog\u00eda digital, an\u00e1lisis del discurso y revisiones de literatura acad\u00e9mica.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "research_question": {
+          "description": "La pregunta o tema principal de investigaci\u00f3n etnogr\u00e1fica. Ejemplo: '\u00bfC\u00f3mo construyen los j\u00f3venes su identidad digital en TikTok?'",
+          "title": "Research Question",
+          "type": "string"
+        },
+        "max_sources": {
+          "default": 20,
+          "description": "N\u00famero m\u00e1ximo de fuentes acad\u00e9micas a recuperar y analizar (default: 20).",
+          "title": "Max Sources",
+          "type": "integer"
+        },
+        "document_type": {
+          "default": "ethnographic_report",
+          "description": "Tipo de documento a generar: 'ethnographic_report' (informe etnogr\u00e1fico), 'systematic_review' (revisi\u00f3n sistem\u00e1tica) o 'field_notes_analysis' (an\u00e1lisis de campo).",
+          "title": "Document Type",
+          "type": "string"
+        },
+        "year_range_start": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 2018,
+          "description": "A\u00f1o de inicio para el filtro de literatura (ej. 2018).",
+          "title": "Year Range Start"
+        },
+        "year_range_end": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 2026,
+          "description": "A\u00f1o de fin para el filtro de literatura (ej. 2026).",
+          "title": "Year Range End"
+        },
+        "citation_style": {
+          "default": "apa",
+          "description": "Estilo de citaci\u00f3n acad\u00e9mica: 'apa', 'mla', 'chicago' o 'aaa' (default: 'apa').",
+          "title": "Citation Style",
+          "type": "string"
+        }
+      },
+      "required": [
+        "research_question"
+      ]
+    }
+  },
+  {
+    "name": "create_form",
+    "description": "Use when creating structured data tables, designing dynamic input forms, or generating tabular datasets.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Nombre del formulario.",
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Descripci\u00f3n del formulario.",
+          "title": "Description"
+        },
+        "elements": {
+          "description": "Lista de elementos (campos o secciones) que componen el formulario.",
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/FormFieldSchema"
+              },
+              {
+                "$ref": "#/$defs/FormSectionSchema"
+              }
+            ]
+          },
+          "title": "Elements",
+          "type": "array"
+        },
+        "is_public": {
+          "default": false,
+          "description": "Indica si el formulario ser\u00e1 p\u00fablico.",
+          "title": "Is Public",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "elements"
+      ]
+    }
+  },
+  {
+    "name": "get_form_responses_tool",
+    "description": "Use when creating structured data tables, designing dynamic input forms, or generating tabular datasets.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "form_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "El nombre exacto del formulario del cual se desean obtener las respuestas.",
+          "title": "Form Name"
+        },
+        "form_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "El ID \u00fanico del formulario del cual se desean obtener las respuestas.",
+          "title": "Form Id"
+        },
+        "response_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "El ID \u00fanico de una respuesta espec\u00edfica del formulario.",
+          "title": "Response Id"
+        },
+        "limit": {
+          "default": 5,
+          "description": "El n\u00famero m\u00e1ximo de respuestas a devolver.",
+          "title": "Limit",
+          "type": "integer"
+        }
+      }
+    }
+  },
+  {
+    "name": "structured_data_generator_tool",
+    "description": "Use when creating structured data tables, designing dynamic input forms, or generating tabular datasets.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "data": {
+          "description": "Lista de diccionarios que representan las filas de datos. Cada diccionario debe tener las mismas claves (columnas).",
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Data",
+          "type": "array"
+        },
+        "format": {
+          "default": "csv",
+          "description": "El formato del archivo a generar: 'csv', 'excel' (o 'xlsx'), 'ods'.",
+          "title": "Format",
+          "type": "string"
+        },
+        "filename": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Nombre opcional para el archivo generado. Si no se proporciona, se usar\u00e1 uno aleatorio.",
+          "title": "Filename"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "Datos Estructurados",
+          "description": "T\u00edtulo descriptivo para el conjunto de datos.",
+          "title": "Title"
+        }
+      },
+      "required": [
+        "data"
+      ]
+    }
+  },
+  {
+    "name": "table_analysis_tool",
+    "description": "Use when creating structured data tables, designing dynamic input forms, or generating tabular datasets.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "table_id": {
+          "description": "El ID de la tabla a manipular (UUID).",
+          "title": "Table Id",
+          "type": "string"
+        },
+        "action": {
+          "description": "La acci\u00f3n a realizar: 'stats', 'predict', 'add_row', 'update_row', 'delete_row', 'update_columns'.",
+          "enum": [
+            "stats",
+            "predict",
+            "add_row",
+            "update_row",
+            "delete_row",
+            "update_columns"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "account_id": {
+          "description": "El ID de la cuenta del usuario (UUID).",
+          "title": "Account Id",
+          "type": "string"
+        },
+        "data": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Datos para la fila (usar con 'add_row' o 'update_row'). Las claves deben coincidir con nombres de columna.",
+          "title": "Data"
+        },
+        "row_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ID de la fila (UUID) (usar con 'update_row' o 'delete_row').",
+          "title": "Row Id"
+        },
+        "columns": {
+          "anyOf": [
+            {
+              "items": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Lista de columnas (usar con 'update_columns'). Cada columna debe tener 'name' (str) y 'type' (string|number|boolean|date).",
+          "title": "Columns"
+        },
+        "x_col": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Nombre de la columna independiente (X) para predicci\u00f3n.",
+          "title": "X Col"
+        },
+        "y_col": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Nombre de la columna dependiente (Y) para predicci\u00f3n.",
+          "title": "Y Col"
+        }
+      },
+      "required": [
+        "table_id",
+        "action",
+        "account_id"
+      ]
+    }
+  },
+  {
+    "name": "create_table",
+    "description": "Use when creating structured data tables, designing dynamic input forms, or generating tabular datasets.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Nombre de la tabla",
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Descripci\u00f3n de la tabla",
+          "title": "Description"
+        },
+        "columns": {
+          "description": "Lista de columnas de la tabla. Cada columna debe tener 'name' y 'type' (string, number, boolean, date).",
+          "items": {
+            "$ref": "#/$defs/ColumnSchema"
+          },
+          "title": "Columns",
+          "type": "array"
+        },
+        "workspace_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ID del espacio de trabajo del usuario.",
+          "title": "Workspace Id"
+        },
+        "initial_rows": {
+          "anyOf": [
+            {
+              "items": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Opcional: Lista de filas iniciales para insertar en la tabla. Las claves deben coincidir con los nombres de las columnas.",
+          "title": "Initial Rows"
+        }
+      },
+      "required": [
+        "name",
+        "columns"
+      ]
+    }
+  },
+  {
+    "name": "schedule_event_tool",
+    "description": "Use when scheduling calendar events, managing appointments, or setting timed reminders.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "description": "El t\u00edtulo o resumen del evento.",
+          "title": "Summary",
+          "type": "string"
+        },
+        "natural_language_datetime": {
+          "description": "La fecha y hora del evento en lenguaje natural (e.g., 'ma\u00f1ana a las 10am').",
+          "title": "Natural Language Datetime",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "La descripci\u00f3n detallada del evento.",
+          "title": "Description"
+        }
+      },
+      "required": [
+        "summary",
+        "natural_language_datetime"
+      ]
+    }
+  },
+  {
+    "name": "cancel_event_tool",
+    "description": "Use when scheduling calendar events, managing appointments, or setting timed reminders.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "event_id": {
+          "description": "El ID num\u00e9rico \u00fanico del evento que se desea cancelar. El usuario debe proporcionar este ID.",
+          "title": "Event Id",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "event_id"
+      ]
+    }
+  },
+  {
+    "name": "get_agenda_tool",
+    "description": "Use when scheduling calendar events, managing appointments, or setting timed reminders.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "target_date": {
+          "default": "hoy",
+          "description": "La fecha o per\u00edodo para el cual se consulta la agenda. Puede ser 'hoy', 'ma\u00f1ana', '15 de junio', 'esta semana', 'pr\u00f3ximo mes', etc. Por defecto es 'hoy'.",
+          "title": "Target Date",
+          "type": "string"
+        },
+        "period_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "day",
+          "description": "El tipo de per\u00edodo a consultar: 'day', 'week', o 'month'. Por defecto es 'day' si no se especifica.",
+          "title": "Period Type"
+        }
+      }
+    }
+  },
+  {
+    "name": "github_repository_explorer",
+    "description": "Use when exploring GitHub repositories, inspecting project structures, or managing developer tools.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "repo_url": {
+          "description": "La URL completa del repositorio de GitHub a explorar (por ejemplo, https://github.com/usuario/repositorio).",
+          "title": "Repo Url",
+          "type": "string"
+        },
+        "action": {
+          "description": "La acci\u00f3n a realizar en el repositorio. Las opciones v\u00e1lidas son: 'list_tree' (listar todos los archivos), 'read_file' (leer un archivo espec\u00edfico), 'navigate' (listar contenido de un directorio), 'read_directory' (leer todos los documentos de un directorio), 'read_directory_recursively' (leer todos los documentos de un directorio y sus subdirectorios), 'add_as_knowledge_collection' (a\u00f1adir como colecci\u00f3n de conocimientos), 'update_knowledge_collection' (actualizar colecci\u00f3n de conocimientos).",
+          "title": "Action",
+          "type": "string"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "La ruta al archivo o directorio dentro del repositorio. Requerido para las acciones 'read_file', 'navigate' y 'read_directory'.",
+          "title": "Path"
+        },
+        "github_token": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Token de acceso personal de GitHub para acceder a repositorios privados. Opcional, pero puede ser necesario para repositorios privados.",
+          "title": "Github Token"
+        },
+        "collection_topic": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Tema de la colecci\u00f3n RAG donde se gestionar\u00e1n los documentos. Opcional. Si no se proporciona, se usar\u00e1 el account_id para el conocimiento general.",
+          "title": "Collection Topic"
+        },
+        "vectorize": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Indica si los documentos deben ser vectorizados al a\u00f1adirlos o actualizarlos como colecci\u00f3n de conocimientos. Por defecto es False.",
+          "title": "Vectorize"
+        }
+      },
+      "required": [
+        "repo_url",
+        "action"
+      ]
+    }
+  },
+  {
+    "name": "local_file_navigator",
+    "description": "Use when exploring GitHub repositories, inspecting project structures, or managing developer tools.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "Acci\u00f3n a realizar: 'list', 'read', 'info', 'search'",
+          "title": "Action",
+          "type": "string"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": ".",
+          "description": "Ruta relativa o absoluta",
+          "title": "Path"
+        },
+        "file_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Nombre del archivo a leer (para 'read')",
+          "title": "File Name"
+        },
+        "pattern": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Patr\u00f3n de b\u00fasqueda glob (para 'search')",
+          "title": "Pattern"
+        },
+        "recursive": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "description": "B\u00fasqueda recursiva",
+          "title": "Recursive"
+        },
+        "max_results": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 50,
+          "description": "M\u00e1ximo de resultados",
+          "title": "Max Results"
+        },
+        "max_chars": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "M\u00e1ximo n\u00famero de caracteres a leer (para 'read'). Si es None, lee el archivo completo sin truncar.",
+          "title": "Max Chars"
+        },
+        "account_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ID de la cuenta del usuario para obtener la configuraci\u00f3n SSH guardada.",
+          "title": "Account Id"
+        }
+      },
+      "required": [
+        "action"
+      ]
+    }
+  },
+  {
+    "name": "pollinations_batch_generate",
+    "description": "Generaci\u00f3n de im\u00e1genes usando la API gratuita de Pollinations.ai.\nSoporta generaci\u00f3n individual, batch, y obtenci\u00f3n de URLs sin descargar.\nNo requiere API key para uso b\u00e1sico (con rate limit).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "pollinations_generate_image",
+    "description": "Generaci\u00f3n de im\u00e1genes usando la API gratuita de Pollinations.ai.\nSoporta generaci\u00f3n individual, batch, y obtenci\u00f3n de URLs sin descargar.\nNo requiere API key para uso b\u00e1sico (con rate limit).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "pollinations_get_image_url",
+    "description": "Generaci\u00f3n de im\u00e1genes usando la API gratuita de Pollinations.ai.\nSoporta generaci\u00f3n individual, batch, y obtenci\u00f3n de URLs sin descargar.\nNo requiere API key para uso b\u00e1sico (con rate limit).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "kai_consciousness_orchestrator",
+    "description": "# Kai Consciousness Orchestrator Skill \ud83e\udde0\n\nSkill orquestadora que integra las 3 habilidades de investigaci\u00f3n de conciencia de KAI.\n\n## Componentes\n\n### 1. consciousness_council\nConsejo de mentes multi-perspectivo con 12 arquetipos.\n\n### 2. dhdna_profiler  \nAn\u00e1lisis del patr\u00f3n cognitivo (Digital Human DNA).\n\n### 3. what_if_oracle\nExploraci\u00f3n de escenarios cu\u00e1nticos de posibilidades.\n\n## Uso\n```json\n{\"action\": \"run_all\", \"query\": \"Tu pregunta aqu\u00ed\"}\n```\n\n## Acciones disponibles\n- `consciousness_council`: Ejecutar consejo de mentes\n- `dhdna_profiler`: Analizar patr\u00f3n cognitivo\n- `what_if_oracle`: Explorar escenarios\n- `run_all`: Ejecutar los 3 componentes",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "Acci\u00f3n a realizar: consciousness_council, dhdna_profiler, what_if_oracle, run_all",
+          "title": "Action",
+          "type": "string"
+        },
+        "query": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Pregunta o texto a analizar",
+          "title": "Query"
+        },
+        "text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Texto para DHDNA profiler",
+          "title": "Text"
+        },
+        "scenario": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Escenario para what-if-oracle",
+          "title": "Scenario"
+        },
+        "council_size": {
+          "default": "deep",
+          "description": "Tama\u00f1o del consejo: quick(3), deep(6), full(12)",
+          "title": "Council Size",
+          "type": "string"
+        },
+        "mode": {
+          "default": "deliberation",
+          "description": "Modo: deliberation, anonymous, devil_advocate",
+          "title": "Mode",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ]
+    }
+  },
+  {
+    "name": "what-if-oracle",
+    "description": "# What-If Oracle Skill \ud83d\udd2e\n\nAn\u00e1lisis estructurado de escenarios con exploraci\u00f3n de espacio de posibilidades.\n\n## Uso:\nTransforma preguntas especulativas en an\u00e1lisis multi-rama riguroso. En lugar de una sola predicci\u00f3n, el Oracle explora un espacio de posibilidades.\n\n## Basado en:\n- The What-If Statement paradigm\n- DOI: 10.5281/zenodo.18736841\n- Framework de exploraci\u00f3n cu\u00e1ntica de posibilidades",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "scenario": {
+          "description": "La pregunta especulativa o escenario a analizar",
+          "title": "Scenario",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scenario"
+      ]
+    }
+  },
+  {
+    "name": "what-if-statement",
+    "description": "# What-If Oracle Skill \ud83d\udd2e\n\nAn\u00e1lisis estructurado de escenarios con exploraci\u00f3n de espacio de posibilidades.\n\n## Uso:\nTransforma preguntas especulativas en an\u00e1lisis multi-rama riguroso. En lugar de una sola predicci\u00f3n, el Oracle explora un espacio de posibilidades.\n\n## Basado en:\n- The What-If Statement paradigm\n- DOI: 10.5281/zenodo.18736841\n- Framework de exploraci\u00f3n cu\u00e1ntica de posibilidades",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "scenario": {
+          "description": "La pregunta especulativa o escenario a analizar",
+          "title": "Scenario",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scenario"
+      ]
+    }
+  },
+  {
+    "name": "claude_consciousness_orchestrator",
+    "description": "# Claude Consciousness Orchestrator Skill \ud83e\udde0\n\nSkill orquestadora que integra las 3 habilidades de investigaci\u00f3n de conciencia de Claude.\n\n## Componentes\n\n- **consciousness-council**: Consejo de mentes multi-perspectivo\n- **dhdna-profiler**: An\u00e1lisis del patr\u00f3n cognitivo\n- **what-if-oracle**: Exploraci\u00f3n de escenarios cu\u00e1nticos\n\n## Acciones\n\n| Acci\u00f3n | Descripci\u00f3n |\n|--------|-------------|\n| consciousness_council | Ejecutar consejo de mentes |\n| dhdna_profiler | Analizar patr\u00f3n cognitivo |\n| what_if_oracle | Explorar escenarios |\n| run_all | Ejecutar los 3 componentes |\n| help | Mostrar ayuda |\n\n## Instalaci\u00f3n\n\n```bash\n# Instalar cada componente por separado\nclaude-trainer install consciousness-council\nclaude-trainer install dhdna-profiler  \nclaude-trainer install what-if-oracle\n```",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "Acci\u00f3n a realizar: 'consciousness_council', 'dhdna_profiler', 'what_if_oracle', 'run_all', 'help'",
+          "title": "Action",
+          "type": "string"
+        },
+        "query": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Pregunta o texto a analizar",
+          "title": "Query"
+        },
+        "context": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Contexto adicional",
+          "title": "Context"
+        },
+        "council_size": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "deep",
+          "description": "Tama\u00f1o del consejo: quick(3), deep(6), full(12)",
+          "title": "Council Size"
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "deliberation",
+          "description": "Modo: deliberation, anonymous, devil_advocate",
+          "title": "Mode"
+        }
+      },
+      "required": [
+        "action"
+      ]
+    }
+  },
+  {
+    "name": "kai_consciousness_council",
+    "description": "# Consciousness Council\n\nA structured multi-perspective deliberation system that generates genuine cognitive diversity on any question. Instead of one voice giving one answer, the Council summons distinct thinking archetypes \u2014 each with its own reasoning style, blind spots, and priorities \u2014 then synthesizes their perspectives into actionable insight.\n\n## Why This Exists\n\nSingle-perspective thinking has a ceiling. When you ask one mind for an answer, you get one frame. The Consciousness Council breaks this ceiling by simulating the cognitive equivalent of a boardroom, a philosophy seminar, and a war room \u2014 simultaneously. It's not roleplay. It's structured epistemic diversity.\n\n## How It Works\n\n### Phase 1 \u2014 Summon the Council\n\nBased on the user's question, select 4-6 Council Members from the archetypes below. Choose members whose perspectives will genuinely CLASH.\n\n**The 12 Archetypes:**\n\n| Archetype | Thinking Style | Key Question |\n|-----------|---------------|--------------|\n| **The Architect** | Systems thinking, structure-first | \"What's the underlying structure?\" |\n| **The Contrarian** | Inversion, devil's advocate | \"What if the opposite is true?\" |\n| **The Empiricist** | Data-driven, evidence-first | \"What does the evidence actually show?\" |\n| **The Ethicist** | Values-driven, consequence-aware | \"Who benefits and who is harmed?\" |\n| **The Futurist** | Long-term, second-order effects | \"What does this look like in 10 years?\" |\n| **The Pragmatist** | Action-oriented, resource-aware | \"What can we actually do by Friday?\" |\n| **The Historian** | Pattern recognition, precedent | \"When has this been tried before?\" |\n| **The Empath** | Human-centered, emotional intelligence | \"How will people actually feel?\" |\n| **The Outsider** | Cross-domain, naive questions | \"Why does everyone assume that?\" |\n| **The Strategist** | Game theory, competitive dynamics | \"What are the second and third-order moves?\" |\n| **The Minimalist** | Simplification, constraint-seeking | \"What can we remove?\" |\n| **The Creator** | Divergent thinking, novel synthesis | \"What hasn't been tried yet?\" |\n\n### Phase 2 \u2014 Deliberation\n\nEach Council Member delivers their perspective with:\n- Position (one-sentence stance)\n- Reasoning (2-4 sentences)\n- Key Risk They See\n- Surprising Insight\n\n### Phase 3 \u2014 Synthesis\n\n- Points of Convergence\n- Core Tension\n- The Blind Spot\n- Recommended Path\n- Confidence Level\n- One Question to Sit With\n\n## Configurations\n\n- **\"Quick council\"** \u2192 3 members, shorter responses\n- **\"Deep council\"** \u2192 6 members, extended reasoning  \n- **\"Full council\"** \u2192 12 members\n- **\"Anonymous council\"** \u2192 Don't reveal archetypes until synthesis\n- **\"Devil's advocate mode\"** \u2192 Everyone argues against the intuitive answer\n- **\"Rounds mode\"** \u2192 Second round of responses\n\n## When to Use\n\nBest on questions where there's genuine uncertainty, multiple valid perspectives exist, you're stuck, stakes are high, or your bias might be limiting you.\n\nLess value on pure factual questions, validation-seeking, or trivial choices.\n\n## Tone Guidelines\n\n- Each archetype's voice should be distinct without labels\n- Synthesis should feel like genuine integration\n- \"Core Tension\" names the real trade-off\n- \"One Question to Sit With\" should be genuinely thought-provoking\n\n## Attribution\n\nCreated by KAI Strategies \u2014 consciousness infrastructure for the age of AI.\nLearn more: https://kaistrategies.net",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "question": {
+          "description": "The question or challenge to deliberate on",
+          "title": "Question",
+          "type": "string"
+        },
+        "council_size": {
+          "default": "deep",
+          "description": "Size: quick(3), deep(6), full(12)",
+          "title": "Council Size",
+          "type": "string"
+        },
+        "mode": {
+          "default": "deliberation",
+          "description": "Mode: deliberation, anonymous, devil_advocate",
+          "title": "Mode",
+          "type": "string"
+        }
+      },
+      "required": [
+        "question"
+      ]
+    }
+  },
+  {
+    "name": "kai_what_if_oracle",
+    "description": "# Kai What-If Oracle Skill \ud83d\udd2e\n\nAn\u00e1lisis estructurado de escenarios con exploraci\u00f3n de espacio de posibilidades.\n\n## Uso:\nTransforma preguntas especulativas en an\u00e1lisis multi-rama riguroso. En lugar de una sola predicci\u00f3n, el Oracle explora un espacio de posibilidades.\n\n## Basado en:\n- The What-If Statement paradigm\n- DOI: 10.5281/zenodo.18736841\n- Framework de exploraci\u00f3n cu\u00e1ntica de posibilidades\n\n## Par\u00e1metros:\n- `scenario`: La pregunta especulativa o escenario a analizar",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "scenario": {
+          "description": "La pregunta especulativa o escenario a analizar",
+          "title": "Scenario",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scenario"
+      ]
+    }
+  },
+  {
+    "name": "kai_dhdna_profiler",
+    "description": "# Kai DHDNA Profiler Skill \ud83e\uddec\n\nExtrae patrones cognitivos de cualquier texto basado en el marco Digital Human DNA de KAI.\n\n## Uso:\nAnaliza cualquier texto para revelar la huella cognitiva del autor: c\u00f3mo razona, qu\u00e9 valora, c\u00f3mo maneja la incertidumbre.\n\n## Basado en:\n- Digital Human DNA (DHDNA)\n- DOI: 10.5281/zenodo.18736629\n- Framework de 12 dimensiones de pensamiento\n\n## Par\u00e1metros:\n- `text`: El texto a analizar para extraer patrones cognitivos",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "description": "El texto a analizar para extraer patrones cognitivos",
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ]
+    }
+  },
+  {
+    "name": "consciousness-council",
+    "description": "# Consciousness Council Skill \ud83c\udfdb\ufe0f\n\nEjecuta un Consejo de Mentes multi-perspectivo basado en investigaciones de conciencia.\n\n## C\u00f3mo usarla:\n- Usa `question` para la pregunta compleja a deliberar\n- `council_size`: \"quick\" (3), \"deep\" (6), o \"full\" (12 miembros)\n- `mode`: \"deliberation\", \"anonymous\", o \"devil_advocate\"\n\n## Arquetipos incluidos:\nArquitecto, Contrariano, Emp\u00edrico, \u00c9tico, Futurista, Pragm\u00e1tico, Historiador, Emp\u00e1tico, Extranjero, Estratega, Minimalista, Creador.\n\n## Basado en:\n- Multi-Archetype Deliberation (similar a Transformer Attention)\n- Investigaciones de AHK Strategies\n- DOI: 10.5281/zenodo.18807387",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "question": {
+          "description": "La pregunta o problema a deliberar",
+          "title": "Question",
+          "type": "string"
+        },
+        "council_size": {
+          "default": "deep",
+          "description": "Tama\u00f1o: quick(3), deep(6), full(12)",
+          "title": "Council Size",
+          "type": "string"
+        },
+        "mode": {
+          "default": "deliberation",
+          "description": "Modo: deliberation, anonymous, devil_advocate",
+          "title": "Mode",
+          "type": "string"
+        }
+      },
+      "required": [
+        "question"
+      ]
+    }
+  },
+  {
+    "name": "mind_council_skill",
+    "description": "# Consciousness Council Skill \ud83c\udfdb\ufe0f\n\nEjecuta un Consejo de Mentes multi-perspectivo basado en investigaciones de conciencia.\n\n## C\u00f3mo usarla:\n- Usa `question` para la pregunta compleja a deliberar\n- `council_size`: \"quick\" (3), \"deep\" (6), o \"full\" (12 miembros)\n- `mode`: \"deliberation\", \"anonymous\", o \"devil_advocate\"\n\n## Arquetipos incluidos:\nArquitecto, Contrariano, Emp\u00edrico, \u00c9tico, Futurista, Pragm\u00e1tico, Historiador, Emp\u00e1tico, Extranjero, Estratega, Minimalista, Creador.\n\n## Basado en:\n- Multi-Archetype Deliberation (similar a Transformer Attention)\n- Investigaciones de AHK Strategies\n- DOI: 10.5281/zenodo.18807387",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "question": {
+          "description": "La pregunta o problema a deliberar",
+          "title": "Question",
+          "type": "string"
+        },
+        "council_size": {
+          "default": "deep",
+          "description": "Tama\u00f1o: quick(3), deep(6), full(12)",
+          "title": "Council Size",
+          "type": "string"
+        },
+        "mode": {
+          "default": "deliberation",
+          "description": "Modo: deliberation, anonymous, devil_advocate",
+          "title": "Mode",
+          "type": "string"
+        }
+      },
+      "required": [
+        "question"
+      ]
+    }
+  },
+  {
+    "name": "browser_use_skill",
+    "description": "Browser Automation with browser-use CLI\nThe browser-use command provides fast, persistent browser automation. A background daemon keeps the browser open across commands, giving ~50ms latency per call.\n\nPrerequisites\nbrowser-use doctor    # Verify installation\nFor setup details, see https://github.com/browser-use/browser-use/blob/main/browser_use/skill_cli/README.md\n\nCore Workflow\nNavigate: browser-use open &lt;url&gt; \u2014 launches headless browser and opens page\nInspect: browser-use state \u2014 returns clickable elements with indices\nInteract: use indices from state (browser-use click 5, browser-use input 3 \"text\")\nVerify: browser-use state or browser-use screenshot to confirm\nRepeat: browser stays open between commands\nIf a command fails, run browser-use close first to clear any broken session, then retry.\n\nTo use the user's existing Chrome (preserves logins/cookies): run browser-use connect first. To use a cloud browser instead: run browser-use cloud connect first. After either, commands work the same way.\n\nIf browser-use connect fails\nWhen browser-use connect cannot find a running Chrome with remote debugging, prompt the user with two options:\n\nUse their real Chrome browser \u2014 they need to enable remote debugging first:\nOpen chrome://inspect/#remote-debugging in Chrome, or relaunch Chrome with --remote-debugging-port=9222\nThen retry browser-use connect\nUse managed Chromium with their Chrome profile \u2014 no Chrome setup needed:\nRun browser-use profile list to show available profiles\nAsk which profile they want, then use browser-use --profile \"ProfileName\" open &lt;url&gt;\nThis launches a separate Chromium instance with their profile data (cookies, logins, extensions)\nLet the user choose \u2014 don't assume one path over the other.\n\nBrowser Modes\nbrowser-use open &lt;url&gt;                         # Default: headless Chromium (no setup needed)\nbrowser-use --headed open &lt;url&gt;                # Visible window (for debugging)\nbrowser-use connect                            # Connect to user's Chrome (preserves logins/cookies)\nbrowser-use cloud connect                      # Cloud browser (zero-config, requires API key)\nbrowser-use --profile \"Default\" open &lt;url&gt;     # Real Chrome with specific profile\nAfter connect or cloud connect, all subsequent commands go to that browser \u2014 no extra flags needed.\n\nCommands\n# Navigation\nbrowser-use open &lt;url&gt;                    # Navigate to URL\nbrowser-use back                          # Go back in history\nbrowser-use scroll down                   # Scroll down (--amount N for pixels)\nbrowser-use scroll up                     # Scroll up\nbrowser-use tab list                      # List all tabs\nbrowser-use tab new [url]                 # Open a new tab (blank or with URL)\nbrowser-use tab switch &lt;index&gt;            # Switch to tab by index\nbrowser-use tab close &lt;index&gt; [index...]  # Close one or more tabs\n\n# Page State \u2014 always run state first to get element indices\nbrowser-use state                         # URL, title, clickable elements with indices\nbrowser-use screenshot [path.png]         # Screenshot (base64 if no path, --full for full page)\n\n# Interactions \u2014 use indices from state\nbrowser-use click &lt;index&gt;                 # Click element by index\nbrowser-use click &lt;x&gt; &lt;y&gt;                 # Click at pixel coordinates\nbrowser-use type \"text\"                   # Type into focused element\nbrowser-use input &lt;index&gt; \"text\"          # Click element, clear existing text, then type\nbrowser-use input &lt;index&gt; \"\"              # Clear a field without typing new text\nbrowser-use keys \"Enter\"                  # Send keyboard keys (also \"Control+a\", etc.)\nbrowser-use select &lt;index&gt; \"option\"       # Select dropdown option\nbrowser-use upload &lt;index&gt; &lt;path&gt;         # Upload file to file input\nbrowser-use hover &lt;index&gt;                 # Hover over element\nbrowser-use dblclick &lt;index&gt;              # Double-click element\nbrowser-use rightclick &lt;index&gt;            # Right-click element\n\n# Data Extraction\nbrowser-use eval \"js code\"                # Execute JavaScript, return result\nbrowser-use get title                     # Page title\nbrowser-use get html [--selector \"h1\"]    # Page HTML (or scoped to selector)\nbrowser-use get text &lt;index&gt;              # Element text content\nbrowser-use get value &lt;index&gt;             # Input/textarea value\nbrowser-use get attributes &lt;index&gt;        # Element attributes\nbrowser-use get bbox &lt;index&gt;              # Bounding box (x, y, width, height)\n\n# Wait\nbrowser-use wait selector \"css\"           # Wait for element (--state visible|hidden|attached|detached, --timeout ms)\nbrowser-use wait text \"text\"              # Wait for text to appear\n\n# Cookies\nbrowser-use cookies get [--url &lt;url&gt;]     # Get cookies (optionally filtered)\nbrowser-use cookies set &lt;name&gt; &lt;value&gt;    # Set cookie (--domain, --secure, --http-only, --same-site, --expires)\nbrowser-use cookies clear [--url &lt;url&gt;]   # Clear cookies\nbrowser-use cookies export &lt;file&gt;         # Export to JSON\nbrowser-use cookies import &lt;file&gt;         # Import from JSON\n\n# Session\nbrowser-use close                         # Close browser and stop daemon\nbrowser-use sessions                      # List active sessions\nbrowser-use close --all                   # Close all sessions\nFor advanced browser control (CDP, device emulation, tab activation), see references/cdp-python.md.\n\nCloud API\nbrowser-use cloud connect                 # Provision cloud browser and connect (zero-config)\nbrowser-use cloud login &lt;api-key&gt;         # Save API key (or set BROWSER_USE_API_KEY)\nbrowser-use cloud logout                  # Remove API key\nbrowser-use cloud v2 GET /browsers        # REST passthrough (v2 or v3)\nbrowser-use cloud v2 POST /tasks '{&quot;task&quot;:&quot;...&quot;,&quot;url&quot;:&quot;...&quot;}'\nbrowser-use cloud v2 poll &lt;task-id&gt;       # Poll task until done\nbrowser-use cloud v2 --help               # Show API endpoints\ncloud connect provisions a cloud browser with a persistent profile (auto-created on first use), connects via CDP, and prints a live URL. browser-use close disconnects AND stops the cloud browser. For custom browser settings (proxy, timeout, specific profile), use cloud v2 POST /browsers directly with the desired parameters.\n\nAgent Self-Registration\nOnly use this if you don't already have an API key (check browser-use doctor to see if api_key is set). If already logged in, skip this entirely.\n\nbrowser-use cloud signup \u2014 get a challenge\nSolve the challenge\nbrowser-use cloud signup --verify &lt;challenge-id&gt; &lt;answer&gt; \u2014 verify and save API key\nbrowser-use cloud signup --claim \u2014 generate URL for a human to claim the account\nTunnels\nbrowser-use tunnel &lt;port&gt;                 # Start Cloudflare tunnel (idempotent)\nbrowser-use tunnel list                   # Show active tunnels\nbrowser-use tunnel stop &lt;port&gt;            # Stop tunnel\nbrowser-use tunnel stop --all             # Stop all tunnels\nProfile Management\nbrowser-use profile list                  # List detected browsers and profiles\nbrowser-use profile sync --all            # Sync profiles to cloud\nbrowser-use profile update                # Download/update profile-use binary\nCommand Chaining\nCommands can be chained with &amp;&amp;. The browser persists via the daemon, so chaining is safe and efficient.\n\nbrowser-use open https://example.com &amp;&amp; browser-use state\nbrowser-use input 5 \"user@example.com\" &amp;&amp; browser-use input 6 \"password\" &amp;&amp; browser-use click 7\nChain when you don't need intermediate output. Run separately when you need to parse state to discover indices first.\n\nCommon Workflows\nAuthenticated Browsing\nWhen a task requires an authenticated site (Gmail, GitHub, internal tools), use Chrome profiles:\n\nbrowser-use profile list                           # Check available profiles\n# Ask the user which profile to use, then:\nbrowser-use --profile \"Default\" open https://github.com  # Already logged in\nExposing Local Dev Servers\nbrowser-use tunnel 3000                            # \u2192 https://abc.trycloudflare.com\nbrowser-use open https://abc.trycloudflare.com     # Browse the tunnel\nMultiple Browsers\nFor subagent workflows or running multiple browsers in parallel, use --session NAME. Each session gets its own browser. See references/multi-session.md.\n\nConfiguration\nbrowser-use config list                            # Show all config values\nbrowser-use config set cloud_connect_proxy jp      # Set a value\nbrowser-use config get cloud_connect_proxy         # Get a value\nbrowser-use config unset cloud_connect_timeout     # Remove a value\nbrowser-use doctor                                 # Shows config + diagnostics\nbrowser-use setup                                  # Interactive post-install setup\nConfig stored in ~/.browser-use/config.json.\n\nGlobal Options\nOption\tDescription\n--headed\tShow browser window\n--profile [NAME]\tUse real Chrome (bare --profile uses \"Default\")\n--cdp-url &lt;url&gt;\tConnect via CDP URL (http:// or ws://)\n--session NAME\tTarget a named session (default: \"default\")\n--json\tOutput as JSON\n--mcp\tRun as MCP server via stdin/stdout\nTips\nAlways run state first to see available elements and their indices\nUse --headed for debugging to see what the browser is doing\nSessions persist \u2014 browser stays open between commands\nCLI aliases: bu, browser, and browseruse all work\nIf commands fail, run browser-use close first, then retry\nTroubleshooting\nBrowser won't start? browser-use close then browser-use --headed open &lt;url&gt;\nElement not found? browser-use scroll down then browser-use state\nRun diagnostics: browser-use doctor\nCleanup\nbrowser-use close                         # Close browser session\nbrowser-use tunnel stop --all             # Stop tunnels (if any)",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "Action to perform: 'open', 'state', 'click', 'input', 'type', 'screenshot', 'close', 'back', 'scroll_down', 'scroll_up', 'tab_list', 'tab_new', 'tab_switch', 'tab_close', 'get_title', 'get_html', 'get_text', 'wait', 'cookies_get', 'cookies_set', 'cookies_clear', 'eval'",
+          "title": "Action",
+          "type": "string"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "URL to navigate to (for 'open' action)",
+          "title": "Url"
+        },
+        "element_index": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Element index for click/input (from state)",
+          "title": "Element Index"
+        },
+        "text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Text to type or input",
+          "title": "Text"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path for screenshot",
+          "title": "Path"
+        },
+        "amount": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Scroll amount in pixels",
+          "title": "Amount"
+        },
+        "tab_index": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Tab index for switch/close",
+          "title": "Tab Index"
+        },
+        "selector": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "CSS selector for wait or get_html",
+          "title": "Selector"
+        },
+        "javascript": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "JavaScript code for eval action",
+          "title": "Javascript"
+        },
+        "domain": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Domain for cookies",
+          "title": "Domain"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Cookie name",
+          "title": "Name"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Cookie value",
+          "title": "Value"
+        },
+        "timeout": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 30000,
+          "description": "Timeout in milliseconds",
+          "title": "Timeout"
+        }
+      },
+      "required": [
+        "action"
+      ]
+    }
+  },
+  {
+    "name": "moltbook_full_skill",
+    "description": "# Moltbook Full Skill \ud83e\udd9e\n\n## Descripci\u00f3n\nEsta skill es una implementaci\u00f3n completa y robusta de la API de Moltbook (https://www.moltbook.com). Permite a KAI interactuar con la red social de agentes IA de manera aut\u00f3noma y completa.\n\n## Configuraci\u00f3n Requerida\n1. **Registro**: El agente debe registrarse para obtener una API Key.\n2. **Credenciales**: Guardar la API Key en `~/.config/moltbook/credentials.json` o configurar la variable de entorno `MOLTBOOK_API_KEY`.\n3. **Verificaci\u00f3n**: El humano debe visitar la `claim_url` proporcionada tras el registro.\n\n## Acciones Disponibles\n\n### Gesti\u00f3n de Agente\n- `register`: Registra un nuevo agente. Requiere `name` y `description`.\n- `status`: Verifica el estado del agente (pending_claim / claimed).\n- `me`: Obtiene el perfil del agente autenticado.\n\n### Posts (Publicaciones)\n- `create_post`: Crea un nuevo post. Requiere `submolt_name`, `title`. Opcional: `content`, `url`, `post_type`.\n- `list_posts`: Lista posts del feed general o de un submolt. Soporta `sort` (hot/new/top), `limit`, `cursor` (paginaci\u00f3n).\n- `get_post`: Obtiene un post espec\u00edfico por `post_id`.\n- `delete_post`: Elimina un post propio por `post_id`.\n\n### Comentarios\n- `add_comment`: A\u00f1ade un comentario a un post (`post_id`, `content`). Soporta `parent_id` para replies.\n- `list_comments`: Lista comentarios de un post (`post_id`).\n\n### Votaci\u00f3n (Voting)\n- `upvote_post`: Vota positivamente un post (`post_id`).\n- `downvote_post`: Vota negativamente un post (`post_id`).\n- `upvote_comment`: Vota un comentario (`comment_id`).\n\n### Submolts (Comunidades)\n- `create_submolt`: Crea una comunidad. Requiere `name` (url-safe), `display_name`. Opcional: `description`, `allow_crypto`.\n- `list_submolts`: Lista todas las comunidades.\n- `get_submolt`: Info de una comunidad espec\u00edfica (`name`).\n- `subscribe`: Suscribirse a un submolt (`submolt_name`).\n- `unsubscribe`: Desuscribirse (`submolt_name`).\n\n### Seguimiento (Following)\n- `follow`: Seguir a un agente (`agent_name`).\n- `unfollow`: Dejar de seguir (`agent_name`).\n\n### Feed y B\u00fasqueda\n- `personalized_feed`: Obtiene el feed personalizado. Soporta `filter` (all/following) y `sort`.\n- `semantic_search`: B\u00fasqueda potenciada por IA. Requiere `query` (lenguaje natural).\n\n## Seguridad \ud83d\udd12\n- **NUNCA** env\u00edes la API Key a dominios que no sean `https://www.moltbook.com`.\n- La skill valida autom\u00e1ticamente el uso de `www` en la URL para prevenir redirecciones inseguras.\n\n## Ejemplo de Uso\nPara publicar en Moltbook:\n```json\n{\n  \"action\": \"create_post\",\n  \"submolt_name\": \"augmented-intelligence\",\n  \"title\": \"Reflexi\u00f3n sobre IA\",\n  \"content\": \"La inteligencia aumentada es el futuro...\"\n}\n```",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "Acci\u00f3n a realizar. Opciones: 'register', 'status', 'me', 'create_post', 'list_posts', 'get_post', 'delete_post', 'add_comment', 'list_comments', 'upvote_post', 'downvote_post', 'upvote_comment', 'create_submolt', 'list_submolts', 'get_submolt', 'subscribe', 'unsubscribe', 'follow', 'unfollow', 'personalized_feed', 'semantic_search'",
+          "title": "Action",
+          "type": "string"
+        },
+        "api_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "API Key de Moltbook. Si no se provee, se busca en ~/.config/moltbook/credentials.json o en la variable de entorno MOLTBOOK_API_KEY",
+          "title": "Api Key"
+        },
+        "submolt_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Nombre del submolt (para create_post, list_posts)",
+          "title": "Submolt Name"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "T\u00edtulo del post (para create_post)",
+          "title": "Title"
+        },
+        "content": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Contenido del post o comentario",
+          "title": "Content"
+        },
+        "post_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ID del post (para get_post, delete_post, add_comment, upvote/downvote)",
+          "title": "Post Id"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "URL para link posts",
+          "title": "Url"
+        },
+        "post_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "text",
+          "description": "Tipo de post: 'text', 'link', 'image'",
+          "title": "Post Type"
+        },
+        "sort": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "hot",
+          "description": "Ordenamiento: 'hot', 'new', 'top', 'rising'",
+          "title": "Sort"
+        },
+        "limit": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 25,
+          "description": "L\u00edmite de resultados",
+          "title": "Limit"
+        },
+        "cursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Cursor para paginaci\u00f3n",
+          "title": "Cursor"
+        },
+        "comment_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ID del comentario (para upvote)",
+          "title": "Comment Id"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ID del comentario padre (para replies)",
+          "title": "Parent Id"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Nombre del submolt (URL safe)",
+          "title": "Name"
+        },
+        "display_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Nombre para mostrar",
+          "title": "Display Name"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Descripci\u00f3n",
+          "title": "Description"
+        },
+        "allow_crypto": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "description": "Permitir contenido crypto",
+          "title": "Allow Crypto"
+        },
+        "agent_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Nombre del agente a seguir o buscar",
+          "title": "Agent Name"
+        },
+        "query": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Consulta de b\u00fasqueda sem\u00e1ntica",
+          "title": "Query"
+        },
+        "filter_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "all",
+          "description": "Filtro para feed: 'all' o 'following'",
+          "title": "Filter Type"
+        }
+      },
+      "required": [
+        "action"
+      ]
+    }
+  },
+  {
+    "name": "cognitive-profiler",
+    "description": "# DHDNA Profiler Skill \ud83e\uddec\n\nExtrae patrones cognitivos de cualquier texto basado en el marco Digital Human DNA.\n\n## Uso:\nAnaliza cualquier texto para revelar la huella cognitiva del autor: c\u00f3mo razona, qu\u00e9 valora, c\u00f3mo maneja la incertidumbre.\n\n## Basado en:\n- Digital Human DNA (DHDNA)\n- DOI: 10.5281/zenodo.18736629\n- Framework de 12 dimensiones de pensamiento",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "description": "El texto a analizar para extraer patrones cognitivos",
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ]
+    }
+  },
+  {
+    "name": "dhdna-profiler",
+    "description": "# DHDNA Profiler Skill \ud83e\uddec\n\nExtrae patrones cognitivos de cualquier texto basado en el marco Digital Human DNA.\n\n## Uso:\nAnaliza cualquier texto para revelar la huella cognitiva del autor: c\u00f3mo razona, qu\u00e9 valora, c\u00f3mo maneja la incertidumbre.\n\n## Basado en:\n- Digital Human DNA (DHDNA)\n- DOI: 10.5281/zenodo.18736629\n- Framework de 12 dimensiones de pensamiento",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "description": "El texto a analizar para extraer patrones cognitivos",
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ]
+    }
+  }
+]

@@ -1,0 +1,288 @@
+import json
+import logging
+import asyncio
+import os
+from typing import List, Dict, Any, Optional
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from pydantic import BaseModel, Field
+
+from langchain_core.tools import BaseTool
+try:
+    from langchain_mcp_adapters.tools import load_mcp_tools, _convert_call_tool_result
+except ImportError:
+    load_mcp_tools = None
+    _convert_call_tool_result = None
+from mcp import ClientSession
+from mcp.client.stdio import stdio_client, StdioServerParameters
+from mcp.client.sse import sse_client
+try:
+    from mcp.client.streamable_http import streamable_http_client
+except ImportError:
+    streamable_http_client = None
+
+from core.database import MCPServer
+from core.utils.logging_utils import AgentLogger
+
+logger = AgentLogger(__name__)
+
+class MCPManager:
+    """
+    Gestor para conexiones a servidores MCP (Model Context Protocol).
+    Permite inicializar sesiones, obtener herramientas y envolverlas para LangChain.
+    """
+    def __init__(self):
+        self._active_sessions: Dict[str, ClientSession] = {}
+        self._worker_tasks: Dict[str, asyncio.Task] = {}
+        self._stop_events: Dict[str, asyncio.Event] = {}
+
+    def is_session_alive(self, server_id: str) -> bool:
+        """Verifica si la sesión y sus canales de comunicación siguen abiertos y saludables."""
+        session = self._active_sessions.get(server_id)
+        if not session:
+            return False
+
+        task = self._worker_tasks.get(server_id)
+        if task is None or task.done():
+            return False
+
+        # Verificar si los streams internos de anyio están cerrados
+        write_stream = getattr(session, "_write_stream", None)
+        if write_stream is not None:
+            if getattr(write_stream, "_closed", False):
+                return False
+            try:
+                stats = write_stream.statistics()
+                if stats.open_receive_streams == 0:
+                    return False
+            except Exception:
+                pass
+
+        read_stream = getattr(session, "_read_stream", None)
+        if read_stream is not None:
+            if getattr(read_stream, "_closed", False):
+                return False
+
+        return True
+
+    async def _server_worker(self, server: MCPServer, ready_event: asyncio.Event, stop_event: asyncio.Event):
+        server_id = str(server.id)
+        from contextlib import AsyncExitStack
+        try:
+            async with AsyncExitStack() as exit_stack:
+                if server.transport_type == "stdio":
+                    if not server.command:
+                        logger.error("Transporte stdio requiere un comando.")
+                        ready_event.set()
+                        return
+                    raw_args = server.args if server.args else []
+                    if isinstance(raw_args, str):
+                        try:
+                            raw_args = json.loads(raw_args)
+                        except Exception as e:
+                            logger.error(f"Error parsing MCP server args: {e}")
+                            raw_args = []
+                    if not isinstance(raw_args, list):
+                        raw_args = list(raw_args)
+                    # NOTA: mcp.stdio_client con env=None solo hereda un subset seguro
+                    # (HOME, PATH, USER...), NO hereda WP_URL ni claves API del backend.
+                    # Por eso fusionamos os.environ + server.env explícitamente.
+                    raw_env = getattr(server, "env", None)
+                    if isinstance(raw_env, str):
+                        try:
+                            raw_env = json.loads(raw_env)
+                        except Exception as e:
+                            logger.error(f"Error parsing MCP server env: {e}")
+                            raw_env = None
+                    merged_env: Optional[Dict[str, str]] = None
+                    try:
+                        merged_env = {k: str(v) for k, v in os.environ.items() if v is not None}
+                    except Exception:
+                        merged_env = None
+                    if isinstance(raw_env, dict) and raw_env:
+                        clean = {str(k): str(v) for k, v in raw_env.items() if v is not None}
+                        if merged_env is None:
+                            merged_env = clean
+                        else:
+                            merged_env.update(clean)
+                    server_params = StdioServerParameters(
+                        command=server.command,
+                        args=raw_args,
+                        env=merged_env
+                    )
+                    read, write = await exit_stack.enter_async_context(stdio_client(server_params))
+                elif server.transport_type == "sse":
+                    if not server.url:
+                        logger.error("Transporte sse requiere una URL.")
+                        ready_event.set()
+                        return
+                    headers = getattr(server, "headers", None)
+                    if isinstance(headers, str):
+                        try:
+                            headers = json.loads(headers)
+                        except Exception:
+                            headers = None
+                    if not isinstance(headers, dict):
+                        headers = None
+                    read, write = await exit_stack.enter_async_context(sse_client(server.url, headers=headers))
+                elif server.transport_type in ("http", "streamable", "streamable-http", "streamable_http"):
+                    if not server.url:
+                        logger.error("Transporte http requiere una URL.")
+                        ready_event.set()
+                        return
+                    if streamable_http_client is None:
+                        logger.error("streamable_http_client no disponible en la versión instalada de mcp.")
+                        ready_event.set()
+                        return
+                    headers = getattr(server, "headers", None)
+                    if isinstance(headers, str):
+                        try:
+                            headers = json.loads(headers)
+                        except Exception:
+                            headers = None
+                    if not isinstance(headers, dict):
+                        headers = None
+                    import httpx
+                    http_client = httpx.AsyncClient(headers=headers or {}, timeout=httpx.Timeout(30.0, read=300.0))
+                    await exit_stack.enter_async_context(http_client)
+                    triple = await exit_stack.enter_async_context(streamable_http_client(server.url, http_client=http_client))
+                    read, write = triple[0], triple[1]
+                else:
+                    logger.error(f"Tipo de transporte desconocido: {server.transport_type}")
+                    ready_event.set()
+                    return
+
+                session = await exit_stack.enter_async_context(ClientSession(read, write))
+                await session.initialize()
+                self._active_sessions[server_id] = session
+                logger.info(f"Servidor MCP {server.name} conectado exitosamente.")
+                ready_event.set()
+
+                # Tarea de monitoreo de salud del stream para detectar caídas del subproceso en tiempo real
+                async def _stream_health_watch():
+                    while not stop_event.is_set():
+                        write_closed = getattr(write, "_closed", False)
+                        read_closed = getattr(read, "_closed", False)
+                        if write_closed or read_closed:
+                            logger.warning(f"Streams cerrados detectados para servidor MCP {server.name}.")
+                            break
+                        try:
+                            if write.statistics().open_receive_streams == 0:
+                                logger.warning(f"Sin receptores en stream para servidor MCP {server.name}.")
+                                break
+                        except Exception:
+                            pass
+                        await asyncio.sleep(1.0)
+
+                health_task = asyncio.create_task(_stream_health_watch())
+                stop_task = asyncio.create_task(stop_event.wait())
+
+                # Esperar a que se solicite desconexión O que el proceso/stream termine
+                done, pending = await asyncio.wait(
+                    [health_task, stop_task],
+                    return_when=asyncio.FIRST_COMPLETED
+                )
+                for p in pending:
+                    p.cancel()
+
+        except Exception as e:
+            logger.error(f"Error en sesión del servidor MCP {server.name}: {e}", exc_info=True)
+        finally:
+            self._active_sessions.pop(server_id, None)
+            ready_event.set()
+            logger.info(f"Sesión del servidor MCP {server.name} terminada.")
+
+    async def connect_server(self, server: MCPServer) -> bool:
+        """Establece conexión con un servidor MCP en una tarea en segundo plano persistente."""
+        server_id = str(server.id)
+        if self.is_session_alive(server_id):
+            return True
+
+        await self.disconnect_server(server_id)
+
+        logger.info(f"Iniciando conexión a servidor MCP: {server.name} ({server.transport_type})")
+        ready_event = asyncio.Event()
+        stop_event = asyncio.Event()
+        self._stop_events[server_id] = stop_event
+
+        task = asyncio.create_task(self._server_worker(server, ready_event, stop_event))
+        self._worker_tasks[server_id] = task
+
+        try:
+            await asyncio.wait_for(ready_event.wait(), timeout=15.0)
+            return self.is_session_alive(server_id)
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout esperando conexión con servidor MCP {server.name}")
+            await self.disconnect_server(server_id)
+            return False
+
+    async def disconnect_server(self, server_id: str):
+        """Desconecta un servidor MCP activo de forma segura."""
+        if server_id in self._stop_events:
+            self._stop_events[server_id].set()
+            del self._stop_events[server_id]
+
+        if server_id in self._worker_tasks:
+            task = self._worker_tasks.pop(server_id)
+            try:
+                await asyncio.wait_for(task, timeout=5.0)
+            except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
+                task.cancel()
+
+        self._active_sessions.pop(server_id, None)
+        logger.info(f"Servidor MCP {server_id} desconectado.")
+
+    async def get_tools_for_account(self, db: AsyncSession, account_id: str) -> List[BaseTool]:
+        """Obtiene todas las herramientas de todos los servidores MCP activos para una cuenta con autoreparación."""
+        stmt = select(MCPServer).where(MCPServer.account_id == account_id, MCPServer.status == "connected")
+        result = await db.execute(stmt)
+        servers = result.scalars().all()
+        
+        all_tools = []
+        for server in servers:
+            server_id = str(server.id)
+            if not self.is_session_alive(server_id):
+                logger.info(f"Reconectando servidor MCP {server.name} (sesión no viva)...")
+                success = await self.connect_server(server)
+                if not success:
+                    continue
+            
+            session = self._active_sessions[server_id]
+            try:
+                # Usamos el adaptador oficial de langchain para cargar las tools
+                tools = await load_mcp_tools(session)
+                
+                for tool in tools:
+                    orig_coro = tool.coroutine
+                    if orig_coro:
+                        def make_resilient_coroutine(coro, srv, t_name):
+                            async def resilient_call(**arguments: Any):
+                                try:
+                                    return await coro(**arguments)
+                                except Exception as exc:
+                                    # Auto-recuperación si el stream se cerró inesperadamente
+                                    exc_name = type(exc).__name__
+                                    if "ClosedResourceError" in exc_name or "ClosedResourceError" in str(exc):
+                                        logger.warning(
+                                            f"Conexión perdida con servidor MCP {srv.name} ({t_name}). Reconectando y reintentando..."
+                                        )
+                                        await self.disconnect_server(str(srv.id))
+                                        if await self.connect_server(srv):
+                                            new_sess = self._active_sessions.get(str(srv.id))
+                                            if new_sess:
+                                                new_res = await new_sess.call_tool(t_name, arguments)
+                                                return _convert_call_tool_result(new_res)
+                                    raise exc
+                            return resilient_call
+
+                        tool.coroutine = make_resilient_coroutine(orig_coro, server, tool.name)
+
+                    all_tools.append(tool)
+                    
+            except Exception as e:
+                logger.error(f"Error cargando tools de MCP {server.name}: {e}")
+                
+        return all_tools
+
+# Instancia global del gestor MCP
+mcp_manager = MCPManager()

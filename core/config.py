@@ -53,18 +53,18 @@ class Config:
         # --- Configuración de Modelos de Lenguaje (LiteLLM) ---
         # El LLM principal para el agente (texto y razonamiento).
         # Ejemplo: "gemini/gemini-1.5-pro", "openai/gpt-4o", "anthropic/claude-3-opus"
-        self.llm_model: str = os.getenv("LLM_MODEL", "gemini/gemini-2.0-flash")
+        self.llm_model: Optional[str] = os.getenv("LLM_MODEL")
         
         # El LLM para tareas rápidas y económicas como la sumarización.
         # Ejemplo: "gemini/gemini-1.5-flash", "openai/gpt-3.5-turbo"
-        self.fast_llm_model: str = os.getenv("FAST_LLM_MODEL", "gemini/gemini-2.0-flash")
+        self.fast_llm_model: Optional[str] = os.getenv("FAST_LLM_MODEL")
 
         # Base URL para modelos personalizados (ej. Ollama, LM Studio)
         self.llm_api_base: Optional[str] = os.getenv("LLM_API_BASE")
 
         # Mantener compatibilidad hacia atrás (deprecated)
-        self.google_main_model_name: str = get_model_name_from_provider_format(os.getenv("LLM_MODEL", "gemini-2.0-flash"))
-        self.google_summary_model_name: str = get_model_name_from_provider_format(os.getenv("FAST_LLM_MODEL", "gemini-2.0-flash"))
+        self.google_main_model_name: str = get_model_name_from_provider_format(os.getenv("LLM_MODEL", "")) if os.getenv("LLM_MODEL") else ""
+        self.google_summary_model_name: str = get_model_name_from_provider_format(os.getenv("FAST_LLM_MODEL", "")) if os.getenv("FAST_LLM_MODEL") else ""
         
         # El modelo de Vertex AI para la generación de imágenes (ej. Imagen 3).
         self.google_image_generation_model_name: str = os.getenv("GOOGLE_IMAGE_GENERATION_MODEL_NAME", "imagen-3.0-generate-002")
@@ -85,7 +85,7 @@ class Config:
         self.embedding_device: Optional[str] = os.getenv("EMBEDDING_DEVICE") # Dispositivo para SentenceTransformer local (ej. cpu, cuda)
         self.llm_request_timeout: int = int(os.getenv("LLM_REQUEST_TIMEOUT", 300)) # Nuevo: Tiempo de espera para las solicitudes al LLM en segundos
         self.llm_max_retries: int = int(os.getenv("LLM_MAX_RETRIES", 3)) # Nuevo: Número máximo de reintentos para llamadas al LLM
-        self.max_agent_loops: int = int(os.getenv("MAX_AGENT_LOOPS", 20)) # Nuevo: Límite de iteraciones para el agente de herramientas
+        self.max_agent_loops: int = int(os.getenv("MAX_AGENT_LOOPS", 0)) # Límite de iteraciones agénticas (0 o <= 0 = sin límite / desactivado)
         self.agent_history_limit_default: int = int(os.getenv("AGENT_HISTORY_LIMIT_DEFAULT", 24))
         self.agent_history_limit_ollama: int = int(os.getenv("AGENT_HISTORY_LIMIT_OLLAMA", 24))
         self.thread_title_update_concurrency: int = max(1, int(os.getenv("THREAD_TITLE_UPDATE_CONCURRENCY", 3)))

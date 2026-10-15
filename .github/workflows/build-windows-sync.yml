@@ -1,0 +1,49 @@
+name: Build Kognito Sync (Windows Installer)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'cli/**'
+    tags:
+      - 'v*'
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install customtkinter pystray watchdog httpx pillow pyinstaller
+
+      - name: Install Inno Setup
+        run: |
+          choco install innosetup --no-progress
+
+      - name: Compile Executable with PyInstaller
+        working-directory: cli
+        run: |
+          pyinstaller --clean -y kognitosync.spec
+
+      - name: Compile Installer with Inno Setup
+        working-directory: cli
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+
+      - name: Upload Installer Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: KognitoSync-Setup-Windows
+          path: cli/dist-installer/KognitoSync-Setup.exe
+          if-no-files-found: error

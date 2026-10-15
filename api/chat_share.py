@@ -58,7 +58,7 @@ class ShareChatMessagesRequest(BaseModel):
     """Request to get messages from a shared chat."""
     password: Optional[str] = None
     skip: int = Field(0, ge=0)
-    limit: int = Field(20, ge=1, le=100)
+    limit: Optional[int] = Field(None, ge=1)
 
 
 class SharedThreadPublic(BaseModel):
@@ -365,7 +365,13 @@ async def get_shared_chat_messages(
         real_messages.sort(key=lambda m: m.created_at)
 
         total = len(real_messages)
-        paginated = real_messages[body.skip : body.skip + body.limit]
+        if body.limit is not None:
+            if body.skip > 0:
+                paginated = real_messages[body.skip : body.skip + body.limit]
+            else:
+                paginated = real_messages[-body.limit:] if total > body.limit else real_messages
+        else:
+            paginated = real_messages[body.skip:]
 
         return PaginatedChatMessagesResponse(total=total, messages=paginated)
     except ValueError:

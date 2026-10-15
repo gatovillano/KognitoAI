@@ -1,10 +1,11 @@
 import { ShareAnalysisDialog } from '@/components/ShareAnalysisDialog';
 import { MessageSquare } from 'lucide-react';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Analysis, AnalysisType, Insight, Question, CollectionAnalysis, DocumentAnalysisResult as SingleTextAnalysis, DocumentSummaryResult, CollectionConnection, ThemeReference, ThemeQuote, CodeAnalysisResultFrontend, NoteCollectionAnalysisResult, NoteAnalysisResult, DeepResearchAnalysisResult, ProactiveInsightResult, ComprehensiveWebAnalysisResult, ScopedRagAnalysisResult } from '@/lib/models';
-import { Lightbulb, Workflow, ScrollText, Megaphone, Target, BarChart3, TrendingUp, FlaskConical, Puzzle, Goal, LibraryBig, Bot, CircleCheck, Info, Sparkles, XCircle, FileWarning, HelpCircle, Brain, Network, Volume2, Loader2, Pause, Calendar, AlertTriangle, Expand, Atom, FileText, Settings, GitBranch, Activity, Trash2, Zap, ExternalLink, Download } from 'lucide-react';
+import { Lightbulb, Workflow, ScrollText, Megaphone, Target, BarChart3, TrendingUp, FlaskConical, Puzzle, Goal, LibraryBig, Bot, CircleCheck, Info, Sparkles, XCircle, FileWarning, HelpCircle, Brain, Network, Volume2, Loader2, Pause, Calendar, AlertTriangle, Expand, Atom, FileText, Settings, GitBranch, Activity, Trash2, Zap, ExternalLink, Download, Save } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -699,6 +700,7 @@ export const SectionTTSButton: React.FC<SectionTTSButtonProps> = ({
 
 
 export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ analysis: initialAnalysis, isOpen, onOpenChange, onAnalysisDeleted }) => {
+  const router = useRouter();
   const [currentAnalysis, setCurrentAnalysis] = useState<Analysis | null>(initialAnalysis);
   const [isQuestionsDialogOpen, setIsQuestionsDialogOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('summary');
@@ -731,6 +733,7 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
   const exportToPdf = async () => {
     if (!currentAnalysis) return;
     setIsPdfExporting(true);
+    const toastId = toast.loading("Generando documento PDF y guardando en Documentos...");
     try {
       const token = typeof window !== 'undefined' ? localStorage.getItem('token') : '';
 
@@ -777,7 +780,7 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
       }
 
       if (!content) {
-        toast.error("No se encontró contenido detallado para exportar.");
+        toast.error("No se encontró contenido detallado para exportar.", { id: toastId });
         setIsPdfExporting(false);
         return;
       }
@@ -786,18 +789,40 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
         title: currentAnalysis.title || "Informe de Análisis",
         final_report: content,
         sources: sources,
-        recommendations: recommendations
+        recommendations: recommendations,
+        workspace_id: (currentAnalysis as any).workspace_id || (currentAnalysis as any).result_payload?.workspace_id || null
       });
 
       const data = response.data;
-      if (data.url) {
-        window.open(data.url, '_blank');
+      if (data.status === "success" || data.document_id || data.url) {
+        toast.success("PDF guardado en Documentos exitosamente", {
+          id: toastId,
+          description: data.filename 
+            ? `Se guardó "${data.filename}" en tu nube de Documentos.` 
+            : "El informe está disponible en tu sección de Documentos.",
+          action: {
+            label: "Ver en Documentos",
+            onClick: () => {
+              if (data.document_id) {
+                router.push(`/documents?open=${data.document_id}`);
+              } else {
+                router.push('/documents');
+              }
+            }
+          }
+        });
       } else {
-        toast.error("No se pudo generar el PDF");
+        toast.error("No se pudo guardar el PDF en Documentos", {
+          id: toastId,
+          description: data.detail || "Ocurrió un error inesperado al generar el PDF."
+        });
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error exporting PDF:", error);
-      toast.error("Error al exportar PDF");
+      toast.error("Error al exportar PDF. Por favor, intenta de nuevo.", {
+        id: toastId,
+        description: error.response?.data?.detail || "Error en el servidor al generar el documento."
+      });
     } finally {
       setIsPdfExporting(false);
     }
@@ -1475,8 +1500,8 @@ export const AnalysisDetailDialog: React.FC<AnalysisDetailDialogProps> = ({ anal
                 disabled={isPdfExporting}
                 className="gap-2"
               >
-                {isPdfExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                Exportar PDF
+                {isPdfExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                Guardar PDF en Documentos
               </Button>
               {currentAnalysis && (currentAnalysis.type === 'neural_insight' || currentAnalysis.type === 'proactive_insight') ? (
                 <>

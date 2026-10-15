@@ -16,7 +16,32 @@ skill_dir = os.path.dirname(current_dir)
 if skill_dir not in sys.path:
     sys.path.insert(0, skill_dir)
 
+
+def _load_skill_module(short_name: str, relative_path: str):
+    """Carga un módulo de la skill por ruta de archivo, evitando colisiones
+    con paquetes top-level del proyecto (`core`, `scripts`, `agents`).
+
+    Usa un nombre de módulo único `kai_ethno_<short_name>` registrado en
+    sys.modules para que las cargas sean idempotentes.
+    """
+    import importlib.util
+
+    unique_name = f"kai_ethno_{short_name}"
+    if unique_name in sys.modules:
+        return sys.modules[unique_name]
+    file_path = os.path.join(skill_dir, *relative_path.split("/"))
+    spec = importlib.util.spec_from_file_location(unique_name, file_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"No se pudo crear spec para {file_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[unique_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 try:
+    # Caso 1: cargado como skills.kai_ethno_skill.scripts.orchestrator
+    # (vía SkillManager) -> los imports relativos funcionan.
     from ..agents.archivist import ArchivistAgent, ArchivistState
     from ..agents.bibliomancer import BibliomancerAgent, BibliomancerState
     from ..agents.ethnograph import EthnographAgent, EthnographState
@@ -27,15 +52,41 @@ try:
     from ..core.ethics_council import EthicsCouncil, EthicsVerdict
     from ..core.message_bus import MessageBus, MessageType
 except (ImportError, ValueError):
-    from agents.archivist import ArchivistAgent, ArchivistState
-    from agents.bibliomancer import BibliomancerAgent, BibliomancerState
-    from agents.ethnograph import EthnographAgent, EthnographState
-    from agents.pattern_finder import PatternFinderAgent, PatternFinderState
-    from agents.scribe import ScribeAgent, ScribeState
-    from agents.synthesizer import SynthesizerAgent, SynthesizerState
-    from agents.visualizer import VisualizerAgent, VisualizerState
-    from core.ethics_council import EthicsCouncil, EthicsVerdict
-    from core.message_bus import MessageBus, MessageType
+    try:
+        # Caso 2: imports absolutos con el FQN de la skill.
+        from skills.kai_ethno_skill.agents.archivist import ArchivistAgent, ArchivistState
+        from skills.kai_ethno_skill.agents.bibliomancer import BibliomancerAgent, BibliomancerState
+        from skills.kai_ethno_skill.agents.ethnograph import EthnographAgent, EthnographState
+        from skills.kai_ethno_skill.agents.pattern_finder import PatternFinderAgent, PatternFinderState
+        from skills.kai_ethno_skill.agents.scribe import ScribeAgent, ScribeState
+        from skills.kai_ethno_skill.agents.synthesizer import SynthesizerAgent, SynthesizerState
+        from skills.kai_ethno_skill.agents.visualizer import VisualizerAgent, VisualizerState
+        from skills.kai_ethno_skill.core.ethics_council import EthicsCouncil, EthicsVerdict
+        from skills.kai_ethno_skill.core.message_bus import MessageBus, MessageType
+    except ImportError:
+        # Caso 3: cargado como top-level `scripts.orchestrator` (sys.path con
+        # skill_dir). `core`/`agents` genéricos colisionan con el `core/` y
+        # `scripts/` del proyecto raíz (ya importados como `core.*`), así que
+        # cargamos por ruta de archivo con nombres únicos.
+        _archivist = _load_skill_module("agents_archivist", "agents/archivist/agent.py")
+        _bibliomancer = _load_skill_module("agents_bibliomancer", "agents/bibliomancer/agent.py")
+        _ethnograph = _load_skill_module("agents_ethnograph", "agents/ethnograph/agent.py")
+        _pattern_finder = _load_skill_module("agents_pattern_finder", "agents/pattern_finder/agent.py")
+        _scribe = _load_skill_module("agents_scribe", "agents/scribe/agent.py")
+        _synthesizer = _load_skill_module("agents_synthesizer", "agents/synthesizer/agent.py")
+        _visualizer = _load_skill_module("agents_visualizer", "agents/visualizer/agent.py")
+        _ethics = _load_skill_module("core_ethics_council", "core/ethics_council.py")
+        _bus = _load_skill_module("core_message_bus", "core/message_bus.py")
+
+        ArchivistAgent, ArchivistState = _archivist.ArchivistAgent, _archivist.ArchivistState
+        BibliomancerAgent, BibliomancerState = _bibliomancer.BibliomancerAgent, _bibliomancer.BibliomancerState
+        EthnographAgent, EthnographState = _ethnograph.EthnographAgent, _ethnograph.EthnographState
+        PatternFinderAgent, PatternFinderState = _pattern_finder.PatternFinderAgent, _pattern_finder.PatternFinderState
+        ScribeAgent, ScribeState = _scribe.ScribeAgent, _scribe.ScribeState
+        SynthesizerAgent, SynthesizerState = _synthesizer.SynthesizerAgent, _synthesizer.SynthesizerState
+        VisualizerAgent, VisualizerState = _visualizer.VisualizerAgent, _visualizer.VisualizerState
+        EthicsCouncil, EthicsVerdict = _ethics.EthicsCouncil, _ethics.EthicsVerdict
+        MessageBus, MessageType = _bus.MessageBus, _bus.MessageType
 
 logger = logging.getLogger(__name__)
 

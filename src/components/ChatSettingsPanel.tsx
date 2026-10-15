@@ -3,9 +3,10 @@ import { Button } from '@/components/ui/button';
 import { X, BookMarked, FileText } from 'lucide-react';
 
 interface PersistentContextItem {
-  type: 'document' | 'collection';
+  type: 'document' | 'collection' | 'onlyoffice' | string;
   id: string; // This could be document ID or collection name/ID
   name?: string; // Optional: display name for the item
+  doc_source?: string;
 }
 
 interface ChatSettingsPanelProps {
@@ -88,12 +89,21 @@ export const ChatSettingsPanel: React.FC<ChatSettingsPanelProps> = ({
             {persistentContext.map((item, index) => (
               <li key={index} className="flex items-center justify-between bg-gray-100 p-2 rounded-md">
                 <div className="flex items-center gap-2">
-                  {item.type === 'document' ? (
+                  {item.type === 'onlyoffice' || item.doc_source === 'onlyoffice' || item.name?.startsWith('[OnlyOffice]') ? (
                     <FileText className="h-4 w-4 text-blue-500" />
+                  ) : item.type === 'document' ? (
+                    <FileText className="h-4 w-4 text-emerald-500" />
                   ) : (
-                    <BookMarked className="h-4 w-4 text-green-500" />
+                    <BookMarked className="h-4 w-4 text-amber-500" />
                   )}
                   <span className="text-sm font-medium">{item.name || item.id}</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
+                    item.type === 'onlyoffice' || item.doc_source === 'onlyoffice' || item.name?.startsWith('[OnlyOffice]')
+                      ? 'text-blue-600 bg-blue-50 dark:bg-blue-950/40'
+                      : 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40'
+                  }`}>
+                    {item.type === 'onlyoffice' || item.doc_source === 'onlyoffice' || item.name?.startsWith('[OnlyOffice]') ? 'OnlyOffice' : 'RAG'}
+                  </span>
                 </div>
                 <Button
                   variant="ghost"

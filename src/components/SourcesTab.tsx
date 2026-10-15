@@ -148,7 +148,7 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({ sources, onSourceClick }
                     </div>
                 </div>
 
-                <div className="flex gap-2 w-full sm:w-auto">
+                <div className="flex flex-wrap gap-2 w-full sm:w-auto">
                     {/* Pestañas de Citación */}
                     <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)} className="w-auto">
                         <TabsList className="bg-muted/50 p-1 h-10 rounded-xl flex overflow-x-auto no-scrollbar">

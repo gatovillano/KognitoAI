@@ -64,7 +64,7 @@ export default function TeamsPage() {
     const fetchDocuments = async () => {
       setLoadingDocuments(true);
       try {
-        const response = await apiClient.post('/api/list-documents');
+        const response = await apiClient.post('/api/documents/list-all-user-documents');
         setDocuments(response.data);
       } catch (error) {
         console.error("Error fetching documents:", error);
@@ -98,8 +98,8 @@ export default function TeamsPage() {
     const fetchNotes = async () => {
       setLoadingNotes(true);
       try {
-        const response = await apiClient.post('/api/list-notes', { search_term: '' });
-        setNotes(response.data);
+        const response = await apiClient.post('/api/notes/list-notes', { skip: 0, limit: 100 });
+        setNotes(response.data?.notes || response.data || []);
       } catch (error) {
         console.error("Error fetching notes:", error);
       } finally {

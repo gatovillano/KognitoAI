@@ -7,7 +7,7 @@ import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
-import apiClient from '@/lib/api';
+import apiClient, { photoFileUrl } from '@/lib/api';
 import { FormResponse, FormResponseAnswer, LinkedFormResponse } from '@/types/form';
 import { toast } from 'sonner';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
@@ -415,7 +415,7 @@ export default function ProfileDetailsPage() {
                   <div className="relative w-full aspect-square bg-muted rounded-md overflow-hidden mb-3">
                     {album.cover_photo?.file_path ? (
                       <Image
-                        src={`${process.env.NEXT_PUBLIC_API_URL}/media/${album.cover_photo.file_path}`}
+                        src={photoFileUrl(album.cover_photo.id)}
                         alt={album.name || 'Cover photo'}
                         fill
                         style={{ objectFit: 'cover' }}

@@ -39,6 +39,19 @@ async def get_tool_by_name(
         if tool.name == tool_name:
             _individual_tool_cache[individual_tool_cache_key] = tool
             return tool
+
+    # Fallback: normalizar guiones/guiones bajos (los MCP usan '-' pero
+    # algunos LLMs devuelven '_' en el function call).
+    norm_requested = tool_name.replace("-", "_")
+    norm_dashed = tool_name.replace("_", "-")
+    for tool in all_tools:
+        t_name = getattr(tool, "name", "")
+        if t_name == norm_requested or t_name.replace("-", "_") == norm_requested:
+            _individual_tool_cache[individual_tool_cache_key] = tool
+            return tool
+        if t_name == norm_dashed:
+            _individual_tool_cache[individual_tool_cache_key] = tool
+            return tool
     
     logger.warning(f"Herramienta '{tool_name}' no encontrada en el conjunto de herramientas proporcionado para el contexto '{context_key}'.")
     return None
