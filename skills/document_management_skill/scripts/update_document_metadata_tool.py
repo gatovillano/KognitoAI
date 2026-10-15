@@ -59,10 +59,9 @@ class UpdateDocumentMetadataTool(BaseTool):
     """
     name: str = "update_document_metadata_tool"
     description: str = (
-        "Actualiza el título y/o la categoría (topic) de un documento existente en la base de conocimiento del usuario. "
-        "Permite especificar el documento por su `file_name` y el `account_id` del usuario. "
-        "También puede operar en documentos dentro de un `workspace_id` específico. " # <-- Descripción actualizada
-        "Se debe proporcionar al menos `new_title` o `new_topic`."
+        "[BASE DE CONOCIMIENTO RAG] Actualiza el título y/o la categoría (topic) de un documento indexado "
+        "en la base de conocimiento vectorial del usuario a partir de su 'file_name'. "
+        "NO opera sobre documentos de OnlyOffice. Se debe proporcionar al menos 'new_title' o 'new_topic'."
     )
     args_schema: Type[BaseModel] = UpdateDocumentMetadataInput
     return_direct: bool = False  # El agente debe procesar la respuesta.

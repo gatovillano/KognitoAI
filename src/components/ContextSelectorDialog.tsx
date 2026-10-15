@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Loader2, FileText, Github, Image as ImageIcon } from 'lucide-react';
 import { toast } from 'sonner';
-import apiClient from '@/lib/api';
+import apiClient, { photoFileUrl } from '@/lib/api';
 import { AlbumResponse, PhotoResponse } from '@/types/gallery';
 import { SelectedContextItem } from '@/types/context';
 import NextImage from 'next/image';
@@ -123,6 +123,7 @@ const ContextSelectorDialog: React.FC<ContextSelectorDialogProps> = ({
         title: doc.title || doc.file_name,
         topic: doc.topic,
         file_name: doc.file_name,
+        doc_source: 'rag',
       }));
 
       const groupedItems: { [key: string]: { id: string; topic: string; items: SelectedContextItem[] } } = {};
@@ -293,7 +294,7 @@ const ContextSelectorDialog: React.FC<ContextSelectorDialogProps> = ({
           title: fileName,
           topic: album.name,
           file_name: photo.file_path,
-          content: `${process.env.NEXT_PUBLIC_API_URL || ''}/media/${photo.file_path}`
+          content: photoFileUrl(photo.id)
         };
         return [...prev, photoItem];
       }
@@ -333,7 +334,7 @@ const ContextSelectorDialog: React.FC<ContextSelectorDialogProps> = ({
               title: fileName,
               topic: album.name,
               file_name: photo.file_path,
-              content: `${process.env.NEXT_PUBLIC_API_URL || ''}/media/${photo.file_path}`
+              content: photoFileUrl(photo.id)
             };
             newSelected.push(photoItem);
           }
@@ -689,10 +690,12 @@ const ContextSelectorDialog: React.FC<ContextSelectorDialogProps> = ({
                     const renderDoc = (doc: OnlyOfficeDocument) => {
                       const contextItem: SelectedContextItem = {
                         id: doc.id,
-                        type: 'document',
+                        type: 'onlyoffice',
                         name: `[OnlyOffice] ${doc.filename}`,
                         title: doc.filename,
                         topic: 'OnlyOffice',
+                        file_name: doc.filename,
+                        doc_source: 'onlyoffice',
                       };
                       return (
                         <div
@@ -917,7 +920,11 @@ const ContextSelectorDialog: React.FC<ContextSelectorDialogProps> = ({
                             <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 pl-4 pr-1">
                               {albumPhotos.map((photo) => {
                                 const isSelected = selectedDocuments.some(d => d.id === photo.id && d.type === 'image');
-                                const mediaUrl = `${process.env.NEXT_PUBLIC_API_URL || ''}/media/${photo.thumbnail_path || photo.file_path}`;
+                                // thumbnail_path es relativo a THUMBNAIL_ROOT, no a MEDIA_ROOT: anteponer
+// /media/ lo rompe. /thumbnails es el montaje correcto para esa columna.
+                                const mediaUrl = photo.thumbnail_path
+                                  ? `${process.env.NEXT_PUBLIC_API_URL || ''}/thumbnails/${photo.thumbnail_path}`
+                                  : photoFileUrl(photo.id);
 
                                 return (
                                   <div

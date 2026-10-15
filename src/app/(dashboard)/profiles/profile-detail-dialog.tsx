@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/componen
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import apiClient from '@/lib/api';
+import apiClient, { photoFileUrl } from '@/lib/api';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
@@ -274,7 +274,7 @@ export function ProfileDetailDialog({ isOpen, onOpenChange, profileId, onEdit }:
                                             <div className="relative h-24 w-full bg-muted">
                                                 {album.cover_photo?.file_path ? (
                                                     <Image
-                                                        src={`${process.env.NEXT_PUBLIC_API_URL}/media/${album.cover_photo.file_path}`}
+                                                        src={photoFileUrl(album.cover_photo.id)}
                                                         alt={album.name}
                                                         fill
                                                         className="object-cover"

@@ -11,6 +11,37 @@ from utils.db_session import DBSession
 
 logger = logging.getLogger(__name__)
 
+
+def _content_to_str(content: Any) -> str:
+    """Normaliza el contenido de un mensaje a str.
+
+    En langchain_chat_history el campo content puede ser str, list
+    (bloques multimodales) o dict. Sin esto, list.strip() lanza
+    "'list' object has no attribute 'strip'".
+    """
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                for key in ("text", "content", "data"):
+                    if key in item:
+                        parts.append(_content_to_str(item[key]))
+                        break
+                else:
+                    parts.append(json.dumps(item, ensure_ascii=False))
+            else:
+                parts.append(str(item))
+        return "\n".join(parts)
+    if isinstance(content, dict):
+        return json.dumps(content, ensure_ascii=False)
+    return str(content)
+
 class ReadConversationInput(BaseModel):
     thread_id: str = Field(..., description="ID de la conversación (UUID) que se desea leer.")
     limit: Optional[int] = Field(100, description="El número máximo de mensajes a recuperar.")
@@ -74,7 +105,15 @@ class ReadConversationTool(BaseTool):
                         msg_data = raw_msg
                         
                     # Extraer el rol (human/ai/system/etc)
-                    msg_type = msg_data.get("type", "unknown")
+                    if isinstance(msg_data, dict):
+                        msg_type = msg_data.get("type", "unknown")
+                    else:
+                        # Mensaje de texto plano sin estructura
+                        msg_type = "unknown"
+                        content = _content_to_str(msg_data)
+                        output += f"[{idx+1}] Texto:\n{content.strip()}\n\n"
+                        output += "-" * 30 + "\n\n"
+                        continue
                     if msg_type == "human":
                         role = "Usuario"
                     elif msg_type == "ai":
@@ -94,9 +133,9 @@ class ReadConversationTool(BaseTool):
                         else:
                             content = str(msg_data)
                     else:
-                        content = str(msg_data)
-                        
-                    output += f"[{idx+1}] {role}:\n{content.strip()}\n\n"
+                        content = _content_to_str(msg_data)
+
+                    output += f"[{idx+1}] {role}:\n{_content_to_str(content).strip()}\n\n"
                     output += "-" * 30 + "\n\n"
                     
                 return output

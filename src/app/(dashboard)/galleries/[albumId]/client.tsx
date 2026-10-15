@@ -16,7 +16,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import apiClient from '@/lib/api';
+import apiClient, { photoFileUrl } from '@/lib/api';
 import { useDropzone } from 'react-dropzone';
 import ShareAlbumModal from '@/components/ShareAlbumModal';
 import { UploadPhotosModal } from '@/components/UploadPhotosModal';
@@ -261,7 +261,7 @@ export default function AlbumDetailPageClient({ albumId }: AlbumClientPageProps)
             />
           </div>
         )}
-        <NextImage src={`/media/${photo.file_path}`} alt="Album Photo" fill className="object-cover" />
+        <NextImage src={photoFileUrl(photo.id)} alt="Album Photo" fill className="object-cover" unoptimized />
         <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -466,7 +466,7 @@ export default function AlbumDetailPageClient({ albumId }: AlbumClientPageProps)
           open={lightboxOpen}
           close={() => setLightboxOpen(false)}
           slides={album.photos.map((photo) => ({
-            src: `/media/${photo.file_path}`,
+            src: photoFileUrl(photo.id),
           }))}
           index={lightboxIndex}
         />

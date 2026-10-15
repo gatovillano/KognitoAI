@@ -13,7 +13,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     ffmpeg \
     graphviz \
-    && rm -rf /var/lib/apt/lists/* \    
+    libgl1 \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 # Usa el archivo de requerimientos unificado.

@@ -196,6 +196,90 @@
   font-weight: 600;
 }
 
+/* Listas de tareas (Tiptap TaskList y Markdown GFM) */
+.prose ul[data-type="taskList"],
+ul[data-type="taskList"],
+.prose ul.contains-task-list {
+  list-style: none !important;
+  padding-left: 0 !important;
+  margin-left: 0 !important;
+}
+
+.prose ul[data-type="taskList"] > li,
+ul[data-type="taskList"] > li,
+.prose li.task-list-item {
+  list-style: none !important;
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: flex-start !important;
+  gap: 0.5rem;
+  margin-top: 0.25em !important;
+  margin-bottom: 0.25em !important;
+  padding-left: 0 !important;
+}
+
+.prose ul[data-type="taskList"] > li::marker,
+ul[data-type="taskList"] > li::marker,
+.prose ul[data-type="taskList"] > li::before,
+ul[data-type="taskList"] > li::before,
+.prose li.task-list-item::marker,
+.prose li.task-list-item::before {
+  display: none !important;
+  content: none !important;
+}
+
+.prose ul[data-type="taskList"] > li > label,
+ul[data-type="taskList"] > li > label {
+  flex: 0 0 auto !important;
+  user-select: none;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  margin-top: 0.35rem; /* Alinea el checkbox perfectamente con la primera línea de texto */
+  line-height: 1;
+}
+
+.prose ul[data-type="taskList"] > li > label input[type="checkbox"],
+ul[data-type="taskList"] > li > label input[type="checkbox"],
+.prose li.task-list-item input[type="checkbox"] {
+  cursor: pointer;
+  accent-color: hsl(var(--primary));
+  width: 1.05rem;
+  height: 1.05rem;
+  margin: 0;
+  border-radius: 0.25rem;
+}
+
+.prose li.task-list-item input[type="checkbox"] {
+  margin-top: 0.35rem;
+}
+
+.prose ul[data-type="taskList"] > li > div,
+ul[data-type="taskList"] > li > div {
+  flex: 1 1 auto !important;
+  min-width: 0;
+}
+
+.prose ul[data-type="taskList"] > li > div > p,
+ul[data-type="taskList"] > li > div > p {
+  margin: 0 !important;
+}
+
+/* Listas de tareas anidadas */
+.prose ul[data-type="taskList"] ul[data-type="taskList"],
+ul[data-type="taskList"] ul[data-type="taskList"] {
+  padding-left: 1.5rem !important;
+  margin-top: 0.25rem !important;
+  margin-bottom: 0.25rem !important;
+}
+
+/* Estilo visual para tarea completada */
+.prose ul[data-type="taskList"] li[data-checked="true"] > div,
+ul[data-type="taskList"] li[data-checked="true"] > div {
+  text-decoration: line-through;
+  opacity: 0.65;
+}
+
 /* Citas (Blockquotes) con diseño Glassmorphism elegante */
 .prose blockquote {
   margin: 1.5em 0;

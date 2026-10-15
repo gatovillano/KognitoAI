@@ -40,6 +40,8 @@ class DeepResearchTool(BaseTool):
     account_id: str
     workspace_id: Optional[str] = None
     telegram_id: Optional[str] = None
+    thread_id: Optional[str] = None
+    task_id: Optional[str] = None
     progress_callback: Optional[Any] = Field(default=None, exclude=True)
 
     @retry(
@@ -50,21 +52,58 @@ class DeepResearchTool(BaseTool):
                retry_if_exception_type(httpx.HTTPStatusError)),
         reraise=True
     )
-    async def _run(self, query: str) -> Dict[str, Any]:
+    async def _run(self, query: str, run_manager: Optional[Any] = None, **kwargs: Any) -> Dict[str, Any]:
         """Use the tool."""
-        logger.info(f"Executing Deep Research tool for query: '{query}' for account: {self.account_id}")
+        meta = getattr(run_manager, "metadata", {}) or {}
+        effective_thread_id = meta.get("thread_id") or getattr(self, "thread_id", None)
+        effective_task_id = meta.get("task_id") or getattr(self, "task_id", None)
+        logger.info(f"Executing Deep Research tool for query: '{query}' for account: {self.account_id} (thread: {effective_thread_id}, task: {effective_task_id})")
+        from core.llm_manager import set_active_account_id
+        set_active_account_id(self.account_id)
         
         try:
             logger.info("Compiling deep researcher graph...")
             graph = compile_deep_researcher_graph()
             logger.info("Deep researcher graph compiled successfully.")
             
-            config = {"configurable": {"account_id": self.account_id}}
-            
-            # --- PROGRESS CALLBACK INTEGRATION ---
-            if hasattr(self, 'progress_callback') and self.progress_callback:
-                config["configurable"]["progress_callback"] = self.progress_callback
-                logger.info("Progress callback injected into Deep Research graph configuration.")
+            async def report_progress(progress: int, message: str, current_node: str = "main"):
+                logger.info(f"📊 [DeepResearch Progress] {progress}% - {message} ({current_node})")
+                payload = {
+                    "type": "progress",
+                    "progress": progress,
+                    "message": message,
+                    "current_node": current_node,
+                    "tool_name": "deep_research",
+                }
+                if effective_thread_id:
+                    payload["thread_id"] = str(effective_thread_id)
+                if effective_task_id:
+                    payload["taskId"] = str(effective_task_id)
+
+                try:
+                    await websocket_manager.send_personal_message(payload, self.account_id)
+                except Exception as ws_err:
+                    logger.warning(f"Error sending progress websocket message: {ws_err}")
+
+                if self.progress_callback and self.progress_callback != report_progress:
+                    try:
+                        if asyncio.iscoroutinefunction(self.progress_callback):
+                            await self.progress_callback(progress, message, current_node)
+                        else:
+                            self.progress_callback(progress, message, current_node)
+                    except Exception as cb_err:
+                        logger.warning(f"Error invoking custom progress callback: {cb_err}")
+
+            config = {
+                "configurable": {
+                    "account_id": self.account_id,
+                    "progress_callback": report_progress,
+                    "base_progress": 0,
+                    "max_sub_progress": 100,
+                }
+            }
+            if effective_thread_id:
+                config["configurable"]["thread_id"] = str(effective_thread_id)
 
             inputs = {
                 "messages": [HumanMessage(content=query)],
@@ -220,34 +259,78 @@ class DeepResearchTool(BaseTool):
             logger.error(f"An unexpected error occurred in DeepResearchTool: {e}", exc_info=True)
             return ToolOutputWithSources(context_for_llm=error_message, sources=[]).model_dump()
 
-    async def _arun(self, query: str) -> Dict[str, Any]:
+    async def _arun(self, query: str, run_manager: Optional[Any] = None, **kwargs: Any) -> Dict[str, Any]:
         """Use the tool asynchronously in background."""
-        logger.info(f"Executing Async Deep Research tool for query: '{query}' for account: {self.account_id}")
-        run_id = str(uuid.uuid4())
-        
+        meta = getattr(run_manager, "metadata", {}) or {}
+        effective_thread_id = meta.get("thread_id") or getattr(self, "thread_id", None)
+        effective_task_id = meta.get("task_id") or getattr(self, "task_id", None)
+        run_id = str(effective_task_id) if effective_task_id else str(uuid.uuid4())
+
+        logger.info(f"Executing Async Deep Research tool for query: '{query}' for account: {self.account_id} (task: {run_id}, thread: {effective_thread_id})")
+
+        async def report_progress(progress: int, message: str, current_node: str = "main"):
+            logger.info(f"📊 [DeepResearch Progress] {progress}% - {message} ({current_node})")
+            payload = {
+                "type": "progress",
+                "progress": progress,
+                "message": message,
+                "current_node": current_node,
+                "tool_name": "deep_research",
+            }
+            if effective_thread_id:
+                payload["thread_id"] = str(effective_thread_id)
+            if run_id:
+                payload["taskId"] = str(run_id)
+
+            try:
+                await websocket_manager.send_personal_message(payload, self.account_id)
+            except Exception as ws_err:
+                logger.warning(f"Error sending progress websocket message: {ws_err}")
+
+            if self.progress_callback and self.progress_callback != report_progress:
+                try:
+                    if asyncio.iscoroutinefunction(self.progress_callback):
+                        await self.progress_callback(progress, message, current_node)
+                    else:
+                        self.progress_callback(progress, message, current_node)
+                except Exception as cb_err:
+                    logger.warning(f"Error invoking custom progress callback: {cb_err}")
+
         async def _background_research():
             try:
                 # Notify start via websocket
-                await websocket_manager.send_personal_message({
+                start_msg = {
                     "type": "tool_start",
                     "tool_name": "deep_research",
                     "taskId": run_id,
                     "message": f"Iniciando investigación profunda en segundo plano para: '{query}'"
-                }, self.account_id)
-                        
+                }
+                if effective_thread_id:
+                    start_msg["thread_id"] = str(effective_thread_id)
+                await websocket_manager.send_personal_message(start_msg, self.account_id)
+
+                await report_progress(5, "Iniciando investigación profunda...", "init")
+
                 graph = compile_deep_researcher_graph()
-                config = {"configurable": {"account_id": self.account_id}}
-                if hasattr(self, 'progress_callback') and self.progress_callback:
-                    config["configurable"]["progress_callback"] = self.progress_callback
-                
+                config = {
+                    "configurable": {
+                        "account_id": self.account_id,
+                        "progress_callback": report_progress,
+                        "base_progress": 0,
+                        "max_sub_progress": 100,
+                    }
+                }
+                if effective_thread_id:
+                    config["configurable"]["thread_id"] = str(effective_thread_id)
+
                 inputs = {
                     "messages": [HumanMessage(content=query)],
                     "account_id": self.account_id,
                     "sources": [],
                 }
-                
+
                 final_state = await graph.ainvoke(inputs, config=config)
-                
+
                 # Check for completion
                 if final_state and "final_report" in final_state:
                     report = final_state["final_report"]
@@ -255,7 +338,7 @@ class DeepResearchTool(BaseTool):
                     final_sources = raw_sources
                     if isinstance(final_sources, dict) and final_sources.get("type") == "override":
                         final_sources = final_sources.get("value", [])
-                    
+
                     sources_list = []
                     if isinstance(final_sources, list):
                         for i, raw_source in enumerate(final_sources, start=1):
@@ -303,6 +386,9 @@ class DeepResearchTool(BaseTool):
                     except Exception as save_err:
                         logger.error(f"Error saving deep research Word document in tool arun: {save_err}", exc_info=True)
 
+                    # Notify 100% progress before completion
+                    await report_progress(100, "Investigación profunda completada con éxito.", "complete")
+
                     # Notify completion
                     msg = {
                         "type": "tool_end",
@@ -312,6 +398,8 @@ class DeepResearchTool(BaseTool):
                         "message": "Investigación profunda completada. Por favor, pide al agente que analice los resultados.",
                         "background_completion": True
                     }
+                    if effective_thread_id:
+                        msg["thread_id"] = str(effective_thread_id)
                     await websocket_manager.send_personal_message(msg, self.account_id)
 
             except Exception as e:
@@ -324,11 +412,13 @@ class DeepResearchTool(BaseTool):
                     "error": str(e),
                     "background_completion": True
                 }
+                if effective_thread_id:
+                    msg["thread_id"] = str(effective_thread_id)
                 await websocket_manager.send_personal_message(msg, self.account_id)
-                        
+
         # Lanza el task sin bloquear
         asyncio.create_task(_background_research())
-        
+
         # Devuelve inmediatamente al agente principal
         inmediate_response = (
             f"He iniciado la investigación profunda en segundo plano con ID de tarea: {run_id}. "

@@ -35,6 +35,7 @@ interface Memory {
 
 
 const LLM_PROVIDERS = [
+  { id: 'antigravity', name: '🛸 Google Antigravity', env_key: null },
   { id: 'gemini', name: 'Google AI Studio', env_key: 'GOOGLE_API_KEY' },
   { id: 'openai', name: 'OpenAI (GPT)', env_key: 'OPENAI_API_KEY' },
   { id: 'anthropic', name: 'Anthropic (Claude)', env_key: 'ANTHROPIC_API_KEY' },
@@ -45,9 +46,18 @@ const LLM_PROVIDERS = [
   { id: 'mistral', name: 'Mistral AI', env_key: 'MISTRAL_API_KEY' },
   { id: 'kilocode', name: '🚀 Kilocode Gateway', env_key: 'KILOCODE_API_KEY' },
   { id: 'nvidia', name: '🟢 NVIDIA AI Catalog', env_key: 'NVIDIA_API_KEY' },
+  { id: 'inceptionlabs', name: '🔮 Inception Labs', env_key: 'INCEPTIONLABS_API_KEY' },
 ];
 
 const MODELS_BY_PROVIDER: Record<string, string[]> = {
+  antigravity: [
+    'antigravity/gemini-3-flash',
+    'antigravity/gemini-3-pro',
+    'antigravity/gemini-2.5-flash',
+    'antigravity/gemini-2.5-pro',
+    'antigravity/claude-sonnet-4-6',
+    'antigravity/claude-opus-4-6-thinking',
+  ],
   gemini: ['gemini/gemini-2.0-flash', 'gemini/gemini-1.5-flash', 'gemini/gemini-1.5-pro', 'gemini/gemini-2.0-flash-exp'],
   openai: ['openai/gpt-4o', 'openai/gpt-4o-mini', 'openai/gpt-4-turbo'],
   anthropic: ['anthropic/claude-3-5-sonnet-20240620', 'anthropic/claude-3-opus-20240229', 'anthropic/claude-3-haiku-20240307'],
@@ -68,7 +78,9 @@ const MODELS_BY_PROVIDER: Record<string, string[]> = {
     'nvidia/nvidia/llama-3.1-nemotron-70b-instruct',
     'nvidia/mistralai/mistral-large-2-instruct',
     'nvidia/deepseek-ai/deepseek-r1',
+    'nvidia/qwen/qwen2.5-72b-instruct',
   ],
+  inceptionlabs: [],
 };
 
 const TTS_PROVIDERS = [
@@ -550,6 +562,107 @@ const LLMSettingsForm: React.FC = () => {
   const [ttsVoices, setTtsVoices] = useState<string[]>([]);
   const [loadingModels, setLoadingModels] = useState({ main: false, fast: false, vision: false, tts: false, voices: false });
 
+  const [antigravityStatus, setAntigravityStatus] = useState<{
+    loggedIn: boolean;
+    running: boolean;
+    authUrl?: string | null;
+    expiry?: string | null;
+    loading: boolean;
+    authenticating: boolean;
+  }>({
+    loggedIn: false,
+    running: false,
+    authUrl: null,
+    expiry: null,
+    loading: false,
+    authenticating: false,
+  });
+
+  const checkAntigravityStatus = async () => {
+    try {
+      setAntigravityStatus(prev => ({ ...prev, loading: true }));
+      const res = await apiClient.get('/api/llm/antigravity/auth/status');
+      if (res?.data) {
+        setAntigravityStatus(prev => ({
+          ...prev,
+          loggedIn: Boolean(res.data.logged_in),
+          running: Boolean(res.data.running),
+          authUrl: res.data.auth_url || null,
+          expiry: res.data.expiry || null,
+          loading: false,
+        }));
+      }
+    } catch (e) {
+      console.error('Error al verificar estado de Antigravity:', e);
+      setAntigravityStatus(prev => ({ ...prev, loading: false }));
+    }
+  };
+
+  useEffect(() => {
+    checkAntigravityStatus();
+  }, []);
+
+  const handleStartAntigravityAuth = async () => {
+    try {
+      setAntigravityStatus(prev => ({ ...prev, authenticating: true }));
+      const res = await apiClient.post('/api/llm/antigravity/auth/start');
+      const authUrl = res.data?.auth_url;
+      if (authUrl) {
+        window.open(authUrl, '_blank', 'width=600,height=750');
+        toast.info('Ventana de inicio de sesión con Google abierta. Esperando autorización...');
+
+        let attempts = 0;
+        const maxAttempts = 60;
+        const pollTimer = setInterval(async () => {
+          attempts += 1;
+          try {
+            const statusRes = await apiClient.get('/api/llm/antigravity/auth/status');
+            if (statusRes.data?.logged_in) {
+              clearInterval(pollTimer);
+              setAntigravityStatus(prev => ({
+                ...prev,
+                loggedIn: true,
+                authenticating: false,
+                expiry: statusRes.data.expiry,
+              }));
+              toast.success('¡Google Antigravity conectado con éxito!');
+              fetchModels('antigravity', 'main', { refresh: true });
+              if (localLLM.llm_provider === 'antigravity' && (!localLLM.llm_model || !localLLM.llm_model.startsWith('antigravity/'))) {
+                setLocalLLM(prev => ({ ...prev, llm_model: 'antigravity/gemini-3-flash' }));
+              }
+              return;
+            }
+          } catch (err) {
+            console.error('Error polling Antigravity status:', err);
+          }
+
+          if (attempts >= maxAttempts) {
+            clearInterval(pollTimer);
+            setAntigravityStatus(prev => ({ ...prev, authenticating: false }));
+            toast.error('Tiempo de espera agotado para el inicio de sesión.');
+          }
+        }, 1500);
+      } else {
+        toast.error('No se pudo generar la URL de autorización.');
+        setAntigravityStatus(prev => ({ ...prev, authenticating: false }));
+      }
+    } catch (e: any) {
+      console.error('Error al iniciar login Antigravity:', e);
+      toast.error('Error al iniciar autenticación con Google: ' + (e?.response?.data?.detail || e.message));
+      setAntigravityStatus(prev => ({ ...prev, authenticating: false }));
+    }
+  };
+
+  const handleDisconnectAntigravity = async () => {
+    try {
+      await apiClient.post('/api/llm/antigravity/auth/disconnect');
+      setAntigravityStatus(prev => ({ ...prev, loggedIn: false, expiry: null }));
+      toast.info('Sesión de Google Antigravity cerrada');
+    } catch (e) {
+      toast.error('Error al desconectar sesión');
+    }
+  };
+
   const fetchModels = async (provider: string, type: 'main' | 'fast' | 'vision', options: { apiBase?: string; refresh?: boolean } = {}) => {
     setLoadingModels(prev => ({ ...prev, [type]: true }));
     try {
@@ -619,6 +732,95 @@ const LLMSettingsForm: React.FC = () => {
     }
   }, [localTTS.tts_provider, localTTS.tts_api_base]);
 
+  const renderAntigravityBanner = (providerType: 'main' | 'fast' | 'vision') => (
+    <div className="col-span-1 sm:col-span-2 p-3.5 rounded-xl border bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-transparent border-emerald-500/20">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="h-9 w-9 rounded-lg bg-emerald-500/20 flex items-center justify-center text-emerald-400 font-bold text-base flex-shrink-0">
+            🛸
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-xs sm:text-sm">Google Antigravity</span>
+              {antigravityStatus.loggedIn ? (
+                <Badge variant="outline" className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 text-[9px] uppercase font-bold">
+                  Conectado
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="bg-amber-500/15 text-amber-400 border-amber-500/30 text-[9px] uppercase font-bold">
+                  Requiere inicio de sesión
+                </Badge>
+              )}
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {antigravityStatus.loggedIn
+                ? `Sesión OAuth2 de Google activa. Modelos Gemini 3, 2.5 y Claude disponibles.`
+                : `Inicia sesión con tu cuenta de Google para cargar los modelos y cuotas de Antigravity.`}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 self-end sm:self-center">
+          {antigravityStatus.loggedIn ? (
+            <div className="flex items-center gap-1.5">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleStartAntigravityAuth}
+                disabled={antigravityStatus.authenticating}
+                className="border-emerald-500/30 hover:bg-emerald-500/10 text-xs text-emerald-400 h-8"
+              >
+                {antigravityStatus.authenticating ? (
+                  <>
+                    <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
+                    Reconectando...
+                  </>
+                ) : (
+                  'Reconectar'
+                )}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleDisconnectAntigravity}
+                className="text-xs text-muted-foreground hover:text-red-400 h-8 px-2"
+                title="Cerrar sesión de Antigravity"
+              >
+                Desconectar
+              </Button>
+            </div>
+          ) : (
+            <Button
+              type="button"
+              size="sm"
+              onClick={handleStartAntigravityAuth}
+              disabled={antigravityStatus.authenticating}
+              className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-sm h-8"
+            >
+              {antigravityStatus.authenticating ? (
+                <>
+                  <RefreshCw className="h-3 w-3 mr-1.5 animate-spin" />
+                  Esperando a Google...
+                </>
+              ) : (
+                <>
+                  <svg className="h-3.5 w-3.5 mr-1.5" viewBox="0 0 24 24">
+                    <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                    <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                    <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+                    <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+                  </svg>
+                  Iniciar sesión con Google
+                </>
+              )}
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
   const renderModelItem = (m: any, currentProvider: string) => {
     const isString = typeof m === 'string';
     const id = isString ? m : m.id;
@@ -626,14 +828,20 @@ const LLMSettingsForm: React.FC = () => {
     const isGemini = currentProvider === 'gemini' || id.startsWith('gemini/');
     const isOpenRouter = currentProvider === 'openrouter' || id.startsWith('openrouter/');
     const isKilocode = currentProvider === 'kilocode' || id.startsWith('kilocode/');
+    const isAntigravity = currentProvider === 'antigravity' || id.startsWith('antigravity/');
 
-    if (isOpenRouter || isGemini || isKilocode) {
+    if (isOpenRouter || isGemini || isKilocode || isAntigravity) {
       let badgeColor = "bg-blue-500/10 text-blue-500 border-blue-500/20";
-      let badgeText = isKilocode ? "KiloCode" : "OpenRouter";
-      let borderColor = "border-blue-500";
-      let bgColor = "bg-blue-500/5";
+      let badgeText = isKilocode ? "KiloCode" : isAntigravity ? "Antigravity" : "OpenRouter";
+      let borderColor = isAntigravity ? "border-emerald-500" : "border-blue-500";
+      let bgColor = isAntigravity ? "bg-emerald-500/5" : "bg-blue-500/5";
 
-      if (isGemini) {
+      if (isAntigravity) {
+        badgeText = "Antigravity";
+        badgeColor = "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
+        borderColor = "border-emerald-500";
+        bgColor = "bg-emerald-500/5";
+      } else if (isGemini) {
         badgeText = "Google";
         badgeColor = "bg-red-500/10 text-red-500 border-red-500/20";
         borderColor = "border-red-500";
@@ -870,6 +1078,7 @@ const LLMSettingsForm: React.FC = () => {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {localLLM.llm_provider === 'antigravity' && renderAntigravityBanner('main')}
                 <div className="space-y-2">
                   <Label className="text-[11px] font-bold uppercase text-muted-foreground">Proveedor</Label>
                   <Select
@@ -937,6 +1146,7 @@ const LLMSettingsForm: React.FC = () => {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {localLLM.fast_llm_provider === 'antigravity' && renderAntigravityBanner('fast')}
                 <div className="space-y-2">
                   <Label className="text-[11px] font-bold uppercase text-muted-foreground">Proveedor</Label>
                   <Select
@@ -992,6 +1202,7 @@ const LLMSettingsForm: React.FC = () => {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {localLLM.vision_llm_provider === 'antigravity' && renderAntigravityBanner('vision')}
                 <div className="space-y-2">
                   <Label className="text-[11px] font-bold uppercase text-muted-foreground">Proveedor</Label>
                   <Select
@@ -3076,50 +3287,101 @@ const SettingsPage: React.FC = () => {
           <Card className="mt-6 border border-primary/20 bg-primary/5">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <Badge variant="outline" className="bg-primary/10 text-primary border-primary/20">Cliente Linux</Badge>
+                <Badge variant="outline" className="bg-primary/10 text-primary border-primary/20">Windows &amp; Linux</Badge>
                 Sincronizador de Documentos (Kognito Sync)
               </CardTitle>
               <CardDescription>
-                Sincroniza tus documentos de OnlyOffice y base de conocimiento localmente en tu computadora Linux con nuestro cliente de escritorio oficial en segundo plano.
+                Sincroniza tus documentos de OnlyOffice y base de conocimiento localmente en tu computadora con nuestro cliente de escritorio oficial en segundo plano.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              <div className="flex flex-col md:flex-row items-start md:items-center justify-between p-4 rounded-xl bg-card border border-border/40 gap-4">
-                <div className="space-y-1">
-                  <h4 className="font-bold text-sm">Cliente de Escritorio (Linux x64)</h4>
-                  <p className="text-xs text-muted-foreground">
-                    Incluye bandeja del sistema (System Tray), base de datos SQLite y sincronización bidireccional instantánea.
-                  </p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Windows Card */}
+                <div className="flex flex-col justify-between p-4 rounded-xl bg-card border border-border/40 gap-4">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <Badge variant="secondary" className="text-[10px]">Windows x64</Badge>
+                      <h4 className="font-bold text-sm">Instalador Oficial (.exe)</h4>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Instalador guiado con asistente, iconos en Menú Inicio y Escritorio, y arranque automático con Windows.
+                    </p>
+                  </div>
+                  <Button asChild className="font-bold w-full">
+                    <a href="/KognitoSync-Setup.exe" download="KognitoSync-Setup.exe">
+                      Descargar Instalador (.exe)
+                    </a>
+                  </Button>
                 </div>
-                <Button asChild className="font-bold px-6 py-2">
-                  <a href="/kognito-sync-linux.zip" download="kognito-sync-linux.zip">
-                    Descargar Cliente (.zip)
-                  </a>
-                </Button>
+
+                {/* Linux Card */}
+                <div className="flex flex-col justify-between p-4 rounded-xl bg-card border border-border/40 gap-4">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <Badge variant="secondary" className="text-[10px]">Linux x64</Badge>
+                      <h4 className="font-bold text-sm">Paquete Cliente (.zip)</h4>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Incluye bandeja del sistema (System Tray), base de datos SQLite y script de instalación automatizada.
+                    </p>
+                  </div>
+                  <Button asChild variant="outline" className="font-bold w-full">
+                    <a href="/kognito-sync-linux.zip" download="kognito-sync-linux.zip">
+                      Descargar Cliente Linux (.zip)
+                    </a>
+                  </Button>
+                </div>
               </div>
 
-              <div className="space-y-2">
-                <h3 className="font-semibold text-sm">Guía de Instalación</h3>
-                <ol className="list-decimal list-inside text-xs text-muted-foreground space-y-2 leading-relaxed">
-                  <li>
-                    Descomprime el archivo descargado <code className="bg-muted px-1.5 py-0.5 rounded text-primary">kognito-sync-linux.zip</code> en tu computadora.
-                  </li>
-                  <li>
-                    Abre una terminal en la carpeta descomprimida y ejecuta el instalador automático:
-                    <pre className="bg-muted/80 p-3 rounded-lg font-mono text-[11px] text-foreground mt-1.5 overflow-x-auto">
-                      bash install_client.sh
-                    </pre>
-                    <span className="text-[10px] text-muted-foreground/75 italic mt-1 block">
-                      Nota: El script instalará las dependencias necesarias de Python y Tkinter (solicitando privilegios si es necesario) y creará el entorno virtual.
-                    </span>
-                  </li>
-                  <li>
-                    Busca <strong className="text-foreground">Kognito Sync</strong> en el menú de tus aplicaciones Linux e inícialo.
-                  </li>
-                  <li>
-                    Configura la URL de esta plataforma (<code className="bg-muted px-1.5 py-0.5 rounded">{typeof window !== "undefined" ? window.location.origin : "http://localhost:8000"}</code>), tu usuario/contraseña, selecciona una carpeta de tu disco para sincronizar y haz clic en <strong className="text-strong">Conectar y Sincronizar</strong>.
-                  </li>
-                </ol>
+              <div className="space-y-4 pt-2">
+                <h3 className="font-semibold text-sm">Guías de Instalación</h3>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Guia Windows */}
+                  <div className="space-y-2 p-3.5 rounded-lg bg-background/50 border border-border/30">
+                    <h4 className="text-xs font-bold text-primary flex items-center gap-1.5">
+                      Instalación en Windows
+                    </h4>
+                    <ol className="list-decimal list-inside text-xs text-muted-foreground space-y-1.5 leading-relaxed">
+                      <li>
+                        Descarga el archivo <code className="bg-muted px-1.5 py-0.5 rounded text-primary">KognitoSync-Setup.exe</code>.
+                      </li>
+                      <li>
+                        Ejecuta el instalador y sigue los pasos del asistente en pantalla.
+                      </li>
+                      <li>
+                        (Opcional) Marca la casilla para iniciar Kognito Sync automáticamente al encender tu PC.
+                      </li>
+                      <li>
+                        Abre <strong className="text-foreground">Kognito Sync</strong> desde tu Menú Inicio o Escritorio, conecta con tus credenciales y comienza a sincronizar.
+                      </li>
+                    </ol>
+                  </div>
+
+                  {/* Guia Linux */}
+                  <div className="space-y-2 p-3.5 rounded-lg bg-background/50 border border-border/30">
+                    <h4 className="text-xs font-bold text-primary flex items-center gap-1.5">
+                      Instalación en Linux
+                    </h4>
+                    <ol className="list-decimal list-inside text-xs text-muted-foreground space-y-1.5 leading-relaxed">
+                      <li>
+                        Descomprime el archivo <code className="bg-muted px-1.5 py-0.5 rounded text-primary">kognito-sync-linux.zip</code>.
+                      </li>
+                      <li>
+                        Abre una terminal y ejecuta el script instalador:
+                        <pre className="bg-muted/80 p-2 rounded font-mono text-[10px] text-foreground mt-1 overflow-x-auto">
+                          bash install_client.sh
+                        </pre>
+                      </li>
+                      <li>
+                        Inicia <strong className="text-foreground">Kognito Sync</strong> desde tu lanzador de aplicaciones de escritorio.
+                      </li>
+                      <li>
+                        Configura la URL de esta plataforma (<code className="bg-muted px-1 py-0.5 rounded text-[10px]">{typeof window !== "undefined" ? window.location.origin : "http://localhost:8000"}</code>) e inicia sesión.
+                      </li>
+                    </ol>
+                  </div>
+                </div>
               </div>
             </CardContent>
           </Card>

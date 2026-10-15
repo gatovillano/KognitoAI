@@ -6,7 +6,7 @@ from typing import Any, Optional, Type
 
 from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
-from core.llm_manager import get_fast_llm
+from core.llm_manager import get_fast_llm, get_main_llm, get_llm_for_user
 from langchain_core.messages import HumanMessage
 from langchain_core.output_parsers import PydanticOutputParser
 
@@ -90,8 +90,12 @@ class GenerateDocumentSummaryTool(BaseTool):
                 confidence=0.5
             )
 
-        # Obtener LLM rápido
-        llm = get_fast_llm()
+        # Obtener LLM del usuario o fallback global
+        llm = (await get_llm_for_user(self.account_id, purpose="fast")) if self.account_id else None
+        if not llm:
+            llm = get_fast_llm() or get_main_llm()
+        if not llm:
+            raise ValueError("No hay ningún LLM configurado o disponible para generar el resumen.")
 
         # Parser para forzar estructura JSON
         parser = PydanticOutputParser(pydantic_object=DocumentSummary)

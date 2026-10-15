@@ -58,7 +58,7 @@ class AnalysisInterpreterTool(BaseTool):
         **kwargs
     ) -> str:
         # Store account_id for use in _create_litellm_compatible_config
-        self.account_id = account_id
+        self.account_id = account_id or getattr(self, "account_id", None)
         
         # Create configuration using Kognito LLMs
         config = await self._create_litellm_compatible_config(

@@ -42,6 +42,7 @@ específica del usuario, documentos, notas y relaciones entre conceptos.
 - La información general está disponible públicamente (usa search-and-research)
 - No hay base de conocimiento del usuario para consultar
 - Necesitas información en tiempo real que cambia constantemente
+- Deseas crear, leer o editar documentos ofimáticos editables (Word, Excel, PowerPoint); para eso usa **`onlyoffice_skill`** (`create_onlyoffice_document`, `read_onlyoffice_document`, `edit_onlyoffice_document`).
 
 ## Uso Básico
 

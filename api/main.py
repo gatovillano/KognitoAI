@@ -336,8 +336,22 @@ app.include_router(chat_share_router, prefix="/api/chat/share", tags=["chat-shar
 app.include_router(auth_router, prefix="/api", tags=["auth"])
 app.include_router(users_router, prefix="/api", tags=["users"])
 app.include_router(documents_router, prefix="/api/documents", tags=["documents"])
+# Alias de compatibilidad hacia atrás para endpoints invocados sin prefijo /documents
+from api.documents import (
+    list_documents_endpoint,
+    upload_document_endpoint,
+    delete_document_endpoint,
+    list_all_user_documents_endpoint,
+)
+app.add_api_route("/api/list-documents", list_documents_endpoint, methods=["GET", "POST"], include_in_schema=False)
+app.add_api_route("/api/upload-document", upload_document_endpoint, methods=["POST"], include_in_schema=False)
+app.add_api_route("/api/delete-document", delete_document_endpoint, methods=["POST"], include_in_schema=False)
+app.add_api_route("/api/list-all-user-documents", list_all_user_documents_endpoint, methods=["POST"], include_in_schema=False)
+
 app.include_router(note_search_router, prefix="/api", tags=["note-search"]) # Mover arriba para prioridad sobre {note_id}
 app.include_router(notes_router, prefix="/api", tags=["notes"])
+from api.notes import list_notes_endpoint
+app.add_api_route("/api/list-notes", list_notes_endpoint, methods=["POST"], include_in_schema=False)
 app.include_router(agenda_router, prefix="/api", tags=["agenda"])
 from api.workspaces import router as workspaces_router
 from api.contact_profiles import router as contact_profiles_router

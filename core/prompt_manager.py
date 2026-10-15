@@ -34,20 +34,57 @@ def _format_selected_context_items(items: List[Dict[str, Any]]) -> str:
     manifest_lines = []
 
     for item in items:
-        item_type = str(item.get("type") or "context").lower()
+        raw_type = str(item.get("type") or "context").lower()
         item_id = item.get("id")
-        exact_name = item.get("file_name") or item.get("name") or item.get("title") or item_id or "sin-nombre"
-        extras = []
+        file_name = item.get("file_name")
+        topic = item.get("topic")
+        title = item.get("title")
+        raw_name = item.get("name") or title or file_name or item_id or "sin-nombre"
+        
+        # Detectar si es un documento de OnlyOffice
+        is_onlyoffice = (
+            raw_type in ("onlyoffice", "onlyoffice_document")
+            or (topic and str(topic).lower() == "onlyoffice")
+            or (raw_name and str(raw_name).startswith("[OnlyOffice]"))
+        )
 
-        if item.get("title") and item.get("title") != exact_name:
-            extras.append(f"titulo: {item['title']}")
-        if item.get("topic"):
-            extras.append(f"topic: {item['topic']}")
-        if item_id:
-            extras.append(f"id: {item_id}")
-
-        extra_text = f" ({'; '.join(extras)})" if extras else ""
-        manifest_lines.append(f"- {item_type}: {exact_name}{extra_text}")
+        if is_onlyoffice:
+            clean_name = raw_name.replace("[OnlyOffice]", "").strip()
+            manifest_lines.append(
+                f"- 📝 [DOCUMENTO ONLYOFFICE (EDITABLE)]: \"{clean_name}\"\n"
+                f"    * ID de Documento (UUID): \"{item_id}\"\n"
+                f"    * Herramienta para leer: read_onlyoffice_document(document_id=\"{item_id}\")\n"
+                f"    * Herramienta para editar: edit_onlyoffice_document(document_id=\"{item_id}\", action=...)\n"
+                f"    * 🛑 PROHIBIDO usar get_document_content_tool para este archivo."
+            )
+        elif raw_type == "document":
+            exact_file_name = file_name or clean_title if (clean_title := title or raw_name) else raw_name
+            topic_str = f", Topic: \"{topic}\"" if topic else ""
+            manifest_lines.append(
+                f"- 📄 [DOCUMENTO RAG (BASE DE CONOCIMIENTO)]: \"{raw_name}\"\n"
+                f"    * Handle de archivo (file_name): \"{exact_file_name}\"{topic_str}\n"
+                f"    * Herramienta para leer texto completo: get_document_content_tool(file_name=\"{exact_file_name}\")\n"
+                f"    * Herramienta para análisis RAG: scoped_rag_analysis(query=..., content_types=\"documents\")\n"
+                f"    * 🛑 PROHIBIDO usar read_onlyoffice_document para este archivo."
+            )
+        elif raw_type == "collection":
+            coll_topic = topic or raw_name
+            manifest_lines.append(
+                f"- 📚 [COLECCIÓN RAG (BASE DE CONOCIMIENTO)]: \"{raw_name}\"\n"
+                f"    * Topic de la colección: \"{coll_topic}\"\n"
+                f"    * Herramienta para listar documentos de la colección: get_document_list_tool(topic=\"{coll_topic}\")\n"
+                f"    * Herramienta para análisis de la colección: scoped_rag_analysis(topic=\"{coll_topic}\")"
+            )
+        else:
+            extras = []
+            if title and title != raw_name:
+                extras.append(f"titulo: {title}")
+            if topic:
+                extras.append(f"topic: {topic}")
+            if item_id:
+                extras.append(f"id: {item_id}")
+            extra_text = f" ({'; '.join(extras)})" if extras else ""
+            manifest_lines.append(f"- 📎 [{raw_type.upper()}]: {raw_name}{extra_text}")
 
     return "\n".join(manifest_lines)
 
@@ -128,13 +165,15 @@ class PromptManager:
             doc_list = _format_selected_context_items(explicit_rag_context_items) if explicit_rag_context_items else "\n".join([f"- document: {name}" for name in explicit_document_names or []])
             active_context_header = f"""
 🚨 **CONTEXTO PRIORITARIO SELECCIONADO POR EL USUARIO** 🚨
-El usuario ha seleccionado EXPLICITAMENTE este contexto activo para esta consulta:
+El usuario ha adjuntado EXPLICITAMENTE este contexto activo para esta consulta:
 {doc_list}
 
-**INSTRUCCIÓN OBLIGATORIA:**
-1. Trata los `file_name`, `name` e `id` listados arriba como los handles canónicos para herramientas.
-2. No asumas que el contenido completo de esos archivos ya está cargado en el prompt.
-3. Si necesitas leer o verificar contenido, usa primero las herramientas disponibles con esos nombres exactos o IDs exactos.
+**INSTRUCCIÓN OBLIGATORIA DE MANEJO DE CONTEXTO Y HERRAMIENTAS:**
+1. Diferencia estrictamente entre documentos de Base de Conocimiento RAG y documentos OnlyOffice:
+   - Para items RAG: usa `get_document_content_tool(file_name=...)` o `scoped_rag_analysis`. NUNCA uses herramientas de OnlyOffice.
+   - Para items OnlyOffice: usa `read_onlyoffice_document(document_id=UUID)` o `edit_onlyoffice_document(document_id=UUID, action=...)`. NUNCA uses `get_document_content_tool`.
+2. Trata los `file_name` e `id` listados arriba como los handles canónicos exactos.
+3. No asumas que el contenido completo de esos archivos ya está cargado en el prompt si no aparece abajo.
 4. Prioriza este contexto antes de recurrir a conocimiento general o a otros documentos.
 5. Si respondes usando este contexto, reconócelo explícitamente.
 ---------------------------------------------------------

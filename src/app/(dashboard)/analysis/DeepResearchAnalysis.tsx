@@ -107,32 +107,38 @@ const DeepResearchAnalysis: React.FC<DeepResearchAnalysisProps> = ({
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-2 mb-2">
-        <div className="p-2 rounded-xl bg-primary/10">
+    <div className="space-y-6 min-w-0 w-full overflow-hidden">
+      <div className="flex items-center gap-2 mb-2 min-w-0">
+        <div className="p-2 rounded-xl bg-primary/10 shrink-0">
           <FileText className={`w-6 h-6 ${gapColors.icon}`} />
         </div>
-        <div>
-          <h3 className="text-2xl font-black tracking-tight">Investigación Profunda</h3>
-          <p className="text-xs text-muted-foreground uppercase tracking-widest font-bold">Análisis Detallado Basado en Evidencia</p>
+        <div className="min-w-0">
+          <h3 className="text-xl sm:text-2xl font-black tracking-tight truncate">Investigación Profunda</h3>
+          <p className="text-[10px] sm:text-xs text-muted-foreground uppercase tracking-widest font-bold truncate">Análisis Detallado Basado en Evidencia</p>
         </div>
       </div>
 
-      <Tabs defaultValue="report" className="w-full">
-        <TabsList className="grid w-full grid-cols-3 mb-8 h-14 bg-muted/40 p-1.5 rounded-2xl border border-border/50 backdrop-blur-md">
-          <TabsTrigger value="report" className="gap-2.5 rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-primary transition-all duration-300">
-            <FileText className="w-4.5 h-4.5" />
-            <span className="font-bold">Informe Detallado</span>
+      <Tabs defaultValue="report" className="w-full min-w-0">
+        <TabsList className="grid w-full grid-cols-3 mb-6 sm:mb-8 h-12 sm:h-14 bg-muted/40 p-1 sm:p-1.5 rounded-xl sm:rounded-2xl border border-border/50 backdrop-blur-md min-w-0">
+          <TabsTrigger value="report" className="gap-1.5 sm:gap-2.5 px-1.5 sm:px-3 text-xs sm:text-sm rounded-lg sm:rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-primary transition-all duration-300 min-w-0">
+            <FileText className="w-4 h-4 sm:w-4.5 sm:h-4.5 shrink-0" />
+            <span className="font-bold truncate">
+              <span className="inline sm:hidden">Informe</span>
+              <span className="hidden sm:inline">Informe Detallado</span>
+            </span>
           </TabsTrigger>
-          <TabsTrigger value="schema" className="gap-2.5 rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-primary transition-all duration-300">
-            <LayoutDashboard className="w-4.5 h-4.5" />
-            <span className="font-bold">Esquema Visual</span>
+          <TabsTrigger value="schema" className="gap-1.5 sm:gap-2.5 px-1.5 sm:px-3 text-xs sm:text-sm rounded-lg sm:rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-primary transition-all duration-300 min-w-0">
+            <LayoutDashboard className="w-4 h-4 sm:w-4.5 sm:h-4.5 shrink-0" />
+            <span className="font-bold truncate">
+              <span className="inline sm:hidden">Esquema</span>
+              <span className="hidden sm:inline">Esquema Visual</span>
+            </span>
           </TabsTrigger>
-          <TabsTrigger value="sources" className="gap-2.5 rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-primary transition-all duration-300">
-            <Link2 className="w-4.5 h-4.5" />
-            <span className="font-bold">Fuentes</span>
+          <TabsTrigger value="sources" className="gap-1.5 sm:gap-2.5 px-1.5 sm:px-3 text-xs sm:text-sm rounded-lg sm:rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-lg data-[state=active]:text-primary transition-all duration-300 min-w-0">
+            <Link2 className="w-4 h-4 sm:w-4.5 sm:h-4.5 shrink-0" />
+            <span className="font-bold truncate">Fuentes</span>
             {displaySources.length > 0 && (
-              <Badge variant="secondary" className="ml-1 px-1.5 h-5 min-w-5 flex items-center justify-center rounded-full text-[10px] bg-primary/10 text-primary border-none text-xs">
+              <Badge variant="secondary" className="ml-0.5 sm:ml-1 px-1 sm:px-1.5 h-4 sm:h-5 min-w-4 sm:min-w-5 flex items-center justify-center rounded-full text-[9px] sm:text-[10px] bg-primary/10 text-primary border-none">
                 {displaySources.length}
               </Badge>
             )}
@@ -140,24 +146,26 @@ const DeepResearchAnalysis: React.FC<DeepResearchAnalysisProps> = ({
         </TabsList>
 
         {/* TAB: REPORTE */}
-        <TabsContent value="report" className="space-y-4 animate-in fade-in-50 slide-in-from-left-4 duration-500">
+        <TabsContent value="report" className="space-y-4 animate-in fade-in-50 slide-in-from-left-4 duration-500 min-w-0">
           {reportContent ? (
-            <Card className={`${gapColors.cardBg} border shadow-2xl shadow-primary/5 rounded-[2.5rem] overflow-hidden`}>
-              <CardHeader className="pb-4 flex flex-row items-center justify-between bg-muted/20 border-b border-border/10 px-8 py-6">
-                <div className="flex items-center gap-3">
-                  <div className="h-3 w-3 rounded-full bg-primary shadow-[0_0_10px_rgba(var(--primary),0.5)] animate-pulse" />
-                  <CardTitle className={`text-sm font-black uppercase tracking-[0.2em] ${gapColors.cardTitle}`}>Análisis Ejecutivo</CardTitle>
+            <Card className={`${gapColors.cardBg} border shadow-2xl shadow-primary/5 rounded-2xl sm:rounded-[2.5rem] overflow-hidden min-w-0 w-full`}>
+              <CardHeader className="pb-4 flex flex-row items-center justify-between gap-2 bg-muted/20 border-b border-border/10 px-4 sm:px-8 py-4 sm:py-6 min-w-0">
+                <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                  <div className="h-3 w-3 rounded-full bg-primary shadow-[0_0_10px_rgba(var(--primary),0.5)] animate-pulse shrink-0" />
+                  <CardTitle className={`text-xs sm:text-sm font-black uppercase tracking-[0.2em] truncate ${gapColors.cardTitle}`}>Análisis Ejecutivo</CardTitle>
                 </div>
-                <SectionTTSButton
-                  text={reportContent}
-                  play={play}
-                  isLoading={isLoading}
-                  isPlaying={isPlaying}
-                  activeText={activeText}
-                />
+                <div className="shrink-0">
+                  <SectionTTSButton
+                    text={reportContent}
+                    play={play}
+                    isLoading={isLoading}
+                    isPlaying={isPlaying}
+                    activeText={activeText}
+                  />
+                </div>
               </CardHeader>
-              <CardContent className="p-8 sm:p-10">
-                <div className="text-foreground leading-relaxed prose prose-slate dark:prose-invert max-w-none">
+              <CardContent className="p-4 sm:p-8 lg:p-10 min-w-0 overflow-hidden">
+                <div className="text-foreground leading-relaxed prose prose-slate dark:prose-invert max-w-none break-words min-w-0 [overflow-wrap:anywhere]">
                   <MarkdownRenderer contentParts={contentParts} fontSize="text-sm sm:text-base lg:text-lg" />
                 </div>
 
@@ -212,19 +220,19 @@ const DeepResearchAnalysis: React.FC<DeepResearchAnalysisProps> = ({
         </TabsContent>
 
         {/* TAB: ESQUEMA */}
-        <TabsContent value="schema" className="space-y-4 animate-in fade-in-50 slide-in-from-bottom-6 duration-700">
+        <TabsContent value="schema" className="space-y-4 animate-in fade-in-50 slide-in-from-bottom-6 duration-700 min-w-0">
           {analysis.visual_schema ? (
-            <div className="relative group">
+            <div className="relative group min-w-0">
               {/* Fondo decorativo de 'Lienzo' */}
-              <div className="absolute inset-0 bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:20px_20px] opacity-[0.15] pointer-events-none rounded-[3rem]" />
+              <div className="absolute inset-0 bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:20px_20px] opacity-[0.15] pointer-events-none rounded-2xl sm:rounded-[3rem]" />
 
-              <div className="rounded-[3rem] overflow-hidden border border-border/40 shadow-2xl bg-card/80 backdrop-blur-sm min-h-[500px] flex flex-col relative z-10">
-                <div className="bg-muted/30 border-b border-border/10 px-8 py-4 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <LayoutDashboard className="w-4 h-4 text-primary" />
-                    <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Lienzo Esquema Visual</span>
+              <div className="rounded-2xl sm:rounded-[3rem] overflow-hidden border border-border/40 shadow-2xl bg-card/80 backdrop-blur-sm min-h-[500px] flex flex-col relative z-10 min-w-0 w-full">
+                <div className="bg-muted/30 border-b border-border/10 px-4 sm:px-8 py-3 sm:py-4 flex items-center justify-between min-w-0">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <LayoutDashboard className="w-4 h-4 text-primary shrink-0" />
+                    <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground truncate">Lienzo Esquema Visual</span>
                   </div>
-                  <div className="flex gap-1">
+                  <div className="flex gap-1 shrink-0">
                     <div className="w-2 h-2 rounded-full bg-red-400/20" />
                     <div className="w-2 h-2 rounded-full bg-amber-400/20" />
                     <div className="w-2 h-2 rounded-full bg-green-400/20" />
@@ -232,7 +240,7 @@ const DeepResearchAnalysis: React.FC<DeepResearchAnalysisProps> = ({
                 </div>
 
                 <div
-                  className="visual-schema-content p-8 sm:p-12 overflow-auto max-h-[75vh] custom-scrollbar selection:bg-primary/20"
+                  className="visual-schema-content p-4 sm:p-8 lg:p-12 overflow-x-auto overflow-y-auto max-h-[75vh] custom-scrollbar selection:bg-primary/20 max-w-full min-w-0"
                   dangerouslySetInnerHTML={{ __html: analysis.visual_schema }}
                 />
               </div>
@@ -242,6 +250,9 @@ const DeepResearchAnalysis: React.FC<DeepResearchAnalysisProps> = ({
                   font-family: 'Inter', system-ui, -apple-system, sans-serif;
                   color: inherit;
                   line-height: 1.6;
+                  max-width: 100%;
+                  overflow-wrap: break-word;
+                  word-break: break-word;
                 }
                 .visual-schema-content img {
                   max-width: 100%;
@@ -253,12 +264,14 @@ const DeepResearchAnalysis: React.FC<DeepResearchAnalysisProps> = ({
                 }
                 .visual-schema-content table {
                   width: 100%;
+                  max-width: 100%;
+                  display: block;
+                  overflow-x: auto;
                   border-collapse: separate;
                   border-spacing: 0;
                   margin: 2rem 0;
                   border: 1px solid rgba(128, 128, 128, 0.1);
                   border-radius: 1rem;
-                  overflow: hidden;
                   background: rgba(var(--card), 0.5);
                 }
                 .visual-schema-content th {
@@ -332,7 +345,7 @@ const DeepResearchAnalysis: React.FC<DeepResearchAnalysisProps> = ({
         </TabsContent>
 
         {/* TAB: FUENTES */}
-        <TabsContent value="sources" className="space-y-6 animate-in fade-in-50 duration-500">
+        <TabsContent value="sources" className="space-y-6 animate-in fade-in-50 duration-500 min-w-0">
           <SourcesTab sources={displaySources} />
         </TabsContent>
       </Tabs>

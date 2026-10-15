@@ -46,8 +46,8 @@ apiClient.interceptors.response.use(
       localStorage.removeItem('authToken');
       localStorage.removeItem('access_token');
 
-      // Solo redirigir si no estamos ya en la página de login
-      if (!window.location.pathname.includes('/login')) {
+      // Solo redirigir si no estamos ya en la página de login o en telegram
+      if (!window.location.pathname.includes('/login') && !window.location.pathname.includes('/telegram')) {
         console.warn('🔄 Redirigiendo al login...');
         window.location.href = '/login';
       }
@@ -73,6 +73,24 @@ apiClient.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+/**
+ * URL del archivo ORIGINAL de una foto.
+ *
+ * No usar `/media/${file_path}`: ese mount estático solo expone MEDIA_ROOT y no
+ * alcanza los originales de las cuentas con `cloud_storage_path` configurado
+ * (el archivo devuelve 404 aunque la foto exista en disco).
+ *
+ * El token viaja como query param porque los consumidores son <img> y el
+ * lightbox, que no pueden enviar el header Authorization.
+ */
+export const photoFileUrl = (photoId: string): string => {
+  const base = process.env.NEXT_PUBLIC_API_URL || 'https://apibase.cuerpolibre.cl';
+  const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
+  return token
+    ? `${base}/api/galleries/photos/${photoId}/file?token=${encodeURIComponent(token)}`
+    : `${base}/api/galleries/photos/${photoId}/file`;
+};
 
 export const userSettings = {
   get: async () => {

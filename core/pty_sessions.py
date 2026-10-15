@@ -51,10 +51,15 @@ async def create_session(
     session_id: Optional[str] = None,
     cols: int = 220,
     rows: int = 50,
+    chat_task_id: Optional[str] = None,
+    thread_id: Optional[str] = None,
 ) -> str:
     """
     Crea una sesión PTY asíncrona que ejecuta `command` y retransmite la salida.
     Retorna el session_id.
+    Si se provee chat_task_id, el evento tool_start lo reutiliza para que el
+    frontend pueda asociar la terminal al mensaje en streaming en tiempo real
+    (estilo kogniterm-desktop). Si no, usa session_id como fallback.
     """
     if session_id is None:
         session_id = uuid.uuid4().hex
@@ -71,6 +76,17 @@ async def create_session(
 
     def _start_proc():
         # Iniciar el proceso dentro del PTY
+        def _child_setup():
+            # Darle al hijo su propia sesión y terminal controladora para
+            # que programas interactivos (sudo, ssh, passwd…) puedan abrir
+            # /dev/tty y pedir passwords. Sin esto sudo falla o se cuelga
+            # sin mostrar el prompt.
+            try:
+                os.setsid()
+                fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+            except Exception:
+                pass
+
         try:
             cmd_args = ["/bin/bash", "-c", command] if isinstance(command, str) else command
             proc = subprocess.Popen(
@@ -82,6 +98,7 @@ async def create_session(
                 close_fds=True,
                 env=_env,
                 cwd=cwd or None,
+                preexec_fn=_child_setup,
             )
             # el padre no necesita el fd slave
             try:
@@ -103,6 +120,9 @@ async def create_session(
         "proc": proc,
         "account_id": account_id,
         "task_id": session_id,
+        "chat_task_id": chat_task_id,
+        "thread_id": thread_id,
+        "command": command,
         "cols": cols,
         "rows": rows,
         "closed": False,
@@ -111,17 +131,28 @@ async def create_session(
     }
     _sessions[session_id] = session
 
-    # Notificar inicio de la terminal para estado de herramientas
+    # Notificar inicio de la terminal para estado de herramientas.
+    # Se envía DE INMEDIATO (antes de que el comando termine) para que el
+    # frontend monte la terminal interactiva en tiempo real, estilo
+    # kogniterm-desktop: desplegada, persistente y con input habilitado.
+    # taskId = chat_task_id cuando se conoce, para que CommonChat lo asocie
+    # al mensaje en streaming sin filtrarlo; session_task_id permite
+    # correlacionar el tool_end posterior aunque el taskId difiera.
     try:
+        display_cmd = command if isinstance(command, str) else " ".join(command)
+        tool_start_msg: Dict[str, Any] = {
+            "type": "tool_start",
+            "taskId": chat_task_id or session_id,
+            "tool_name": "terminal_executor",
+            "message": f"Ejecutando en terminal: {display_cmd[:200]}",
+            "pty_session": {"session_id": session_id, "command": display_cmd[:500]},
+            "session_task_id": session_id,
+        }
+        if thread_id:
+            tool_start_msg["thread_id"] = thread_id
         await send_personal_message(
             account_id,
-            {
-                "type": "tool_start",
-                "taskId": session_id,
-                "tool_name": "terminal_executor",
-                "message": "Terminal interactiva iniciada",
-                "pty_session": {"session_id": session_id},
-            },
+            tool_start_msg,
         )
     except Exception:
         logger.exception("Error notificando inicio de sesión PTY")
@@ -157,9 +188,11 @@ async def _reader_loop(session_id: str) -> None:
             if current_session:
                 current_session.setdefault("accumulated_output", []).append(text)
 
-            # Enviar a clientes terminales conectados (tipo conexión: 'terminal')
+            # Enviar a clientes terminales conectados (tipo conexión: 'terminal').
+            # Se etiqueta con session_id para que cada terminal embebida filtre
+            # solo su sesión (varias terminales pueden coexistir en el chat).
             try:
-                await send_personal_message(account_id, {"type": "output", "data": text}, connection_type="terminal")
+                await send_personal_message(account_id, {"type": "output", "data": text, "session_id": session_id}, connection_type="terminal")
             except Exception:
                 logger.exception("Error enviando output a conexiones 'terminal'")
 
@@ -177,14 +210,19 @@ async def _reader_loop(session_id: str) -> None:
                 returncode = None
 
         try:
+            tool_end_msg: Dict[str, Any] = {
+                "type": "tool_end",
+                "taskId": session.get("chat_task_id") or task_id,
+                "tool_name": "terminal_executor",
+                "message": f"Terminal finalizada (exit: {returncode})",
+                "session_task_id": session_id,
+                "pty_session": {"session_id": session_id},
+            }
+            if session.get("thread_id"):
+                tool_end_msg["thread_id"] = session["thread_id"]
             await send_personal_message(
                 account_id,
-                {
-                    "type": "tool_end",
-                    "taskId": task_id,
-                    "tool_name": "terminal_executor",
-                    "message": "Terminal finalizada",
-                },
+                tool_end_msg,
             )
         except Exception:
             logger.exception("Error enviando tool_end")

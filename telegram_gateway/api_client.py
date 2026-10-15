@@ -163,7 +163,7 @@ async def upload_document(jwt_token: str, file_name: str, file_bytes: bytes,
 
 async def get_workspaces(jwt_token: str) -> list:
     """
-    Obtiene la lista de workspaces del usuario via GET /api/workspaces.
+    Obtiene la lista completa de workspaces del usuario via GET /api/workspaces.
     """
     headers = {"Authorization": f"Bearer {jwt_token}"}
     try:
@@ -172,7 +172,22 @@ async def get_workspaces(jwt_token: str) -> list:
             resp.raise_for_status()
             data = resp.json()
             if isinstance(data, dict):
-                return data.get("workspaces", [])
+                total = data.get("total", 0)
+                workspaces = data.get("workspaces", [])
+                # Si por alguna razón la respuesta viniera paginada, paginar hasta obtener todos los workspaces
+                while len(workspaces) < total:
+                    next_resp = await client.get(
+                        f"{config.core_api_url}/api/workspaces",
+                        headers=headers,
+                        params={"skip": len(workspaces), "limit": 100}
+                    )
+                    next_resp.raise_for_status()
+                    next_data = next_resp.json()
+                    next_ws = next_data.get("workspaces", []) if isinstance(next_data, dict) else []
+                    if not next_ws:
+                        break
+                    workspaces.extend(next_ws)
+                return workspaces
             return data  # Fallback si por alguna razón ya es lista
     except Exception as e:
         logger.error(f"Error en get_workspaces: {e}", exc_info=True)

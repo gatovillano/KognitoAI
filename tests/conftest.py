@@ -66,7 +66,11 @@ class SafeAutoMockFinder(MetaPathFinder):
             "langchain", "langchain_core", "langchain_community",
             "openai", "aiofiles", "psycopg", "psycopg_pool", "psycopg_binary",
             "pgvector", "bleach", "xml", "bcrypt", "types", "importlib", "collections",
-            "python_multipart", "multipart", "httpx", "greenlet", "_greenlet", "secrets", "test_"
+            "python_multipart", "multipart", "httpx", "greenlet", "_greenlet", "secrets", "test_",
+            # PIL must stay real: the auto-mock finder would otherwise replace
+            # Image.open with a MagicMock and any image assertion would pass
+            # vacuously (or fail confusingly).
+            "PIL",
         )
         if any(fullname == p or fullname.startswith(p + ".") or fullname.startswith("test") for p in allowed_prefixes):
             return None

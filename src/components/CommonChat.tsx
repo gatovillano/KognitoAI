@@ -54,6 +54,7 @@ interface MessageContentPart {
   id?: string;
   status?: 'start' | 'end' | 'error';
   tool_name?: string;
+  pty_session?: { session_id: string; command?: string };
 }
 
 const hasPendingToolCall = (parts: MessageContentPart[], toolName?: string, content?: string): boolean => {
@@ -399,14 +400,6 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
     setShowScrollBottomButton(!isAtBottom);
   }, []);
 
-  useEffect(() => {
-    const container = scrollAreaRef.current;
-    if (!container) return;
-
-    container.addEventListener('scroll', handleScroll);
-    return () => container.removeEventListener('scroll', handleScroll);
-  }, [handleScroll]);
-
   const scrollToBottom = useCallback((behavior: 'smooth' | 'auto' = 'auto') => {
     const container = scrollAreaRef.current;
     if (!container) return;
@@ -424,6 +417,29 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
     }
   }, []);
 
+  const handleScrollToBottom = useCallback(() => {
+    scrollToBottom('smooth');
+    setShowScrollBottomButton(false);
+  }, [scrollToBottom]);
+
+  useEffect(() => {
+    const container = scrollAreaRef.current;
+    if (!container) return;
+
+    handleScroll();
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    window.addEventListener('resize', handleScroll);
+
+    return () => {
+      container.removeEventListener('scroll', handleScroll);
+      window.removeEventListener('resize', handleScroll);
+    };
+  }, [handleScroll]);
+
+  useEffect(() => {
+    handleScroll();
+  }, [messages.length, renderedMessageCount, handleScroll]);
+
   const { registerMessageHandler } = useWebSocketContext();
 
   useEffect(() => {
@@ -438,8 +454,15 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         return;
       }
 
-      // Filtrar por taskId para ignorar mensajes de tareas canceladas o anteriores
-      if (taskId && currentTaskIdRef.current && taskId !== currentTaskIdRef.current) {
+      // Filtrar por taskId para ignorar mensajes de tareas canceladas o anteriores.
+      // EXCEPCIÓN tiempo real PTY (estilo kogniterm-desktop): los eventos
+      // tool_start/tool_end de terminal_executor llegan con taskId = session_id
+      // (o chat_task_id propagado) y deben montarse en vivo en el mensaje en
+      // streaming aunque el taskId no coincida exactamente.
+      const isPtyToolEvent =
+        (type === 'tool_start' || type === 'tool_end' || type === 'tool_error') &&
+        ((data as any).tool_name === 'terminal_executor' || !!(data as any).pty_session || !!(data as any).session_task_id);
+      if (taskId && currentTaskIdRef.current && taskId !== currentTaskIdRef.current && !isPtyToolEvent) {
         return;
       }
 
@@ -467,6 +490,8 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
           const toolStartMessage = data as ToolStatusMessage;
           if (toolStartMessage.tool_name === 'deep_research') {
             setIsDeepResearchActive(true);
+            setResearchProgress((prev) => (prev > 0 ? prev : 5));
+            setResearchStatus(toolStartMessage.message || 'Iniciando investigación profunda...');
             if (threadIdRef.current) {
               localStorage.setItem('deep_research_active_' + threadIdRef.current, 'true');
             }
@@ -488,6 +513,11 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
               duration: 3000,
             });
           }
+          // Terminal en tiempo real: anclar la vista al fondo para que la
+          // terminal desplegada quede visible de inmediato.
+          if ((toolStartMessage as any).pty_session) {
+            setTimeout(() => scrollToBottom('auto'), 50);
+          }
           break;
         }
         case 'tool_end':
@@ -505,6 +535,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
 
           if (toolEndMessage.tool_name === 'deep_research') {
             setIsDeepResearchActive(false);
+            setResearchProgress(0);
             if (threadIdRef.current) {
               localStorage.removeItem('deep_research_active_' + threadIdRef.current);
             }
@@ -531,7 +562,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         }
         case 'progress':
           if (data.progress !== undefined) {
-            setResearchProgress(data.progress);
+            setResearchProgress(Number(data.progress));
           }
           if (data.message) {
             setResearchStatus(data.message);
@@ -688,36 +719,79 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
           case 'tool_start': {
             const toolStartMessage = data as ToolStatusMessage;
             const toolContent = toolStartMessage.message || `Usando ${toolStartMessage.tool_name}...`;
+            const incomingPty = (toolStartMessage as any).pty_session;
 
-            let chunkMessageIndex = updatedMessages.findIndex(msg => msg.taskId === taskId);
+            // Resolver índice: 1) por taskId exacto, 2) si es evento PTY en
+            // tiempo real, al último mensaje AI en streaming (con taskId
+            // activo) o al último mensaje AI. Esto permite montar la terminal
+            // ANTES de que el comando termine (estilo kogniterm-desktop).
+            let chunkMessageIndex = taskId ? updatedMessages.findIndex(msg => msg.taskId === taskId) : -1;
+            if (chunkMessageIndex === -1 && incomingPty) {
+              if (currentTaskIdRef.current) {
+                chunkMessageIndex = updatedMessages.findIndex(msg => msg.taskId === currentTaskIdRef.current);
+              }
+              if (chunkMessageIndex === -1) {
+                for (let i = updatedMessages.length - 1; i >= 0; i--) {
+                  if (updatedMessages[i].sender === 'ai') { chunkMessageIndex = i; break; }
+                }
+              }
+              // Si no hay mensaje AI (p. ej. tool_start llegó antes que
+              // stream_start), crearlo para no perder la terminal en vivo.
+              if (chunkMessageIndex === -1) {
+                updatedMessages.push({
+                  text: '',
+                  sender: 'ai',
+                  created_at: new Date().toISOString(),
+                  model_name: settings?.llm_model,
+                  sources: [],
+                  chunks: [],
+                  reasoning_chunks: [],
+                  content_parts: [],
+                  taskId: (taskId as string) || currentTaskIdRef.current || undefined,
+                });
+                chunkMessageIndex = updatedMessages.length - 1;
+              }
+            }
             if (chunkMessageIndex !== -1) {
               const existingMessage = updatedMessages[chunkMessageIndex];
               let newParts = [...(existingMessage.content_parts || [])];
-              if (!hasPendingToolCall(newParts, toolStartMessage.tool_name, toolContent)) {
+              // Correlación por session_id: cada comando abre SU propia
+              // terminal aunque el comando sea idéntico a uno anterior
+              // (evita que un comando repetido fusione/sobrescriba terminales).
+              const incomingSessionId = incomingPty?.session_id;
+              const existingPartIndex = incomingSessionId
+                ? newParts.findIndex((p: any) => p?.type === 'tool_call' && p?.pty_session?.session_id === incomingSessionId)
+                : -1;
+              if (existingPartIndex === -1) {
                 newParts.push({
                   type: 'tool_call',
                   content: toolContent,
                   tool_name: toolStartMessage.tool_name,
                   status: 'start',
-                  pty_session: (toolStartMessage as any).pty_session
+                  pty_session: incomingPty
                 } as any);
                 updatedMessages[chunkMessageIndex] = { ...existingMessage, content_parts: newParts };
-              } else {
-                const lastPartIndex = findLatestToolCallIndex(newParts, toolStartMessage.tool_name);
-                if (lastPartIndex !== -1 && (toolStartMessage as any).pty_session) {
-                  newParts[lastPartIndex] = {
-                    ...newParts[lastPartIndex],
-                    pty_session: (toolStartMessage as any).pty_session,
-                  } as any;
-                  updatedMessages[chunkMessageIndex] = { ...existingMessage, content_parts: newParts };
-                }
+              } else if (incomingPty) {
+                newParts[existingPartIndex] = {
+                  ...newParts[existingPartIndex],
+                  pty_session: incomingPty,
+                } as any;
+                updatedMessages[chunkMessageIndex] = { ...existingMessage, content_parts: newParts };
+              } else if (!hasPendingToolCall(newParts, toolStartMessage.tool_name, toolContent)) {
+                newParts.push({
+                  type: 'tool_call',
+                  content: toolContent,
+                  tool_name: toolStartMessage.tool_name,
+                  status: 'start',
+                } as any);
+                updatedMessages[chunkMessageIndex] = { ...existingMessage, content_parts: newParts };
               }
 
               // Adjuntar metadata de pty_session si la herramienta la provee (p. ej. terminal_executor)
-              if ((toolStartMessage as any).pty_session) {
+              if (incomingPty) {
                 updatedMessages[chunkMessageIndex] = {
                   ...updatedMessages[chunkMessageIndex],
-                  pty_session: (toolStartMessage as any).pty_session,
+                  pty_session: incomingPty,
                 } as any;
               }
             }
@@ -731,12 +805,28 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
           case 'tool_end':
           case 'tool_error': {
             const toolEndMessage = data as ToolStatusMessage;
-            
-            let chunkMessageIndex = updatedMessages.findIndex(msg => msg.taskId === taskId);
+            const endSessionId = (toolEndMessage as any).pty_session?.session_id
+              || (toolEndMessage as any).session_task_id;
+
+            let chunkMessageIndex = taskId ? updatedMessages.findIndex(msg => msg.taskId === taskId) : -1;
+            // Correlacionar tool_end de PTY por session_id aunque el taskId
+            // difiera (tool_start usó session_id como taskId).
+            if (chunkMessageIndex === -1 && endSessionId) {
+              for (let i = updatedMessages.length - 1; i >= 0; i--) {
+                const parts = updatedMessages[i].content_parts || [];
+                if (parts.some((p: any) => p?.pty_session?.session_id === endSessionId)) {
+                  chunkMessageIndex = i;
+                  break;
+                }
+              }
+              if (chunkMessageIndex === -1 && currentTaskIdRef.current) {
+                chunkMessageIndex = updatedMessages.findIndex(msg => msg.taskId === currentTaskIdRef.current);
+              }
+            }
             if (chunkMessageIndex !== -1) {
               const existingMessage = updatedMessages[chunkMessageIndex];
               let newParts = [...(existingMessage.content_parts || [])];
-              
+
               const lastPartIndex = findLatestToolCallIndex(newParts, toolEndMessage.tool_name);
               if (lastPartIndex !== -1) {
                  newParts[lastPartIndex] = {
@@ -803,7 +893,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
     const unregister = registerMessageHandler(handleMessage);
     return unregister; // Cleanup on component unmount
 
-  }, [registerMessageHandler, settings?.llm_model]);
+  }, [registerMessageHandler, settings?.llm_model, scrollToBottom]);
 
   const handleSendMessage = useCallback(
     async (e?: React.FormEvent, messageTextFromInput?: string) => {
@@ -912,6 +1002,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         uploadedImages.forEach(img => URL.revokeObjectURL(img.preview));
         setUploadedImages([]);
       }
+      setTimeout(() => scrollToBottom('smooth'), 50);
 
       try {
         const formData = new FormData();
@@ -941,7 +1032,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         setMessages((prev) => [...prev, { text: 'Lo siento, ocurrió un error.', sender: 'ai', created_at: new Date().toISOString() }]);
       }
     },
-    [user, threadId, selectedContext, router, uploadedImages, serializeSelectedContext, workspaceId]
+    [user, threadId, selectedContext, router, uploadedImages, serializeSelectedContext, workspaceId, scrollToBottom]
   );
 
   const handleImageUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement> | { target: { files: FileList | File[] | null } }) => {
@@ -1399,11 +1490,9 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         setIsLoading(true);
         setMessages([]);
         try {
-          // Cargamos los últimos 100 mensajes por defecto.
-          // La API ahora maneja la lógica de paginación de forma más robusta.
-          const limit = 60;
+          // Obtenemos todos los mensajes del hilo. El renderizado progresivo del cliente se encarga de la visualización fluida.
           const [messagesRes, threadRes] = await Promise.all([
-            apiClient.get(`/api/threads/${threadId}/messages`, { params: { skip: 0, limit: limit } }),
+            apiClient.get(`/api/threads/${threadId}/messages`),
             apiClient.get(`/api/threads/${threadId}`).catch(() => null),
           ]);
 
@@ -1414,8 +1503,7 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
           if (threadRes?.data?.title) {
             setThreadTitle(threadRes.data.title);
           }
-          // Si el total es mayor que el límite, significa que hay más mensajes para cargar.
-          setHasMoreMessages(total > limit);
+          setHasMoreMessages(total > newMessages.length);
         } catch (error) {
           console.error('Error fetching chat data:', error);
           setMessages([{ text: 'No se pudo cargar esta conversación.', sender: 'ai', created_at: new Date().toISOString() }]);
@@ -1835,7 +1923,6 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                           playingMessageIndex={playingMessageIndex}
                           isAudioPaused={isAudioPaused}
                           onSourceClick={handleSourceClick as (source: Source) => void}
-                          scrollToBottom={scrollToBottom}
                         />
                       </div>
                     );
@@ -1861,7 +1948,6 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                         playingMessageIndex={playingMessageIndex}
                         isAudioPaused={isAudioPaused}
                         onSourceClick={handleSourceClick as (source: Source) => void}
-                        scrollToBottom={scrollToBottom}
                       />
 
                       {activeResponse && (
@@ -1876,7 +1962,6 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                           playingMessageIndex={playingMessageIndex}
                           isAudioPaused={isAudioPaused}
                           onSourceClick={handleSourceClick as (source: Source) => void}
-                          scrollToBottom={scrollToBottom}
                           responsePosition={{
                             current: activeResponseIndex + 1,
                             total: totalResponses,
@@ -1926,30 +2011,54 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
             </div>
           </div>
           
-          {/* Scroll to Bottom Button */}
-          <AnimatePresence>
-            {showScrollBottomButton && (
-              <motion.button
-                initial={{ opacity: 0, y: 10, scale: 0.8 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 10, scale: 0.8 }}
-                onClick={() => scrollToBottom('smooth')}
-                className="absolute bottom-4 right-6 z-50 p-2.5 rounded-full bg-primary text-primary-foreground shadow-lg border border-border/20 hover:bg-primary/90 transition-all hover:scale-105 flex items-center justify-center group"
-                aria-label="Ir al final del chat"
-                title="Ir al final del chat"
-              >
-                <div className="relative flex items-center justify-center">
-                  <ArrowDown className="w-5 h-5 stroke-[2.5px]" />
-                  {isResponding && (
-                    <span className="absolute -top-1 -right-1 flex h-3 w-3">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary/40 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-3 w-3 bg-primary"></span>
-                    </span>
-                  )}
-                </div>
-              </motion.button>
-            )}
-          </AnimatePresence>
+          {/* Floating Scroll to Bottom Button */}
+          <div className="pointer-events-none absolute inset-x-0 bottom-4 z-40 flex justify-end px-4 sm:px-6 md:px-8 max-w-4xl lg:max-w-5xl mx-auto w-full">
+            <AnimatePresence>
+              {showScrollBottomButton && (
+                <motion.button
+                  key="scroll-bottom-floating-btn"
+                  initial={{ opacity: 0, y: 20, scale: 0.8 }}
+                  animate={{
+                    opacity: 1,
+                    scale: 1,
+                    y: [0, -6, 0],
+                  }}
+                  exit={{
+                    opacity: 0,
+                    y: 16,
+                    scale: 0.75,
+                    transition: { duration: 0.2, ease: 'easeOut' },
+                  }}
+                  transition={{
+                    opacity: { duration: 0.25 },
+                    scale: { duration: 0.25 },
+                    y: {
+                      repeat: Infinity,
+                      repeatType: 'reverse',
+                      duration: 1.8,
+                      ease: 'easeInOut',
+                    },
+                  }}
+                  whileHover={{ scale: 1.12, transition: { duration: 0.15 } }}
+                  whileTap={{ scale: 0.92 }}
+                  onClick={handleScrollToBottom}
+                  className="pointer-events-auto relative p-3 rounded-full bg-primary text-primary-foreground shadow-xl border border-primary/20 hover:bg-primary/90 hover:shadow-2xl hover:shadow-primary/30 transition-all flex items-center justify-center group focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 dark:focus:ring-offset-background"
+                  aria-label="Ir al final del chat"
+                  title="Ir al final del chat"
+                >
+                  <div className="relative flex items-center justify-center">
+                    <ArrowDown className="w-5 h-5 stroke-[2.5px] transition-transform duration-200 group-hover:translate-y-0.5" />
+                    {isResponding && (
+                      <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary/40 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-3 w-3 bg-primary"></span>
+                      </span>
+                    )}
+                  </div>
+                </motion.button>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
         <div className="w-full md:max-w-6xl mx-auto px-1 pb-2 sm:px-4 sm:pb-6">
           <div className="relative">

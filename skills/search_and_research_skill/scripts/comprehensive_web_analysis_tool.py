@@ -24,7 +24,7 @@ from bs4 import BeautifulSoup
 from skills.search_and_research_skill.scripts.web_search_tool import get_web_search_tool
 from skills.search_and_research_skill.scripts.web_scraper_tool import WebScraperTool
 from core.memory_manager import get_relevant_memories # <-- Esta ya soporta workspace_id
-from core.llm_manager import get_fast_llm
+from core.llm_manager import get_fast_llm, get_main_llm, get_llm_for_user
 from utils.multi_query_retriever import MultiQueryRetriever, multi_query_search
 
 logger = logging.getLogger(__name__)
@@ -151,7 +151,9 @@ class ComprehensiveWebAnalysisTool(BaseTool):
 
             # Step 3: Initial Web Synthesis
             logger.info("Step 3: Synthesizing web content...")
-            synthesis_llm = get_fast_llm()
+            synthesis_llm = (await get_llm_for_user(effective_account_id, purpose="fast")) if effective_account_id else None
+            if not synthesis_llm:
+                synthesis_llm = get_fast_llm() or get_main_llm()
             if not synthesis_llm:
                 return "Error: El modelo de lenguaje para síntesis no está disponible."
 
@@ -187,7 +189,9 @@ class ComprehensiveWebAnalysisTool(BaseTool):
 
             # Step 5: LLM Decision Logic
             logger.info("Step 5: Querying LLM for decision on more search...")
-            decision_llm = get_fast_llm()
+            decision_llm = (await get_llm_for_user(effective_account_id, purpose="fast")) if effective_account_id else None
+            if not decision_llm:
+                decision_llm = get_fast_llm() or get_main_llm()
             if not decision_llm:
                 return "Error: El modelo de lenguaje para la decisión no está disponible."
 
@@ -267,7 +271,11 @@ class ComprehensiveWebAnalysisTool(BaseTool):
 
         # Step 7: Final Combined Analysis (Ahora usa los acumulados)
         logger.info("Step 7: Performing final combined analysis...")
-        final_analysis_llm = get_fast_llm()
+        final_analysis_llm = (await get_llm_for_user(effective_account_id, purpose="main")) if effective_account_id else None
+        if not final_analysis_llm:
+            final_analysis_llm = (await get_llm_for_user(effective_account_id, purpose="fast")) if effective_account_id else None
+        if not final_analysis_llm:
+            final_analysis_llm = get_main_llm() or get_fast_llm()
         if not final_analysis_llm:
             return "Error: El modelo de lenguaje para el análisis final no está disponible."
         

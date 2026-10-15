@@ -289,7 +289,7 @@ class ConversationReviewTool(BaseTool):
         """Usa el LLM para generar un análisis estructurado de las conversaciones."""
         llm = await get_llm_for_user(self.account_id, purpose="fast")
         if not llm:
-            llm = await get_fast_llm()
+            llm = get_fast_llm()
         if not llm:
             return self._format_without_llm(threads_content, days_back, mode)
 

@@ -5,7 +5,7 @@ import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
-import { ArrowUp, X, Paperclip, Loader2, Mic, Square, BookMarked, FlaskConical, Plus } from 'lucide-react';
+import { ArrowUp, X, Paperclip, Loader2, Mic, Square, BookMarked, FlaskConical, Plus, RotateCw } from 'lucide-react';
 import { MoreActionsMenu } from './MoreActionsMenu';
 import ContextSelectorDialog from './ContextSelectorDialog';
 import { LLMSelectorMenu } from './LLMSelectorMenu';
@@ -19,6 +19,15 @@ interface AutocompleteState {
   options: string[];
   activeIndex: number;
   wordStartIndex: number;
+}
+
+interface SkillMetadata {
+  id: string;
+  name?: string;
+  description?: string;
+  type?: string;
+  has_scripts?: boolean;
+  path?: string;
 }
 
 interface ChatMessage {
@@ -123,7 +132,7 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
   const autocompleteAbortRef = useRef<AbortController | null>(null);
   const autocompleteTimerRef = useRef<number | null>(null);
   const repoTreeCacheRef = useRef<Map<string, string[]>>(new Map());
-  const skillsCacheRef = useRef<string[] | null>(null);
+  const skillsCacheRef = useRef<SkillMetadata[] | null>(null);
   const [isContextSelectorOpen, setIsContextSelectorOpen] = useState(false);
   // Estado del panel de Investigación Antropológica
   const [isAnthroResearchOpen, setIsAnthroResearchOpen] = useState(false);
@@ -148,6 +157,8 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
     wordStartIndex: 0,
   });
 
+  const [isRefreshingSkills, setIsRefreshingSkills] = useState(false);
+
   const onToggleKnowledgeAnalysisForced = useCallback(() => {
     setIsKnowledgeAnalysisForcedState(prev => !prev);
   }, []);
@@ -164,7 +175,7 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
     setIsDeepResearchForcedState(prev => !prev);
   }, []);
 
-  const updateAutocompleteOptions = useCallback(async (trigger: '#' | '@' | '/', query: string) => {
+  const updateAutocompleteOptions = useCallback(async (trigger: '#' | '@' | '/', query: string, forceRefresh: boolean = false) => {
     autocompleteAbortRef.current?.abort();
     const controller = new AbortController();
     autocompleteAbortRef.current = controller;
@@ -176,21 +187,37 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
       }
       
       if (trigger === '/') {
-        let fullOptions: string[] = skillsCacheRef.current || [];
-        if (!skillsCacheRef.current) {
-          const res = await fetch(`/api/skills/available`, {
+        if (forceRefresh) {
+          setIsRefreshingSkills(true);
+        }
+        let skillsList: SkillMetadata[] = (forceRefresh ? null : skillsCacheRef.current) || [];
+        if (!skillsCacheRef.current || forceRefresh) {
+          const queryParams = [
+            workspaceId ? `workspace_name=${encodeURIComponent(workspaceId)}` : '',
+            forceRefresh ? 'force_refresh=true' : ''
+          ].filter(Boolean).join('&');
+          const url = `/api/skills/available${queryParams ? `?${queryParams}` : ''}`;
+          const res = await fetch(url, {
             headers: { 'Authorization': `Bearer ${token}` },
             signal: controller.signal,
           });
           const data = await res.json();
-          const skills = Array.isArray(data.skills) ? data.skills : [];
-          fullOptions = skills.map((s: any) => s.id);
-          skillsCacheRef.current = fullOptions;
+          skillsList = Array.isArray(data.skills) ? data.skills : [];
+          skillsCacheRef.current = skillsList;
+          if (forceRefresh) {
+            toast.success(`${skillsList.length} skills actualizadas`);
+          }
         }
 
-        const filtered = (fullOptions || [])
-          .filter(o => o.toLowerCase().includes(query.toLowerCase()))
-          .slice(0, 50);
+        const q = query.toLowerCase();
+        const filtered = (skillsList || [])
+          .filter((s: SkillMetadata) => 
+            s.id.toLowerCase().includes(q) || 
+            (s.name && s.name.toLowerCase().includes(q)) || 
+            (s.description && s.description.toLowerCase().includes(q))
+          )
+          .slice(0, 50)
+          .map((s: SkillMetadata) => s.id);
 
         setAutocomplete(prev => ({
           ...prev,
@@ -248,8 +275,15 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
       if (err?.name !== 'AbortError') {
         console.error('Autocomplete fetch error', err);
       }
+    } finally {
+      setIsRefreshingSkills(false);
     }
-  }, [activeRepositoryContext, token]);
+  }, [activeRepositoryContext, token, workspaceId]);
+
+  const handleRefreshSkills = useCallback(() => {
+    skillsCacheRef.current = null;
+    void updateAutocompleteOptions('/', autocomplete.query, true);
+  }, [autocomplete.query, updateAutocompleteOptions]);
 
   const scheduleAutocompleteUpdate = useCallback((trigger: '#' | '@' | '/', query: string) => {
     if (autocompleteTimerRef.current) {
@@ -701,34 +735,77 @@ const ChatInputBarComponent: React.FC<ChatInputBarProps> = ({
                     <span>
                       {autocomplete.trigger === '#' ? 'Archivos del Repositorio' : 
                        autocomplete.trigger === '@' ? 'Archivos Locales' : 
-                       'Skills Procedimentales'}
+                       'Skills Procedimentales & Herramientas (skills.sh)'}
                     </span>
-                    <span className="text-[9px] font-normal lowercase bg-muted px-1.5 py-0.5 rounded-full">{autocomplete.options.length} sugerencias</span>
+                    <div className="flex items-center gap-2">
+                      {autocomplete.trigger === '/' && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            handleRefreshSkills();
+                          }}
+                          disabled={isRefreshingSkills}
+                          className="flex items-center gap-1 text-[9px] font-medium text-indigo-400 hover:text-indigo-300 bg-indigo-500/10 hover:bg-indigo-500/20 px-2 py-0.5 rounded-full transition-all cursor-pointer"
+                          title="Actualizar listado de skills instaladas"
+                        >
+                          <RotateCw className={`h-2.5 w-2.5 ${isRefreshingSkills ? 'animate-spin' : ''}`} />
+                          <span>Refrescar</span>
+                        </button>
+                      )}
+                      <span className="text-[9px] font-normal lowercase bg-muted px-1.5 py-0.5 rounded-full">{autocomplete.options.length} sugerencias</span>
+                    </div>
                   </div>
                   <div className="grid grid-cols-1 gap-0.5">
-                    {autocomplete.options.map((option, index) => (
-                      <div 
-                        key={option}
-                        className={`px-3 py-2 text-sm cursor-pointer rounded-xl flex items-center gap-3 transition-all duration-150 ${index === autocomplete.activeIndex ? 'bg-primary/15 text-primary font-medium' : 'hover:bg-muted/70 text-muted-foreground hover:text-foreground'}`}
-                        title={option}
-                        onMouseDown={(evt) => {
-                          evt.preventDefault(); // prevent input blur
-                          const selectedOption = option;
-                          const before = newMessage.slice(0, autocomplete.wordStartIndex);
-                          const after = newMessage.slice(textAreaRef.current?.selectionStart || newMessage.length);
-                          const insertText = `${autocomplete.trigger}${selectedOption} `;
-                          setNewMessage(before + insertText + after);
-                          setAutocomplete(prev => ({ ...prev, isVisible: false }));
-                        }}
-                      >
-                        {autocomplete.trigger === '/' ? (
-                          <BookMarked className="h-4 w-4 shrink-0 opacity-70" />
-                        ) : (
-                          <Paperclip className="h-4 w-4 shrink-0 opacity-70" />
-                        )}
-                        <span className="truncate font-mono text-xs sm:text-sm">{option}</span>
-                      </div>
-                    ))}
+                    {autocomplete.options.map((option, index) => {
+                      const skillDetail: SkillMetadata | null = autocomplete.trigger === '/' 
+                        ? (skillsCacheRef.current?.find((s: SkillMetadata) => s.id === option) || null)
+                        : null;
+                      return (
+                        <div 
+                          key={option}
+                          className={`px-3 py-2 text-sm cursor-pointer rounded-xl flex items-center justify-between gap-3 transition-all duration-150 ${index === autocomplete.activeIndex ? 'bg-primary/15 text-primary font-medium' : 'hover:bg-muted/70 text-muted-foreground hover:text-foreground'}`}
+                          title={skillDetail?.description || option}
+                          onMouseDown={(evt) => {
+                            evt.preventDefault(); // prevent input blur
+                            const selectedOption = option;
+                            const before = newMessage.slice(0, autocomplete.wordStartIndex);
+                            const after = newMessage.slice(textAreaRef.current?.selectionStart || newMessage.length);
+                            const insertText = `${autocomplete.trigger}${selectedOption} `;
+                            setNewMessage(before + insertText + after);
+                            setAutocomplete(prev => ({ ...prev, isVisible: false }));
+                          }}
+                        >
+                          <div className="flex items-center gap-2.5 overflow-hidden">
+                            {autocomplete.trigger === '/' ? (
+                              <BookMarked className="h-4 w-4 shrink-0 text-indigo-400 opacity-90" />
+                            ) : (
+                              <Paperclip className="h-4 w-4 shrink-0 opacity-70" />
+                            )}
+                            <div className="flex flex-col overflow-hidden">
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono text-xs sm:text-sm font-semibold truncate">{autocomplete.trigger === '/' ? `/${option}` : option}</span>
+                                {skillDetail && (
+                                  <span className={`text-[9px] px-1.5 py-0.2 rounded-full border uppercase tracking-wider ${
+                                    skillDetail.type === 'procedural' 
+                                      ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' 
+                                      : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                                  }`}>
+                                    {skillDetail.type || 'procedural'}
+                                  </span>
+                                )}
+                              </div>
+                              {skillDetail?.description && (
+                                <span className="text-[11px] text-muted-foreground/70 truncate max-w-lg font-sans font-normal">
+                                  {skillDetail.description}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               </div>

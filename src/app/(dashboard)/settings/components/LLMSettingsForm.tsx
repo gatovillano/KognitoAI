@@ -15,6 +15,7 @@ import { Badge } from '@/components/ui/badge';
 import { Brain, Zap, Image as ImageIcon, RefreshCw, Globe, Trash2 } from 'lucide-react';
 
 const LLM_PROVIDERS = [
+  { id: 'antigravity', name: '🛸 Google Antigravity', env_key: null },
   { id: 'gemini', name: 'Google AI Studio', env_key: 'GOOGLE_API_KEY' },
   { id: 'openai', name: 'OpenAI (GPT)', env_key: 'OPENAI_API_KEY' },
   { id: 'anthropic', name: 'Anthropic (Claude)', env_key: 'ANTHROPIC_API_KEY' },
@@ -25,9 +26,18 @@ const LLM_PROVIDERS = [
   { id: 'mistral', name: 'Mistral AI', env_key: 'MISTRAL_API_KEY' },
   { id: 'kilocode', name: '🚀 Kilocode Gateway', env_key: 'KILOCODE_API_KEY' },
   { id: 'nvidia', name: '🟢 NVIDIA AI Catalog', env_key: 'NVIDIA_API_KEY' },
+  { id: 'inceptionlabs', name: '🔮 Inception Labs', env_key: 'INCEPTIONLABS_API_KEY' },
 ];
 
 const MODELS_BY_PROVIDER: Record<string, string[]> = {
+  antigravity: [
+    'antigravity/gemini-3-flash',
+    'antigravity/gemini-3-pro',
+    'antigravity/gemini-2.5-flash',
+    'antigravity/gemini-2.5-pro',
+    'antigravity/claude-sonnet-4-6',
+    'antigravity/claude-opus-4-6-thinking',
+  ],
   gemini: ['gemini/gemini-2.0-flash', 'gemini/gemini-1.5-flash', 'gemini/gemini-1.5-pro', 'gemini/gemini-2.0-flash-exp'],
   openai: ['openai/gpt-4o', 'openai/gpt-4o-mini', 'openai/gpt-4-turbo'],
   anthropic: ['anthropic/claude-3-5-sonnet-20240620', 'anthropic/claude-3-opus-20240229', 'anthropic/claude-3-haiku-20240307'],
@@ -50,6 +60,7 @@ const MODELS_BY_PROVIDER: Record<string, string[]> = {
     'nvidia/deepseek-ai/deepseek-r1',
     'nvidia/qwen/qwen2.5-72b-instruct',
   ],
+  inceptionlabs: [],
 };
 
 const TTS_PROVIDERS = [
@@ -232,6 +243,196 @@ export const LLMSettingsForm: React.FC = () => {
     }
   }, [localTTS.tts_provider, localTTS.tts_api_base]);
 
+  const [antigravityStatus, setAntigravityStatus] = useState<{
+    loggedIn: boolean;
+    running: boolean;
+    authUrl?: string | null;
+    expiry?: string | null;
+    loading: boolean;
+    authenticating: boolean;
+  }>({
+    loggedIn: false,
+    running: false,
+    authUrl: null,
+    expiry: null,
+    loading: false,
+    authenticating: false,
+  });
+
+  const checkAntigravityStatus = async () => {
+    try {
+      setAntigravityStatus(prev => ({ ...prev, loading: true }));
+      const res = await apiClient.get('/api/llm/antigravity/auth/status');
+      if (res?.data) {
+        setAntigravityStatus(prev => ({
+          ...prev,
+          loggedIn: Boolean(res.data.logged_in),
+          running: Boolean(res.data.running),
+          authUrl: res.data.auth_url || null,
+          expiry: res.data.expiry || null,
+          loading: false,
+        }));
+      }
+    } catch (e) {
+      console.error('Error al verificar estado de Antigravity:', e);
+      setAntigravityStatus(prev => ({ ...prev, loading: false }));
+    }
+  };
+
+  useEffect(() => {
+    checkAntigravityStatus();
+  }, []);
+
+  const handleStartAntigravityAuth = async () => {
+    try {
+      setAntigravityStatus(prev => ({ ...prev, authenticating: true }));
+      const res = await apiClient.post('/api/llm/antigravity/auth/start');
+      const authUrl = res.data?.auth_url;
+      if (authUrl) {
+        window.open(authUrl, '_blank', 'width=600,height=750');
+        toast.info('Ventana de inicio de sesión con Google abierta. Esperando autorización...');
+
+        let attempts = 0;
+        const maxAttempts = 60;
+        const pollTimer = setInterval(async () => {
+          attempts += 1;
+          try {
+            const statusRes = await apiClient.get('/api/llm/antigravity/auth/status');
+            if (statusRes.data?.logged_in) {
+              clearInterval(pollTimer);
+              setAntigravityStatus(prev => ({
+                ...prev,
+                loggedIn: true,
+                authenticating: false,
+                expiry: statusRes.data.expiry,
+              }));
+              toast.success('¡Google Antigravity conectado con éxito!');
+              fetchModels('antigravity', 'main', { refresh: true });
+              if (localLLM.llm_provider === 'antigravity' && (!localLLM.llm_model || !localLLM.llm_model.startsWith('antigravity/'))) {
+                setLocalLLM(prev => ({ ...prev, llm_model: 'antigravity/gemini-3-flash' }));
+              }
+              return;
+            }
+          } catch (err) {
+            console.error('Error polling Antigravity status:', err);
+          }
+
+          if (attempts >= maxAttempts) {
+            clearInterval(pollTimer);
+            setAntigravityStatus(prev => ({ ...prev, authenticating: false }));
+            toast.error('Tiempo de espera agotado para el inicio de sesión.');
+          }
+        }, 1500);
+      } else {
+        toast.error('No se pudo generar la URL de autorización.');
+        setAntigravityStatus(prev => ({ ...prev, authenticating: false }));
+      }
+    } catch (e: any) {
+      console.error('Error al iniciar login Antigravity:', e);
+      toast.error('Error al iniciar autenticación con Google: ' + (e?.response?.data?.detail || e.message));
+      setAntigravityStatus(prev => ({ ...prev, authenticating: false }));
+    }
+  };
+
+  const handleDisconnectAntigravity = async () => {
+    try {
+      await apiClient.post('/api/llm/antigravity/auth/disconnect');
+      setAntigravityStatus(prev => ({ ...prev, loggedIn: false, expiry: null }));
+      toast.info('Sesión de Google Antigravity cerrada');
+    } catch (e) {
+      toast.error('Error al desconectar sesión');
+    }
+  };
+
+  const renderAntigravityBanner = (role: 'main' | 'fast' | 'vision') => (
+    <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3.5 mt-2 transition-all">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="h-9 w-9 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-lg shrink-0">
+            🛸
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-xs sm:text-sm">Google Antigravity</span>
+              {antigravityStatus.loggedIn ? (
+                <Badge variant="outline" className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 text-[9px] uppercase font-bold">
+                  Conectado
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="bg-amber-500/15 text-amber-400 border-amber-500/30 text-[9px] uppercase font-bold">
+                  Requiere inicio de sesión
+                </Badge>
+              )}
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {antigravityStatus.loggedIn
+                ? `Sesión OAuth2 de Google activa. Modelos Gemini 3, 2.5 y Claude disponibles.`
+                : `Inicia sesión con tu cuenta de Google para cargar los modelos y cuotas de Antigravity.`}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 self-end sm:self-center">
+          {antigravityStatus.loggedIn ? (
+            <div className="flex items-center gap-1.5">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleStartAntigravityAuth}
+                disabled={antigravityStatus.authenticating}
+                className="border-emerald-500/30 hover:bg-emerald-500/10 text-xs text-emerald-400 h-8"
+              >
+                {antigravityStatus.authenticating ? (
+                  <>
+                    <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
+                    Reconectando...
+                  </>
+                ) : (
+                  'Reconectar'
+                )}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleDisconnectAntigravity}
+                className="text-xs text-muted-foreground hover:text-red-400 h-8 px-2"
+                title="Cerrar sesión de Antigravity"
+              >
+                Desconectar
+              </Button>
+            </div>
+          ) : (
+            <Button
+              type="button"
+              size="sm"
+              onClick={handleStartAntigravityAuth}
+              disabled={antigravityStatus.authenticating}
+              className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-sm h-8"
+            >
+              {antigravityStatus.authenticating ? (
+                <>
+                  <RefreshCw className="h-3 w-3 mr-1.5 animate-spin" />
+                  Esperando a Google...
+                </>
+              ) : (
+                <>
+                  <svg className="h-3.5 w-3.5 mr-1.5" viewBox="0 0 24 24">
+                    <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                    <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                    <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+                    <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+                  </svg>
+                  Iniciar sesión con Google
+                </>
+              )}
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
   const renderModelItem = (m: any, currentProvider: string) => {
     const isString = typeof m === 'string';
     const id = isString ? m : m.id;
@@ -240,14 +441,20 @@ export const LLMSettingsForm: React.FC = () => {
     const isOpenRouter = currentProvider === 'openrouter' || id.startsWith('openrouter/');
     const isKilocode = currentProvider === 'kilocode' || id.startsWith('kilocode/');
     const isNVIDIA = currentProvider === 'nvidia' || id.startsWith('nvidia/');
+    const isAntigravity = currentProvider === 'antigravity' || id.startsWith('antigravity/');
 
-    if (isOpenRouter || isGemini || isKilocode || isNVIDIA) {
+    if (isOpenRouter || isGemini || isKilocode || isNVIDIA || isAntigravity) {
       let badgeColor = "bg-blue-500/10 text-blue-500 border-blue-500/20";
-      let badgeText = isKilocode ? "KiloCode" : isNVIDIA ? "NVIDIA" : "OpenRouter";
-      let borderColor = isNVIDIA ? "border-emerald-500" : "border-blue-500";
-      let bgColor = isNVIDIA ? "bg-emerald-500/5" : "bg-blue-500/5";
+      let badgeText = isKilocode ? "KiloCode" : isNVIDIA ? "NVIDIA" : isAntigravity ? "Antigravity" : "OpenRouter";
+      let borderColor = isAntigravity ? "border-emerald-500" : isNVIDIA ? "border-emerald-500" : "border-blue-500";
+      let bgColor = isAntigravity ? "bg-emerald-500/5" : isNVIDIA ? "bg-emerald-500/5" : "bg-blue-500/5";
 
-      if (isNVIDIA) {
+      if (isAntigravity) {
+        badgeText = "Antigravity";
+        badgeColor = "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
+        borderColor = "border-emerald-500";
+        bgColor = "bg-emerald-500/5";
+      } else if (isNVIDIA) {
         badgeText = "NVIDIA";
         badgeColor = "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
       } else if (isGemini) {
@@ -537,6 +744,7 @@ export const LLMSettingsForm: React.FC = () => {
                   </Select>
                 </div>
               </div>
+              {localLLM.llm_provider === 'antigravity' && renderAntigravityBanner('main')}
             </div>
             <div className="p-4 rounded-xl bg-orange-500/5 border border-orange-500/10 space-y-4">
               <div className="flex items-center gap-2 mb-2">
@@ -587,6 +795,7 @@ export const LLMSettingsForm: React.FC = () => {
                   </Select>
                 </div>
               </div>
+              {localLLM.fast_llm_provider === 'antigravity' && renderAntigravityBanner('fast')}
             </div>
             <div className="p-4 rounded-xl bg-blue-500/5 border border-blue-500/10 space-y-4">
               <div className="flex items-center gap-2 mb-2">
@@ -637,6 +846,7 @@ export const LLMSettingsForm: React.FC = () => {
                   </Select>
                 </div>
               </div>
+              {localLLM.vision_llm_provider === 'antigravity' && renderAntigravityBanner('vision')}
             </div>
             <div className="pt-4 border-t border-border/50 space-y-4">
               <div className="space-y-2">

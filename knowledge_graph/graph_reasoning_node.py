@@ -7,7 +7,7 @@ from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from core.llm_manager import get_fast_llm
+from core.llm_manager import get_fast_llm, get_main_llm
 from knowledge_graph.graph_database import GraphDB
 from knowledge_graph.prompts_graph import CYPHER_GENERATION_PROMPT
 from knowledge_graph.output_parsers_graph import GraphOutputParser
@@ -29,20 +29,22 @@ class GraphReasoningNode:
     4.  Genera una visualización Mermaid del subgrafo resultante.
     """
 
-    def __init__(self, graph_db: GraphDB, min_trust: float = 0.5):
+    def __init__(self, graph_db: GraphDB, min_trust: float = 0.5, llm: Optional[Any] = None):
         """
         Inicializa el nodo con una conexión a la base de datos del grafo.
 
         Args:
             graph_db: Instancia de GraphDB para la conexión con Neo4j.
             min_trust: Umbral mínimo de confianza para filtrar nodos y relaciones.
+            llm: Instancia opcional de LLM a usar.
         """
         self.graph_db = graph_db
         self.min_trust = min_trust
-        self.llm = get_fast_llm()
-        if not self.llm:
-            raise ValueError("No se pudo obtener un LLM rápido para el GraphReasoningNode.")
-        logger.info(f"✅ GraphReasoningNode inicializado con LLM rápido y min_trust={self.min_trust}.")
+        self.llm = llm or get_fast_llm() or get_main_llm()
+        if self.llm:
+            logger.info(f"✅ GraphReasoningNode inicializado con LLM y min_trust={self.min_trust}.")
+        else:
+            logger.info(f"ℹ️ GraphReasoningNode inicializado sin LLM estático (se resolverá dinámicamente por account_id).")
 
     async def ainvoke(self, state: Dict[str, Any], target_datasets: Optional[List[str]] = None) -> Dict[str, Any]:
         """
@@ -76,6 +78,12 @@ class GraphReasoningNode:
             user_llm = await get_llm_for_user(account_id, purpose="fast")
             if user_llm:
                 llm_to_use = user_llm
+            elif not llm_to_use:
+                llm_to_use = await get_llm_for_user(account_id, purpose="main")
+
+        if not llm_to_use:
+            from core.llm_manager import get_fast_llm, get_main_llm
+            llm_to_use = get_fast_llm() or get_main_llm()
 
         if target_datasets:
             logger.info(f"🎯 Datasets objetivo: {target_datasets}")
@@ -196,13 +204,8 @@ class GraphReasoningNode:
             concept1 = concepts[0]
             concept2 = concepts[1]
             
-            workspace_filter_nodes = ""
+            # Eliminado filtro de workspace_id para buscar en TODO el grafo (todos los workspaces de la cuenta)
             params_sp = {"concept1": concept1, "concept2": concept2, "account_id": account_id, "min_trust": effective_min_trust}
-            if workspace_id:
-                workspace_filter_nodes = "AND n.workspace_id = $workspace_id AND m.workspace_id = $workspace_id AND ALL(node IN nodes(p) WHERE node.workspace_id = $workspace_id) AND ALL(rel IN relationships(p) WHERE rel.workspace_id = $workspace_id)"
-                params_sp["workspace_id"] = workspace_id
-            else:
-                workspace_filter_nodes = "AND n.workspace_id IS NULL AND m.workspace_id IS NULL AND ALL(node IN nodes(p) WHERE node.workspace_id IS NULL) AND ALL(rel IN relationships(p) WHERE rel.workspace_id IS NULL)"
 
             shortest_path_query = f"""
             MATCH (n), (m)
@@ -214,7 +217,6 @@ class GraphReasoningNode:
             MATCH p = shortestPath((n)-[*1..4]-(m))
             WHERE ALL(node IN nodes(p) WHERE (node.account_id = $account_id OR node.account_id IS NULL) AND (node.trust_score IS NULL OR node.trust_score >= $min_trust))
               AND ALL(rel IN relationships(p) WHERE (rel.account_id = $account_id OR rel.account_id IS NULL) AND (rel.trust_score IS NULL OR rel.trust_score >= $min_trust) AND (rel.is_current IS NULL OR rel.is_current = true))
-              {workspace_filter_nodes}
               {dataset_filter_sp}
             RETURN p as path
             LIMIT 5
@@ -227,20 +229,14 @@ class GraphReasoningNode:
             if target_datasets:
                 dataset_filter = f"AND ALL(node IN nodes(p) WHERE node.dataset_name IN {target_datasets})"
             
-            workspace_filter_path = ""
+            # Eliminado filtro de workspace_id para buscar en TODO el grafo (todos los workspaces de la cuenta)
             params = {"concept": concept, "account_id": account_id, "min_trust": effective_min_trust}
-            if workspace_id:
-                workspace_filter_path = "AND ALL(node IN nodes(p) WHERE node.workspace_id = $workspace_id) AND ALL(rel IN relationships(p) WHERE rel.workspace_id = $workspace_id)"
-                params["workspace_id"] = workspace_id
-            else:
-                workspace_filter_path = "AND ALL(node IN nodes(p) WHERE node.workspace_id IS NULL) AND ALL(rel IN relationships(p) WHERE rel.workspace_id IS NULL)"
 
             neural_query = f"""
             MATCH p = (n)-[r*1..2]-(m)
             WHERE (n.name CONTAINS $concept OR n.description CONTAINS $concept)
               AND ALL(node IN nodes(p) WHERE (node.account_id = $account_id OR node.account_id IS NULL) AND (node.trust_score IS NULL OR node.trust_score >= $min_trust))
               AND ALL(rel IN relationships(p) WHERE (rel.account_id = $account_id OR rel.account_id IS NULL) AND (rel.trust_score IS NULL OR rel.trust_score >= $min_trust) AND (rel.is_current IS NULL OR rel.is_current = true))
-              {workspace_filter_path}
               {dataset_filter}
             RETURN p as path
             LIMIT 10

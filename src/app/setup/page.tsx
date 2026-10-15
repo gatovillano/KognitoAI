@@ -14,6 +14,7 @@ import apiClient from '@/lib/api';
 import { User, Folder, Brain, CheckCircle2, ArrowRight, ArrowLeft, ShieldCheck, Zap, Image as ImageIcon, Globe, KeyRound } from 'lucide-react';
 
 const LLM_PROVIDERS = [
+  { id: 'antigravity', name: '🛸 Google Antigravity', env_key: null },
   { id: 'gemini', name: 'Google AI Studio', env_key: 'GOOGLE_API_KEY' },
   { id: 'openai', name: 'OpenAI (GPT)', env_key: 'OPENAI_API_KEY' },
   { id: 'anthropic', name: 'Anthropic (Claude)', env_key: 'ANTHROPIC_API_KEY' },
@@ -23,9 +24,18 @@ const LLM_PROVIDERS = [
   { id: 'openai-compatible', name: '🖥️ Local AI / OpenAI Compatible', env_key: null },
   { id: 'mistral', name: 'Mistral AI', env_key: 'MISTRAL_API_KEY' },
   { id: 'nvidia', name: '🟢 NVIDIA AI Catalog', env_key: 'NVIDIA_API_KEY' },
+  { id: 'inceptionlabs', name: '🔮 Inception Labs', env_key: 'INCEPTIONLABS_API_KEY' },
 ];
 
 const MODELS_BY_PROVIDER: Record<string, string[]> = {
+  antigravity: [
+    'antigravity/gemini-3-flash',
+    'antigravity/gemini-3-pro',
+    'antigravity/gemini-2.5-flash',
+    'antigravity/gemini-2.5-pro',
+    'antigravity/claude-sonnet-4-6',
+    'antigravity/claude-opus-4-6-thinking',
+  ],
   gemini: ['gemini/gemini-2.0-flash', 'gemini/gemini-1.5-flash', 'gemini/gemini-1.5-pro'],
   openai: ['openai/gpt-4o', 'openai/gpt-4o-mini', 'openai/gpt-4-turbo'],
   anthropic: ['anthropic/claude-3-5-sonnet-20240620', 'anthropic/claude-3-haiku-20240307'],
@@ -39,7 +49,9 @@ const MODELS_BY_PROVIDER: Record<string, string[]> = {
     'nvidia/nvidia/llama-3.1-nemotron-70b-instruct',
     'nvidia/mistralai/mistral-large-2-instruct',
     'nvidia/deepseek-ai/deepseek-r1',
+    'nvidia/qwen/qwen2.5-72b-instruct',
   ],
+  inceptionlabs: [],
 };
 
 export default function SetupPage() {

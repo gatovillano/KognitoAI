@@ -115,10 +115,11 @@ async def get_all_langchain_tools(
     workspace_id: Optional[str] = None,
     progress_callback: Optional[Any] = None,
     query: Optional[str] = None,
+    extra_categories: Optional[List[str]] = None,
 ) -> List[Tool]:
     """
     Recoge, instancia y devuelve una lista de todas las herramientas LangChain habilitadas
-    descubiertas por el SkillManager.
+    descubiertas por el SkillManager. Permite forzar la inclusión de categorías mediante 'extra_categories'.
     """
     logger.debug("⚙️ Assembling agent toolbox via SkillManager...")
 
@@ -167,8 +168,13 @@ async def get_all_langchain_tools(
             if not relevant_categories:
                 relevant_categories = None # Fallback a cargar todas si ambas fallan
 
+        if extra_categories and relevant_categories is not None:
+            for cat in extra_categories:
+                if cat not in relevant_categories:
+                    relevant_categories.append(cat)
+
         if relevant_categories is not None:
-            logger.info(f"🗂️ Carga de skills filtrada dinámicamente por query (Semántica + Keywords): {relevant_categories}")
+            logger.info(f"🗂️ Carga de skills filtrada dinámicamente por query (Semántica + Keywords + Extras): {relevant_categories}")
         else:
             logger.info("🗂️ Carga completa de todas las categorías de skills (filtro dinámico desactivado o sin query).")
 

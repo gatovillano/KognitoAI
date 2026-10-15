@@ -188,11 +188,10 @@ async def get_user_settings(current_account_id: str = Depends(get_current_accoun
     email_password_secret = None
     try:
         repo = SecretRepository(db)
-        secret = await repo.get_secret(
+        email_password_secret = await repo.get_decrypted_secret(
             account_id=uuid.UUID(current_account_id),
             key_name="email_password"
         )
-        email_password_secret = secret.value if secret else None
     except Exception as e:
         logger.warning(f"No se pudo obtener el secreto email_password: {e}")
 

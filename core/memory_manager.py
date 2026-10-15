@@ -37,12 +37,20 @@ from sqlalchemy.orm import selectinload, joinedload
 from langchain_core.retrievers import BaseRetriever # Nueva importación
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-import tiktoken # Importar tiktoken
+try:
+    import tiktoken
+except ImportError:
+    tiktoken = None
 
 def num_tokens_from_string(string: str, encoding_name: str = "cl100k_base") -> int:
     """Returns the number of tokens in a text string."""
-    encoding = tiktoken.get_encoding(encoding_name)
-    num_tokens = len(encoding.encode(string))
+    if tiktoken:
+        try:
+            encoding = tiktoken.get_encoding(encoding_name)
+            return len(encoding.encode(string))
+        except Exception:
+            pass
+    return len(string) // 4
     return num_tokens
 
 from core.database import (
@@ -877,47 +885,69 @@ async def _update_embedding_columns_after_insert(
         Número de filas actualizadas.
     """
     try:
-        logger.info(f"🔄 Actualizando columnas optimizadas para {file_name} (doc_id: {document_id})")
+        # Limpiar y convertir parámetros de forma segura para PostgreSQL
+        def clean_uuid_str(val):
+            if val is None or isinstance(val, FieldInfo) or str(val).strip().lower() in ("none", "", "null"):
+                return None
+            return str(val).strip()
+
+        clean_account_id = clean_uuid_str(account_id)
+        clean_workspace_id = clean_uuid_str(workspace_id)
+        clean_thread_id = clean_uuid_str(thread_id)
+        clean_telegram_id = None
+        if telegram_id is not None and not isinstance(telegram_id, FieldInfo):
+            tg_str = str(telegram_id).strip()
+            if tg_str and tg_str.lower() not in ("none", "", "null"):
+                try:
+                    clean_telegram_id = int(tg_str)
+                except (ValueError, TypeError):
+                    clean_telegram_id = None
 
         # Construir las cláusulas de actualización
         update_clauses = [
-            "account_id = :account_id",
+            "account_id = CAST(:account_id AS uuid)",
             "content_type = :content_type",
             "topic = :topic",
             "category = :category",
-            "workspace_id = :workspace_id",
-            "telegram_id = :telegram_id",
-            "thread_id = :thread_id"
+            "workspace_id = CAST(:workspace_id AS uuid)",
+            "telegram_id = CAST(:telegram_id AS bigint)",
+            "thread_id = CAST(:thread_id AS uuid)"
         ]
         
         if document_id and str(document_id).lower() not in ("none", ""):
             # Si hay document_id válido, asegurarse de que esté en cmetadata de forma persistente
             update_clauses.append("cmetadata = cmetadata || jsonb_build_object('document_id', CAST(:document_id AS TEXT))")
 
-        # Construir la consulta de actualización final
+        # Construir la condición WHERE según si es un documento o una memoria
+        if content_type == "user_documents" or (file_name and file_name != "memory"):
+            where_condition = """
+                collection_id = CAST(:collection_uuid AS uuid)
+                AND cmetadata->>'file_name' = :file_name
+                AND cmetadata->>'type' = 'document_chunk'
+            """
+        else:
+            where_condition = """
+                collection_id = CAST(:collection_uuid AS uuid)
+                AND account_id IS NULL
+                AND (cmetadata->>'account_id' = :account_id OR :account_id IS NULL)
+            """
+
         update_query = f"""
             UPDATE langchain_pg_embedding
             SET {", ".join(update_clauses)}
             WHERE
-                collection_id = :collection_uuid
-                AND cmetadata->>'file_name' = :file_name
-                AND cmetadata->>'type' = 'document_chunk'
+                {where_condition}
         """
 
-        # Procesar FieldInfo para workspace_id, telegram_id, thread_id
-        processed_workspace_id = str(workspace_id) if isinstance(workspace_id, FieldInfo) else workspace_id
-        processed_telegram_id = str(telegram_id) if isinstance(telegram_id, FieldInfo) else telegram_id
-        processed_thread_id = str(thread_id) if isinstance(thread_id, FieldInfo) else thread_id
-
         params = {
-            "account_id": account_id,
+            "account_id": clean_account_id,
             "content_type": content_type,
             "topic": topic,
             "category": category,
-            "workspace_id": processed_workspace_id,
-            "telegram_id": processed_telegram_id,
-            "thread_id": processed_thread_id,
-            "collection_uuid": collection_uuid,
+            "workspace_id": clean_workspace_id,
+            "telegram_id": clean_telegram_id,
+            "thread_id": clean_thread_id,
+            "collection_uuid": str(collection_uuid),
             "file_name": file_name,
             "document_id": document_id
         }

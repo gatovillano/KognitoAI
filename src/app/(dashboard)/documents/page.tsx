@@ -47,7 +47,8 @@ import {
   FileAudio,
   FileVideo,
   FileCode,
-  File
+  File,
+  Brain
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
@@ -649,12 +650,25 @@ export default function DocumentsPage() {
   };
 
   const handleVectorize = async (doc: OnlyOfficeDoc) => {
-    const toastId = toast.loading(`Vectorizando e indexando "${doc.filename}"...`);
+    const toastId = toast.loading(`Añadiendo "${doc.filename}" a la memoria...`);
     try {
-      await apiClient.post(`/api/onlyoffice/${doc.id}/vectorize`);
-      toast.success(`Documento "${doc.filename}" indexado correctamente para el RAG`, { id: toastId });
+      const response = await apiClient.post(`/api/onlyoffice/${doc.id}/vectorize`);
+      const msg = response?.data?.message || `Documento "${doc.filename}" añadido a la memoria correctamente`;
+      toast.success(msg, { id: toastId });
     } catch (error: any) {
-      const errorMessage = error?.response?.data?.detail || 'Error al vectorizar el documento';
+      const errorMessage = error?.response?.data?.detail || 'Error al añadir el documento a la memoria';
+      toast.error(errorMessage, { id: toastId });
+    }
+  };
+
+  const handleVectorizeFolder = async (folder: OnlyOfficeFolder) => {
+    const toastId = toast.loading(`Añadiendo carpeta "${folder.name}" a la memoria...`);
+    try {
+      const response = await apiClient.post(`/api/onlyoffice/folders/${folder.id}/vectorize`);
+      const msg = response?.data?.message || `Carpeta "${folder.name}" añadida a la memoria correctamente`;
+      toast.success(msg, { id: toastId });
+    } catch (error: any) {
+      const errorMessage = error?.response?.data?.detail || 'Error al añadir la carpeta a la memoria';
       toast.error(errorMessage, { id: toastId });
     }
   };
@@ -954,10 +968,25 @@ export default function DocumentsPage() {
 
   const initEditor = useCallback((config: any) => {
     try {
+      const placeholder = document.getElementById("onlyoffice-placeholder");
+      if (!placeholder) {
+        setTimeout(() => initEditor(config), 100);
+        return;
+      }
+
       const fullConfig = {
         ...config,
         events: {
           ...(config.events || {}),
+          onAppReady: () => {
+            setIsOpeningEditor(false);
+          },
+          onError: (event: any) => {
+            console.error("OnlyOffice error:", event);
+            const detail = event?.data?.errorDescription || "Error de inicialización en OnlyOffice";
+            toast.error(detail);
+            setIsOpeningEditor(false);
+          },
           onRequestSaveAs: (event: any) => {
             if (event?.data?.url) {
               setSaveAsSourceUrl(event.data.url);
@@ -977,7 +1006,10 @@ export default function DocumentsPage() {
       };
       // @ts-ignore
       editorRef.current = new window.DocsAPI.DocEditor("onlyoffice-placeholder", fullConfig);
-      setIsOpeningEditor(false);
+      // Fallback por si el evento onAppReady tarda o no se dispara
+      setTimeout(() => {
+        setIsOpeningEditor(false);
+      }, 3500);
     } catch (err) {
       console.error("Editor init failed", err);
       toast.error("Error al inicializar el editor de OnlyOffice");
@@ -987,6 +1019,20 @@ export default function DocumentsPage() {
 
   const openEditor = useCallback(async (doc: OnlyOfficeDoc) => {
     setIsOpeningEditor(true);
+    let isCancelled = false;
+
+    const timeoutId = setTimeout(() => {
+      if (!isCancelled) {
+        setIsOpeningEditor((prev) => {
+          if (prev) {
+            toast.error("Tiempo de espera agotado al conectar con el servidor OnlyOffice.");
+            return false;
+          }
+          return false;
+        });
+      }
+    }, 15000);
+
     try {
       const response = await apiClient.get(`/api/onlyoffice/config/${doc.id}`);
       const { config, onlyoffice_url } = response.data;
@@ -994,18 +1040,40 @@ export default function DocumentsPage() {
       setEditingDoc(doc);
       
       if (!(window as any).DocsAPI) {
+        const oldScript = document.getElementById('onlyoffice-api-script');
+        if (oldScript) {
+          oldScript.remove();
+        }
+
         const script = document.createElement('script');
         script.src = `${onlyoffice_url}/web-apps/apps/api/documents/api.js`;
         script.id = 'onlyoffice-api-script';
-        script.onload = () => initEditor(config);
+        script.onload = () => {
+          clearTimeout(timeoutId);
+          initEditor(config);
+        };
+        script.onerror = () => {
+          clearTimeout(timeoutId);
+          toast.error("No se pudo cargar el script del editor OnlyOffice desde el servidor.");
+          setIsOpeningEditor(false);
+        };
         document.head.appendChild(script);
       } else {
-        if (editorRef.current) {
-          editorRef.current.destroyEditor();
+        if (editorRef.current && typeof editorRef.current.destroyEditor === 'function') {
+          try {
+            editorRef.current.destroyEditor();
+          } catch (e) {
+            console.warn('Error destroying editor', e);
+          }
+          editorRef.current = null;
         }
-        setTimeout(() => initEditor(config), 100);
+        setTimeout(() => {
+          clearTimeout(timeoutId);
+          initEditor(config);
+        }, 100);
       }
     } catch (error) {
+      clearTimeout(timeoutId);
       toast.error('Error al iniciar el editor');
       setIsOpeningEditor(false);
     }
@@ -1035,11 +1103,16 @@ export default function DocumentsPage() {
   }, [searchParams, documents, hasMounted, handleOpenItem, router]);
 
   const closeEditor = () => {
-    if (editorRef.current) {
-      editorRef.current.destroyEditor();
+    if (editorRef.current && typeof editorRef.current.destroyEditor === 'function') {
+      try {
+        editorRef.current.destroyEditor();
+      } catch (e) {
+        console.warn('Error destroying editor', e);
+      }
       editorRef.current = null;
     }
     setEditingDoc(null);
+    setIsOpeningEditor(false);
     setIsChatSidebarOpen(false);
     setCurrentChatThreadId(null);
     fetchDocuments();
@@ -1226,6 +1299,14 @@ export default function DocumentsPage() {
                 <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-background/80 backdrop-blur-sm">
                   <Loader2 className="h-10 w-10 text-primary animate-spin" />
                   <p className="text-muted-foreground font-medium animate-pulse">Iniciando Editor OnlyOffice...</p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={closeEditor}
+                    className="rounded-xl mt-2 text-xs"
+                  >
+                    Cancelar
+                  </Button>
                 </div>
               )}
             </div>
@@ -1636,6 +1717,16 @@ export default function DocumentsPage() {
                                 <Share2 className="h-4 w-4" />
                                 <span>Compartir</span>
                               </DropdownMenuItem>
+                              <DropdownMenuItem 
+                                onClick={(e) => { 
+                                  e.stopPropagation(); 
+                                  handleVectorizeFolder(folder);
+                                }} 
+                                className="gap-2 cursor-pointer focus:bg-muted"
+                              >
+                                <Brain className="h-4 w-4 text-emerald-500" />
+                                <span className="font-medium text-emerald-500">Añadir a memoria</span>
+                              </DropdownMenuItem>
                               <div className="h-px bg-border/40 my-1" />
                               <DropdownMenuItem 
                                 onClick={(e) => { e.stopPropagation(); handleDeleteFolder(folder.id, folder.name); }} 
@@ -1842,8 +1933,8 @@ export default function DocumentsPage() {
                                 onClick={() => handleVectorize(doc)}
                                 className="gap-2 cursor-pointer py-2 px-3"
                               >
-                                <Layers className="h-4 w-4 text-emerald-500" />
-                                <span className="font-medium text-emerald-500">Vectorizar (RAG)</span>
+                                <Brain className="h-4 w-4 text-emerald-500" />
+                                <span className="font-medium text-emerald-500">Añadir a memoria</span>
                               </DropdownMenuItem>
                               <DropdownMenuItem 
                                 onClick={(e) => {
@@ -2060,6 +2151,16 @@ export default function DocumentsPage() {
                           <Share2 className="h-4 w-4" />
                           <span>Compartir</span>
                         </DropdownMenuItem>
+                        <DropdownMenuItem 
+                          onClick={(e) => { 
+                            e.stopPropagation(); 
+                            handleVectorizeFolder(folder);
+                          }} 
+                          className="gap-2 cursor-pointer"
+                        >
+                          <Brain className="h-4 w-4 text-emerald-500" />
+                          <span className="font-medium text-emerald-500">Añadir a memoria</span>
+                        </DropdownMenuItem>
                         <div className="h-px bg-border/40 my-1" />
                         <DropdownMenuItem 
                           onClick={(e) => { e.stopPropagation(); handleDeleteFolder(folder.id, folder.name); }} 
@@ -2203,8 +2304,8 @@ export default function DocumentsPage() {
                             onClick={(e) => { e.stopPropagation(); handleVectorize(doc); }}
                             className="gap-2 cursor-pointer py-2 px-3"
                           >
-                            <Layers className="h-4 w-4 text-emerald-500" />
-                            <span className="font-medium text-emerald-500">Vectorizar (RAG)</span>
+                            <Brain className="h-4 w-4 text-emerald-500" />
+                            <span className="font-medium text-emerald-500">Añadir a memoria</span>
                           </DropdownMenuItem>
                           <DropdownMenuItem 
                             onClick={(e) => {

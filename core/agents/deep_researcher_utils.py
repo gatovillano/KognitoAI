@@ -32,7 +32,7 @@ from tavily import AsyncTavilyClient
 from core.agents.deep_researcher_config import Configuration, SearchAPI
 from core.agents.deep_researcher_prompts import summarize_webpage_prompt
 from core.agents.deep_researcher_state import ResearchComplete, Summary
-from core.llm_manager import get_fast_llm, get_main_llm
+from core.llm_manager import get_fast_llm, get_main_llm, get_llm_for_user
 from core.utils.llm_utils import (
     is_token_limit_exceeded, 
     remove_up_to_last_ai_message, 
@@ -93,15 +93,28 @@ async def tavily_search(
     cfg = Configuration.from_runnable_config(config)
     max_char_to_include = cfg.max_content_length
     
-    summarization_llm = get_fast_llm() # pylint: disable=undefined-variable
+    from core.llm_manager import get_active_account_id
+    account_id = (
+        (config.get("configurable", {}).get("account_id") if isinstance(config, dict) else None)
+        or (getattr(config, "configurable", {}).get("account_id") if hasattr(config, "configurable") else None)
+        or get_active_account_id()
+    )
+    logger.info(f"🔎 [tavily_search] Resolviendo LLM para summarization con account_id: {account_id}")
+    summarization_llm = None
+    if account_id:
+        summarization_llm = await get_llm_for_user(account_id, purpose="fast")
+        if not summarization_llm:
+            summarization_llm = await get_llm_for_user(account_id, purpose="main")
     if not summarization_llm:
-        raise ValueError("Main LLM not initialized for summarization.")
+        summarization_llm = get_fast_llm() or get_main_llm()
+    if not summarization_llm:
+        logger.warning("⚠️ No hay LLM disponible para summarization en tavily_search. Usando contenido crudo.")
 
     async def noop():
         return None
     
     summarization_tasks = [
-        noop() if not result.get("raw_content") 
+        noop() if not (result.get("raw_content") and summarization_llm) 
         else summarize_webpage(
             summarization_llm, 
             result['raw_content'][:max_char_to_include],
@@ -285,6 +298,7 @@ async def get_all_tools(config: Optional[RunnableConfig]): # Changed to Optional
         graph_cypher.account_id = account_id
         knowledge_search.account_id = account_id
         knowledge_search.workspace_id = workspace_id
+        comprehensive_analyzer.account_id = account_id
     else:
         logger.warning("⚠️ account_id no encontrado en la configuración del runnable. Las herramientas que lo requieran fallarán.")
 
@@ -370,6 +384,16 @@ async def execute_tool_safely(tool, args, config: Optional[RunnableConfig]): # C
             # We overwrite it with the actual RunnableConfig object to prevent validation errors.
             tool_args['config'] = config
         
+        # Propagar el account_id al ContextVar si está disponible en config
+        acc_id = None
+        if isinstance(config, dict):
+            acc_id = config.get("configurable", {}).get("account_id")
+        elif hasattr(config, "configurable") and isinstance(config.configurable, dict):
+            acc_id = config.configurable.get("account_id")
+        if acc_id:
+            from core.llm_manager import set_active_account_id
+            set_active_account_id(acc_id)
+
         return await tool.ainvoke(tool_args, config)
     except Exception as e:
         logger.error(f"Error executing tool {tool.name}: {e}", exc_info=True)

@@ -512,8 +512,9 @@ export const ChatScreen = ({ navigation }: any) => {
 
       {/* Input Area */}
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+        enabled
       >
         <View style={[styles.inputWrapper, { borderTopColor: theme.border + '20' }]}>
            <View style={[styles.inputContainer, { backgroundColor: theme.surface, borderColor: theme.border }]}>

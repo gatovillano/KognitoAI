@@ -14,6 +14,41 @@ if skill_dir not in sys.path:
 logger = logging.getLogger(__name__)
 
 
+def _get_bibliomancer_class():
+    """Resuelve BibliomancerAgent sin colisionar con paquetes top-level."""
+    try:
+        from ..agents.bibliomancer import BibliomancerAgent
+
+        return BibliomancerAgent
+    except (ImportError, ValueError):
+        pass
+    try:
+        from skills.kai_ethno_skill.agents.bibliomancer import BibliomancerAgent
+
+        return BibliomancerAgent
+    except ImportError:
+        pass
+    try:
+        from agents.bibliomancer import BibliomancerAgent
+
+        return BibliomancerAgent
+    except ImportError:
+        pass
+    import importlib.util
+
+    unique_name = "kai_ethno_agents_bibliomancer"
+    if unique_name in sys.modules:
+        return sys.modules[unique_name].BibliomancerAgent
+    file_path = os.path.join(skill_dir, "agents", "bibliomancer", "agent.py")
+    spec = importlib.util.spec_from_file_location(unique_name, file_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"No se pudo cargar BibliomancerAgent desde {file_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[unique_name] = module
+    spec.loader.exec_module(module)
+    return module.BibliomancerAgent
+
+
 class SearchEthnographicLiteratureInput(BaseModel):
     query: str = Field(
         ...,
@@ -59,7 +94,7 @@ class SearchEthnographicLiteratureTool(BaseTool):
             return await self._arun_plain_text(query, max_results, year_range_start, year_range_end)
 
         try:
-            from agents.bibliomancer import BibliomancerAgent
+            BibliomancerAgent = _get_bibliomancer_class()
 
             biblio = BibliomancerAgent()
             year_range = None
@@ -169,7 +204,7 @@ class SearchEthnographicLiteratureTool(BaseTool):
     async def _arun_plain_text(self, query, max_results, year_range_start, year_range_end):
         """Fallback que retorna texto plano si citation_models no está disponible."""
         try:
-            from agents.bibliomancer import BibliomancerAgent
+            BibliomancerAgent = _get_bibliomancer_class()
             biblio = BibliomancerAgent()
             year_range = (year_range_start, year_range_end) if year_range_start and year_range_end else None
             sources = await biblio.search(query=query, max_results=max_results, year_range=year_range)

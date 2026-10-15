@@ -37,13 +37,12 @@ class DocumentRAGInput(BaseModel):
 
 class DocumentRAGTool(BaseTool):
     name: str = "process_document_for_rag"
-    description: str = """
-    Useful when the user provides a document and wants its content added to their knowledge base (RAG).
-    This tool takes the extracted text, file name, a user-specified topic, and optional metadata.
-    It will split, embed, and store the content in the user's vector database.
-    Use this when the user uploads a document AND indicates it should be saved for future reference.
-    The LLM must extract all relevant data and provide the user's 'account_id'.
-    """
+    description: str = (
+        "[BASE DE CONOCIMIENTO RAG] Procesa, fragmenta e indexa texto de un documento en la base de datos "
+        "vectorial del usuario (pgvector) para búsqueda semántica y recuperación futura (RAG). "
+        "NO crea documentos editables de OnlyOffice (Word/Excel/PowerPoint); si el usuario quiere crear un documento "
+        "editable en la plataforma usa 'create_onlyoffice_document'."
+    )
     args_schema: type[BaseModel] = DocumentRAGInput
     return_direct: bool = False
     account_id: str = Field(..., description="El ID de cuenta del usuario, inyectado automáticamente.")

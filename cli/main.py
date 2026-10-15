@@ -15,7 +15,32 @@ ctk.set_default_color_theme("blue")
 # Import the SyncManager
 from sync_logic import KognitoSyncManager
 
-CONFIG_PATH = os.path.expanduser("~/.config/kognito-sync/config.json")
+def get_resource_path(relative_path):
+    """Obtiene la ruta absoluta a un recurso, compatible con PyInstaller y ejecución normal."""
+    base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base_path, relative_path)
+
+def get_config_dir():
+    """Retorna el directorio de configuración del usuario según el SO."""
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA") or os.path.expanduser("~")
+        path = os.path.join(base, "KognitoSync")
+    else:
+        path = os.path.expanduser("~/.config/kognito-sync")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+def get_data_dir():
+    """Retorna el directorio de almacenamiento local de datos/DB según el SO."""
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or os.path.expanduser("~")
+        path = os.path.join(base, "KognitoSync")
+    else:
+        path = os.path.expanduser("~/.local/share/kognito-sync")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+CONFIG_PATH = os.path.join(get_config_dir(), "config.json")
 
 def create_default_icon():
     image = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
@@ -25,12 +50,32 @@ def create_default_icon():
     dc.ellipse([24, 24, 40, 40], fill=(255, 255, 255))
     return image
 
+def get_tray_icon_image():
+    """Carga el icono desde archivo si existe, o genera el procedural."""
+    for filename in ("icon.png", "icon.ico"):
+        p = get_resource_path(filename)
+        if os.path.exists(p):
+            try:
+                return Image.open(p)
+            except Exception:
+                pass
+    return create_default_icon()
+
 class SyncApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("Kognito AI Sync")
         self.geometry("550x550")
         self.resizable(False, False)
+        
+        # Cargar icono nativo de ventana en Windows si está disponible
+        if sys.platform == "win32":
+            ico_path = get_resource_path("icon.ico")
+            if os.path.exists(ico_path):
+                try:
+                    self.iconbitmap(ico_path)
+                except Exception:
+                    pass
         
         self.sync_manager = None
         self.sync_thread = None
@@ -150,7 +195,7 @@ class SyncApp(ctk.CTk):
 
         self.save_config()
 
-        db_path = os.path.expanduser("~/.local/share/kognito-sync/metadata.db")
+        db_path = os.path.join(get_data_dir(), "metadata.db")
         self.sync_manager = KognitoSyncManager(server_url, username, password, sync_dir, db_path)
 
         self.log("Conectando con el servidor...")
@@ -186,7 +231,7 @@ class SyncApp(ctk.CTk):
             self.setup_tray()
 
     def setup_tray(self):
-        image = create_default_icon()
+        image = get_tray_icon_image()
         menu = (
             item('Abrir Configuración', self.restore_from_tray),
             item('Sincronizar ahora', self.sync_now_action),

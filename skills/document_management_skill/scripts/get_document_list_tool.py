@@ -48,11 +48,11 @@ class GetDocumentListTool(BaseTool):
     """
     name: str = "get_document_list_tool"
     description: str = (
-        "Recupera una lista de todos los documentos (junto con sus temas, títulos y autores) "
-        "que el usuario ha subido previamente a su base de conocimiento. "
-        "Permite listar documentos generales, documentos específicos de un workspace, o documentos de una colección (topic) específica. "
-        "Úsala cuando el usuario pida explícitamente ver sus documentos guardados. "
-        "Si el usuario menciona un 'tema', 'colección' o 'categoría', usa el parámetro 'topic'."
+        "[BASE DE CONOCIMIENTO RAG] Recupera la lista de documentos y colecciones (topics) "
+        "que el usuario ha subido previamente a su base de conocimiento vectorial (RAG). "
+        "Permite listar documentos generales, de un workspace o de una colección (topic). "
+        "NO lista los documentos editables de OnlyOffice; para listar o buscar documentos de OnlyOffice "
+        "(Word .docx, Excel .xlsx, PPT .pptx) usa 'list_onlyoffice_documents' o 'search_onlyoffice_documents'."
     )
     args_schema: Type[BaseModel] = GetDocumentListInput
     return_direct: bool = False

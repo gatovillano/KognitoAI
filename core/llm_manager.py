@@ -24,11 +24,27 @@ from core.config import settings
 from core.database import SessionLocal, Account, UserSecret
 from core.repositories.secret_repository import SecretRepository
 from utils.url_safety import SSRFValidationError, require_safe_llm_api_base
+from contextvars import ContextVar
 import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 SYSTEM_ACCOUNT_ID = uuid.UUID("00000000-0000-0000-0000-000000000000")
+
+# ContextVar para propagar el account_id del usuario a través de llamadas asíncronas y subgrafos
+current_active_account_id: ContextVar[Optional[str]] = ContextVar("current_active_account_id", default=None)
+
+
+def set_active_account_id(account_id: Optional[Union[str, uuid.UUID]]) -> Any:
+    """Fija el account_id activo en el contexto asíncrono actual."""
+    if account_id:
+        return current_active_account_id.set(str(account_id))
+    return None
+
+
+def get_active_account_id() -> Optional[str]:
+    """Obtiene el account_id activo del contexto asíncrono actual."""
+    return current_active_account_id.get()
 
 
 class UnsafeLlmApiBaseError(ValueError):
@@ -145,6 +161,10 @@ def detect_provider_from_model(model_name: str) -> str:
 
     model_lower = model_name.lower()
 
+    # Modelos de Antigravity (comprobar antes de gemini/google para evitar falsos positivos)
+    if "antigravity" in model_lower:
+        return "antigravity"
+
     # Modelos de Gemini/Google
     if any(x in model_lower for x in ["gemini", "google"]):
         return "gemini"
@@ -231,6 +251,7 @@ def get_provider_from_model_or_fallback(
         prefix = model_name.split("/")[0].lower()
         # Validar que sea un proveedor conocido
         known_providers = [
+            "antigravity",
             "gemini",
             "google",
             "openai",
@@ -406,17 +427,42 @@ def clear_user_llm_cache(account_id: Union[str, uuid.UUID]):
 
 
 def get_main_llm() -> Optional[ChatLiteLLM]:  # More specific return type
-    """Returns the initialized main agent LLM instance."""
+    """Returns the initialized main agent LLM instance, prioritizing the active user model."""
+    acc_id = current_active_account_id.get()
+    if acc_id and (acc_id, "main") in _llm_cache:
+        instance, ts = _llm_cache[(acc_id, "main")]
+        if time.time() - ts < _LLM_CACHE_TTL:
+            return instance
     return _main_agent_llm_instance
 
 
 def get_fast_llm() -> Optional[ChatLiteLLM]:  # More specific return type
-    """Returns the initialized fast task LLM instance, or the main one as a fallback."""
+    """Returns the initialized fast task LLM instance, prioritizing the active user model."""
+    acc_id = current_active_account_id.get()
+    if acc_id:
+        if (acc_id, "fast") in _llm_cache:
+            instance, ts = _llm_cache[(acc_id, "fast")]
+            if time.time() - ts < _LLM_CACHE_TTL:
+                return instance
+        if (acc_id, "main") in _llm_cache:
+            instance, ts = _llm_cache[(acc_id, "main")]
+            if time.time() - ts < _LLM_CACHE_TTL:
+                return instance
     return _fast_task_llm_instance or _main_agent_llm_instance
 
 
 def get_vision_llm() -> Optional[ChatLiteLLM]:
-    """Returns the initialized vision LLM instance for multimodal tasks."""
+    """Returns the initialized vision LLM instance, prioritizing the active user model."""
+    acc_id = current_active_account_id.get()
+    if acc_id:
+        if (acc_id, "vision") in _llm_cache:
+            instance, ts = _llm_cache[(acc_id, "vision")]
+            if time.time() - ts < _LLM_CACHE_TTL:
+                return instance
+        if (acc_id, "main") in _llm_cache:
+            instance, ts = _llm_cache[(acc_id, "main")]
+            if time.time() - ts < _LLM_CACHE_TTL:
+                return instance
     return _vision_llm_instance or _main_agent_llm_instance
 
 
@@ -636,6 +682,17 @@ async def get_llm_for_user(
                 if account.vision_llm_provider:
                     provider_target = account.vision_llm_provider
 
+            # Auto-detección de proveedor Antigravity por prefijo de modelo
+            if (
+                model_target
+                and (model_target.startswith("antigravity/") or "antigravity" in (provider_target or "").lower())
+                and provider_target != "antigravity"
+            ):
+                logger.info(
+                    f"Detectado modelo Antigravity: {model_target}. Forzando provider a 'antigravity'."
+                )
+                provider_target = "antigravity"
+
             # Auto-detección de proveedor Kilocode por prefijo de modelo
             if (
                 model_target
@@ -802,14 +859,21 @@ async def get_llm_for_user(
                 llm_kwargs["api_key"] = api_key
 
             # --- FIX: Manejo específico para OpenRouter ---
+            # NOTA: No fijar api_base manualmente. LiteLLM ya routea
+            # "openrouter/..." al endpoint correcto y elimina el prefijo
+            # al enviar el model ID a OpenRouter. Fijar api_base lo trata
+            # como endpoint OpenAI genérico y envía el prefijo verbatim,
+            # lo que OpenRouter rechaza con "is not a valid model ID".
             if provider_target.lower() == "openrouter":
-                llm_kwargs["api_base"] = "https://openrouter.ai/api/v1"
-
                 # Paso 1: Obtener el ID real del modelo
                 actual_id = normalize_openrouter_model_name(model_target)
 
                 # Paso 2: Añadir prefijo openrouter/ para LiteLLM
                 llm_kwargs["model_name"] = f"openrouter/{actual_id}"
+                if "custom_llm_provider" in llm_kwargs:
+                    del llm_kwargs["custom_llm_provider"]
+                # Asegurar que no se herede un api_base de otro proveedor
+                llm_kwargs.pop("api_base", None)
 
                 # No forzar provider=openai para que LiteLLM reconozca openrouter/ y elimine el prefijo al enviar
                 if "provider" in llm_kwargs:
@@ -903,6 +967,22 @@ async def get_llm_for_user(
                 _llm_cache[cache_key] = (llm_instance, time.time())
                 return llm_instance
 
+            elif "antigravity" in provider_target.lower() or "antigravity" in model_target.lower():
+                from core.antigravity_direct import AntigravityChatModel
+
+                actual_model = model_target.strip()
+                logger.info(
+                    f"🛸 Google Antigravity (Direct): model={actual_model}"
+                )
+
+                llm_instance = AntigravityChatModel(
+                    model_name=actual_model,
+                    temperature=account.llm_temperature if account and hasattr(account, "llm_temperature") else None,
+                    timeout=settings.llm_request_timeout,
+                )
+                _llm_cache[cache_key] = (llm_instance, time.time())
+                return llm_instance
+
             elif provider_target.lower() == "kilocode":
                 # Kilocode Gateway - API unificada de IA (OpenAI-compatible)
                 llm_kwargs["api_base"] = "https://api.kilo.ai/api/gateway"
@@ -927,6 +1007,26 @@ async def get_llm_for_user(
 
                 logger.info(
                     f"🚀 Kilocode Gateway configurado: {llm_kwargs['model_name']} en {llm_kwargs['api_base']}"
+                )
+
+            elif provider_target.lower() == "inceptionlabs":
+                llm_kwargs["api_base"] = "https://api.inceptionlabs.ai/v1"
+
+                if api_key:
+                    llm_kwargs["api_key"] = api_key
+
+                actual_model = model_target
+                if actual_model.startswith("inceptionlabs/"):
+                    actual_model = actual_model[len("inceptionlabs/") :]
+
+                llm_kwargs["model_name"] = f"openai/{actual_model}"
+                llm_kwargs["custom_llm_provider"] = "openai"
+
+                if "provider" in llm_kwargs:
+                    del llm_kwargs["provider"]
+
+                logger.info(
+                    f"🔮 InceptionLabs configurado: {llm_kwargs['model_name']} en {llm_kwargs['api_base']}"
                 )
 
             elif provider_target.lower() == "nvidia":
@@ -1008,8 +1108,6 @@ async def get_llm_for_user(
             llm_instance = ChatLiteLLM(**llm_kwargs)
             if "custom_llm_provider" in llm_kwargs:
                 llm_instance.custom_llm_provider = llm_kwargs["custom_llm_provider"]
-            elif provider_target.lower() == "openrouter":
-                llm_instance.custom_llm_provider = "openrouter"
             # Cache the instance for future calls
             _llm_cache[cache_key] = (llm_instance, time.time())
             return llm_instance
@@ -1173,14 +1271,18 @@ async def initialize_llms():
     else:
         eff_llm_api_base = settings.llm_api_base
 
-    eff_fast_llm_model = global_fast_llm_model or settings.fast_llm_model
+    eff_fast_llm_model = (
+        global_fast_llm_model or global_llm_model or settings.fast_llm_model
+    )
     eff_fast_llm_provider = get_provider_from_model_or_fallback(
-        eff_fast_llm_model, global_fast_llm_provider
+        eff_fast_llm_model, global_fast_llm_provider or global_llm_provider
     )
 
-    eff_vision_llm_model = global_vision_llm_model or settings.vision_model
+    eff_vision_llm_model = (
+        global_vision_llm_model or global_llm_model or settings.vision_model
+    )
     eff_vision_llm_provider = get_provider_from_model_or_fallback(
-        eff_vision_llm_model, global_vision_llm_provider
+        eff_vision_llm_model, global_vision_llm_provider or global_llm_provider
     )
 
     # 2. Cargar API Keys globales desde los secretos de la base de datos
@@ -1268,265 +1370,270 @@ async def initialize_llms():
     vision_api_key = _sanitize_ascii(vision_api_key) if vision_api_key else None
 
     # --- INICIALIZACIÓN DE MODELOS ---
+    providers_requiring_key = [
+        "gemini",
+        "google",
+        "google_ai_studio",
+        "openai",
+        "openrouter",
+        "anthropic",
+        "groq",
+        "deepseek",
+        "mistral",
+        "cerebras",
+        "kilocode",
+        "nvidia",
+        "ollama-cloud",
+    ]
+
     try:
-        logger.info(f"Inicializando LLM Principal: {eff_llm_model}")
-
-        llm_kwargs = {
-            "model_name": eff_llm_model,
-            "temperature": eff_llm_temperature,
-            "streaming": True,
-            "verbose": False,
-            "max_retries": 0,  # We handle rate limiting, so disable litellm's retries for this
-            "rate_limiter": gemini_rate_limiter,  # Pass the compliant rate limiter
-            "max_tokens": settings.deep_research_max_tokens,  # Allow for massive reports
-            "timeout": settings.llm_request_timeout,
-        }
-
-        if use_gpu:
-            llm_kwargs["device"] = "cuda"
-            llm_kwargs["force_redownload"] = (
-                True  # Forzar la descarga para asegurar la compatibilidad de la GPU
+        if not eff_llm_model:
+            logger.info("ℹ️ No hay modelo LLM principal configurado globalmente.")
+            _main_agent_llm_instance = None
+        elif not main_api_key and (eff_llm_provider or "").lower() in providers_requiring_key:
+            logger.warning(
+                f"⚠️ El modelo global '{eff_llm_model}' (proveedor '{eff_llm_provider}') "
+                f"requiere API Key pero no se encontró ninguna disponible. No se inicializará el LLM global."
             )
+            _main_agent_llm_instance = None
+        else:
+            logger.info(f"Inicializando LLM Principal: {eff_llm_model}")
+            llm_kwargs = {
+                "model_name": eff_llm_model,
+                "temperature": eff_llm_temperature,
+                "streaming": True,
+                "verbose": False,
+                "max_retries": 0,
+                "rate_limiter": gemini_rate_limiter,
+                "max_tokens": settings.deep_research_max_tokens,
+                "timeout": settings.llm_request_timeout,
+            }
 
-        if eff_llm_api_base:
-            llm_kwargs["api_base"] = eff_llm_api_base
+            if use_gpu:
+                llm_kwargs["device"] = "cuda"
+                llm_kwargs["force_redownload"] = True
 
-        if main_api_key:
-            llm_kwargs["api_key"] = main_api_key
+            if eff_llm_api_base:
+                llm_kwargs["api_base"] = eff_llm_api_base
 
-        # Configurar proveedor específico según el formato del modelo
-        model_lower = eff_llm_model.lower()
-
-        if "openrouter" in model_lower:
-            logger.info("🔧 Applying OpenRouter specific config for main LLM.")
-            llm_kwargs["api_base"] = "https://openrouter.ai/api/v1"
-
-            # Normalizar el nombre del modelo - eliminar prefijo openrouter/ para evitar duplicados
-            actual_id = normalize_openrouter_model_name(eff_llm_model)
-
-            # Configurar el nombre del modelo con el prefijo openrouter/ necesario para LiteLLM
-            llm_kwargs["model_name"] = f"openrouter/{actual_id}"
-
-            # No forzar provider=openai para que LiteLLM reconozca openrouter/ y elimine el prefijo al enviar
-            if "provider" in llm_kwargs:
-                del llm_kwargs["provider"]
-
-            # Aplicar lógica de adaptador universal según el modelo
-            apply_openrouter_model_specific_logic(actual_id, llm_kwargs)
-
-            # Headers recomendados por OpenRouter para mejor soporte y visibilidad
-            if "extra_headers" not in llm_kwargs:
-                llm_kwargs["extra_headers"] = {}
-            llm_kwargs["extra_headers"]["HTTP-Referer"] = (
-                "https://kognito.ai"  # Identificador de la app
-            )
-            llm_kwargs["extra_headers"]["X-Title"] = "Kognito AI"
-        elif "anthropic" in model_lower:
-            logger.info("🔧 Applying Anthropic specific config.")
-            llm_kwargs["provider"] = "anthropic"
-        elif "groq" in model_lower:
-            logger.info("🔧 Applying Groq specific config.")
-            llm_kwargs["provider"] = "groq"
-        elif "deepseek" in model_lower:
-            logger.info("🔧 Applying DeepSeek specific config.")
-            llm_kwargs["provider"] = "deepseek"
-        elif "mistral" in model_lower:
-            logger.info("🔧 Applying Mistral specific config.")
-            llm_kwargs["provider"] = "mistral"
-        elif "cerebras" in model_lower:
-            logger.info("🔧 Applying Cerebras specific config.")
-            llm_kwargs["provider"] = "cerebras"
-        elif "vertex" in model_lower or "google_vertex" in model_lower:
-            logger.info("🔧 Applying Vertex AI specific config.")
-            llm_kwargs["provider"] = "vertex_ai"
-            if settings.google_project_id:
-                llm_kwargs["vertex_project_id"] = settings.google_project_id
-        elif "azure" in model_lower:
-            logger.info("🔧 Applying Azure OpenAI specific config.")
-            llm_kwargs["provider"] = "azure"
-        elif "gemini" in model_lower:
-            logger.info("🔧 Applying Gemini specific config.")
-            llm_kwargs["provider"] = "google_ai_studio"
-            llm_kwargs["api_base"] = "https://generativelanguage.googleapis.com/v1beta"
-            llm_kwargs.pop("vertex_project_id", None)
-            llm_kwargs.pop("vertex_location", None)
-            if not llm_kwargs["model_name"].startswith("gemini/"):
-                llm_kwargs["model_name"] = f"gemini/{llm_kwargs['model_name']}"
-            logger.info(
-                f"🔧 Google AI Studio: endpoint forzado, modelo={llm_kwargs['model_name']}"
-            )
-
-        elif "openai" in model_lower or "gpt" in model_lower:
-            logger.info("🔧 Applying OpenAI/GPT specific config.")
-        elif "kilocode" in model_lower:
-            logger.info("🔧 Applying Kilocode Gateway specific config for main LLM.")
-            kilocode_base = "https://api.kilo.ai/api/gateway"
-            llm_kwargs["api_base"] = kilocode_base
-
-            # Autenticación: Usar API key
             if main_api_key:
                 llm_kwargs["api_key"] = main_api_key
 
-            # Normalizar el nombre del modelo
-            actual_model = eff_llm_model
-            if actual_model.startswith("kilocode/"):
-                actual_model = actual_model[len("kilocode/") :]
+            model_lower = eff_llm_model.lower()
+            if "openrouter" in model_lower:
+                logger.info("🔧 Applying OpenRouter specific config for main LLM.")
+                llm_kwargs.pop("api_base", None)
+                actual_id = normalize_openrouter_model_name(eff_llm_model)
+                llm_kwargs["model_name"] = f"openrouter/{actual_id}"
+                if "custom_llm_provider" in llm_kwargs:
+                    del llm_kwargs["custom_llm_provider"]
+                if "provider" in llm_kwargs:
+                    del llm_kwargs["provider"]
+                apply_openrouter_model_specific_logic(actual_id, llm_kwargs)
+                if "extra_headers" not in llm_kwargs:
+                    llm_kwargs["extra_headers"] = {}
+                llm_kwargs["extra_headers"]["HTTP-Referer"] = "https://kognito.ai"
+                llm_kwargs["extra_headers"]["X-Title"] = "Kognito AI"
+            elif "anthropic" in model_lower:
+                logger.info("🔧 Applying Anthropic specific config.")
+                llm_kwargs["provider"] = "anthropic"
+            elif "groq" in model_lower:
+                logger.info("🔧 Applying Groq specific config.")
+                llm_kwargs["provider"] = "groq"
+            elif "deepseek" in model_lower:
+                logger.info("🔧 Applying DeepSeek specific config.")
+                llm_kwargs["provider"] = "deepseek"
+            elif "mistral" in model_lower:
+                logger.info("🔧 Applying Mistral specific config.")
+                llm_kwargs["provider"] = "mistral"
+            elif "cerebras" in model_lower:
+                logger.info("🔧 Applying Cerebras specific config.")
+                llm_kwargs["provider"] = "cerebras"
+            elif "vertex" in model_lower or "google_vertex" in model_lower:
+                logger.info("🔧 Applying Vertex AI specific config.")
+                llm_kwargs["provider"] = "vertex_ai"
+                if settings.google_project_id:
+                    llm_kwargs["vertex_project_id"] = settings.google_project_id
+            elif "azure" in model_lower:
+                logger.info("🔧 Applying Azure OpenAI specific config.")
+                llm_kwargs["provider"] = "azure"
+            elif "gemini" in model_lower:
+                logger.info("🔧 Applying Gemini specific config.")
+                llm_kwargs["provider"] = "google_ai_studio"
+                llm_kwargs["api_base"] = "https://generativelanguage.googleapis.com/v1beta"
+                llm_kwargs.pop("vertex_project_id", None)
+                llm_kwargs.pop("vertex_location", None)
+                if not llm_kwargs["model_name"].startswith("gemini/"):
+                    llm_kwargs["model_name"] = f"gemini/{llm_kwargs['model_name']}"
+                logger.info(
+                    f"🔧 Google AI Studio: endpoint forzado, modelo={llm_kwargs['model_name']}"
+                )
+            elif "openai" in model_lower or "gpt" in model_lower:
+                logger.info("🔧 Applying OpenAI/GPT specific config.")
+            elif "kilocode" in model_lower:
+                logger.info("🔧 Applying Kilocode Gateway specific config for main LLM.")
+                kilocode_base = "https://api.kilo.ai/api/gateway"
+                llm_kwargs["api_base"] = kilocode_base
+                if main_api_key:
+                    llm_kwargs["api_key"] = main_api_key
+                actual_model = eff_llm_model
+                if actual_model.startswith("kilocode/"):
+                    actual_model = actual_model[len("kilocode/") :]
+                llm_kwargs["model_name"] = f"openai/{actual_model}"
+                llm_kwargs["custom_llm_provider"] = "openai"
 
-            # Asegurarnos de que el model_name tenga prefijo openai/ para LiteLLM
-            llm_kwargs["model_name"] = f"openai/{actual_model}"
-            llm_kwargs["custom_llm_provider"] = "openai"
-
-        eff_provider_str = (eff_llm_provider or "").lower()
-        if "ollama" in model_lower or "ollama" in eff_provider_str:
-            logger.info("🔧 Applying Ollama specific config for main LLM (Direct).")
-            from core.ollama_direct import OllamaDirectChatModel, normalize_ollama_base_url
-
-            actual_model = eff_llm_model.split("/")[-1].strip()
-            api_base_str = (
-                eff_llm_api_base
-                or settings.ollama_api_url
-                or "http://host.docker.internal:11434"
-            )
-            api_base_str = normalize_ollama_base_url(api_base_str)
-            _main_agent_llm_instance = OllamaDirectChatModel(
-                model_name=actual_model,
-                base_url=api_base_str,
-                fallback_base_url=getattr(settings, "ollama_direct_api_url", None),
-                timeout=settings.llm_request_timeout,
-            )
-            logger.info(f"Modelo LLM Principal (Ollama Direct) listo: {actual_model} en {api_base_str}")
-        else:
-            # --- FIX: Sanitize kwargs to prevent UnicodeEncodeError in headers ---
-            llm_kwargs = _sanitize_llm_kwargs(llm_kwargs)
-
-            main_llm = ChatLiteLLM(**llm_kwargs)
-            # Patch the instance explicitly if LiteLLM didn't pick it up
-            if hasattr(main_llm, "custom_llm_provider") and llm_kwargs.get(
-                "custom_llm_provider"
-            ):
-                main_llm.custom_llm_provider = llm_kwargs["custom_llm_provider"]
-            elif "openrouter" in model_lower:
-                main_llm.custom_llm_provider = "openrouter"
-            _main_agent_llm_instance = main_llm
-            logger.info("Modelo LLM Principal listo.")
-
+            eff_provider_str = (eff_llm_provider or "").lower()
+            if "antigravity" in model_lower or "antigravity" in eff_provider_str:
+                logger.info("🔧 Applying Antigravity specific config for main LLM (Direct).")
+                from core.antigravity_direct import AntigravityChatModel
+                _main_agent_llm_instance = AntigravityChatModel(
+                    model_name=eff_llm_model,
+                    temperature=eff_temperature,
+                    timeout=settings.llm_request_timeout,
+                )
+                logger.info(f"Modelo LLM Principal (Antigravity Direct) listo: {eff_llm_model}")
+            elif "ollama" in model_lower or "ollama" in eff_provider_str:
+                logger.info("🔧 Applying Ollama specific config for main LLM (Direct).")
+                from core.ollama_direct import OllamaDirectChatModel, normalize_ollama_base_url
+                actual_model = eff_llm_model.split("/")[-1].strip()
+                api_base_str = (
+                    eff_llm_api_base
+                    or settings.ollama_api_url
+                    or "http://host.docker.internal:11434"
+                )
+                api_base_str = normalize_ollama_base_url(api_base_str)
+                _main_agent_llm_instance = OllamaDirectChatModel(
+                    model_name=actual_model,
+                    base_url=api_base_str,
+                    fallback_base_url=getattr(settings, "ollama_direct_api_url", None),
+                    timeout=settings.llm_request_timeout,
+                )
+                logger.info(f"Modelo LLM Principal (Ollama Direct) listo: {actual_model} en {api_base_str}")
+            else:
+                llm_kwargs = _sanitize_llm_kwargs(llm_kwargs)
+                main_llm = ChatLiteLLM(**llm_kwargs)
+                if hasattr(main_llm, "custom_llm_provider") and llm_kwargs.get("custom_llm_provider"):
+                    main_llm.custom_llm_provider = llm_kwargs["custom_llm_provider"]
+                elif "openrouter" in model_lower:
+                    main_llm.custom_llm_provider = "openrouter"
+                _main_agent_llm_instance = main_llm
+                logger.info("Modelo LLM Principal listo.")
     except Exception as e:
         logger.error(f"❌ FATAL: Failed to initialize the main LLM: {e}", exc_info=True)
         raise
 
     try:
-        logger.info(f"Inicializando LLM Rápido: {eff_fast_llm_model}")
-        fast_llm_kwargs = {
-            "model_name": eff_fast_llm_model,
-            "temperature": 0.0,
-            "streaming": True,
-            "verbose": False,
-            "max_retries": 0,
-            "rate_limiter": gemini_rate_limiter,  # Use the same rate limiter instance
-            "timeout": settings.llm_request_timeout,
-        }
-
-        if use_gpu:
-            fast_llm_kwargs["device"] = "cuda"
-
-        if eff_llm_api_base:
-            fast_llm_kwargs["api_base"] = eff_llm_api_base
-
-        if fast_api_key:
-            fast_llm_kwargs["api_key"] = fast_api_key
-
-        # Configurar proveedor específico según el formato del modelo
-        fast_model_lower = eff_fast_llm_model.lower()
-
-        if "openrouter" in fast_model_lower:
-            logger.info("🔧 Applying OpenRouter specific config for fast LLM.")
-            fast_llm_kwargs["api_base"] = "https://openrouter.ai/api/v1"
-            actual_id = normalize_openrouter_model_name(eff_fast_llm_model)
-            fast_llm_kwargs["model_name"] = f"openrouter/{actual_id}"
-            if "provider" in fast_llm_kwargs:
-                del fast_llm_kwargs["provider"]
-            apply_openrouter_model_specific_logic(actual_id, fast_llm_kwargs)
-        elif "anthropic" in fast_model_lower:
-            logger.info("🔧 Applying Anthropic specific config for fast LLM.")
-            fast_llm_kwargs["provider"] = "anthropic"
-        elif "groq" in fast_model_lower:
-            logger.info("🔧 Applying Groq specific config for fast LLM.")
-            fast_llm_kwargs["provider"] = "groq"
-        elif "deepseek" in fast_model_lower:
-            logger.info("🔧 Applying DeepSeek specific config for fast LLM.")
-            fast_llm_kwargs["provider"] = "deepseek"
-        elif "mistral" in fast_model_lower:
-            logger.info("🔧 Applying Mistral specific config for fast LLM.")
-            fast_llm_kwargs["provider"] = "mistral"
-        elif "gemini" in fast_model_lower:
-            logger.info("🔧 Applying Gemini specific config for fast LLM.")
-            fast_llm_kwargs["provider"] = "google_ai_studio"
-            fast_llm_kwargs["api_base"] = (
-                "https://generativelanguage.googleapis.com/v1beta"
+        if not eff_fast_llm_model:
+            logger.info("ℹ️ No hay modelo LLM rápido configurado globalmente.")
+            _fast_task_llm_instance = None
+        elif not fast_api_key and (eff_fast_llm_provider or "").lower() in providers_requiring_key:
+            logger.warning(
+                f"⚠️ El modelo rápido global '{eff_fast_llm_model}' (proveedor '{eff_fast_llm_provider}') "
+                f"requiere API Key pero no se encontró ninguna disponible. No se inicializará el LLM rápido global."
             )
-            fast_llm_kwargs.pop("vertex_project_id", None)
-            fast_llm_kwargs.pop("vertex_location", None)
-            if not fast_llm_kwargs["model_name"].startswith("gemini/"):
-                fast_llm_kwargs["model_name"] = (
-                    f"gemini/{fast_llm_kwargs['model_name']}"
-                )
-            logger.info(
-                f"🔧 Google AI Studio (fast): endpoint forzado, modelo={fast_llm_kwargs['model_name']}"
-            )
-
-        elif "openai" in fast_model_lower or "gpt" in fast_model_lower:
-            logger.info("🔧 Applying OpenAI/GPT specific config for fast LLM.")
-        elif "kilocode" in fast_model_lower:
-            logger.info("🔧 Applying Kilocode Gateway specific config for fast LLM.")
-            kilocode_base = "https://api.kilo.ai/api/gateway"
-            fast_llm_kwargs["api_base"] = kilocode_base
-
-            # Autenticación
+            _fast_task_llm_instance = None
+        else:
+            logger.info(f"Inicializando LLM Rápido: {eff_fast_llm_model}")
+            fast_llm_kwargs = {
+                "model_name": eff_fast_llm_model,
+                "temperature": 0.0,
+                "streaming": True,
+                "verbose": False,
+                "max_retries": 0,
+                "rate_limiter": gemini_rate_limiter,
+                "timeout": settings.llm_request_timeout,
+            }
+            if use_gpu:
+                fast_llm_kwargs["device"] = "cuda"
+            if eff_llm_api_base:
+                fast_llm_kwargs["api_base"] = eff_llm_api_base
             if fast_api_key:
                 fast_llm_kwargs["api_key"] = fast_api_key
 
-            # Normalizar el nombre del modelo
-            actual_model = eff_fast_llm_model
-            if actual_model.startswith("kilocode/"):
-                actual_model = actual_model[len("kilocode/") :]
+            fast_model_lower = eff_fast_llm_model.lower()
+            if "openrouter" in fast_model_lower:
+                logger.info("🔧 Applying OpenRouter specific config for fast LLM.")
+                fast_llm_kwargs.pop("api_base", None)
+                actual_id = normalize_openrouter_model_name(eff_fast_llm_model)
+                fast_llm_kwargs["model_name"] = f"openrouter/{actual_id}"
+                if "custom_llm_provider" in fast_llm_kwargs:
+                    del fast_llm_kwargs["custom_llm_provider"]
+                if "provider" in fast_llm_kwargs:
+                    del fast_llm_kwargs["provider"]
+                apply_openrouter_model_specific_logic(actual_id, fast_llm_kwargs)
+            elif "anthropic" in fast_model_lower:
+                logger.info("🔧 Applying Anthropic specific config for fast LLM.")
+                fast_llm_kwargs["provider"] = "anthropic"
+            elif "groq" in fast_model_lower:
+                logger.info("🔧 Applying Groq specific config for fast LLM.")
+                fast_llm_kwargs["provider"] = "groq"
+            elif "deepseek" in fast_model_lower:
+                logger.info("🔧 Applying DeepSeek specific config for fast LLM.")
+                fast_llm_kwargs["provider"] = "deepseek"
+            elif "mistral" in fast_model_lower:
+                logger.info("🔧 Applying Mistral specific config for fast LLM.")
+                fast_llm_kwargs["provider"] = "mistral"
+            elif "gemini" in fast_model_lower:
+                logger.info("🔧 Applying Gemini specific config for fast LLM.")
+                fast_llm_kwargs["provider"] = "google_ai_studio"
+                fast_llm_kwargs["api_base"] = "https://generativelanguage.googleapis.com/v1beta"
+                fast_llm_kwargs.pop("vertex_project_id", None)
+                fast_llm_kwargs.pop("vertex_location", None)
+                if not fast_llm_kwargs["model_name"].startswith("gemini/"):
+                    fast_llm_kwargs["model_name"] = f"gemini/{fast_llm_kwargs['model_name']}"
+                logger.info(
+                    f"🔧 Google AI Studio (fast): endpoint forzado, modelo={fast_llm_kwargs['model_name']}"
+                )
+            elif "openai" in fast_model_lower or "gpt" in fast_model_lower:
+                logger.info("🔧 Applying OpenAI/GPT specific config for fast LLM.")
+            elif "kilocode" in fast_model_lower:
+                logger.info("🔧 Applying Kilocode Gateway specific config for fast LLM.")
+                kilocode_base = "https://api.kilo.ai/api/gateway"
+                fast_llm_kwargs["api_base"] = kilocode_base
+                if fast_api_key:
+                    fast_llm_kwargs["api_key"] = fast_api_key
+                actual_model = eff_fast_llm_model
+                if actual_model.startswith("kilocode/"):
+                    actual_model = actual_model[len("kilocode/") :]
+                fast_llm_kwargs["model_name"] = f"openai/{actual_model}"
+                fast_llm_kwargs["custom_llm_provider"] = "openai"
 
-            # Asegurarnos de que el model_name tenga prefijo openai/ para LiteLLM
-            fast_llm_kwargs["model_name"] = f"openai/{actual_model}"
-            fast_llm_kwargs["custom_llm_provider"] = "openai"
-
-        eff_fast_provider_str = (eff_fast_llm_provider or "").lower()
-        if "ollama" in fast_model_lower or "ollama" in eff_fast_provider_str:
-            logger.info("🔧 Applying Ollama specific config for fast LLM (Direct).")
-            from core.ollama_direct import OllamaDirectChatModel, normalize_ollama_base_url
-
-            actual_model = eff_fast_llm_model.split("/")[-1].strip()
-            api_base_str = (
-                eff_llm_api_base
-                or settings.ollama_api_url
-                or "http://host.docker.internal:11434"
-            )
-            api_base_str = normalize_ollama_base_url(api_base_str)
-            _fast_task_llm_instance = OllamaDirectChatModel(
-                model_name=actual_model,
-                base_url=api_base_str,
-                fallback_base_url=getattr(settings, "ollama_direct_api_url", None),
-                timeout=settings.llm_request_timeout,
-            )
-            logger.info(f"Modelo LLM Rápido (Ollama Direct) listo: {actual_model} en {api_base_str}")
-        else:
-            # --- FIX: Sanitize kwargs to prevent UnicodeEncodeError in headers ---
-            fast_llm_kwargs = _sanitize_llm_kwargs(fast_llm_kwargs)
-
-            fast_llm = ChatLiteLLM(**fast_llm_kwargs)
-            # Patch the instance explicitly if LiteLLM didn't pick it up
-            if hasattr(fast_llm, "custom_llm_provider") and fast_llm_kwargs.get(
-                "custom_llm_provider"
-            ):
-                fast_llm.custom_llm_provider = fast_llm_kwargs["custom_llm_provider"]
-            elif "openrouter" in fast_model_lower:
-                fast_llm.custom_llm_provider = "openrouter"
-            _fast_task_llm_instance = fast_llm
-            logger.info("Modelo LLM Rápido listo.")
+            eff_fast_provider_str = (eff_fast_llm_provider or "").lower()
+            if "antigravity" in fast_model_lower or "antigravity" in eff_fast_provider_str:
+                logger.info("🔧 Applying Antigravity specific config for fast LLM (Direct).")
+                from core.antigravity_direct import AntigravityChatModel
+                _fast_task_llm_instance = AntigravityChatModel(
+                    model_name=eff_fast_llm_model,
+                    temperature=0.0,
+                    timeout=settings.llm_request_timeout,
+                )
+                logger.info(f"Modelo LLM Rápido (Antigravity Direct) listo: {eff_fast_llm_model}")
+            elif "ollama" in fast_model_lower or "ollama" in eff_fast_provider_str:
+                logger.info("🔧 Applying Ollama specific config for fast LLM (Direct).")
+                from core.ollama_direct import OllamaDirectChatModel, normalize_ollama_base_url
+                actual_model = eff_fast_llm_model.split("/")[-1].strip()
+                api_base_str = (
+                    eff_llm_api_base
+                    or settings.ollama_api_url
+                    or "http://host.docker.internal:11434"
+                )
+                api_base_str = normalize_ollama_base_url(api_base_str)
+                _fast_task_llm_instance = OllamaDirectChatModel(
+                    model_name=actual_model,
+                    base_url=api_base_str,
+                    fallback_base_url=getattr(settings, "ollama_direct_api_url", None),
+                    timeout=settings.llm_request_timeout,
+                )
+                logger.info(f"Modelo LLM Rápido (Ollama Direct) listo: {actual_model} en {api_base_str}")
+            else:
+                fast_llm_kwargs = _sanitize_llm_kwargs(fast_llm_kwargs)
+                fast_llm = ChatLiteLLM(**fast_llm_kwargs)
+                if hasattr(fast_llm, "custom_llm_provider") and fast_llm_kwargs.get("custom_llm_provider"):
+                    fast_llm.custom_llm_provider = fast_llm_kwargs["custom_llm_provider"]
+                elif "openrouter" in fast_model_lower:
+                    fast_llm.custom_llm_provider = "openrouter"
+                _fast_task_llm_instance = fast_llm
+                logger.info("Modelo LLM Rápido listo.")
     except Exception as e:
         logger.warning(
             f"⚠️ Failed to initialize the fast task LLM. The main LLM will be used as a fallback: {e}"
@@ -1534,109 +1641,109 @@ async def initialize_llms():
         _fast_task_llm_instance = _main_agent_llm_instance
 
     try:
-        logger.info(f"Inicializando LLM Visión: {eff_vision_llm_model}")
-        vision_llm_kwargs = {
-            "model_name": eff_vision_llm_model,
-            "temperature": 0.0,
-            "streaming": True,
-            "verbose": False,
-            "max_retries": 0,
-            "rate_limiter": gemini_rate_limiter,
-            "timeout": settings.llm_request_timeout,
-        }
-
-        if use_gpu:
-            vision_llm_kwargs["device"] = "cuda"
-
-        if vision_api_key:
-            vision_llm_kwargs["api_key"] = vision_api_key
-
-        # Configurar proveedor específico según el formato del modelo
-        vision_model_lower = eff_vision_llm_model.lower()
-
-        if "openrouter" in vision_model_lower:
-            logger.info("🔧 Applying OpenRouter specific config for vision LLM.")
-            vision_llm_kwargs["api_base"] = "https://openrouter.ai/api/v1"
-            actual_id = normalize_openrouter_model_name(eff_vision_llm_model)
-            vision_llm_kwargs["model_name"] = f"openrouter/{actual_id}"
-            if "provider" in vision_llm_kwargs:
-                del vision_llm_kwargs["provider"]
-            apply_openrouter_model_specific_logic(actual_id, vision_llm_kwargs)
-        elif "anthropic" in vision_model_lower:
-            logger.info("🔧 Applying Anthropic specific config for vision LLM.")
-            vision_llm_kwargs["provider"] = "anthropic"
-        elif "groq" in vision_model_lower:
-            logger.info("🔧 Applying Groq specific config for vision LLM.")
-            vision_llm_kwargs["provider"] = "groq"
-        elif "gemini" in vision_model_lower:
-            logger.info("🔧 Applying Gemini specific config for vision LLM.")
-            vision_llm_kwargs["provider"] = "google_ai_studio"
-            vision_llm_kwargs["api_base"] = (
-                "https://generativelanguage.googleapis.com/v1beta"
+        if not eff_vision_llm_model:
+            logger.info("ℹ️ No hay modelo LLM visión configurado globalmente.")
+            _vision_llm_instance = None
+        elif not vision_api_key and (eff_vision_llm_provider or "").lower() in providers_requiring_key:
+            logger.warning(
+                f"⚠️ El modelo visión global '{eff_vision_llm_model}' (proveedor '{eff_vision_llm_provider}') "
+                f"requiere API Key pero no se encontró ninguna disponible. No se inicializará el LLM visión global."
             )
-            vision_llm_kwargs.pop("vertex_project_id", None)
-            vision_llm_kwargs.pop("vertex_location", None)
-            if not vision_llm_kwargs["model_name"].startswith("gemini/"):
-                vision_llm_kwargs["model_name"] = (
-                    f"gemini/{vision_llm_kwargs['model_name']}"
-                )
-            logger.info(
-                f"🔧 Google AI Studio (vision): endpoint forzado, modelo={vision_llm_kwargs['model_name']}"
-            )
-
-        elif "openai" in vision_model_lower or "gpt" in vision_model_lower:
-            logger.info("🔧 Applying OpenAI/GPT specific config for vision LLM.")
-        elif "kilocode" in vision_model_lower:
-            logger.info("🔧 Applying Kilocode Gateway specific config for vision LLM.")
-            kilocode_base = "https://api.kilo.ai/api/gateway"
-            vision_llm_kwargs["api_base"] = kilocode_base
-
-            # Autenticación
+            _vision_llm_instance = None
+        else:
+            logger.info(f"Inicializando LLM Visión: {eff_vision_llm_model}")
+            vision_llm_kwargs = {
+                "model_name": eff_vision_llm_model,
+                "temperature": 0.0,
+                "streaming": True,
+                "verbose": False,
+                "max_retries": 0,
+                "rate_limiter": gemini_rate_limiter,
+                "timeout": settings.llm_request_timeout,
+            }
+            if use_gpu:
+                vision_llm_kwargs["device"] = "cuda"
             if vision_api_key:
                 vision_llm_kwargs["api_key"] = vision_api_key
 
-            # Normalizar el nombre del modelo
-            actual_model = eff_vision_llm_model
-            if actual_model.startswith("kilocode/"):
-                actual_model = actual_model[len("kilocode/") :]
+            vision_model_lower = eff_vision_llm_model.lower()
+            if "openrouter" in vision_model_lower:
+                logger.info("🔧 Applying OpenRouter specific config for vision LLM.")
+                vision_llm_kwargs.pop("api_base", None)
+                actual_id = normalize_openrouter_model_name(eff_vision_llm_model)
+                vision_llm_kwargs["model_name"] = f"openrouter/{actual_id}"
+                if "custom_llm_provider" in vision_llm_kwargs:
+                    del vision_llm_kwargs["custom_llm_provider"]
+                if "provider" in vision_llm_kwargs:
+                    del vision_llm_kwargs["provider"]
+                apply_openrouter_model_specific_logic(actual_id, vision_llm_kwargs)
+            elif "anthropic" in vision_model_lower:
+                logger.info("🔧 Applying Anthropic specific config for vision LLM.")
+                vision_llm_kwargs["provider"] = "anthropic"
+            elif "groq" in vision_model_lower:
+                logger.info("🔧 Applying Groq specific config for vision LLM.")
+                vision_llm_kwargs["provider"] = "groq"
+            elif "gemini" in vision_model_lower:
+                logger.info("🔧 Applying Gemini specific config for vision LLM.")
+                vision_llm_kwargs["provider"] = "google_ai_studio"
+                vision_llm_kwargs["api_base"] = "https://generativelanguage.googleapis.com/v1beta"
+                vision_llm_kwargs.pop("vertex_project_id", None)
+                vision_llm_kwargs.pop("vertex_location", None)
+                if not vision_llm_kwargs["model_name"].startswith("gemini/"):
+                    vision_llm_kwargs["model_name"] = f"gemini/{vision_llm_kwargs['model_name']}"
+                logger.info(
+                    f"🔧 Google AI Studio (vision): endpoint forzado, modelo={vision_llm_kwargs['model_name']}"
+                )
+            elif "openai" in vision_model_lower or "gpt" in vision_model_lower:
+                logger.info("🔧 Applying OpenAI/GPT specific config for vision LLM.")
+            elif "kilocode" in vision_model_lower:
+                logger.info("🔧 Applying Kilocode Gateway specific config for vision LLM.")
+                kilocode_base = "https://api.kilo.ai/api/gateway"
+                vision_llm_kwargs["api_base"] = kilocode_base
+                if vision_api_key:
+                    vision_llm_kwargs["api_key"] = vision_api_key
+                actual_model = eff_vision_llm_model
+                if actual_model.startswith("kilocode/"):
+                    actual_model = actual_model[len("kilocode/") :]
+                vision_llm_kwargs["model_name"] = f"openai/{actual_model}"
+                vision_llm_kwargs["custom_llm_provider"] = "openai"
 
-            # Asegurarnos de que el model_name tenga prefijo openai/ para LiteLLM
-            vision_llm_kwargs["model_name"] = f"openai/{actual_model}"
-            vision_llm_kwargs["custom_llm_provider"] = "openai"
-
-        eff_vision_provider_str = (eff_vision_llm_provider or "").lower()
-        if "ollama" in vision_model_lower or "ollama" in eff_vision_provider_str:
-            logger.info("🔧 Applying Ollama specific config for vision LLM (Direct).")
-            from core.ollama_direct import OllamaDirectChatModel, normalize_ollama_base_url
-
-            actual_model = eff_vision_llm_model.split("/")[-1].strip()
-            api_base_str = (
-                eff_llm_api_base
-                or settings.ollama_api_url
-                or "http://host.docker.internal:11434"
-            )
-            api_base_str = normalize_ollama_base_url(api_base_str)
-            _vision_llm_instance = OllamaDirectChatModel(
-                model_name=actual_model,
-                base_url=api_base_str,
-                fallback_base_url=getattr(settings, "ollama_direct_api_url", None),
-                timeout=settings.llm_request_timeout,
-            )
-            logger.info(f"Modelo LLM Visión (Ollama Direct) listo: {actual_model} en {api_base_str}")
-        else:
-            # --- FIX: Sanitize kwargs to prevent UnicodeEncodeError in headers ---
-            vision_llm_kwargs = _sanitize_llm_kwargs(vision_llm_kwargs)
-
-            vision_llm = ChatLiteLLM(**vision_llm_kwargs)
-            # Patch the instance explicitly if LiteLLM didn't pick it up
-            if hasattr(vision_llm, "custom_llm_provider") and vision_llm_kwargs.get(
-                "custom_llm_provider"
-            ):
-                vision_llm.custom_llm_provider = vision_llm_kwargs["custom_llm_provider"]
-            elif "openrouter" in vision_model_lower:
-                vision_llm.custom_llm_provider = "openrouter"
-            _vision_llm_instance = vision_llm
-            logger.info("Modelo LLM Visión listo.")
+            eff_vision_provider_str = (eff_vision_llm_provider or "").lower()
+            if "antigravity" in vision_model_lower or "antigravity" in eff_vision_provider_str:
+                logger.info("🔧 Applying Antigravity specific config for vision LLM (Direct).")
+                from core.antigravity_direct import AntigravityChatModel
+                _vision_llm_instance = AntigravityChatModel(
+                    model_name=eff_vision_llm_model,
+                    temperature=0.0,
+                    timeout=settings.llm_request_timeout,
+                )
+                logger.info(f"Modelo LLM Visión (Antigravity Direct) listo: {eff_vision_llm_model}")
+            elif "ollama" in vision_model_lower or "ollama" in eff_vision_provider_str:
+                logger.info("🔧 Applying Ollama specific config for vision LLM (Direct).")
+                from core.ollama_direct import OllamaDirectChatModel, normalize_ollama_base_url
+                actual_model = eff_vision_llm_model.split("/")[-1].strip()
+                api_base_str = (
+                    eff_llm_api_base
+                    or settings.ollama_api_url
+                    or "http://host.docker.internal:11434"
+                )
+                api_base_str = normalize_ollama_base_url(api_base_str)
+                _vision_llm_instance = OllamaDirectChatModel(
+                    model_name=actual_model,
+                    base_url=api_base_str,
+                    fallback_base_url=getattr(settings, "ollama_direct_api_url", None),
+                    timeout=settings.llm_request_timeout,
+                )
+                logger.info(f"Modelo LLM Visión (Ollama Direct) listo: {actual_model} en {api_base_str}")
+            else:
+                vision_llm_kwargs = _sanitize_llm_kwargs(vision_llm_kwargs)
+                vision_llm = ChatLiteLLM(**vision_llm_kwargs)
+                if hasattr(vision_llm, "custom_llm_provider") and vision_llm_kwargs.get("custom_llm_provider"):
+                    vision_llm.custom_llm_provider = vision_llm_kwargs["custom_llm_provider"]
+                elif "openrouter" in vision_model_lower:
+                    vision_llm.custom_llm_provider = "openrouter"
+                _vision_llm_instance = vision_llm
+                logger.info("Modelo LLM Visión listo.")
     except Exception as e:
         logger.warning(
             f"⚠️ Failed to initialize the vision LLM. The main LLM will be used as a fallback: {e}"

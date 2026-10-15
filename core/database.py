@@ -313,10 +313,12 @@ class MCPServer(Base):
     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
     name = Column(String(255), nullable=False, comment="Nombre amigable para el servidor MCP")
     status = Column(String(50), default="disconnected", nullable=False, comment="connected, disconnected, error")
-    transport_type = Column(String(50), nullable=False, comment="stdio, sse")
+    transport_type = Column(String(50), nullable=False, comment="stdio, sse, http/streamable-http")
     command = Column(String(512), nullable=True, comment="Comando a ejecutar para transporte stdio")
     args = Column(JSONB, nullable=True, comment="Argumentos JSON para el comando stdio")
-    url = Column(String(512), nullable=True, comment="URL para transporte SSE")
+    url = Column(String(512), nullable=True, comment="URL para transporte SSE/HTTP")
+    env = Column(JSONB, nullable=True, comment="Variables de entorno JSON para el proceso stdio (ej. WP_URL, API keys)")
+    headers = Column(JSONB, nullable=True, comment="Headers HTTP JSON para transporte sse/http (ej. Authorization)")
     
     created_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"))
     updated_at = Column(DateTime(timezone=True), default=text("CURRENT_TIMESTAMP"), onupdate=text("CURRENT_TIMESTAMP"))
@@ -452,11 +454,13 @@ class LangchainPgEmbedding(Base):
     telegram_id = Column(BigInteger, nullable=True, index=True) # ⭐ COLUMNA DIRECTA
     thread_id = Column(UUID(as_uuid=True), nullable=True, index=True) # ⭐ COLUMNA DIRECTA
     text_search_vector = Column(TSVECTOR, nullable=True) # ⭐ COLUMNA DIRECTA para FTS
+    is_graph_processed = Column(Boolean, default=False, nullable=False, server_default=text("false")) # ⭐ Flag para Knowledge Graph
 
     # Índices adicionales para las columnas directas
     __table_args__ = (
         Index('idx_langchain_pg_embedding_account_id', account_id),
         Index('idx_langchain_pg_embedding_workspace_id', workspace_id),
+        Index('idx_langchain_pg_embedding_is_graph_proc', account_id, is_graph_processed),
         Index('ix_cmetadata_gin', cmetadata, postgresql_using="gin"),
     )
 
@@ -1417,9 +1421,10 @@ async def create_tables():
         try:
             logger.info(f"Verificando y creando tablas (intento {attempt + 1}/{max_retries})...")
             async with engine.begin() as conn:
-                # Asegura que la extensión de pgvector esté habilitada
+                # Asegura que las extensiones de pgvector y pgcrypto estén habilitadas
                 await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-                logger.info("Extensión pgvector verificada/creada.")
+                await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
+                logger.info("Extensiones pgvector y pgcrypto verificadas/creadas.")
                 
                 # Crea todas las tablas que heredan de Base
                 await conn.run_sync(Base.metadata.create_all)
@@ -1429,6 +1434,7 @@ async def create_tables():
                 migrations = [
                     "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS cloud_storage_path VARCHAR",
                     "ALTER TABLE accounts ADD COLUMN IF NOT EXISTS local_base_path VARCHAR",
+                    "ALTER TABLE langchain_pg_embedding ADD COLUMN IF NOT EXISTS is_graph_processed BOOLEAN NOT NULL DEFAULT false",
                 ]
                 for migration_sql in migrations:
                     try:
@@ -1437,10 +1443,11 @@ async def create_tables():
                         logger.warning(f"⚠️ Migración omitida (ya existe o error): {migration_err}")
                 logger.info("✅ Migraciones de esquema verificadas/aplicadas.")
 
-                # Crear índices manualmente para AnalyzedPair con IF NOT EXISTS
+                # Crear índices manualmente con IF NOT EXISTS
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_analyzed_pairs_account_id ON analyzed_pairs (account_id)"))
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_analyzed_pairs_document_ids ON analyzed_pairs (document_id_a, document_id_b)"))
-                logger.info("✅ Índices de 'analyzed_pairs' verificados/creados exitosamente.")
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_langchain_pg_embedding_is_graph_proc ON langchain_pg_embedding (account_id, is_graph_processed)"))
+                logger.info("✅ Índices verificados/creados exitosamente.")
 
                 return  # Salir de la función si tiene éxito
         except Exception as e:
@@ -1785,8 +1792,6 @@ class EmailAccount(Base):
 
     __table_args__ = (
         UniqueConstraint('account_id', 'email_address', name='_account_email_uc'),
-        Index('ix_email_accounts_account_id', account_id),
-        Index('ix_email_accounts_email_address', email_address),
     )
 
     def __repr__(self):
@@ -1827,8 +1832,6 @@ class EmailFolder(Base):
 
     __table_args__ = (
         UniqueConstraint('email_account_id', 'imap_name', name='_account_folder_imap_name_uc'),
-        Index('ix_email_folders_account_id', email_account_id),
-        Index('ix_email_folders_parent_id', parent_id),
     )
 
     def __repr__(self):
@@ -1903,10 +1906,6 @@ class Email(Base):
     __table_args__ = (
         UniqueConstraint('email_account_id', 'imap_uid', name='_account_imap_uid_uc'),
         Index('ix_emails_account_folder', email_account_id, folder_id),
-        Index('ix_emails_date_sent', date_sent),
-        Index('ix_emails_thread_id', thread_id),
-        Index('ix_emails_is_read', is_read),
-        Index('ix_emails_message_id', message_id),
     )
 
     def __repr__(self):
@@ -1944,7 +1943,6 @@ class EmailAttachment(Base):
     email = relationship("Email", back_populates="attachments")
 
     __table_args__ = (
-        Index('ix_email_attachments_email_id', email_id),
         Index('ix_email_attachments_content_hash', content_hash),
     )
 

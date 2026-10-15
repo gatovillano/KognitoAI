@@ -15,6 +15,9 @@ try {
 }
 
 const nextConfig = {
+  experimental: {
+    middlewareClientMaxBodySize: '100mb',
+  },
   allowedDevOrigins: ['kognito.cuerpolibre.cl', 'webapp3.cuerpolibre.cl', 'kognitoai.cloud'],
   images: {
     unoptimized: true,

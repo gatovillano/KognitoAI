@@ -8,7 +8,7 @@ from langchain_core.tools import BaseTool
 from langchain_core.language_models import BaseLanguageModel # Importar el tipo base del LLM
 
 # Importar tu gestor de LLMs
-from core.llm_manager import get_fast_llm
+from core.llm_manager import get_fast_llm, get_llm_for_user
 # Importar tu integración con Cognee/Neo4j
 from knowledge_graph.graph_integration import GraphIntegration
 
@@ -67,7 +67,11 @@ class GraphCypherGeneratorTool(BaseTool):
         **kwargs
     ) -> str:
         graph_integration = self._get_graph_integration()
-        fast_llm = self._get_fast_llm_instance() # Usar el método de la clase
+        fast_llm = None
+        if self.account_id:
+            fast_llm = await get_llm_for_user(self.account_id, purpose="fast")
+        if not fast_llm:
+            fast_llm = self._get_fast_llm_instance()
         dataset_name_with_account = f"{dataset_name}_{self.account_id.replace('-', '_')}"
 
         try:

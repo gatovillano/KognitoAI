@@ -31,7 +31,14 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.pregel import Pregel
 from langchain_core.language_models import BaseChatModel # Import BaseChatModel
 
-from core.llm_manager import get_main_llm, initialize_llms, get_fast_llm, get_fallback_llm, get_configured_fallback_llm # Import initialize_llms and get_fast_llm
+from core.llm_manager import (
+    get_main_llm,
+    initialize_llms,
+    get_fast_llm,
+    get_fallback_llm,
+    get_configured_fallback_llm,
+    set_active_account_id,
+)
 from core.utils.llm_utils import safe_bind_tools, is_openrouter_model  # OpenRouter compatibility
 from core.utils.date_utils import get_today_str
 from core.agents.deep_researcher_config import Configuration
@@ -99,6 +106,8 @@ async def clarify_with_user(state: AgentState, config: RunnableConfig) -> dict:
     
     # Get and increment clarification attempts
     account_id = state.get("account_id")
+    if account_id:
+        set_active_account_id(account_id)
     from core.llm_manager import get_llm_for_user
     
     if account_id:
@@ -224,6 +233,8 @@ async def write_research_brief(state: AgentState, config: RunnableConfig) -> dic
         await progress_callback(progress, "Generando el resumen de investigación...", "write_research_brief")
     
     account_id = state.get("account_id")
+    if account_id:
+        set_active_account_id(account_id)
     from core.llm_manager import get_llm_for_user
 
     if account_id:
@@ -311,6 +322,8 @@ async def final_report_generation(state: AgentState, config: RunnableConfig) -> 
         await progress_callback(current_global_progress, "Generando el informe final...", "final_report_generation")
 
     account_id = state.get("account_id")
+    if account_id:
+        set_active_account_id(account_id)
     from core.llm_manager import get_llm_for_user
     
     if account_id:
@@ -362,26 +375,65 @@ async def final_report_generation(state: AgentState, config: RunnableConfig) -> 
     )
     final_report_prompt += "\n\nIMPORTANTE: Al citar fuentes, cada número de fuente debe estar entre sus propios corchetes. Por ejemplo, en lugar de [1, 2, 3], formatee como [1][2][3]."
     
+    final_report = None
     try:
         final_report = await writer_model.ainvoke([HumanMessage(content=final_report_prompt)])
     except Exception as e:
-        if is_token_limit_exceeded(e):
-            logger.warning("⚠️ [DeepResearcher] Final report generation failed due to token limit. Retrying with more aggressive pruning.")
-            # Even more aggressive pruning
+        logger.warning(f"⚠️ [DeepResearcher] Primary final report generation failed: {e}. Attempting aggressive pruning and fallback...")
+        # 1. Intentar con podado agresivo de findings y mensajes en writer_model
+        try:
             pruned_messages_ultra = await prune_messages_to_fit_token_limit(
-                current_messages_list, writer_model, cfg.max_input_tokens, keep_ratio=0.1
+                current_messages_list, writer_model, min(cfg.max_input_tokens, 16000), keep_ratio=0.1
             )
-            findings_ultra = findings[:50000] + "\n\n[... Findings aggressively truncated ...]"
-            
+            findings_ultra = findings[:40000] + "\n\n[... Hallazgos podados para sintetizar reporte final ...]"
             final_report_prompt_ultra = final_report_generation_prompt.format(
                 research_brief=state.get("research_brief", ""),
                 messages=get_buffer_string(pruned_messages_ultra),
                 findings=findings_ultra,
                 date=get_today_str(),
             )
+            final_report_prompt_ultra += "\n\nIMPORTANTE: Al citar fuentes, cada número de fuente debe estar entre sus propios corchetes. Por ejemplo, en lugar de [1, 2, 3], formatee como [1][2][3]."
             final_report = await writer_model.ainvoke([HumanMessage(content=final_report_prompt_ultra)])
-        else:
-            raise e
+            logger.info("✅ [DeepResearcher] Final report generation succeeded with aggressive pruning.")
+        except Exception as e_pruned:
+            logger.warning(f"⚠️ [DeepResearcher] Aggressive pruning with primary model failed: {e_pruned}. Trying fallback LLM...")
+            # 2. Intentar con Fallback LLM (modelo alternativo configurado)
+            fallback_llm = None
+            if account_id:
+                fallback_llm = await get_configured_fallback_llm(account_id, failed_purpose="main")
+            else:
+                fallback_llm = get_fallback_llm()
+            
+            if fallback_llm:
+                try:
+                    findings_fb = findings[:30000] + "\n\n[... Hallazgos resumidos ...]"
+                    final_report_prompt_fb = final_report_generation_prompt.format(
+                        research_brief=state.get("research_brief", ""),
+                        messages="",
+                        findings=findings_fb,
+                        date=get_today_str(),
+                    )
+                    final_report = await fallback_llm.ainvoke([HumanMessage(content=final_report_prompt_fb)])
+                    logger.info("✅ [DeepResearcher] Final report generation succeeded with fallback LLM.")
+                except Exception as e_fb:
+                    logger.error(f"❌ [DeepResearcher] Fallback LLM also failed: {e_fb}")
+            
+            # 3. Si todo lo anterior falla, armar el reporte de contingencia directamente con los findings investigados
+            # para no perder absolutamente nada del trabajo previo de investigación.
+            if not final_report or not getattr(final_report, "content", None):
+                logger.error(f"🚨 [DeepResearcher] Todos los LLMs fallaron al redactar el informe final ({e}). Generando reporte de contingencia estructurado a partir de los hallazgos acumulados.")
+                emergency_brief = state.get("research_brief", "Investigación profunda completada.")
+                emergency_content = (
+                    f"# Informe de Investigación: {emergency_brief[:120]}\n\n"
+                    f"## Resumen Ejecutivo\n"
+                    f"Se completó la recopilación y síntesis de evidencia para la investigación '{emergency_brief}'. "
+                    f"A continuación se presentan los hallazgos detallados, análisis y datos extraídos por el sistema autónomo.\n\n"
+                    f"## Hallazgos y Análisis Temático\n"
+                    f"{findings}\n\n"
+                    f"## Conclusiones e Implicaciones Estratégicas\n"
+                    f"Se consolidaron un total de {len(sources)} fuentes y evidencias durante las fases de investigación.\n"
+                )
+                final_report = AIMessage(content=emergency_content)
     
     # Extract sources and recommendations from the supervisor messages
     sources = []
@@ -451,9 +503,13 @@ async def final_report_generation(state: AgentState, config: RunnableConfig) -> 
     # Bajamos el umbral a 0.95 para capturar mejor los casos donde el LLM se queda sin tokens al final
     if len(report_content) >= cfg.max_input_tokens * 0.95 or (not report_content.strip().endswith(('.', '!', '?', '>', '\"')) and len(report_content) > 3000):
         logger.warning("⚠️ [DeepResearcher] Reporte parece truncado. Solicitando continuación...")
-        continuation_prompt = HumanMessage(content="El reporte anterior quedó incompleto. Por favor, continúa exactamente donde te quedaste, manteniendo el tono académico y la densidad técnica.")
-        continuation_response = await writer_model.ainvoke([HumanMessage(content=final_report_prompt), final_report, continuation_prompt])
-        report_content += "\n" + continuation_response.content
+        try:
+            continuation_prompt = HumanMessage(content="El reporte anterior quedó incompleto. Por favor, continúa exactamente donde te quedaste, manteniendo el tono académico y la densidad técnica.")
+            continuation_response = await writer_model.ainvoke([HumanMessage(content=final_report_prompt), final_report, continuation_prompt])
+            if continuation_response and getattr(continuation_response, "content", None):
+                report_content += "\n" + continuation_response.content
+        except Exception as cont_err:
+            logger.warning(f"⚠️ [DeepResearcher] Error al solicitar continuación del reporte ({cont_err}). Usando reporte actual sin continuación.")
 
     logger.info(f"🔍 [DeepResearcher Diagnostics] Final report content preview (first 500 chars): {report_content[:500]}")
     
@@ -551,6 +607,8 @@ async def supervisor(state: SupervisorState, config: RunnableConfig) -> dict:
         await progress_callback(current_global_progress, f"Supervisor: Planificando iteración de investigación {current_iteration + 1}/{total_iterations}", "supervisor")
 
     account_id = state.get("account_id")
+    if account_id:
+        set_active_account_id(account_id)
     from core.llm_manager import get_llm_for_user
     
     if account_id:
@@ -664,6 +722,8 @@ async def supervisor(state: SupervisorState, config: RunnableConfig) -> dict:
 async def supervisor_tools(state: SupervisorState, config: RunnableConfig, researcher_subgraph: Pregel, expert_agent_subgraph: Pregel) -> dict:
     """Executes tools called by the supervisor."""
     logger.debug("--- [DeepResearcher] Node: supervisor_tools ---")
+    if state.get("account_id"):
+        set_active_account_id(state.get("account_id"))
     cfg = Configuration.from_runnable_config(config)
     progress_callback = config.get("configurable", {}).get("progress_callback")
     base_progress = config.get("configurable", {}).get("base_progress", 0)
@@ -729,9 +789,14 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig, resea
 
             if "configurable" not in subgraph_config:
                 subgraph_config["configurable"] = {}
-            subgraph_config.get("configurable", {})["progress_callback"] = progress_callback
-            subgraph_config.get("configurable", {})["base_progress"] = subgraph_base_progress
-            subgraph_config.get("configurable", {})["max_sub_progress"] = subgraph_max_sub_progress
+            else:
+                subgraph_config["configurable"] = dict(subgraph_config["configurable"])
+            subgraph_config["configurable"]["account_id"] = state.get("account_id")
+            if state.get("workspace_id"):
+                subgraph_config["configurable"]["workspace_id"] = state.get("workspace_id")
+            subgraph_config["configurable"]["progress_callback"] = progress_callback
+            subgraph_config["configurable"]["base_progress"] = subgraph_base_progress
+            subgraph_config["configurable"]["max_sub_progress"] = subgraph_max_sub_progress
             
             task = researcher_subgraph.ainvoke({
                 "researcher_messages": [HumanMessage(content=tc["args"]["research_topic"])],
@@ -759,9 +824,14 @@ async def supervisor_tools(state: SupervisorState, config: RunnableConfig, resea
 
             if "configurable" not in subgraph_config:
                 subgraph_config["configurable"] = {}
-            subgraph_config.get("configurable", {})["progress_callback"] = progress_callback
-            subgraph_config.get("configurable", {})["base_progress"] = subgraph_base_progress
-            subgraph_config.get("configurable", {})["max_sub_progress"] = subgraph_max_sub_progress
+            else:
+                subgraph_config["configurable"] = dict(subgraph_config["configurable"])
+            subgraph_config["configurable"]["account_id"] = state.get("account_id")
+            if state.get("workspace_id"):
+                subgraph_config["configurable"]["workspace_id"] = state.get("workspace_id")
+            subgraph_config["configurable"]["progress_callback"] = progress_callback
+            subgraph_config["configurable"]["base_progress"] = subgraph_base_progress
+            subgraph_config["configurable"]["max_sub_progress"] = subgraph_max_sub_progress
             
             expert_name = tc["args"].get("expert_name", "Specialist")
             research_topic = tc["args"].get("research_topic", "")
@@ -951,12 +1021,17 @@ async def researcher(state: ResearcherState, config: RunnableConfig) -> dict:
         logger.debug(f"Calling progress_callback in researcher: {current_global_progress}% for topic {state['research_topic']}")
         await progress_callback(current_global_progress, f"Investigando: {state['research_topic']} (Paso {current_tool_iteration + 1}/{total_tool_calls})", f"researcher_{state['research_topic']}")
     
+    account_id = state.get("account_id")
+    if account_id:
+        set_active_account_id(account_id)
+        if config and "configurable" in config:
+            config["configurable"]["account_id"] = account_id
+
     tools = await get_all_tools(config)
     if not tools:
         logger.error("[Researcher] No tools found for research. Aborting.")
         raise ValueError("No tools found for research.")
 
-    account_id = state.get("account_id")
     from core.llm_manager import get_llm_for_user
     
     if account_id:
@@ -1058,6 +1133,16 @@ async def researcher_tools(state: ResearcherState, config: RunnableConfig) -> di
     if not most_recent_message.tool_calls:
         logger.warning("[Researcher Tools] No tool calls in the last message. Skipping tool execution.")
         return {}
+
+    if config is None:
+        config = RunnableConfig(configurable={})
+    elif "configurable" not in config:
+        config["configurable"] = {}
+    else:
+        config["configurable"] = dict(config["configurable"])
+    if state.get("account_id"):
+        config["configurable"]["account_id"] = state.get("account_id")
+        set_active_account_id(state.get("account_id"))
 
     tools = await get_all_tools(config)
     tools_by_name = {tool.name: tool for tool in tools if hasattr(tool, 'name')}
@@ -1195,6 +1280,8 @@ async def compress_research(state: ResearcherState, config: RunnableConfig) -> d
         await progress_callback(final_researcher_progress, f"Sintetizando hallazgos para: {state['research_topic']}", f"compress_research_{state['research_topic']}")
 
     account_id = state.get("account_id")
+    if account_id:
+        set_active_account_id(account_id)
     from core.llm_manager import get_llm_for_user
     
     if account_id:
@@ -1553,12 +1640,17 @@ async def expert_agent(state: ExpertAgentState, config: RunnableConfig) -> dict:
             f"expert_agent_{state['research_topic']}"
         )
     
+    account_id = state.get("account_id")
+    if account_id:
+        set_active_account_id(account_id)
+        if config and "configurable" in config:
+            config["configurable"]["account_id"] = account_id
+
     tools = await get_all_tools(config)
     if not tools:
         logger.error("[Expert Agent] No tools found for research. Aborting.")
         raise ValueError("No tools found for research.")
 
-    account_id = state.get("account_id")
     from core.llm_manager import get_llm_for_user
     
     if account_id:
@@ -1664,6 +1756,16 @@ async def expert_agent_tools(state: ExpertAgentState, config: RunnableConfig) ->
         logger.warning("[Expert Agent Tools] No tool calls in the last message. Skipping tool execution.")
         return {}
 
+    if config is None:
+        config = RunnableConfig(configurable={})
+    elif "configurable" not in config:
+        config["configurable"] = {}
+    else:
+        config["configurable"] = dict(config["configurable"])
+    if state.get("account_id"):
+        config["configurable"]["account_id"] = state.get("account_id")
+        set_active_account_id(state.get("account_id"))
+
     tools = await get_all_tools(config)
     tools_by_name = {tool.name: tool for tool in tools if hasattr(tool, 'name')}
     
@@ -1751,6 +1853,8 @@ async def compress_expert_research(state: ExpertAgentState, config: RunnableConf
         )
 
     account_id = state.get("account_id")
+    if account_id:
+        set_active_account_id(account_id)
     from core.llm_manager import get_llm_for_user
     
     if account_id:

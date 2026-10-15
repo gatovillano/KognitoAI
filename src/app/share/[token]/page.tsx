@@ -151,8 +151,14 @@ const SharedAlbumPage: React.FC = () => {
     );
   }
 
+  // Los originales se sirven por el endpoint del enlace compartido, no por el
+  // mount estatico /media: ese solo expone MEDIA_ROOT y da 404 cuando la cuenta
+  // tiene cloud_storage_path configurado.
+  const sharedPhotoUrl = (photoId: string) =>
+    `${process.env.NEXT_PUBLIC_API_URL}/api/galleries/share/${token}/photos/${photoId}/file`;
+
   const slides = album.photos.map((photo) => ({
-      src: `${process.env.NEXT_PUBLIC_API_URL}/media/${photo.file_path}`,
+      src: sharedPhotoUrl(photo.id),
   }));
 
   const breakpointColumnsObj = {
@@ -220,7 +226,7 @@ const SharedAlbumPage: React.FC = () => {
                   setCurrentIndex(index);
                   setOpen(true);
                 }}>
-                  <Image src={`${process.env.NEXT_PUBLIC_API_URL}/media/${photo.file_path}`} alt="Album Photo" width={500} height={500} className="w-full object-cover" />
+                  <Image src={sharedPhotoUrl(photo.id)} alt="Album Photo" width={500} height={500} className="w-full object-cover" unoptimized />
 
                 </div>
               ))}

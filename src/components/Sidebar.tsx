@@ -342,8 +342,8 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed,
           <Button
             variant="ghost"
             className={cn(
-              "font-normal transition-all duration-150 rounded-xl overflow-hidden hover:bg-accent/60",
-              isCollapsed ? "h-8 w-8 p-0 flex items-center justify-center mx-auto" : "w-full justify-between gap-1.5 text-left h-8 px-2 py-1",
+              "font-normal transition-all duration-150 rounded-xl hover:bg-accent/60 whitespace-normal",
+              isCollapsed ? "h-8 w-8 p-0 flex items-center justify-center mx-auto" : "w-full justify-between items-start gap-1.5 text-left h-auto min-h-[2rem] px-2 py-1.5",
               isSelected && "bg-secondary/80 text-foreground font-medium"
             )}
           >
@@ -351,24 +351,24 @@ export function Sidebar({ isCollapsed, onLinkClick, showToolText = !isCollapsed,
               <MessageSquare className="h-4 w-4 text-muted-foreground shrink-0" />
             ) : (
               <>
-                <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
+                <div className="flex items-start gap-2 min-w-0 flex-1">
                   {thread.platform === 'telegram' ? (
-                    <Smartphone className="h-3 w-3 text-blue-500 shrink-0" />
+                    <Smartphone className="h-3.5 w-3.5 text-blue-500 shrink-0 mt-0.5" />
                   ) : isSelected ? (
-                    <div className="h-1.5 w-1.5 rounded-full bg-primary shrink-0" />
+                    <div className="h-1.5 w-1.5 rounded-full bg-primary shrink-0 mt-1.5" />
                   ) : null}
-                  <span className="truncate text-xs text-foreground/90 font-normal group-hover/item:text-foreground">
+                  <span className="text-xs text-foreground/90 font-normal group-hover/item:text-foreground whitespace-normal break-words [overflow-wrap:anywhere] leading-snug">
                     {thread.title || "Sin título"}
                   </span>
                 </div>
 
-                <div className="flex items-center gap-1 shrink-0">
+                <div className="flex items-center gap-1 shrink-0 self-start mt-0.5">
                   {timeString && (
-                    <span className="text-[11px] text-muted-foreground/60 font-normal group-hover/item:hidden select-none">
+                    <span className="text-[10px] text-muted-foreground/60 font-normal select-none whitespace-nowrap">
                       {timeString}
                     </span>
                   )}
-                  <div className="relative shrink-0 hidden group-hover/item:block">
+                  <div className="relative shrink-0">
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <div

@@ -17,9 +17,9 @@ class ListOnlyOfficeInput(BaseModel):
 class ListOnlyOfficeDocumentsTool(BaseTool):
     name: str = "list_onlyoffice_documents"
     description: str = (
-        "Lista el contenido (carpetas y documentos) de un nivel específico o carpeta de OnlyOffice. "
-        "Úsala para navegar paso a paso por la estructura de directorios del usuario. "
-        "Si no sabes por dónde empezar, úsala sin argumentos para ver la raíz."
+        "[MÓDULO ONLYOFFICE DE KAI] Lista el contenido (carpetas y documentos editables) de un nivel específico "
+        "o carpeta de OnlyOffice. Úsala para navegar paso a paso por la estructura de directorios del usuario en OnlyOffice. "
+        "NO lista documentos de la base de conocimiento RAG (para esos usa 'get_document_list_tool')."
     )
     args_schema: Type[BaseModel] = ListOnlyOfficeInput
     

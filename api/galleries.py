@@ -6,12 +6,12 @@ import aiofiles
 import secrets
 import hashlib
 from datetime import datetime, timedelta
-from PIL import Image # Added
+from PIL import Image, ImageOps # Added
 import io # Added
 import zipfile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, FileResponse
 
-from fastapi import APIRouter, Depends, HTTPException, Response, File, UploadFile, status, Query # Added Query
+from fastapi import APIRouter, Depends, HTTPException, Response, File, UploadFile, status, Query, Security # Added Query
 from fastapi.concurrency import run_in_threadpool # Added
 import shutil # Added
 from pydantic import BaseModel, Field
@@ -23,6 +23,7 @@ from core.dependencies import get_db_session
 from core.database import Album, Account, Photo, SharedAlbumLink, ContactProfile
 from core.config import settings
 from api.auth import get_current_account_id
+from utils.security import get_optional_current_active_account
 from sqlalchemy.future import select
 from sqlalchemy import func # Added func
 
@@ -142,12 +143,123 @@ async def get_photo_and_verify_ownership(photo_id: uuid.UUID, current_account: A
 def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
 
-def generate_thumbnail_sync(image_path: str, output_path: str, size: Tuple[int, int] = (256, 256)):
-    """Generates a thumbnail for an image synchronously."""
+async def get_account_for_media(
+    token: Optional[str] = Query(
+        None,
+        description="JWT alternativo. Necesario porque <img src> y el visor de "
+                    "lightbox no pueden enviar el header Authorization.",
+    ),
+    bearer_account: Optional[Account] = Security(get_optional_current_active_account),
+    db: AsyncSession = Depends(get_db_session),
+) -> Account:
+    """Autenticación para servir/binario de fotos: acepta Bearer o ?token=."""
+    if bearer_account is not None:
+        return bearer_account
+
+    if token:
+        from utils.security import decode_access_token
+        payload = decode_access_token(token)
+        if payload and payload.get("sub"):
+            account = (
+                await db.execute(
+                    select(Account).where(
+                        Account.id == payload["sub"], Account.is_active == True
+                    )
+                )
+            ).scalars().first()
+            if account:
+                return account
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="No autorizado.",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+def resolve_photo_path(account: Optional[Account], file_path: str) -> str:
+    """Resolves a Photo.file_path (stored relative to the account media root).
+
+    Photo.file_path is relative on purpose, but the account media root can live
+    outside MEDIA_ROOT when the account has cloud_storage_path configured.
+    """
+    return os.path.join(get_account_media_root(account), file_path)
+
+# Thumbnail geometry is intentionally generous: the grid renders these at
+# device-pixel sizes well above 256px, and a too-small thumbnail is what makes
+# a gallery look "soft" even though the originals are pristine.
+THUMBNAIL_SIZE = (1024, 1024)
+THUMBNAIL_QUALITY = 90
+
+def _srgb_convert(img, icc_bytes):
+    """Convierte un thumbnail a sRGB (estándar web) preservando la apariencia.
+
+    - Si el original ya es sRGB, devuelve la imagen y los bytes del perfil para
+      re-incrustarlos tal cual (round-trip seguro, sin conversión).
+    - Si es un perfil amplio (Adobe RGB, Display P3...), convierte los píxeles
+      a sRGB con intent perceptual y devuelve (imagen, None): sRGB es el
+      valor asumido por defecto en la web, así el thumbnail se ve correcto
+      incluso donde no hay gestión de color.
+    - Si algo falla (perfil corrupto, LCMS ausente), devuelve (imagen, None)
+      y el llamador incrusta el perfil original como red de seguridad para
+      navegadores con gestión de color.
+    """
+    try:
+        import io as _io
+        from PIL import ImageCms as _ImageCms
+
+        src_profile = _ImageCms.getOpenProfile(_io.BytesIO(icc_bytes))
+        desc = _ImageCms.getProfileDescription(src_profile).strip().lower()
+        if "srgb" in desc:
+            return img, icc_bytes
+        srgb_profile = _ImageCms.createProfile("sRGB")
+        converted = _ImageCms.profileToProfile(
+            img, src_profile, srgb_profile, outputMode="RGB"
+        )
+        return converted, None
+    except Exception as e:
+        logger.warning(f"No se pudo convertir a sRGB ({e}); se conserva el perfil original.")
+        return img, icc_bytes
+
+
+def generate_thumbnail_sync(image_path: str, output_path: str, size: Tuple[int, int] = THUMBNAIL_SIZE) -> bool:
+    """Generates a JPEG thumbnail for an image synchronously.
+
+    The original file is never modified. Returns False when the image cannot be
+    processed (unsupported or corrupt format) so the caller can continue instead
+    of failing the whole upload batch.
+
+    Color: el thumbnail se normaliza a sRGB (o conserva el ICC si ya es sRGB).
+    Sin esto, un original Adobe RGB pierde su perfil al re-guardar, el navegador
+    asume sRGB y los negros se lavan / los colores se desaturan.
+    """
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    img = Image.open(image_path)
-    img.thumbnail(size)
-    img.save(output_path)
+    try:
+        img = Image.open(image_path)
+        # Capturar el ICC antes de transformar: convert()/transpose pueden
+        # crear objetos nuevos sin .info.
+        icc_bytes = img.info.get("icc_profile") if hasattr(img, "info") else None
+        # Honour EXIF orientation, otherwise portrait phone photos render sideways.
+        img = ImageOps.exif_transpose(img) or img
+        img.thumbnail(size, Image.Resampling.LANCZOS)
+        if img.mode not in ("RGB", "L"):
+            # CMYK / palette / alpha cannot be written as JPEG.
+            img = img.convert("RGB")
+        save_kwargs = {"quality": THUMBNAIL_QUALITY, "optimize": True, "progressive": True}
+        if icc_bytes:
+            img, out_icc = _srgb_convert(img, icc_bytes)
+            if out_icc:
+                # Solo cuando el original ya era sRGB (o la conversión falló y
+                # devolvimos los píxeles intactos): píxeles y perfil emparejados.
+                # Un thumbnail convertido a sRGB se guarda SIN perfil porque
+                # sRGB es el asumido por defecto en la web; incrustar el perfil
+                # Adobe original sobre píxeles ya convertidos duplicaría el cambio.
+                save_kwargs["icc_profile"] = out_icc
+        img.save(output_path, "JPEG", **save_kwargs)
+        return True
+    except Exception as e:
+        logger.warning(f"No se pudo generar thumbnail para {os.path.basename(image_path)}: {e}")
+        return False
 
 # --- Album Endpoints ---
 
@@ -568,35 +680,33 @@ async def upload_photos(
 
     created_photos = []
     for idx, file in enumerate(files):
-        try:
-            unique_filename = f"{uuid.uuid4()}-{file.filename}"
-            file_path = os.path.join(album_dir, unique_filename)
+        unique_filename = f"{uuid.uuid4()}-{file.filename}"
+        file_path = os.path.join(album_dir, unique_filename)
 
-            # Save the original file using shutil.copyfileobj in a threadpool
-            with open(file_path, 'wb') as buffer:
-                await run_in_threadpool(shutil.copyfileobj, file.file, buffer)
-            
-            db_file_path = os.path.join(str(album_id), unique_filename)
+        # Save the original file verbatim, using shutil.copyfileobj in a threadpool.
+        # This is a raw byte copy: no re-encoding, so quality is preserved exactly.
+        with open(file_path, 'wb') as buffer:
+            await run_in_threadpool(shutil.copyfileobj, file.file, buffer)
 
-            # Generate thumbnail in a threadpool
-            thumbnail_dir = os.path.join(THUMBNAIL_ROOT, str(album_id))
-            os.makedirs(thumbnail_dir, exist_ok=True)
-            thumbnail_filename = f"thumb-{unique_filename}"
-            thumbnail_path = os.path.join(thumbnail_dir, thumbnail_filename)
-            await run_in_threadpool(generate_thumbnail_sync, file_path, thumbnail_path)
-            db_thumbnail_path = os.path.join(str(album_id), thumbnail_filename)
+        db_file_path = os.path.join(str(album_id), unique_filename)
 
-            new_photo = Photo(
-                album_id=album_id,
-                file_path=db_file_path,
-                thumbnail_path=db_thumbnail_path,
-                order=current_total_photos + idx
-            )
-            db.add(new_photo)
-            created_photos.append(new_photo)
-        except Exception as e:
-            logger.error(f"Error al procesar el archivo {file.filename}: {e}", exc_info=True)
-            raise HTTPException(status_code=500, detail=f"Error al guardar el archivo {file.filename}: {e}")
+        # Generate thumbnail in a threadpool. Thumbnails are always JPEG so the
+        # Content-Type served by StaticFiles matches the actual bytes.
+        thumbnail_dir = os.path.join(THUMBNAIL_ROOT, str(album_id))
+        os.makedirs(thumbnail_dir, exist_ok=True)
+        thumbnail_filename = f"thumb-{uuid.uuid4()}.jpg"
+        thumbnail_path = os.path.join(thumbnail_dir, thumbnail_filename)
+        thumbnail_ok = await run_in_threadpool(generate_thumbnail_sync, file_path, thumbnail_path)
+        db_thumbnail_path = os.path.join(str(album_id), thumbnail_filename) if thumbnail_ok else None
+
+        new_photo = Photo(
+            album_id=album_id,
+            file_path=db_file_path,
+            thumbnail_path=db_thumbnail_path,
+            order=current_total_photos + idx
+        )
+        db.add(new_photo)
+        created_photos.append(new_photo)
 
     await db.commit()
     for photo in created_photos:
@@ -604,6 +714,30 @@ async def upload_photos(
 
     return created_photos
 
+@router.get("/photos/{photo_id}/file", summary="Obtener el archivo original de una foto")
+async def get_photo_file(
+    photo_id: uuid.UUID,
+    current_account: Account = Depends(get_account_for_media),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Sirve el archivo ORIGINAL de la foto, sin recomprimir, resolviendo la raíz
+    de medios de la cuenta. Es la vía correcta para el visor y las descargas:
+    el mount estático /media solo expone MEDIA_ROOT y no alcanza las cuentas
+    que tienen cloud_storage_path configurado.
+    """
+    photo = await get_photo_and_verify_ownership(photo_id, current_account, db)
+
+    full_file_path = resolve_photo_path(current_account, photo.file_path)
+    if not os.path.isfile(full_file_path):
+        raise HTTPException(status_code=404, detail="Archivo original no encontrado en disco.")
+
+    return FileResponse(
+        full_file_path,
+        filename=os.path.basename(photo.file_path),
+        media_type="application/octet-stream",
+    )
+
 @router.put("/photos/{photo_id}/favorite", response_model=PhotoResponse, summary="Marcar/desmarcar foto como favorita")
 async def toggle_favorite_photo(
     photo_id: uuid.UUID,
@@ -629,17 +763,26 @@ async def delete_photo(
     Elimina una foto de un álbum y del disco.
     """
     photo = await get_photo_and_verify_ownership(photo_id, current_account, db)
-    
+
     # Delete the physical file
-    full_file_path = os.path.join(MEDIA_ROOT, photo.file_path)
+    full_file_path = resolve_photo_path(current_account, photo.file_path)
     if os.path.exists(full_file_path):
         os.remove(full_file_path)
     else:
-        print(f"Warning: File not found at {full_file_path} but proceeding with DB deletion.")
+        logger.warning(f"Archivo no encontrado en {full_file_path}; se procede a eliminar la fila.")
+
+    # Best-effort cleanup of the generated thumbnail.
+    if photo.thumbnail_path:
+        thumbnail_path = os.path.join(THUMBNAIL_ROOT, photo.thumbnail_path)
+        if os.path.isfile(thumbnail_path):
+            try:
+                os.remove(thumbnail_path)
+            except OSError as e:
+                logger.warning(f"No se pudo eliminar el thumbnail {thumbnail_path}: {e}")
 
     await db.delete(photo)
     await db.commit()
-    
+
     return Response(status_code=204)
 
 # --- Shared Link Endpoints ---
@@ -832,8 +975,9 @@ async def download_album_as_zip(
 
     zip_io = io.BytesIO()
     with zipfile.ZipFile(zip_io, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        album_account = await db.get(Account, album.account_id)
         for photo in album.photos:
-            file_path = os.path.join(MEDIA_ROOT, photo.file_path)
+            file_path = resolve_photo_path(album_account, photo.file_path)
             if os.path.exists(file_path):
                 zipf.write(file_path, os.path.basename(file_path))
 
@@ -894,17 +1038,26 @@ async def delete_photo(
     Elimina una foto de un álbum y del disco.
     """
     photo = await get_photo_and_verify_ownership(photo_id, current_account, db)
-    
+
     # Delete the physical file
-    full_file_path = os.path.join(MEDIA_ROOT, photo.file_path)
+    full_file_path = resolve_photo_path(current_account, photo.file_path)
     if os.path.exists(full_file_path):
         os.remove(full_file_path)
     else:
-        print(f"Warning: File not found at {full_file_path} but proceeding with DB deletion.")
+        logger.warning(f"Archivo no encontrado en {full_file_path}; se procede a eliminar la fila.")
+
+    # Best-effort cleanup of the generated thumbnail.
+    if photo.thumbnail_path:
+        thumbnail_path = os.path.join(THUMBNAIL_ROOT, photo.thumbnail_path)
+        if os.path.isfile(thumbnail_path):
+            try:
+                os.remove(thumbnail_path)
+            except OSError as e:
+                logger.warning(f"No se pudo eliminar el thumbnail {thumbnail_path}: {e}")
 
     await db.delete(photo)
     await db.commit()
-    
+
     return Response(status_code=204)
 
 # --- Shared Link Endpoints ---
@@ -1097,8 +1250,9 @@ async def download_album_as_zip(
 
     zip_io = io.BytesIO()
     with zipfile.ZipFile(zip_io, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        album_account = await db.get(Account, album.account_id)
         for photo in album.photos:
-            file_path = os.path.join(MEDIA_ROOT, photo.file_path)
+            file_path = resolve_photo_path(album_account, photo.file_path)
             if os.path.exists(file_path):
                 zipf.write(file_path, os.path.basename(file_path))
 
@@ -1133,3 +1287,52 @@ async def reorder_photos(
 
     await db.commit()
     return Response(status_code=204)
+
+@router.get("/share/{token}/photos/{photo_id}/file", summary="Original de una foto en un álbum compartido")
+async def get_shared_photo_file(
+    token: str,
+    photo_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Sirve el original de una foto a traves de un enlace compartido, resolviendo
+    la raiz de medios de la cuenta propietaria del album. Sin esto, la pagina
+    publica seguiria leyendo /media y devolveria 404 en cuentas con
+    cloud_storage_path configurado.
+
+    Los enlaces protegidos por contrasena NO sirven el original: siguen
+    mostrando el thumbnail desde /thumbnails.
+    """
+    link_stmt = select(SharedAlbumLink).where(SharedAlbumLink.token == token)
+    shared_link = (await db.execute(link_stmt)).scalars().first()
+    if not shared_link:
+        raise HTTPException(status_code=404, detail="Enlace compartido no encontrado.")
+    if shared_link.expiry_date and shared_link.expiry_date < datetime.utcnow():
+        raise HTTPException(status_code=403, detail="Enlace compartido caducado.")
+    if shared_link.password_hash:
+        raise HTTPException(
+            status_code=401,
+            detail="Este album esta protegido por contrasena.",
+        )
+
+    photo_stmt = (
+        select(Photo)
+        .join(Album, Photo.album_id == Album.id)
+        .where(Photo.id == photo_id, Album.id == shared_link.album_id)
+    )
+    photo = (await db.execute(photo_stmt)).scalars().first()
+    if not photo:
+        raise HTTPException(status_code=404, detail="Foto no encontrada en este album.")
+
+    album = await db.get(Album, shared_link.album_id)
+    owner = await db.get(Account, album.account_id)
+
+    full_file_path = resolve_photo_path(owner, photo.file_path)
+    if not os.path.isfile(full_file_path):
+        raise HTTPException(status_code=404, detail="Archivo original no encontrado en disco.")
+
+    return FileResponse(
+        full_file_path,
+        filename=os.path.basename(photo.file_path),
+        media_type="application/octet-stream",
+    )

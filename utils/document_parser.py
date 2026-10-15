@@ -7,7 +7,7 @@ Módulo de Utilidad para el Parseo de Documentos.
 import logging
 import base64
 from io import BytesIO
-from typing import Tuple, Dict, Any, List
+from typing import Tuple, Dict, Any, List, Optional, Callable
 
 # Librerías específicas para cada tipo de archivo
 import fitz  # PyMuPDF
@@ -15,14 +15,22 @@ import docx
 from langchain_core.messages import HumanMessage
 
 from core.llm_manager import get_vision_llm
+from utils.ocr_service import is_local_ocr_available, ocr_image_bytes, ocr_pdf_bytes
 
 logger = logging.getLogger(__name__)
 
 
-async def extract_text_and_metadata_from_document(file_name: str, file_bytes: bytes) -> Tuple[str, Dict[str, Any]]:
+async def extract_text_and_metadata_from_document(
+    file_name: str,
+    file_bytes: bytes,
+    progress_callback: Optional[Callable[[int, int, float, str], Any]] = None
+) -> Tuple[str, Dict[str, Any]]:
     """
     Extrae texto plano y metadatos básicos de un archivo en formato binario.
-    Si es una imagen o un PDF sin texto, utiliza un modelo de visión multimodal.
+    Para imágenes o PDFs escaneados/fotocopiados:
+    1. Intenta primero extraer con el motor de OCR local liviano (RapidOCR / ONNX Runtime).
+    2. Si el OCR local no extrae suficiente texto o no está disponible, utiliza como fallback
+       un modelo de visión multimodal.
     """
     file_name_lower = file_name.lower()
     text = ""
@@ -37,17 +45,41 @@ async def extract_text_and_metadata_from_document(file_name: str, file_bytes: by
             with fitz.open(stream=file_bytes, filetype="pdf") as doc:
                 text = "".join(page.get_text() for page in doc)
             
-            # Si el PDF no tiene texto (escaneado), intentar con visión
+            # Si el PDF no tiene texto digital suficiente (escaneado o fotocopiado)
             if not text.strip() or len(text.strip()) < 50:
-                logger.info("El PDF parece ser un escaneo (poco texto detectado). Intentando OCR con modelo de visión...")
-                text = await _extract_text_from_image_multimodal(file_bytes, is_pdf=True)
+                logger.info("El PDF parece ser un escaneo o fotocopia (poco texto digital detectado). Intentando OCR local liviano...")
+                ocr_text, ocr_stats = await ocr_pdf_bytes(file_bytes, progress_callback=progress_callback)
+                
+                # Si el OCR local extrajo contenido suficiente, usarlo
+                if ocr_text and len(ocr_text.strip()) >= 30:
+                    text = ocr_text
+                    metadata["extraction_method"] = "local_ocr_rapidocr"
+                    metadata["ocr_stats"] = ocr_stats
+                    logger.info(f"Texto extraído mediante OCR local exitosamente ({len(text)} caracteres, confianza: {ocr_stats.get('avg_confidence', 0):.2f}).")
+                else:
+                    logger.info("OCR local insuficiente o sin resultados. Recurriendo a fallback con modelo de visión multimodal...")
+                    text = await _extract_text_from_image_multimodal(file_bytes, is_pdf=True)
+                    metadata["extraction_method"] = "multimodal_vision"
+            else:
+                metadata["extraction_method"] = "native_pdf_text"
             
             logger.info(f"Texto extraído de PDF exitosamente. Longitud: {len(text)} caracteres.")
 
-        elif file_name_lower.endswith((".png", ".jpg", ".jpeg", ".webp")):
+        elif file_name_lower.endswith((".png", ".jpg", ".jpeg", ".webp", ".tiff", ".tif", ".bmp")):
             metadata["file_type"] = "image"
-            logger.info(f"Detectada imagen '{file_name}', usando modelo de visión multimodal...")
-            text = await _extract_text_from_image_multimodal(file_bytes)
+            logger.info(f"Detectada imagen '{file_name}', ejecutando OCR local liviano...")
+            ocr_text, ocr_conf = await ocr_image_bytes(file_bytes)
+            
+            if ocr_text and len(ocr_text.strip()) >= 20:
+                text = ocr_text
+                metadata["extraction_method"] = "local_ocr_rapidocr"
+                metadata["ocr_confidence"] = ocr_conf
+                logger.info(f"Texto extraído de imagen con OCR local exitosamente ({len(text)} caracteres, confianza: {ocr_conf:.2f}).")
+            else:
+                logger.info("OCR local no detectó texto suficiente en imagen. Recurriendo a fallback con modelo de visión multimodal...")
+                text = await _extract_text_from_image_multimodal(file_bytes)
+                metadata["extraction_method"] = "multimodal_vision"
+            
             logger.info(f"Texto extraído de imagen exitosamente. Longitud: {len(text)} caracteres.")
 
         elif file_name_lower.endswith(".docx"):

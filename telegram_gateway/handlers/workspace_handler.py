@@ -59,14 +59,6 @@ async def switch_workspace(update: Update, context: CallbackContext) -> None:
 
         workspaces = await get_workspaces(jwt_token)
 
-        keyboard = [
-            [InlineKeyboardButton(
-                ws.get('name', f"Workspace {ws.get('id', '?')}"),
-                callback_data=f"workspace_select_{ws.get('id')}"
-            )]
-            for ws in workspaces
-        ]
-
         if not workspaces:
             # Mostrar mensaje con instrucciones y opción de comando
             help_message = "No tienes acceso a ningún workspace todavía. Puedes crear uno desde el panel web.\n\n"
@@ -74,6 +66,21 @@ async def switch_workspace(update: Update, context: CallbackContext) -> None:
             help_message += "• /leave_workspace - Salir del workspace actual\n"
             await update.message.reply_text(help_message, parse_mode='HTML')
             return
+
+        current_ws_id = context.chat_data.get('current_workspace_id')
+        keyboard = []
+        for ws in workspaces:
+            ws_id = str(ws.get('id', ''))
+            ws_name = ws.get('name') or f"Workspace {ws_id[:8]}"
+            label = f"✓ {ws_name}" if current_ws_id and ws_id == str(current_ws_id) else ws_name
+            keyboard.append([InlineKeyboardButton(
+                label,
+                callback_data=f"workspace_select_{ws_id}"
+            )])
+
+        # Telegram permite máximo 100 botones por InlineKeyboardMarkup
+        if len(keyboard) > 98:
+            keyboard = keyboard[:98]
 
         # Agregar opción para salir del workspace
         keyboard.append([InlineKeyboardButton("🚪 Salir del workspace", callback_data="workspace_exit")])

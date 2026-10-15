@@ -1,0 +1,1378 @@
+# core/agent.py
+
+"""
+Motor Agéntico Nativo Asíncrono de Ultra-Baja Latencia (KAI Fast Agent).
+
+Diseñado para máxima agilidad y velocidad de ejecución de herramientas:
+1. Mantiene íntegras todas las capas de memoria:
+   - Capa 1: Perfil de usuario e instrucciones personalizadas (User Profile).
+   - Capa 2: Historial conversacional y memoria de trabajo inmediata (Working Memory).
+   - Capa 3: Memoria semántica episódica y RAG vectorial (Vector DB / pgvector).
+   - Capa 4: Grafo de conocimiento y contexto activo estructurado (Knowledge Graph / Neo4j).
+   - Capa 5: Memoria procedimental y skills dinámicas (Procedural Skills / SKILL.md).
+2. Ejecución de herramientas de alta velocidad:
+   - Indexación O(1) directa de herramientas (sin búsquedas lineales).
+   - Caché de esquemas OpenAI para evitar overhead de reflexión pydantic repetitiva.
+   - Parser de argumentos JSON de una sola pasada (evita re-parseos por token en streaming).
+   - Notificaciones WebSocket asíncronas sin bloqueo del pipeline de herramientas.
+   - Ejecución concurrente masiva con semáforo configurable.
+3. Compatibilidad total 100% hacia atrás con api/chat.py y resto del ecosistema KAI.
+"""
+
+import asyncio
+import json
+import logging
+import os
+import re
+import uuid
+from typing import Any, Dict, List, Optional, Tuple, TypedDict, Union
+
+from langchain_community.chat_message_histories import PostgresChatMessageHistory
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import BaseTool
+from langchain_core.utils.function_calling import convert_to_openai_tool
+from sqlalchemy import select, update
+
+# --- LiteLLM Optimization ---
+try:
+    import litellm
+
+    litellm.set_verbose = False
+    litellm.suppress_debug_info = True
+    logging.getLogger("litellm").setLevel(logging.WARNING)
+except ImportError:
+    pass
+
+# --- Módulos del Proyecto ---
+from core.citation_models import (
+    Source,
+    SourceType,
+    ToolOutputWithSources,
+    format_context_with_sources,
+)
+from core.config import settings
+from core.database import Account, ChatThread, SessionLocal, Workspace
+from core.enhanced_memory_manager import EnhancedMemoryManager
+from core.llm_manager import (
+    get_configured_fallback_llm,
+    get_fast_llm,
+    get_llm_for_user,
+    get_main_llm,
+)
+from core.memory_manager import (
+    add_memory_to_vector_db,
+    get_document_chunks,
+    get_relevant_memories,
+    get_user_profile,
+)
+from core.prompt_manager import PromptManager
+from core.prompts import SUMMARIZATION_PROMPT, THREAD_TITLE_PROMPT
+from core.tools import get_all_langchain_tools
+from core.utils.tool_utils import get_tool_by_name
+from core.websocket_manager import send_personal_message
+from knowledge_graph.graph_database import GraphDB
+from utils.db_session import DBSession
+from utils.postgres_chat_history import (
+    close_postgres_chat_message_history,
+    get_postgres_history_connection_url,
+)
+
+logger = logging.getLogger(__name__)
+
+# ==============================================================================
+# CONCURRENCIA Y OPTIMIZACIONES GLOBALES
+# ==============================================================================
+
+THREAD_TITLE_UPDATE_SEMAPHORE = asyncio.Semaphore(
+    getattr(settings, "thread_title_update_concurrency", 3)
+)
+
+MAX_PARALLEL_TOOLS = getattr(settings, "max_parallel_tools", 10)
+_TOOL_EXECUTION_SEMAPHORE = asyncio.Semaphore(MAX_PARALLEL_TOOLS)
+
+_graph_db_instance: Optional[GraphDB] = None
+_enhanced_memory_manager_instance: Optional[EnhancedMemoryManager] = None
+_TOOL_SCHEMA_CACHE: Dict[str, Dict[str, Any]] = {}
+
+
+async def get_shared_graph_dependencies() -> Tuple[Optional[GraphDB], Optional[EnhancedMemoryManager]]:
+    """
+    Retorna instancias compartidas de GraphDB y EnhancedMemoryManager.
+    """
+    global _graph_db_instance, _enhanced_memory_manager_instance
+
+    if _graph_db_instance and _enhanced_memory_manager_instance:
+        return _graph_db_instance, _enhanced_memory_manager_instance
+
+    try:
+        if settings.neo4j_uri and settings.neo4j_user and settings.neo4j_password:
+            if not _graph_db_instance:
+                _graph_db_instance = GraphDB(
+                    uri=str(settings.neo4j_uri),
+                    user=str(settings.neo4j_user),
+                    password=str(settings.neo4j_password),
+                )
+                _graph_db_instance.connect()
+                logger.info("✅ Shared GraphDB instance created and connected.")
+
+            if not _enhanced_memory_manager_instance:
+                _enhanced_memory_manager_instance = EnhancedMemoryManager(
+                    graph_db=_graph_db_instance
+                )
+                logger.info("✅ Shared EnhancedMemoryManager instance created.")
+
+            return _graph_db_instance, _enhanced_memory_manager_instance
+        else:
+            logger.warning(
+                "⚠️ Missing Neo4j credentials, graph-based memory will not be available."
+            )
+            return None, None
+    except Exception as e:
+        logger.error(
+            f"❌ Error initializing shared graph dependencies: {e}", exc_info=True
+        )
+        return None, None
+
+
+# ==============================================================================
+# CAPA DE MEMORIA PROCEDIMENTAL (SKILLS)
+# ==============================================================================
+
+
+async def fetch_relevant_procedural_skills(
+    user_message: str,
+    account_id: Optional[str] = None,
+    workspace_name: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Recupera las skills procedimentales relevantes para la consulta del usuario,
+    combinando etiquetas explícitas con el símbolo '/' y búsqueda semántica en SKILL.md.
+    """
+    relevant_skills: List[Dict[str, Any]] = []
+    seen_ids = set()
+
+    if not user_message or not user_message.strip():
+        return relevant_skills
+
+    try:
+        from core.skill_manager import get_skill_manager
+
+        skill_mgr = get_skill_manager()
+
+        # 1. Emparejamiento por tags explícitos (/code-review, etc.)
+        tagged_matches = re.findall(r"(?:^|\s)/([a-zA-Z0-9_\-]+)", user_message)
+        if tagged_matches:
+            all_mds = await skill_mgr._load_skill_markdowns(account_id, workspace_name)
+            id_to_skill = {}
+            for s in all_mds:
+                s_id = s.get("id", "")
+                s_name = s.get("name", "")
+                id_to_skill[s_id.lower()] = s
+                id_to_skill[s_name.lower()] = s
+                id_to_skill[s_id.replace("_skill", "").replace("-skill", "").lower()] = s
+
+            for tag in tagged_matches:
+                tag_clean = tag.lower().strip()
+                if tag_clean in id_to_skill:
+                    s = id_to_skill[tag_clean]
+                    if s.get("id") not in seen_ids:
+                        seen_ids.add(s.get("id"))
+                        relevant_skills.append(s)
+
+        # 2. Búsqueda semántica
+        if len(user_message.strip()) > 3:
+            semantic_results = await skill_mgr.search_skills_semantic(
+                query=user_message,
+                top_k=3,
+                account_id=account_id,
+                workspace_name=workspace_name,
+            )
+            for res in semantic_results:
+                r_id = res.get("id")
+                if r_id and r_id not in seen_ids:
+                    seen_ids.add(r_id)
+                    relevant_skills.append(res)
+    except Exception as e:
+        logger.warning(f"Error recuperando procedural skills: {e}")
+
+    return relevant_skills
+
+
+# ==============================================================================
+# UTILIDADES DE TEXTO Y CONTENIDO
+# ==============================================================================
+
+
+def is_multimodal_model(model_name: Optional[str]) -> bool:
+    """
+    Determina si un modelo soporta visión multimodal según su nombre.
+    """
+    if not model_name:
+        return False
+    indicators = [
+        "gemini", "gpt-4o", "gpt-4-turbo", "gpt-4-vision", "claude-3",
+        "claude-3-5", "vision", "pixtral", "llava", "bakllava", "nova-canvas",
+        "nova-pro", "nova-lite", "qwen-vl", "qwen2.5-vl", "-vl", "deepseek-vl", "step-"
+    ]
+    name_lower = model_name.lower()
+    return any(ind in name_lower for ind in indicators)
+
+
+def normalize_image_url(url_or_base64: Optional[str]) -> str:
+    """
+    Normaliza URLs de imagen y datos Base64 asegurando el esquema data: URI.
+    """
+    if not url_or_base64:
+        return ""
+    url_str = str(url_or_base64).strip()
+    if not url_str or url_str.startswith(("http://", "https://", "data:")):
+        return url_str
+
+    if url_str.startswith("iVBORw0KGgo"):
+        mime = "image/png"
+    elif url_str.startswith("/9j/"):
+        mime = "image/jpeg"
+    elif url_str.startswith("R0lGOD"):
+        mime = "image/gif"
+    elif url_str.startswith("UklGR"):
+        mime = "image/webp"
+    else:
+        mime = "image/jpeg"
+    return f"data:{mime};base64,{url_str}"
+
+
+def sanitize_json_content(content: Any) -> Any:
+    """
+    Sanitiza el contenido para eliminar caracteres Unicode inválidos para PostgreSQL.
+    """
+    if isinstance(content, str):
+        return "".join(c for c in content if ord(c) >= 32 or c in "\t\n\r")
+    elif isinstance(content, dict):
+        return {k: sanitize_json_content(v) for k, v in content.items()}
+    elif isinstance(content, list):
+        return [sanitize_json_content(item) for item in content]
+    return content
+
+
+def extract_text_content(content: Any) -> str:
+    """
+    Extrae texto plano de strings o listas multimodales estructuradas.
+    """
+    if isinstance(content, str):
+        return content
+    elif isinstance(content, list):
+        text_parts = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") in {"text", "input_text"}:
+                text_parts.append(item.get("text", ""))
+            elif isinstance(item, str):
+                text_parts.append(item)
+        return "\n".join(text_parts).strip()
+    return str(content) if content is not None else ""
+
+
+def get_source_identifier(s: Union[Source, Dict[str, Any]]) -> str:
+    """
+    Genera una clave de identidad única para una fuente para evitar duplicados.
+    """
+    if hasattr(s, "model_dump"):
+        s_dict = s.model_dump()
+    elif hasattr(s, "dict"):
+        s_dict = s.dict()
+    elif isinstance(s, dict):
+        s_dict = s
+    else:
+        return str(s)
+    s_type = str(s_dict.get("type", "web"))
+    s_url = str(s_dict.get("url") or s_dict.get("id") or "")
+    s_title = str(s_dict.get("title") or "").strip().lower()
+    s_snippet = str(s_dict.get("snippet") or "")[:80]
+    return f"{s_type}::{s_url}::{s_title}::{s_snippet}"
+
+
+def should_stop_retrying_tool(
+    tool_name: str, tool_error_counts: Dict[str, int], max_retries: int = 3
+) -> Tuple[bool, str]:
+    """
+    Verifica si una herramienta ha fallado demasiadas veces consecutivas.
+    """
+    count = tool_error_counts.get(tool_name, 0)
+    if count >= max_retries:
+        return True, f"La herramienta '{tool_name}' falló {count} veces consecutivas. Deteniendo reintentos."
+    return False, ""
+
+
+# ==============================================================================
+# DEFINICIÓN DE ESTADO (COMPATIBILIDAD CON API/CHAT.PY)
+# ==============================================================================
+
+
+class AgentState(TypedDict, total=False):
+    """
+    Estructura del estado del agente compatible con el frontend y api/chat.py.
+    """
+    messages: List[BaseMessage]
+    account_id: str
+    telegram_id: Optional[int]
+    workspace_id: Optional[str]
+    rag_context: Optional[List[Dict[str, Any]]]
+    sources: List[Dict[str, Any]]
+    task_id: Optional[str]
+    thread_id: Optional[str]
+    tool_error_counts: Optional[Dict[str, int]]
+    graph_db: Optional[GraphDB]
+    enhanced_memory_manager: Optional[EnhancedMemoryManager]
+    graph_context: Optional[str]
+    graph_sources: Optional[List[Dict[str, Any]]]
+    mermaid_diagram: Optional[str]
+    turn_count: int
+    context: Optional[Dict[str, Any]]
+    target_datasets: Optional[List[str]]
+    loop_count: int
+
+
+# ==============================================================================
+# GESTIÓN DE HILOS, TÍTULOS Y RESÚMENES
+# ==============================================================================
+
+
+async def _load_thread_history_messages(thread_id: str) -> Optional[list]:
+    connection_url = get_postgres_history_connection_url(
+        settings.database_url or os.getenv("DATABASE_URL")
+    )
+    if not connection_url:
+        return None
+
+    for attempt in range(3):
+        history = None
+        try:
+            history = PostgresChatMessageHistory(
+                connection_string=connection_url,
+                session_id=thread_id,
+                table_name="langchain_chat_history",
+            )
+            return await history.aget_messages()
+        except Exception:
+            if attempt == 2:
+                return None
+            await asyncio.sleep(attempt + 1)
+        finally:
+            close_postgres_chat_message_history(history, logger=logger)
+    return None
+
+
+async def update_thread_title_if_needed(thread_id: str, messages: list):
+    """
+    Genera o actualiza el título del hilo si alcanza los umbrales de mensajes.
+    """
+    if not messages:
+        return
+
+    account_id = None
+    current_title = None
+    async with DBSession(SessionLocal) as db:
+        thread = await db.get(ChatThread, uuid.UUID(thread_id))
+        if thread:
+            current_title = thread.title
+            account_id = str(thread.account_id)
+
+    need_update = (current_title == "Nuevo Chat" and len(messages) >= 5) or (
+        current_title != "Nuevo Chat" and len(messages) >= 20 and len(messages) % 20 == 0
+    )
+    if not need_update:
+        return
+
+    await _generate_and_save_thread_title(thread_id, messages, account_id)
+
+
+async def force_update_thread_title(thread_id: str):
+    """
+    Fuerza la actualización del título de un hilo de chat.
+    """
+    async with DBSession(SessionLocal) as db:
+        thread = await db.get(ChatThread, uuid.UUID(thread_id))
+        if not thread:
+            return
+        account_id = str(thread.account_id)
+
+    messages = await _load_thread_history_messages(thread_id)
+    if messages:
+        await _generate_and_save_thread_title(thread_id, messages, account_id)
+
+
+async def _generate_and_save_thread_title(thread_id: str, messages: list, account_id: Optional[str]):
+    conversation_text = "\n".join(
+        [
+            extract_text_content(m.content) if hasattr(m, "content") else str(m)
+            for m in messages[-20:]
+        ]
+    )
+    prompt = THREAD_TITLE_PROMPT.format(conversation_text=conversation_text)
+    llm = (
+        await get_llm_for_user(account_id, purpose="fast")
+        if account_id
+        else (get_fast_llm() or get_main_llm())
+    )
+    if not llm:
+        return
+
+    try:
+        response = await llm.ainvoke(prompt)
+        new_title = (
+            str(response.content).strip()
+            if hasattr(response, "content")
+            else str(response).strip()
+        ).strip('"\'')
+        if len(new_title) > 100:
+            new_title = new_title[:97] + "..."
+
+        async with DBSession(SessionLocal) as db:
+            await db.execute(
+                update(ChatThread)
+                .where(ChatThread.id == uuid.UUID(thread_id))
+                .values(title=new_title)
+            )
+            await db.commit()
+
+        if account_id:
+            await send_personal_message(
+                account_id,
+                {
+                    "type": "thread_title_updated",
+                    "thread_id": thread_id,
+                    "new_title": new_title,
+                },
+            )
+    except Exception as e:
+        logger.warning(f"Error actualizando título del hilo {thread_id}: {e}")
+
+
+async def force_update_all_thread_titles(account_id: str):
+    """
+    Fuerza la actualización de títulos de todos los hilos de una cuenta.
+    """
+    async with DBSession(SessionLocal) as db:
+        threads = (
+            await db.execute(
+                select(ChatThread).where(ChatThread.account_id == uuid.UUID(account_id))
+            )
+        ).scalars().all()
+
+    async def _update_one(tid: str):
+        async with THREAD_TITLE_UPDATE_SEMAPHORE:
+            try:
+                await force_update_thread_title(tid)
+            except Exception:
+                pass
+
+    await asyncio.gather(*[_update_one(str(t.id)) for t in threads])
+
+
+async def create_thread_for_account(account_id: str, title: str = "Nuevo Chat") -> str:
+    async with DBSession(SessionLocal) as db:
+        account = await db.get(Account, uuid.UUID(account_id))
+        if not account:
+            raise ValueError(f"No existe la cuenta {account_id}")
+        new_thread = ChatThread(account_id=account.id, title=title)
+        db.add(new_thread)
+        await db.commit()
+        await db.refresh(new_thread)
+        return str(new_thread.id)
+
+
+async def get_or_create_heartbeat_thread(account_id: str) -> str:
+    account_uuid = uuid.UUID(account_id)
+    async with DBSession(SessionLocal) as db:
+        existing = (
+            await db.execute(
+                select(ChatThread)
+                .where(
+                    ChatThread.account_id == account_uuid,
+                    ChatThread.platform == "heartbeat",
+                )
+                .order_by(ChatThread.created_at.asc())
+                .limit(1)
+            )
+        ).scalars().first()
+        if existing:
+            return str(existing.id)
+
+        new_thread = ChatThread(
+            account_id=account_uuid,
+            title="Heartbeat Personalizado",
+            platform="heartbeat",
+        )
+        db.add(new_thread)
+        await db.commit()
+        await db.refresh(new_thread)
+        return str(new_thread.id)
+
+
+async def get_or_create_specific_heartbeat_thread(
+    account_id: str, heartbeat_id: str, heartbeat_name: str
+) -> str:
+    account_uuid = uuid.UUID(account_id)
+    async with DBSession(SessionLocal) as db:
+        existing = (
+            await db.execute(
+                select(ChatThread)
+                .where(
+                    ChatThread.account_id == account_uuid,
+                    ChatThread.platform == f"heartbeat_{heartbeat_id}",
+                )
+                .order_by(ChatThread.created_at.asc())
+                .limit(1)
+            )
+        ).scalars().first()
+        if existing:
+            return str(existing.id)
+
+        new_thread = ChatThread(
+            account_id=account_uuid,
+            title=f"Heartbeat - {heartbeat_name}",
+            platform=f"heartbeat_{heartbeat_id}",
+        )
+        db.add(new_thread)
+        await db.commit()
+        await db.refresh(new_thread)
+        return str(new_thread.id)
+
+
+async def summarize_history_in_background(
+    history_to_summarize: List[BaseMessage],
+    chat_message_history: PostgresChatMessageHistory,
+    account_id: str,
+    workspace_id: Optional[str] = None,
+):
+    """
+    Resume mensajes en segundo plano y añade el resumen a la base vectorial.
+    """
+    llm = await get_llm_for_user(account_id, purpose="fast")
+    if not llm:
+        return
+    try:
+        conversation_text = "\n".join(
+            [
+                f"{'Usuario' if isinstance(m, HumanMessage) else 'Asistente'}: {extract_text_content(m.content)}"
+                for m in history_to_summarize
+            ]
+        )
+        prompt = f"{SUMMARIZATION_PROMPT}\n\nHistorial a resumir:\n{conversation_text}"
+        res = await llm.ainvoke(prompt)
+        summary_content = str(res.content) if hasattr(res, "content") else str(res)
+
+        summary_msg = HumanMessage(
+            content=f"Resumen de la conversación anterior: {summary_content}",
+            additional_kwargs={"role": "summary"},
+        )
+        await chat_message_history.aadd_messages([summary_msg])
+        await add_memory_to_vector_db(
+            account_id=account_id,
+            content=summary_content,
+            type="thread_summary",
+            workspace_id=workspace_id,
+        )
+    except Exception as e:
+        logger.error(f"Error en sumarización en segundo plano: {e}")
+
+
+# ==============================================================================
+# MOTOR AGÉNTICO NATIVO ULTRA-RÁPIDO (FAST NATIVE AGENT RUNNER)
+# ==============================================================================
+
+
+class NativeAgentRunner:
+    """
+    Motor Agéntico Nativo Asíncrono de Alta Velocidad (KAI Fast Agent).
+    Ejecuta el bucle de razonamiento y herramientas directamente con streaming en tiempo real,
+    con indexación O(1) de herramientas y sin sobrecargas de serialización.
+    """
+
+    def __init__(self):
+        self.prompt_manager = PromptManager(
+            settings={"default_system_prompt": settings.default_system_prompt}
+        )
+
+    async def ainvoke(
+        self, state: AgentState, config: Optional[RunnableConfig] = None
+    ) -> Dict[str, Any]:
+        """
+        Ejecución sin streaming: consume el stream interno y retorna el estado final.
+        """
+        final_state = None
+        async for chunk in self.astream(state, config=config):
+            final_state = chunk
+        return final_state or {
+            "generateResponse": {"messages": state.get("messages", [])}
+        }
+
+    async def astream(self, state: AgentState, config: Optional[RunnableConfig] = None):
+        """
+        Ejecución ágil con streaming en tiempo real y función calling autónomo de alta velocidad.
+        """
+        configurable = (
+            config.get("configurable", {})
+            if isinstance(config, dict)
+            else (getattr(config, "configurable", {}) or {})
+        )
+        account_id = state.get("account_id") or configurable.get("account_id")
+        thread_id = state.get("thread_id") or configurable.get("thread_id")
+        task_id = state.get("task_id") or configurable.get("task_id")
+        telegram_id = state.get("telegram_id") or configurable.get("telegram_id")
+        workspace_id = state.get("workspace_id") or configurable.get("workspace_id")
+        rag_context = state.get("rag_context") or configurable.get("rag_context")
+        context = state.get("context") or configurable.get("context")
+
+        target_account_id = "telegram_bot_service" if telegram_id else account_id
+        conn_type = "chat" if telegram_id else None
+
+        messages: List[BaseMessage] = list(state.get("messages", []))
+        if not messages:
+            yield {"generateResponse": {"messages": []}}
+            return
+
+        last_human_message = next(
+            (m for m in reversed(messages) if isinstance(m, HumanMessage)), None
+        )
+        user_message_text = (
+            extract_text_content(last_human_message.content)
+            if last_human_message
+            else ""
+        )
+
+        # Helper para notificaciones websocket no bloqueantes
+        def notify_ws_async(payload: Dict[str, Any]):
+            if target_account_id:
+                asyncio.create_task(
+                    send_personal_message(target_account_id, payload, connection_type=conn_type)
+                )
+
+        async def agent_progress_callback(progress: int, message: str, current_node: str = "main"):
+            payload = {
+                "type": "progress",
+                "progress": progress,
+                "message": message,
+                "current_node": current_node,
+                "tool_name": "deep_research",
+            }
+            if thread_id:
+                payload["thread_id"] = str(thread_id)
+            if task_id:
+                payload["taskId"] = str(task_id)
+            notify_ws_async(payload)
+
+        # ----------------------------------------------------------------------
+        # CARGA CONCURRENTE DE LAS CAPAS DE MEMORIA Y DEPENDENCIAS
+        # ----------------------------------------------------------------------
+        # 1. Separar contexto explícito (OnlyOffice vs RAG)
+        explicit_doc_ids = []
+        has_onlyoffice_context = False
+        extra_tool_categories = []
+
+        if rag_context:
+            for item in rag_context:
+                item_type = str(item.get("type") or "").lower()
+                item_topic = str(item.get("topic") or "").lower()
+                item_name = str(item.get("name") or "")
+                if (
+                    item_type in ("onlyoffice", "onlyoffice_document")
+                    or item_topic == "onlyoffice"
+                    or item_name.startswith("[OnlyOffice]")
+                ):
+                    has_onlyoffice_context = True
+                elif item_type == "document" and item.get("id"):
+                    explicit_doc_ids.append(item["id"])
+
+        if has_onlyoffice_context:
+            extra_tool_categories.append("onlyoffice_skill")
+
+        # 2. Cargar workspace si aplica
+        workspace_name = None
+        workspace_prompt = None
+        if workspace_id:
+            try:
+                async with DBSession(SessionLocal) as db:
+                    ws = await db.get(Workspace, uuid.UUID(workspace_id))
+                    if ws:
+                        workspace_name = ws.name
+                        if ws.system_prompt:
+                            workspace_prompt = str(ws.system_prompt)
+            except Exception as e:
+                logger.warning(f"Error cargando workspace {workspace_id}: {e}")
+
+        # 3. Disparo concurrente de todas las capas de memoria
+        # Capa 1: Perfil de usuario
+        user_profile_task = get_user_profile(account_id)
+        # Capa LLM
+        llm_task = get_llm_for_user(account_id, purpose="main")
+        # Herramientas del agente
+        tools_task = get_all_langchain_tools(
+            account_id=account_id,
+            telegram_id=telegram_id,
+            thread_id=thread_id,
+            workspace_id=workspace_id,
+            progress_callback=agent_progress_callback,
+            query=user_message_text,
+            extra_categories=extra_tool_categories or None,
+        )
+        # Capa 5: Memoria procedimental / skills
+        skills_task = fetch_relevant_procedural_skills(
+            user_message_text, account_id=account_id, workspace_name=workspace_name
+        )
+        # Capa 3: Memoria episódica / semántica RAG
+        rag_task = None
+        if explicit_doc_ids or (len(user_message_text.strip()) > 10):
+            rag_task = get_relevant_memories(
+                account_id=account_id,
+                query=user_message_text,
+                workspace_id=workspace_id,
+                explicit_document_ids=explicit_doc_ids or None,
+                k=8,
+            )
+
+        gather_tasks = [user_profile_task, llm_task, tools_task, skills_task]
+        if rag_task:
+            gather_tasks.append(rag_task)
+
+        results = await asyncio.gather(*gather_tasks, return_exceptions=True)
+
+        user_profile = results[0] if not isinstance(results[0], Exception) else None
+        llm = results[1] if not isinstance(results[1], Exception) else None
+        toolbox = results[2] if not isinstance(results[2], Exception) and results[2] else []
+        relevant_procedural_skills = (
+            results[3] if not isinstance(results[3], Exception) and results[3] else []
+        )
+        rag_output = (
+            results[4] if len(results) > 4 and not isinstance(results[4], Exception) else None
+        )
+
+        if not llm:
+            llm = get_main_llm()
+        if not llm:
+            raise ValueError(f"No hay ningún LLM configurado o disponible para account_id={account_id}.")
+
+        # 4. Formatear fuentes RAG para System Prompt
+        sources_list: List[Source] = []
+        seen_source_ids = set()
+        relevant_memories_text = ""
+
+        def _register_source(src: Union[Source, Dict[str, Any]]) -> Optional[Source]:
+            try:
+                if isinstance(src, dict):
+                    src_obj = Source(**src)
+                elif isinstance(src, Source):
+                    src_obj = src
+                else:
+                    return None
+            except Exception as e:
+                logger.warning(f"Error parseando fuente para LLM: {e}")
+                return None
+            ident = get_source_identifier(src_obj)
+            if ident not in seen_source_ids:
+                seen_source_ids.add(ident)
+                sources_list.append(src_obj)
+                return src_obj
+            return None
+
+        if rag_output and hasattr(rag_output, "sources") and rag_output.sources:
+            for s in rag_output.sources:
+                s_dict = (
+                    s.model_dump()
+                    if hasattr(s, "model_dump")
+                    else (s.dict() if hasattr(s, "dict") else s)
+                )
+                if isinstance(s_dict, dict):
+                    _register_source(s_dict)
+            relevant_memories_text = format_context_with_sources(sources_list)
+
+        # Fallback a chunks explícitos si se especificaron documentos y no hubo match RAG
+        if not sources_list and explicit_doc_ids:
+            fallback_chunks = await get_document_chunks(
+                account_id=account_id,
+                document_ids=explicit_doc_ids,
+                limit=8,
+                workspace_id=workspace_id,
+            )
+            if fallback_chunks:
+                for i, doc in enumerate(fallback_chunks, start=1):
+                    _register_source(
+                        Source(
+                            id=i,
+                            title=doc.metadata.get("file_name", "Documento"),
+                            url=doc.metadata.get("document_id", ""),
+                            snippet=doc.page_content[:400],
+                            type=SourceType.DOCUMENT,
+                        )
+                    )
+                relevant_memories_text = format_context_with_sources(sources_list)
+
+        # 5. Capa 1 y 4: Construir System Prompt consolidado
+        custom_prompt = (
+            str(user_profile.system_prompt)
+            if user_profile and getattr(user_profile, "system_prompt", None)
+            else None
+        )
+
+        system_prompt_content = self.prompt_manager.build_system_prompt(
+            user_profile=user_profile,
+            relevant_memories=relevant_memories_text or "No se encontraron memorias específicas.",
+            summary_string="",
+            custom_prompt_from_profile=custom_prompt,
+            workspace_prompt=workspace_prompt,
+            tools=toolbox,
+            account_id=account_id,
+            telegram_id=telegram_id,
+            user_message=user_message_text,
+            has_explicit_rag_context=bool(rag_context),
+            explicit_rag_context_items=rag_context,
+            context=context,
+            relevant_skills=relevant_procedural_skills,
+        )
+
+        system_message = SystemMessage(content=system_prompt_content)
+
+        # ----------------------------------------------------------------------
+        # OPTIMIZACIÓN DE HERRAMIENTAS: INDEXACIÓN O(1) Y CACHÉ DE ESQUEMAS
+        # ----------------------------------------------------------------------
+        tools_by_name: Dict[str, BaseTool] = {}
+        openai_tools: List[Dict[str, Any]] = []
+
+        for t in toolbox:
+            if not isinstance(t, BaseTool):
+                continue
+            t_name = getattr(t, "name", "")
+            if not t_name:
+                continue
+            tools_by_name[t_name] = t
+            # Alias normalizado: los LLMs a veces devuelven guiones bajos
+            # en lugar de guiones (emcp_tools_... vs emcp-tools-...).
+            norm = t_name.replace("-", "_")
+            if norm != t_name and norm not in tools_by_name:
+                tools_by_name[norm] = t
+
+            # Usar caché de esquemas para evitar reflexión repetitiva
+            cached_schema = _TOOL_SCHEMA_CACHE.get(t_name)
+            if cached_schema is not None:
+                openai_tools.append(cached_schema)
+            else:
+                try:
+                    schema = convert_to_openai_tool(t)
+                    _TOOL_SCHEMA_CACHE[t_name] = schema
+                    openai_tools.append(schema)
+                except Exception as conv_err:
+                    logger.warning(f"Error generando esquema para herramienta '{t_name}': {conv_err}")
+
+        # Vinculación de herramientas al LLM
+        if openai_tools:
+            try:
+                llm_with_tools = llm.bind(tools=openai_tools, tool_choice="auto")
+            except Exception:
+                llm_with_tools = llm.bind(tools=openai_tools)
+        else:
+            llm_with_tools = llm
+
+        # ----------------------------------------------------------------------
+        # BUCLE AGÉNTICO NATIVO Y DISPATCH DE HERRAMIENTAS
+        # ----------------------------------------------------------------------
+        configured_max = getattr(settings, "max_agent_loops", 0)
+        is_unlimited = configured_max is None or configured_max <= 0
+        max_loops = 1000 if is_unlimited else configured_max
+        loop_count = 0
+        final_ai_message = None
+
+        run_config = RunnableConfig(
+            configurable={
+                "account_id": account_id,
+                "workspace_id": workspace_id,
+                "telegram_id": telegram_id,
+                "thread_id": str(thread_id) if thread_id else None,
+                "task_id": str(task_id) if task_id else None,
+                "progress_callback": agent_progress_callback,
+            },
+            metadata={
+                "account_id": account_id,
+                "workspace_id": workspace_id,
+                "telegram_id": telegram_id,
+                "thread_id": str(thread_id) if thread_id else None,
+                "task_id": str(task_id) if task_id else None,
+            },
+        )
+
+        while loop_count < max_loops:
+            loop_count += 1
+            cleaned_history = [m for m in messages if not isinstance(m, SystemMessage)]
+            full_turn_messages = [system_message] + cleaned_history
+
+            full_ai_content = ""
+            full_reasoning_content = ""
+            raw_tool_calls_map: Dict[Union[int, str], Dict[str, Any]] = {}
+            tool_calls_from_llm = []
+
+            try:
+                async for chunk in llm_with_tools.astream(full_turn_messages):
+                    if not isinstance(chunk, AIMessage):
+                        continue
+
+                    # A. Razonamiento / Thinking
+                    add_kwargs = getattr(chunk, "additional_kwargs", {}) or {}
+                    resp_meta = getattr(chunk, "response_metadata", {}) or {}
+                    reasoning_chunk = ""
+                    for k in ("reasoning", "reasoning_content", "thought", "thinking", "reflection"):
+                        if k in add_kwargs and isinstance(add_kwargs[k], str):
+                            reasoning_chunk = add_kwargs[k]
+                            break
+                        if k in resp_meta and isinstance(resp_meta[k], str):
+                            reasoning_chunk = resp_meta[k]
+                            break
+
+                    if reasoning_chunk:
+                        full_reasoning_content += reasoning_chunk
+                        notify_ws_async(
+                            {
+                                "type": "reasoning_chunk",
+                                "thread_id": thread_id,
+                                "taskId": task_id,
+                                "chunk": reasoning_chunk,
+                                "full_reasoning": full_reasoning_content,
+                            }
+                        )
+
+                    # B. Texto del stream
+                    current_text = ""
+                    if isinstance(chunk.content, str):
+                        current_text = chunk.content
+                    elif isinstance(chunk.content, list):
+                        for p in chunk.content:
+                            if isinstance(p, dict) and p.get("type") == "text":
+                                current_text += p.get("text", "")
+
+                    if current_text:
+                        full_ai_content += current_text
+                        notify_ws_async(
+                            {
+                                "type": "stream_chunk",
+                                "thread_id": thread_id,
+                                "taskId": task_id,
+                                "chunk": current_text,
+                                "full_text": full_ai_content,
+                            }
+                        )
+
+                    # C. Acumulación ligera de tool_call_chunks (sin parsing JSON por token)
+                    if hasattr(chunk, "tool_call_chunks") and chunk.tool_call_chunks:
+                        for tc_chunk in chunk.tool_call_chunks:
+                            key = tc_chunk.get("index")
+                            if key is None:
+                                key = tc_chunk.get("id") or len(raw_tool_calls_map)
+
+                            if key not in raw_tool_calls_map:
+                                raw_tool_calls_map[key] = {
+                                    "name": tc_chunk.get("name") or "",
+                                    "args_parts": [],
+                                    "id": tc_chunk.get("id") or str(uuid.uuid4()),
+                                }
+                            entry = raw_tool_calls_map[key]
+                            if tc_chunk.get("name"):
+                                entry["name"] = tc_chunk["name"]
+                            if tc_chunk.get("id"):
+                                entry["id"] = tc_chunk["id"]
+                            if tc_chunk.get("args"):
+                                entry["args_parts"].append(tc_chunk["args"])
+
+                    elif getattr(chunk, "tool_calls", None):
+                        for tc in chunk.tool_calls:
+                            tool_calls_from_llm.append(tc)
+
+            except Exception as stream_err:
+                logger.error(f"❌ Error durante streaming del LLM: {stream_err}", exc_info=True)
+                # Fallback a ainvoke no-stream si el streaming se interrumpe
+                try:
+                    non_stream_res = await llm_with_tools.ainvoke(full_turn_messages)
+                except Exception as invoke_err:
+                    logger.warning(f"⚠️ Reintento no-stream falló con el LLM principal: {invoke_err}. Usando fallback...")
+                    fallback_llm = await get_configured_fallback_llm(account_id, failed_purpose="main")
+                    if fallback_llm and fallback_llm != llm:
+                        fb_with_tools = fallback_llm.bind(tools=openai_tools) if openai_tools else fallback_llm
+                        non_stream_res = await fb_with_tools.ainvoke(full_turn_messages)
+                    else:
+                        raise invoke_err
+
+                if isinstance(non_stream_res, AIMessage):
+                    full_ai_content = extract_text_content(non_stream_res.content)
+                    tool_calls_from_llm = list(getattr(non_stream_res, "tool_calls", []) or [])
+                    if full_ai_content:
+                        notify_ws_async(
+                            {
+                                "type": "stream_chunk",
+                                "thread_id": thread_id,
+                                "taskId": task_id,
+                                "chunk": full_ai_content,
+                                "full_text": full_ai_content,
+                            }
+                        )
+
+            # Consolidar tool calls acumuladas: parsing JSON en UNA sola pasada
+            valid_tool_calls = []
+
+            # 1. De los chunks fragmentados
+            for item in raw_tool_calls_map.values():
+                name = item.get("name")
+                if not name:
+                    continue
+                args_str = "".join(item.get("args_parts", "")).strip()
+                parsed_args = {}
+                if args_str:
+                    try:
+                        parsed_args = json.loads(args_str)
+                    except Exception:
+                        try:
+                            # Intento de rescate si hay caracteres basura
+                            match = re.search(r"\{.*\}", args_str, re.DOTALL)
+                            if match:
+                                parsed_args = json.loads(match.group(0))
+                        except Exception:
+                            parsed_args = {}
+                valid_tool_calls.append(
+                    {
+                        "name": name,
+                        "args": parsed_args if isinstance(parsed_args, dict) else {},
+                        "id": item.get("id") or str(uuid.uuid4()),
+                    }
+                )
+
+            # 2. De llamadas completas directas
+            for tc in tool_calls_from_llm:
+                tc_name = tc.get("name")
+                if not tc_name:
+                    continue
+                tc_args = tc.get("args") or {}
+                if isinstance(tc_args, str):
+                    try:
+                        tc_args = json.loads(tc_args)
+                    except Exception:
+                        tc_args = {}
+                # Evitar duplicados
+                if not any(v["id"] == tc.get("id") for v in valid_tool_calls):
+                    valid_tool_calls.append(
+                        {
+                            "name": tc_name,
+                            "args": tc_args if isinstance(tc_args, dict) else {},
+                            "id": tc.get("id") or str(uuid.uuid4()),
+                        }
+                    )
+
+            # ------------------------------------------------------------------
+            # EJECUCIÓN CONCURRENTE O(1) DE HERRAMIENTAS
+            # ------------------------------------------------------------------
+            if valid_tool_calls:
+                logger.info(
+                    f"🧰 FastNativeAgent: Ejecutando {len(valid_tool_calls)} herramientas concurrentes"
+                )
+
+                ai_msg = AIMessage(
+                    content=full_ai_content,
+                    tool_calls=valid_tool_calls,
+                    additional_kwargs={"reasoning": full_reasoning_content}
+                    if full_reasoning_content
+                    else {},
+                )
+                messages.append(ai_msg)
+
+                async def _execute_single(tc: Dict[str, Any]) -> ToolMessage:
+                    tool_name = tc["name"]
+                    tool_args = tc.get("args") or {}
+                    tool_id = tc["id"]
+
+                    notify_ws_async(
+                        {
+                            "type": "tool_start",
+                            "taskId": task_id,
+                            "tool_name": tool_name,
+                            "thread_id": thread_id,
+                        }
+                    )
+
+                    # Búsqueda instantánea O(1) (+ alias guion/guion-bajo)
+                    selected_tool = tools_by_name.get(tool_name)
+                    if not selected_tool:
+                        selected_tool = tools_by_name.get(tool_name.replace("-", "_"))
+                    if not selected_tool:
+                        selected_tool = tools_by_name.get(tool_name.replace("_", "-"))
+                    if not selected_tool:
+                        # Fallback a get_tool_by_name si no estaba indexada
+                        selected_tool = await get_tool_by_name(
+                            tool_name=tool_name,
+                            all_tools=toolbox,
+                            account_id=account_id,
+                            telegram_id=str(telegram_id) if telegram_id else None,
+                            workspace_id=workspace_id,
+                        )
+
+                    if not selected_tool:
+                        err_res = f"Error: Herramienta '{tool_name}' no encontrada."
+                        notify_ws_async(
+                            {
+                                "type": "tool_end",
+                                "taskId": task_id,
+                                "tool_name": tool_name,
+                                "status": "error",
+                                "result": err_res,
+                                "error": True,
+                            }
+                        )
+                        return ToolMessage(content=err_res, tool_call_id=tool_id)
+
+                    # Inyectar propiedades contextuales si la herramienta las soporta
+                    if hasattr(selected_tool, "thread_id") and not getattr(selected_tool, "thread_id", None):
+                        selected_tool.thread_id = str(thread_id) if thread_id else None
+                    if hasattr(selected_tool, "task_id") and not getattr(selected_tool, "task_id", None):
+                        selected_tool.task_id = str(task_id) if task_id else None
+                    if hasattr(selected_tool, "progress_callback") and not getattr(selected_tool, "progress_callback", None):
+                        selected_tool.progress_callback = agent_progress_callback
+
+                    try:
+                        async with _TOOL_EXECUTION_SEMAPHORE:
+                            out = await selected_tool.ainvoke(tool_args, config=run_config)
+
+                        tool_sources: List[Source] = []
+                        if isinstance(out, ToolOutputWithSources):
+                            out_str = out.context_for_llm
+                            if out.sources:
+                                tool_sources = out.sources
+                        elif isinstance(out, dict):
+                            out_str = (
+                                out.get("context_for_llm")
+                                or json.dumps(out, ensure_ascii=False)
+                            )
+                            raw_s = out.get("sources")
+                            if raw_s and isinstance(raw_s, list):
+                                for s in raw_s:
+                                    if isinstance(s, Source):
+                                        tool_sources.append(s)
+                                    elif isinstance(s, dict):
+                                        try:
+                                            tool_sources.append(Source(**s))
+                                        except Exception:
+                                            pass
+                        elif isinstance(out, list):
+                            out_str = json.dumps(out, ensure_ascii=False)
+                        else:
+                            out_str = str(out)
+
+                        # Registrar fuentes de la herramienta a la lista acumulada
+                        for s in tool_sources:
+                            s_dict = (
+                                s.model_dump()
+                                if hasattr(s, "model_dump")
+                                else (s.dict() if hasattr(s, "dict") else s)
+                            )
+                            ident = get_source_identifier(s_dict)
+                            if ident not in seen_source_ids:
+                                seen_source_ids.add(ident)
+                                s_dict["id"] = len(sources_list) + 1
+                                sources_list.append(Source(**s_dict))
+
+                        notify_ws_async(
+                            {
+                                "type": "tool_end",
+                                "taskId": task_id,
+                                "tool_name": tool_name,
+                                "status": "success",
+                                "result": out_str[:1500],
+                                "sources": [
+                                    s.model_dump() if hasattr(s, "model_dump") else (s.dict() if hasattr(s, "dict") else s)
+                                    for s in tool_sources
+                                ],
+                            }
+                        )
+                        tool_msg = ToolMessage(content=out_str, tool_call_id=tool_id)
+                        if tool_sources:
+                            tool_msg.additional_kwargs["sources"] = [
+                                s.model_dump() if hasattr(s, "model_dump") else (s.dict() if hasattr(s, "dict") else s)
+                                for s in tool_sources
+                            ]
+                        return tool_msg
+
+                    except Exception as t_err:
+                        logger.error(f"Error ejecutando '{tool_name}': {t_err}", exc_info=True)
+                        err_msg = f"Error ejecutando '{tool_name}': {str(t_err)}"
+                        notify_ws_async(
+                            {
+                                "type": "tool_end",
+                                "taskId": task_id,
+                                "tool_name": tool_name,
+                                "status": "error",
+                                "result": err_msg,
+                                "error": True,
+                            }
+                        )
+                        return ToolMessage(content=err_msg, tool_call_id=tool_id)
+
+                # Ejecutar todas las herramientas concurrentemente
+                tool_results = await asyncio.gather(
+                    *[_execute_single(tc) for tc in valid_tool_calls],
+                    return_exceptions=False,
+                )
+                for t_res in tool_results:
+                    messages.append(t_res)
+
+                # Siguiente turno para que el LLM sintetice los resultados
+                continue
+
+            else:
+                # No hay llamadas a herramientas -> Respuesta final completada
+                sources_dump = [
+                    s.model_dump() if hasattr(s, "model_dump") else (s.dict() if hasattr(s, "dict") else s)
+                    for s in sources_list
+                ]
+                additional_kwargs: Dict[str, Any] = {}
+                if full_reasoning_content:
+                    additional_kwargs["reasoning"] = full_reasoning_content
+                if sources_dump:
+                    additional_kwargs["sources"] = sources_dump
+
+                final_ai_message = AIMessage(
+                    content=full_ai_content,
+                    additional_kwargs=additional_kwargs,
+                )
+                messages.append(final_ai_message)
+                break
+
+        # Si se agotaron los loops máximos sin mensaje final, forzar síntesis
+        if final_ai_message is None:
+            logger.warning(
+                f"⚠️ NativeAgentRunner: Se alcanzaron las {max_loops} iteraciones máximas. Forzando síntesis."
+            )
+            cleaned_history = [m for m in messages if not isinstance(m, SystemMessage)]
+            synth_messages = [system_message] + cleaned_history
+            try:
+                synth_ai = await llm.ainvoke(synth_messages)
+                if isinstance(synth_ai, AIMessage):
+                    sources_dump = [
+                        s.model_dump() if hasattr(s, "model_dump") else (s.dict() if hasattr(s, "dict") else s)
+                        for s in sources_list
+                    ]
+                    if sources_dump:
+                        synth_ai.additional_kwargs["sources"] = sources_dump
+                    messages.append(synth_ai)
+                    final_ai_message = synth_ai
+                    final_text = extract_text_content(synth_ai.content)
+                    if final_text:
+                        notify_ws_async(
+                            {
+                                "type": "stream_chunk",
+                                "thread_id": thread_id,
+                                "taskId": task_id,
+                                "chunk": final_text,
+                                "full_text": final_text,
+                            }
+                        )
+            except Exception as synth_err:
+                logger.error(f"❌ Error generando síntesis final del agente: {synth_err}")
+
+        sources_dump = [
+            s.model_dump() if hasattr(s, "model_dump") else (s.dict() if hasattr(s, "dict") else s)
+            for s in sources_list
+        ]
+        # Emitir estado final estructurado compatible con api/chat.py
+        yield {
+            "generateResponse": {
+                "messages": messages,
+                "account_id": account_id,
+                "thread_id": thread_id,
+                "task_id": task_id,
+                "sources": sources_dump,
+            }
+        }
+
+
+# ==============================================================================
+# SINGLETON DEL AGENTE Y PUNTO DE ENTRADA
+# ==============================================================================
+
+_native_agent_singleton: Optional[NativeAgentRunner] = None
+
+
+def get_langgraph_agent() -> NativeAgentRunner:
+    """
+    Retorna la instancia singleton del agente de KAI.
+    Conserva el nombre histórico 'get_langgraph_agent' para compatibilidad total
+    con api/chat.py y otros módulos del sistema.
+    """
+    global _native_agent_singleton
+    if _native_agent_singleton is None:
+        logger.info("⚡ Inicializando FastNativeAgentRunner...")
+        _native_agent_singleton = NativeAgentRunner()
+    return _native_agent_singleton
+
+
+get_native_agent = get_langgraph_agent
+
+
+# ==============================================================================
+# HEARTBEAT PERSONALIZADO DEL USUARIO
+# ==============================================================================
+
+
+async def run_custom_user_heartbeat(
+    account_id: str,
+    heartbeat_id: str,
+    heartbeat_name: str,
+    instructions: str,
+    workspace_id: Optional[str] = None,
+) -> str:
+    """
+    Ejecuta un ciclo de Heartbeat Personalizado en segundo plano para el usuario.
+    """
+    logger.info(f"Iniciando ciclo de heartbeat '{heartbeat_name}' para cuenta {account_id}...")
+    agent_app = get_native_agent()
+
+    thread_id = await get_or_create_specific_heartbeat_thread(
+        account_id, heartbeat_id, heartbeat_name
+    )
+
+    initial_human_message = HumanMessage(
+        content=(
+            f"--- INSTRUCCIÓN DE HEARTBEAT PERSONALIZADO: '{heartbeat_name}' ---\n"
+            f"{instructions}\n"
+            f"REGLA: Ejecuta las acciones necesarias proactivamente usando tus herramientas."
+        )
+    )
+
+    initial_state: AgentState = {
+        "messages": [initial_human_message],
+        "account_id": account_id,
+        "task_id": f"hb_{uuid.uuid4().hex[:8]}",
+        "telegram_id": None,
+        "workspace_id": workspace_id,
+        "rag_context": None,
+        "sources": [],
+        "thread_id": thread_id,
+        "context": {"type": "custom_heartbeat"},
+        "loop_count": 0,
+        "turn_count": 0,
+    }
+
+    try:
+        final_state = await agent_app.ainvoke(initial_state)
+        final_messages = (
+            final_state.get("generateResponse", {}).get("messages", [])
+            if final_state
+            else []
+        )
+        final_ai = next(
+            (m for m in reversed(final_messages) if isinstance(m, AIMessage)), None
+        )
+        if final_ai:
+            return f"Heartbeat '{heartbeat_name}' completado: {extract_text_content(final_ai.content)[:200]}..."
+        return "Heartbeat completado sin respuesta explícita."
+    except Exception as e:
+        logger.error(f"Error en run_custom_user_heartbeat: {e}", exc_info=True)
+        return f"Error: {e}"

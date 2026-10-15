@@ -13,12 +13,17 @@ interface PtyTerminalEmbeddedProps {
   apiBaseUrl?: string;
   initialCommand?: string;
   className?: string;
+  /** true mientras el comando sigue en ejecución; false = finalizada (solo lectura) */
+  active?: boolean;
 }
 
 /**
- * Terminal PTY embebida dentro del chat.
- * Se conecta automáticamente y muestra salida en tiempo real.
- * No tiene botones de toggle/maximizar - controlado por el contenedor.
+ * Terminal PTY embebida en el chat, en tiempo real (estilo kogniterm-desktop).
+ * - Se monta en cuanto llega tool_start (antes de que termine el comando).
+ * - Desplegada y persistente: no colapsada, altura fija, sobrevive al fin
+ *   del comando (queda como historial finalizada).
+ * - Interactiva: todo lo tecleado se envía por WS al PTY del servidor
+ *   (passwords, confirmaciones y/n, Ctrl+C, flechas).
  */
 export default function PtyTerminalEmbedded({
   sessionId,
@@ -27,27 +32,107 @@ export default function PtyTerminalEmbedded({
   apiBaseUrl,
   initialCommand,
   className,
+  active = true,
 }: PtyTerminalEmbeddedProps) {
-  const terminalRef = useRef<HTMLDivElement>(null);
+  const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
-  const fitAddonRef = useRef<FitAddon | null>(null);
+  const fitRef = useRef<FitAddon | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const activeRef = useRef(active);
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  activeRef.current = active;
+
+  const displayCommand =
+    initialCommand && initialCommand !== "terminal_executor"
+      ? initialCommand
+      : "bash";
+
+  function scrollChatIfFollowing() {
+    const scroller = hostRef.current?.closest(
+      "[data-chat-scroll]"
+    ) as HTMLElement | null;
+    // El contenedor de scroll del chat usa ref directa (scrollAreaRef), así
+    // que como fallback se busca cualquier ancestro con scroll.
+    const el =
+      scroller ??
+      (hostRef.current?.closest(
+        ".overflow-y-auto"
+      ) as HTMLElement | null);
+    if (!el) return;
+    const distanceFromBottom =
+      el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (distanceFromBottom < 140) {
+      el.scrollTo({ top: el.scrollHeight });
+    }
+  }
+
+  function fitTerminal() {
+    const term = termRef.current;
+    const fit = fitRef.current;
+    if (!term || !fit) return;
+    try {
+      fit.fit();
+      const dims = fit.proposeDimensions();
+      const ws = wsRef.current;
+      if (dims && ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(
+          JSON.stringify({ type: "resize", cols: dims.cols, rows: dims.rows })
+        );
+      }
+    } catch {
+      /* ignorar errores transitorios de resize */
+    }
+  }
+
+  async function handleCopy() {
+    try {
+      const term = termRef.current;
+      const selection = term?.getSelection();
+      const text =
+        selection || (term as any)?.getBuffer?.() || initialCommand || "";
+      const toCopy =
+        typeof text === "string" ? text : selection || "";
+      if (toCopy) {
+        await navigator.clipboard.writeText(toCopy);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }
+    } catch {
+      /* portapapeles no disponible */
+    }
+  }
+
+  function sendCtrlC() {
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "input", data: "\x03" }));
+    }
+  }
 
   useEffect(() => {
-    if (!terminalRef.current) return;
+    if (!hostRef.current) return;
+    if (!sessionId || !accountId || !token) {
+      setError("Faltan credenciales para la terminal");
+      return;
+    }
 
-    // Inicializar terminal
     const term = new Terminal({
+      cols: 80,
+      rows: 16,
+      scrollback: 5000,
       cursorBlink: true,
       convertEol: true,
-      scrollback: 5000,
+      fontSize: 12,
+      fontFamily:
+        "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
       theme: {
-        background: "#0d1117",
-        foreground: "#e6edf3",
-        cursor: "#58a6ff",
-        selectionBackground: "#264f78",
+        background: "#05070d",
+        foreground: "#f4f4f5",
+        cursor: "#e4e4e7",
+        selectionBackground: "rgba(255, 255, 255, 0.28)",
         black: "#0d1117",
         red: "#f85142",
         green: "#3fb950",
@@ -56,32 +141,23 @@ export default function PtyTerminalEmbedded({
         magenta: "#bc8cff",
         cyan: "#39d0d8",
         white: "#e6edf3",
-        brightBlack: "#161b22",
-        brightRed: "#ff7b72",
-        brightGreen: "#a3ff66",
-        brightYellow: "#ffdb79",
-        brightBlue: "#79c6ff",
-        brightMagenta: "#d2a8ff",
-        brightCyan: "#57ffff",
-        brightWhite: "#ffffff",
       },
-      fontFamily: "'JetBrains Mono', 'Fira Code', 'Consolas', monospace",
-      fontSize: 13,
-      lineHeight: 1.2,
     });
 
-    const fitAddon = new FitAddon();
-    term.loadAddon(fitAddon);
+    const fit = new FitAddon();
+    term.loadAddon(fit);
     term.loadAddon(new WebLinksAddon());
-
-    term.open(terminalRef.current);
-    fitAddon.fit();
-
+    term.open(hostRef.current);
     termRef.current = term;
-    fitAddonRef.current = fitAddon;
+    fitRef.current = fit;
+    fitTerminal();
+    // Habilitar/deshabilitar stdin según estado inicial
+    term.options.disableStdin = !activeRef.current;
 
-    // Conectar WebSocket
-    const base = apiBaseUrl || process.env.NEXT_PUBLIC_API_URL || (typeof window !== "undefined" ? window.location.origin : "http://localhost:8000");
+    const base =
+      apiBaseUrl ||
+      process.env.NEXT_PUBLIC_API_URL ||
+      (typeof window !== "undefined" ? window.location.origin : "http://localhost:8000");
     let wsProtocol = "ws";
     let wsHost = "localhost:8000";
     if (typeof window !== "undefined") {
@@ -95,109 +171,173 @@ export default function PtyTerminalEmbedded({
     } catch (e) {
       console.error("PTY: Error parsing apiBaseUrl, using window.location", e);
     }
-    const wsUrl = `${wsProtocol}://${wsHost}/ws/terminal/${accountId}?token=${encodeURIComponent(token)}&session_id=${sessionId}`;
-    
+    const wsUrl = `${wsProtocol}://${wsHost}/ws/terminal/${accountId}?token=${encodeURIComponent(
+      token
+    )}&session_id=${encodeURIComponent(sessionId)}`;
+
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 
     ws.onopen = () => {
       setIsConnected(true);
       setError(null);
-      if (initialCommand && !sessionId) {
-        ws.send(JSON.stringify({ type: "input", data: initialCommand + "\n" }));
+      // El comando ya se está ejecutando en el PTY del servidor
+      // (creado por terminal_executor): NO reenviar initialCommand.
+      fitTerminal();
+      if (activeRef.current) {
+        try {
+          term.focus();
+        } catch {}
       }
-      if (fitAddonRef.current && termRef.current) {
-        const dims = fitAddonRef.current.proposeDimensions();
-        if (dims) {
-          ws.send(JSON.stringify({ type: "resize", cols: dims.cols, rows: dims.rows }));
-        }
-      }
-      term.focus();
     };
 
     ws.onmessage = (event) => {
+      // Ignorar latidos del servidor: no son salida del comando.
+      if (event.data === "ping" || event.data === "pong") return;
       try {
         const msg = JSON.parse(event.data);
-        if (msg.type === "output" && termRef.current) {
-          termRef.current.write(msg.data);
-        } else if (msg.type === "error" && termRef.current) {
-          termRef.current.writeln(`\x1b[31m${msg.data}\x1b[0m`);
+        // Filtrar por sesión: varias terminales coexisten y el broadcast
+        // incluye outputs de todas. Sin session_id (compat) se acepta.
+        if (msg.session_id && msg.session_id !== sessionId) return;
+        if (msg.type === "output" && msg.data) {
+          term.write(msg.data, () => scrollChatIfFollowing());
+        } else if (msg.type === "error" && msg.data) {
+          term.writeln(`\x1b[31m${msg.data}\x1b[0m`);
         }
       } catch {
-        // Mensaje de texto plano
-        if (termRef.current) {
-          termRef.current.write(event.data);
-        }
+        term.write(event.data, () => scrollChatIfFollowing());
       }
     };
 
-    ws.onerror = (e) => {
-      console.error("PTY WebSocket error:", e);
+    ws.onerror = () => {
       setError("Error de conexión con la terminal");
     };
 
     ws.onclose = () => {
       setIsConnected(false);
-      if (termRef.current) {
-        termRef.current.writeln("\x1b[33m[Terminal desconectada]\x1b[0m");
-      }
     };
 
-    // Enviar datos al escribir en la terminal
-    term.onData((data) => {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "input", data }));
+    // Input interactivo: todo lo tecleado va al PTY (solo si sigue activa)
+    const dataDisposable = term.onData((data) => {
+      const sock = wsRef.current;
+      if (activeRef.current && sock && sock.readyState === WebSocket.OPEN) {
+        sock.send(JSON.stringify({ type: "input", data }));
       }
     });
 
-    // Resize handler
-    const resizeHandler = () => {
-      if (fitAddonRef.current) {
-        fitAddonRef.current.fit();
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
-        }
-      }
-    };
-
-    window.addEventListener("resize", resizeHandler);
+    const observer = new ResizeObserver(() => fitTerminal());
+    if (hostRef.current) observer.observe(hostRef.current);
 
     return () => {
-      window.removeEventListener("resize", resizeHandler);
-      if (ws) {
+      dataDisposable.dispose();
+      observer.disconnect();
+      try {
         ws.close();
-      }
-      if (term) {
-        term.dispose();
-      }
+      } catch {}
+      wsRef.current = null;
+      term.dispose();
+      termRef.current = null;
+      fitRef.current = null;
     };
-  }, [sessionId, accountId, token, apiBaseUrl, initialCommand]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, accountId, token, apiBaseUrl]);
+
+  // Reflejar cambios de estado activo/finalizada sin remontar la terminal
+  useEffect(() => {
+    if (termRef.current) {
+      termRef.current.options.disableStdin = !active;
+    }
+    if (active && isConnected) {
+      try {
+        termRef.current?.focus();
+      } catch {}
+    }
+    if (!active && termRef.current) {
+      termRef.current.writeln("\x1b[33m[Terminal finalizada]\x1b[0m");
+    }
+  }, [active, isConnected]);
 
   return (
-    <div className={`relative bg-[#0d1117] rounded-lg overflow-hidden border border-white/10 ${className || ""}`}>
-      {/* Header minimal */}
-      <div className="flex items-center gap-2 px-3 py-1.5 bg-[#161b22] border-b border-white/5 text-xs font-mono">
-        <span className="text-green-400">●</span>
-        <span className="text-white/60 flex-1 truncate" title={initialCommand || "Terminal PTY — bash"}>
-          {initialCommand ? `PTY: ${initialCommand}` : "Terminal PTY — bash"}
+    <div
+      className={`w-full overflow-hidden transition-all ${
+        className || ""
+      }`}
+    >
+      {/* Cabecera estilo kogniterm-desktop */}
+      <div className="flex items-center gap-2.5 px-4 py-2 text-[12px] select-none">
+        <div className="flex items-center gap-1.5 mr-1">
+          <span className="w-2.5 h-2.5 rounded-full bg-red-500/80" />
+          <span className="w-2.5 h-2.5 rounded-full bg-amber-500/80" />
+          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500/80" />
+        </div>
+
+        <span className="text-[11px] font-mono text-slate-400">terminal</span>
+        <span
+          className="truncate font-mono text-slate-200 text-[11.5px] max-w-sm"
+          title={displayCommand}
+        >
+          $ {displayCommand}
         </span>
-        {isConnected ? (
-          <span className="text-green-400 text-[10px]">Conectado</span>
+
+        <div className="flex-1" />
+
+        {active && isConnected && (
+          <span className="rounded-full bg-amber-500/20 px-2.5 py-0.5 text-[10.5px] font-medium text-amber-200 animate-pulse">
+            interactiva: escribe aquí
+          </span>
+        )}
+        {active && !isConnected && (
+          <span className="rounded-full bg-emerald-500/20 px-2.5 py-0.5 text-[10.5px] font-medium text-emerald-300">
+            {error ? "reconectando" : "ejecutando"}
+          </span>
+        )}
+        {!active && (
+          <span className="rounded-full bg-white/[0.05] px-2.5 py-0.5 text-[10.5px] text-slate-400">
+            finalizada
+          </span>
+        )}
+
+        <button
+          className={`h-6 px-2.5 rounded-full flex items-center gap-1.5 transition-all text-[11px] font-medium ml-1.5 ${
+            copied
+              ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+              : "text-slate-400 hover:text-white hover:bg-white/[0.08]"
+          }`}
+          onClick={handleCopy}
+          onMouseDown={(e) => e.preventDefault()}
+          title={copied ? "¡Copiado!" : "Copiar contenido de la terminal"}
+        >
+          {copied ? <span>Copiado</span> : <span>Copiar</span>}
+        </button>
+      </div>
+
+      <div
+        ref={hostRef}
+        className="h-56 w-full px-2 py-1 cursor-text select-text"
+        onClick={() => active && termRef.current?.focus()}
+      />
+
+      {/* Pie de terminal */}
+      <div className="flex items-center gap-2 px-4 py-1.5 text-[11px] text-slate-400 select-none">
+        {active ? (
+          <>
+            <span>Envío interactivo activo: flechas, contraseñas y Ctrl+C.</span>
+            <div className="flex-1" />
+            <button
+              className="rounded-full bg-white/[0.08] hover:bg-white/[0.14] px-2.5 py-0.5 text-[11px] font-mono text-slate-200 hover:text-white transition-all active:scale-95"
+              title="Enviar señal Ctrl+C (interrumpir)"
+              onClick={sendCtrlC}
+            >
+              Ctrl+C
+            </button>
+          </>
         ) : (
-          <span className="text-yellow-400 text-[10px]">Conectando...</span>
+          <span>Salida de ejecución vinculada al proceso del agente.</span>
         )}
       </div>
-      
-      {/* Terminal container */}
-      <div 
-        ref={terminalRef} 
-        className="h-[280px] w-full cursor-text" 
-        onClick={() => termRef.current?.focus()}
-      />
-      
-      {/* Error overlay */}
+
       {error && (
-        <div className="absolute inset-0 flex items-center justify-center bg-red-900/20 text-red-400 text-sm">
+        <div className="px-4 py-1.5 text-[11px] text-red-400 bg-red-900/20">
           {error}
         </div>
       )}

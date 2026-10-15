@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "skills": {
+    "audio-production": {
+      "source": "travisjneuman/.claude",
+      "sourceType": "github",
+      "skillPath": "skills/audio-production/SKILL.md",
+      "computedHash": "dc17e8fde956b7a61114c13e035a713167aba51c9f04c24632ce80d77f3584c7"
+    },
+    "mastering-engineer": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/mastering-engineer/SKILL.md",
+      "computedHash": "25e7d3bd00bbc31a23dcec3236514dc07745227a002d3d29e7a81604cc138c67"
+    },
+    "mix-engineer": {
+      "source": "bitwize-music-studio/claude-ai-music-skills",
+      "sourceType": "github",
+      "skillPath": "skills/mix-engineer/SKILL.md",
+      "computedHash": "77c71c624f557a54ef494e0cc1cb504045f6b5ddf5e00e409d0441e544bd59c0"
+    },
+    "music-composition": {
+      "source": "sjy051/music-composition",
+      "sourceType": "github",
+      "skillPath": "SKILL.md",
+      "computedHash": "e4f167f8e428f481d6f515a64bf8a2813f8629fce7cfcda893a397347dd3437c"
+    }
+  }
+}

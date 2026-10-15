@@ -15,6 +15,44 @@ if skill_dir not in sys.path:
 logger = logging.getLogger(__name__)
 
 
+def _get_orchestrator_class():
+    """Resuelve KAIEthnoOrchestrator evitando colisiones con los paquetes
+    top-level `scripts`/`core` del proyecto raíz.
+
+    Orden de intento:
+    1. Import relativo (cuando este módulo se carga como
+       skills.kai_ethno_skill.scripts.run_ethnographic_research).
+    2. FQN skills.kai_ethno_skill.scripts.orchestrator.
+    3. Carga por ruta de archivo (cuando se carga como top-level
+       `scripts.run_ethnographic_research`).
+    """
+    try:
+        from .orchestrator import KAIEthnoOrchestrator
+
+        return KAIEthnoOrchestrator
+    except (ImportError, ValueError):
+        pass
+    try:
+        from skills.kai_ethno_skill.scripts.orchestrator import KAIEthnoOrchestrator
+
+        return KAIEthnoOrchestrator
+    except ImportError:
+        pass
+    import importlib.util
+
+    unique_name = "kai_ethno_scripts_orchestrator"
+    if unique_name in sys.modules:
+        return sys.modules[unique_name].KAIEthnoOrchestrator
+    file_path = os.path.join(skill_dir, "scripts", "orchestrator.py")
+    spec = importlib.util.spec_from_file_location(unique_name, file_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"No se pudo cargar el orquestador desde {file_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[unique_name] = module
+    spec.loader.exec_module(module)
+    return module.KAIEthnoOrchestrator
+
+
 class RunEthnographicResearchInput(BaseModel):
     research_question: str = Field(
         ...,
@@ -73,7 +111,7 @@ class RunEthnographicResearchTool(BaseTool):
             )
 
         try:
-            from scripts.orchestrator import KAIEthnoOrchestrator
+            KAIEthnoOrchestrator = _get_orchestrator_class()
 
             orchestrator = KAIEthnoOrchestrator(
                 enable_ethics=True,
@@ -224,7 +262,7 @@ class RunEthnographicResearchTool(BaseTool):
     ):
         """Fallback que retorna texto plano si citation_models no está disponible."""
         try:
-            from scripts.orchestrator import KAIEthnoOrchestrator
+            KAIEthnoOrchestrator = _get_orchestrator_class()
             orchestrator = KAIEthnoOrchestrator(enable_ethics=True, enable_memory=False, enable_message_bus=False)
             year_range = (year_range_start, year_range_end) if year_range_start and year_range_end else None
             result = await orchestrator.run_research(

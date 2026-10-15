@@ -1136,9 +1136,14 @@ async def get_knowledge_graph_data(
                     node_label = all_properties.get("central_concept") or all_properties.get("name") or node_label
                     node_name_for_title = node_label # Usar el label como nombre para el título
                 elif node_type == "ANTHROPOLOGICAL_QUOTE":
+                    desc = all_properties.get("description")
                     text = all_properties.get("text") or all_properties.get("full_text") or all_properties.get("name") or node_label
-                    node_label = (text[:40] + "...") if len(text) > 40 else text
-                    node_name_for_title = text
+                    if desc:
+                        node_label = (desc[:40] + "...") if len(desc) > 40 else desc
+                        node_name_for_title = desc
+                    else:
+                        node_label = (text[:40] + "...") if len(text) > 40 else text
+                        node_name_for_title = text
                 elif node_type == "ANTHROPOLOGICAL_CODE":
                     node_label = all_properties.get("code_name") or all_properties.get("name") or node_label
                     node_name_for_title = node_label

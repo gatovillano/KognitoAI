@@ -1,15 +1,15 @@
 'use client';
 
-import DOMPurify from 'isomorphic-dompurify';
+import DOMPurify, { type Config } from 'isomorphic-dompurify';
 
 const LINK_REL = 'noopener noreferrer nofollow';
 
-const FEDIVERSE_SANITIZE_OPTIONS: DOMPurify.Config = {
+const FEDIVERSE_SANITIZE_OPTIONS: Config = {
   USE_PROFILES: { html: true },
   ADD_ATTR: ['target', 'rel', 'class'],
 };
 
-const MARKDOWN_SANITIZE_OPTIONS: DOMPurify.Config = {
+const MARKDOWN_SANITIZE_OPTIONS: Config = {
   USE_PROFILES: { html: true },
   ADD_ATTR: [
     'target',
@@ -49,14 +49,14 @@ function configureLinkSafetyHooks(): void {
 
 function sanitizeWithOptions(
   html: string | null | undefined,
-  options: DOMPurify.Config
+  options: Config
 ): string {
   if (!html) {
     return '';
   }
 
   configureLinkSafetyHooks();
-  return DOMPurify.sanitize(html, options);
+  return DOMPurify.sanitize(html, options) as string;
 }
 
 /**

@@ -3,12 +3,29 @@ import sqlite3
 import httpx
 import time
 import logging
+import threading
 from datetime import datetime
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger("KognitoSync")
+
+def is_ignored_path(path):
+    if not path:
+        return True
+    filename = os.path.basename(path)
+    if not filename:
+        return True
+    if filename.startswith((".", "~$", "~")):
+        return True
+    if filename.endswith((".tmp", ".swp", ".bak", ".crdownload", ".part", "~", ".sb-")):
+        return True
+    if filename.startswith("goutputstream-"):
+        return True
+    if filename.lower() in ("desktop.ini", "thumbs.db", ".ds_store"):
+        return True
+    return False
 
 class LocalChangeHandler(FileSystemEventHandler):
     def __init__(self, sync_manager):
@@ -44,6 +61,12 @@ class KognitoSyncManager:
         self.is_running = False
         self.observer = None
         self._suppress_watchdog = False
+        self._internal_moves = set()
+        self._internal_moves_lock = threading.Lock()
+        self._uploading_files = set()
+        self._upload_lock = threading.Lock()
+        self._debounce_timers = {}
+        self._debounce_lock = threading.Lock()
         self.init_db()
 
     def init_db(self):
@@ -261,11 +284,17 @@ class KognitoSyncManager:
             personal_dir = os.path.join(self.sync_dir, "Personal")
             os.makedirs(personal_dir, exist_ok=True)
             target_path = os.path.join(personal_dir, filename)
+            with self._internal_moves_lock:
+                self._internal_moves.add((local_path, target_path))
+                self._internal_moves.add(target_path)
             try:
                 os.rename(local_path, target_path)
                 logger.info(f"Archivo movido de raíz a carpeta Personal: {local_path} -> {target_path}")
                 local_path = target_path
             except Exception as e:
+                with self._internal_moves_lock:
+                    self._internal_moves.discard((local_path, target_path))
+                    self._internal_moves.discard(target_path)
                 logger.error(f"No se pudo mover archivo raíz a Personal: {e}")
             rel_path = os.path.relpath(local_path, self.sync_dir)
             parts = rel_path.split(os.sep)
@@ -275,11 +304,17 @@ class KognitoSyncManager:
             # significa que es una carpeta personal creada en la raíz (ej: ~/KognitoSync/MiCarpeta/...)
             target_path = os.path.join(self.sync_dir, "Personal", rel_path)
             os.makedirs(os.path.dirname(target_path), exist_ok=True)
+            with self._internal_moves_lock:
+                self._internal_moves.add((local_path, target_path))
+                self._internal_moves.add(target_path)
             try:
                 os.rename(local_path, target_path)
                 logger.info(f"Ruta reubicada dentro de Personal: {local_path} -> {target_path}")
                 local_path = target_path
             except Exception as e:
+                with self._internal_moves_lock:
+                    self._internal_moves.discard((local_path, target_path))
+                    self._internal_moves.discard(target_path)
                 logger.error(f"No se pudo reubicar bajo Personal: {e}")
             rel_path = os.path.relpath(local_path, self.sync_dir)
             parts = rel_path.split(os.sep)
@@ -488,11 +523,20 @@ class KognitoSyncManager:
             for root, dirs, files in os.walk(self.sync_dir):
                 dirs[:] = [d for d in dirs if not d.startswith('.')]
                 for f in files:
-                    if f.startswith('~$') or f.startswith('.'):
+                    if is_ignored_path(f):
                         continue
                     full_path = os.path.join(root, f)
+                    
+                    # Comprobar directamente en SQLite si ya está registrado
+                    cursor.execute("SELECT 1 FROM sync_files WHERE local_path = ?", (full_path,))
+                    if cursor.fetchone():
+                        continue
+
                     if full_path not in local_db_records and full_path not in remote_by_path:
-                        self.upload_new_file(cursor, full_path, folder_map=folder_map, workspaces=workspaces)
+                        upload_res = self.upload_new_file(cursor, full_path, folder_map=folder_map, workspaces=workspaces)
+                        if upload_res:
+                            doc_id, resolved_path = upload_res
+                            local_db_records[resolved_path] = {"document_id": doc_id, "local_path": resolved_path}
 
             # 6. Limpieza de carpetas locales vacías que ya no existen en la nube
             for root, dirs, files in os.walk(self.sync_dir, topdown=False):
@@ -544,25 +588,76 @@ class KognitoSyncManager:
         except Exception as e:
             logger.error(f"Error en descarga ({document_id}): {e}")
 
-    def upload_new_file(self, cursor, local_path, folder_map=None, workspaces=None):
-        if not os.path.exists(local_path):
-            return
+    def upload_updated_file(self, cursor, local_path, doc_id):
+        if not os.path.exists(local_path) or is_ignored_path(local_path):
+            return False
 
-        filename = os.path.basename(local_path)
-        if filename.startswith("~$") or filename.startswith("."):
-            return
+        try:
+            curr_mtime = os.path.getmtime(local_path)
+        except Exception:
+            return False
 
-        # Resolver la jerarquía de directorios (workspace y carpetas anidadas)
-        local_path, workspace_id, folder_id, folder_map = self.resolve_local_path_hierarchy(
-            local_path, folder_map=folder_map, workspaces=workspaces
-        )
-        filename = os.path.basename(local_path)
+        cursor.execute("SELECT last_seen_mtime FROM sync_files WHERE document_id = ?", (str(doc_id),))
+        row = cursor.fetchone()
+        if row and abs(curr_mtime - row[0]) < 0.1:
+            return True
 
-        logger.info(f"Subiendo nuevo archivo local: {local_path} (workspace_id={workspace_id}, folder_id={folder_id})")
-        
-        url = f"{self.server_url}/api/onlyoffice/upload"
+        logger.info(f"Actualizando contenido remoto para ID: {doc_id} ({local_path})")
+        url = f"{self.server_url}/api/onlyoffice/{doc_id}"
         try:
             with open(local_path, "rb") as f:
+                files = {"file": (os.path.basename(local_path), f, "application/octet-stream")}
+                resp = httpx.put(url, headers=self.get_auth_headers(), files=files)
+                if resp.status_code == 200:
+                    res_json = resp.json()
+                    updated_at = res_json.get("updated_at", datetime.now().isoformat())
+                    cursor.execute("""
+                        UPDATE sync_files SET last_seen_mtime = ?, last_seen_updated_at = ?
+                        WHERE document_id = ?
+                    """, (curr_mtime, updated_at, str(doc_id)))
+                    logger.info(f"Actualizado exitosamente en el servidor (ID: {doc_id}).")
+                    return True
+                else:
+                    logger.error(f"Error al actualizar archivo ({doc_id}): {resp.status_code} - {resp.text}")
+                    return False
+        except Exception as e:
+            logger.error(f"Error en PUT ({doc_id}): {e}")
+            return False
+
+    def upload_new_file(self, cursor, local_path, folder_map=None, workspaces=None):
+        if not os.path.exists(local_path) or is_ignored_path(local_path):
+            return None
+
+        # Bloqueo para evitar subidas concurrentes del mismo archivo
+        with self._upload_lock:
+            if local_path in self._uploading_files:
+                logger.info(f"Subida ya en curso para {local_path}, omitiendo duplicado.")
+                return None
+            self._uploading_files.add(local_path)
+
+        resolved_path = None
+        try:
+            # 1. Resolver la jerarquía de directorios (workspace y carpetas anidadas)
+            resolved_path, workspace_id, folder_id, folder_map = self.resolve_local_path_hierarchy(
+                local_path, folder_map=folder_map, workspaces=workspaces
+            )
+            if not os.path.exists(resolved_path) or is_ignored_path(resolved_path):
+                return None
+
+            # 2. Comprobar si tras la resolución de ruta ya está registrado en SQLite
+            cursor.execute("SELECT document_id, last_seen_mtime FROM sync_files WHERE local_path = ?", (resolved_path,))
+            existing = cursor.fetchone()
+            if existing:
+                doc_id = existing[0]
+                logger.info(f"Archivo ya registrado en {resolved_path} (ID: {doc_id}). Actualizando contenido.")
+                self.upload_updated_file(cursor, resolved_path, doc_id)
+                return doc_id, resolved_path
+
+            filename = os.path.basename(resolved_path)
+            logger.info(f"Subiendo nuevo archivo local: {resolved_path} (workspace_id={workspace_id}, folder_id={folder_id})")
+            
+            url = f"{self.server_url}/api/onlyoffice/upload"
+            with open(resolved_path, "rb") as f:
                 files = {"file": (filename, f, "application/octet-stream")}
                 data = {}
                 if workspace_id:
@@ -574,62 +669,59 @@ class KognitoSyncManager:
                 if resp.status_code == 200:
                     res_json = resp.json()
                     doc_id = str(res_json["id"])
-                    mtime = os.path.getmtime(local_path)
-                    
-                    updated_at = res_json.get("updated_at")
-                    if not updated_at:
-                        updated_at = datetime.now().isoformat()
-
-                    self.register_in_db(cursor, local_path, doc_id, workspace_id, folder_id, updated_at)
+                    updated_at = res_json.get("updated_at") or datetime.now().isoformat()
+                    self.register_in_db(cursor, resolved_path, doc_id, workspace_id, folder_id, updated_at)
                     logger.info(f"Subido con éxito: {filename} (ID: {doc_id}, folder_id: {folder_id})")
+                    return doc_id, resolved_path
                 else:
                     logger.error(f"Error subiendo archivo {filename}: {resp.status_code} - {resp.text}")
+                    return None
         except Exception as e:
             logger.error(f"Error en subida de {local_path}: {e}")
+            return None
+        finally:
+            with self._upload_lock:
+                self._uploading_files.discard(local_path)
+                if resolved_path:
+                    self._uploading_files.discard(resolved_path)
 
     def handle_local_change(self, local_path, change_type):
         if not self.is_running or self._suppress_watchdog:
             return
-        
-        filename = os.path.basename(local_path)
-        if filename.startswith("~$") or filename.startswith("."):
+
+        if is_ignored_path(local_path):
             return
+
+        with self._internal_moves_lock:
+            if local_path in self._internal_moves:
+                self._internal_moves.discard(local_path)
+                return
+
+        # Debounce: cancelar temporizador anterior si existe para este archivo y reiniciar
+        with self._debounce_lock:
+            timer = self._debounce_timers.pop(local_path, None)
+            if timer:
+                try:
+                    timer.cancel()
+                except Exception:
+                    pass
             
-        logger.info(f"Cambio local detectado: {local_path} ({change_type})")
-        time.sleep(0.5)
-        
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        try:
-            if change_type in ["create", "modify"]:
-                cursor.execute("SELECT * FROM sync_files WHERE local_path = ?", (local_path,))
-                row = cursor.fetchone()
-                if row:
-                    doc_id = row[1]
-                    logger.info(f"Actualizando contenido remoto para ID: {doc_id}")
-                    url = f"{self.server_url}/api/onlyoffice/{doc_id}"
-                    try:
-                        with open(local_path, "rb") as f:
-                            files = {"file": (os.path.basename(local_path), f, "application/octet-stream")}
-                            resp = httpx.put(url, headers=self.get_auth_headers(), files=files)
-                            if resp.status_code == 200:
-                                res_json = resp.json()
-                                updated_at = res_json.get("updated_at", datetime.now().isoformat())
-                                mtime = os.path.getmtime(local_path)
-                                cursor.execute("""
-                                    UPDATE sync_files SET last_seen_mtime = ?, last_seen_updated_at = ?
-                                    WHERE local_path = ?
-                                """, (mtime, updated_at, local_path))
-                                logger.info(f"Actualizado exitosamente en el servidor.")
-                            else:
-                                logger.error(f"Error al actualizar archivo: {resp.status_code} - {resp.text}")
-                    except Exception as e:
-                        logger.error(f"Error en PUT: {e}")
-                else:
-                    self.upload_new_file(cursor, local_path)
-                    
-            elif change_type == "delete":
+            new_timer = threading.Timer(0.8, self._process_debounced_change, args=[local_path, change_type])
+            self._debounce_timers[local_path] = new_timer
+            new_timer.daemon = True
+            new_timer.start()
+
+    def _process_debounced_change(self, local_path, change_type):
+        with self._debounce_lock:
+            self._debounce_timers.pop(local_path, None)
+
+        if not self.is_running or self._suppress_watchdog:
+            return
+
+        if change_type == "delete":
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            try:
                 cursor.execute("SELECT * FROM sync_files WHERE local_path = ?", (local_path,))
                 row = cursor.fetchone()
                 if row:
@@ -645,6 +737,37 @@ class KognitoSyncManager:
                             logger.error(f"Error al eliminar en servidor: {resp.status_code} - {resp.text}")
                     except Exception as e:
                         logger.error(f"Error en DELETE: {e}")
+                conn.commit()
+            finally:
+                conn.close()
+            return
+
+        if not os.path.exists(local_path) or is_ignored_path(local_path):
+            return
+
+        # Esperar a que el archivo termine de escribirse si está creciendo
+        last_size = -1
+        for _ in range(5):
+            try:
+                sz = os.path.getsize(local_path)
+                if sz == last_size:
+                    break
+                last_size = sz
+                time.sleep(0.2)
+            except Exception:
+                break
+
+        logger.info(f"Procesando cambio local estabilizado: {local_path} ({change_type})")
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT document_id, last_seen_mtime FROM sync_files WHERE local_path = ?", (local_path,))
+            row = cursor.fetchone()
+            if row:
+                doc_id = row[0]
+                self.upload_updated_file(cursor, local_path, doc_id)
+            else:
+                self.upload_new_file(cursor, local_path)
             conn.commit()
         finally:
             conn.close()
@@ -729,7 +852,17 @@ class KognitoSyncManager:
     def handle_local_move(self, src_path, dest_path, is_directory=False):
         if not self.is_running or self._suppress_watchdog:
             return
-            
+
+        with self._internal_moves_lock:
+            if (src_path, dest_path) in self._internal_moves or dest_path in self._internal_moves:
+                self._internal_moves.discard((src_path, dest_path))
+                self._internal_moves.discard(dest_path)
+                logger.info(f"Movimiento interno de reubicación ignorado en watcher: {src_path} -> {dest_path}")
+                return
+
+        if is_ignored_path(dest_path):
+            return
+
         logger.info(f"Movimiento local detectado: {src_path} -> {dest_path} (is_dir={is_directory})")
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -752,22 +885,27 @@ class KognitoSyncManager:
                         WHERE document_id = ?
                     """, (new_file_path, workspace_id, folder_id, mtime, doc_id))
             else:
-                filename = os.path.basename(dest_path)
-                if filename.startswith("~$") or filename.startswith("."):
-                    return
                 cursor.execute("SELECT * FROM sync_files WHERE local_path = ?", (src_path,))
                 row = cursor.fetchone()
                 if row:
                     doc_id = row[1]
-                    dest_path, workspace_id, folder_id, _ = self.resolve_local_path_hierarchy(dest_path)
-                    self.update_remote_doc_meta(doc_id, filename=os.path.basename(dest_path), workspace_id=workspace_id, folder_id=folder_id)
-                    mtime = os.path.getmtime(dest_path) if os.path.exists(dest_path) else row[4]
+                    resolved_dest_path, workspace_id, folder_id, _ = self.resolve_local_path_hierarchy(dest_path)
+                    self.update_remote_doc_meta(doc_id, filename=os.path.basename(resolved_dest_path), workspace_id=workspace_id, folder_id=folder_id)
+                    mtime = os.path.getmtime(resolved_dest_path) if os.path.exists(resolved_dest_path) else row[4]
                     cursor.execute("""
                         UPDATE sync_files SET local_path = ?, workspace_id = ?, folder_id = ?, last_seen_mtime = ?
                         WHERE document_id = ?
-                    """, (dest_path, workspace_id, folder_id, mtime, doc_id))
+                    """, (resolved_dest_path, workspace_id, folder_id, mtime, doc_id))
                 else:
-                    self.upload_new_file(cursor, dest_path)
+                    # Comprobar si dest_path ya estaba registrado (guardado atómico por editor)
+                    cursor.execute("SELECT document_id FROM sync_files WHERE local_path = ?", (dest_path,))
+                    dest_row = cursor.fetchone()
+                    if dest_row:
+                        doc_id = dest_row[0]
+                        logger.info(f"Guardado atómico detectado para {dest_path} (ID: {doc_id}). Actualizando contenido.")
+                        self.upload_updated_file(cursor, dest_path, doc_id)
+                    else:
+                        self.upload_new_file(cursor, dest_path)
             conn.commit()
         finally:
             conn.close()
@@ -811,4 +949,11 @@ class KognitoSyncManager:
 
     def stop(self):
         self.is_running = False
+        with self._debounce_lock:
+            for timer in self._debounce_timers.values():
+                try:
+                    timer.cancel()
+                except Exception:
+                    pass
+            self._debounce_timers.clear()
         self.stop_watching()

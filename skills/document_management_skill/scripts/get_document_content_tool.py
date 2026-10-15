@@ -54,10 +54,11 @@ class GetDocumentContentTool(BaseTool):
     """
     name: str = "get_document_content_tool"
     description: str = (
-        "La herramienta principal para leer y recuperar el contenido textual completo de un documento específico "
-        "que ha sido subido previamente por el usuario. Esencial para tareas que requieren analizar, "
-        "resumir, o procesar el contenido de un archivo. Úsala siempre que el usuario pida explícitamente "
-        "leer, ver, analizar o trabajar con el contenido de un documento por su `file_name`."
+        "[BASE DE CONOCIMIENTO RAG] Recupera el contenido textual completo de un documento almacenado "
+        "en la base de conocimiento vectorial del usuario a partir de su 'file_name'. "
+        "ÚSALA EXCLUSIVAMENTE para documentos de la base de conocimiento RAG (PDFs, TXT, archivos de referencia). "
+        "NO LA USES para documentos de OnlyOffice (Word .docx, Excel .xlsx, PowerPoint .pptx editables en la plataforma); "
+        "para leer documentos de OnlyOffice debes usar 'read_onlyoffice_document' con su UUID 'document_id'."
     )
     args_schema: Type[BaseModel] = GetDocumentContentInput
     return_direct: bool = False

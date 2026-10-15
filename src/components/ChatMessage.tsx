@@ -8,9 +8,8 @@ import { motion, AnimatePresence } from 'framer-motion'; // Importar motion
 import { ChatAvatar } from './ChatAvatar';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTrigger } from '@/components/ui/dialog';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { BrainCircuit, ChevronDown, ChevronUp, Check, X, Edit3, ChevronLeft, ChevronRight, Trash2, ExternalLink, ArrowDown } from 'lucide-react';
-import { Copy, Play, Loader2, Pause, RefreshCw, Folder, File as FileIcon, Network, Download } from 'lucide-react';
+import { BrainCircuit, ChevronDown, ChevronUp, Check, X, Edit3, ChevronLeft, ChevronRight, Trash2, ExternalLink } from 'lucide-react';
+import { Copy, Play, Loader2, Pause, RefreshCw, Folder, File as FileIcon, FileText, Network, Download } from 'lucide-react';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 import { Source, SourceButton, ContentPart } from '@/components/SourceButton';
 import { processMessageWithCitations, collectSourcesFromMessage, getSourceIdentityKey } from '@/lib/chatUtils';
@@ -175,8 +174,12 @@ const stripHtml = (text: string) => {
 const ToolCallBlock = ({ part }: { part: MessageContentPart }) => {
   const { user, token } = useAuth();
   const isTerminal = part.tool_name === 'terminal_executor' && !!part.pty_session;
+  // La terminal es persistente y desplegada (estilo kogniterm-desktop):
+  // siempre visible, nunca colapsada, con input interactivo en vivo.
   const [isExpanded, setIsExpanded] = useState(isTerminal || part.status === 'error');
+  const [isManuallyCollapsed, setIsManuallyCollapsed] = useState(false);
   const hasContent = (!!part.content && part.status !== 'start') || isTerminal;
+  const terminalActive = isTerminal && part.status === 'start';
 
   useEffect(() => {
     if (isTerminal || part.status === 'error') {
@@ -186,21 +189,73 @@ const ToolCallBlock = ({ part }: { part: MessageContentPart }) => {
 
   const isError = part.status === 'error';
 
+  // ── Terminal interactiva en tiempo real: render directo, sin colapso ──
+  if (isTerminal) {
+    const sessionId = part.pty_session!.session_id;
+    const command = part.pty_session!.command;
+    const collapsed = isManuallyCollapsed;
+    return (
+      <div className="mb-4">
+        <div className="flex flex-col overflow-hidden transition-all duration-300">
+          <button
+            onClick={() => setIsManuallyCollapsed((v) => !v)}
+            className="flex items-center gap-2 w-full text-left cursor-pointer"
+          >
+            {terminalActive ? (
+              <Loader2 className="h-3.5 w-3.5 text-primary animate-spin" />
+            ) : (
+              <Folder className="h-3.5 w-3.5 text-primary" />
+            )}
+            <p className="text-[11px] font-medium flex-1 text-primary/80">
+              {`Terminal: ${command || part.tool_name || 'bash'}`}
+              {terminalActive ? ' - Ejecutando' : ' - Finalizada'}
+            </p>
+            <motion.div
+              animate={{ rotate: collapsed ? 0 : 180 }}
+              transition={{ duration: 0.3 }}
+            >
+              <ChevronDown className="h-3 w-3 text-primary/60" />
+            </motion.div>
+          </button>
+
+          <AnimatePresence initial={false}>
+            {!collapsed && (
+              <motion.div
+                key={`pty-${sessionId}-${terminalActive ? 'live' : 'done'}`}
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.3 }}
+                className="overflow-hidden"
+              >
+                <div className="py-3">
+                  <div className="overflow-hidden rounded-xl border border-white/10 bg-[#05070d] shadow-[0_0_0_1px_rgba(0,0,0,0.4),0_8px_24px_-12px_rgba(0,0,0,0.8)]">
+                    <PtyTerminalEmbedded
+                      key={sessionId}
+                      accountId={(user?.account_id || user?.id) as string || ''}
+                      token={token || ''}
+                      sessionId={sessionId}
+                      apiBaseUrl={process.env.NEXT_PUBLIC_API_URL || ''}
+                      initialCommand={command}
+                      active={terminalActive}
+                    />
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="mb-4">
-      <div 
-        className={`flex flex-col rounded-lg border overflow-hidden transition-all duration-300 ${
-          isError 
-            ? 'bg-destructive/10 border-destructive/30 ring-1 ring-destructive/20 shadow-sm' 
-            : 'bg-primary/5 border-primary/10'
-        } ${isExpanded && !isError ? 'ring-1 ring-primary/20 shadow-sm' : ''}`}
-      >
+      <div className="flex flex-col overflow-hidden transition-all duration-300">
         <button
           onClick={() => hasContent && setIsExpanded(!isExpanded)}
           disabled={!hasContent}
-          className={`flex items-center gap-2 p-2 w-full text-left transition-colors ${
-            hasContent ? (isError ? 'hover:bg-destructive/20 cursor-pointer' : 'hover:bg-primary/10 cursor-pointer') : 'cursor-default'
-          }`}
+          className="flex items-center gap-2 w-full text-left"
         >
           {part.status === 'start' ? (
             <Loader2 className="h-3.5 w-3.5 text-primary animate-spin" />
@@ -232,30 +287,18 @@ const ToolCallBlock = ({ part }: { part: MessageContentPart }) => {
               exit={{ height: 0, opacity: 0 }}
               transition={{ duration: 0.3 }}
             >
-              <div className="px-4 py-3 border-t border-primary/10 bg-background/50">
+              <div className="py-2">
                 <div className="flex items-center gap-2 mb-2 text-[10px] font-bold uppercase tracking-widest text-primary/60">
                    <ExternalLink className="h-3 w-3" />
-                   {isTerminal ? 'Terminal Interactiva en tiempo real' : 'Salida de la herramienta'}
+                   Salida de la herramienta
                 </div>
-                {isTerminal ? (
-                  <div className="mb-2">
-                    <PtyTerminalEmbedded
-                      accountId={(user?.account_id || user?.id) as string || ''}
-                      token={token || ''}
-                      sessionId={part.pty_session!.session_id}
-                      apiBaseUrl={process.env.NEXT_PUBLIC_API_URL || ''}
-                      initialCommand={part.pty_session!.command}
-                    />
-                  </div>
-                ) : (
-                  <div className="max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
-                    <MarkdownRenderer
-                      content={part.content}
-                      fontSize="text-[12px]"
-                      style={{ color: 'var(--foreground)', opacity: 0.9 }}
-                    />
-                  </div>
-                )}
+                <div className="max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                  <MarkdownRenderer
+                    content={part.content}
+                    fontSize="text-[12px]"
+                    style={{ color: 'var(--foreground)', opacity: 0.9 }}
+                  />
+                </div>
               </div>
             </motion.div>
           )}
@@ -298,10 +341,6 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
       : 'Assistant';
   }, [msg.model_name, settings?.llm_model]);
 
-  const { citationSources, additionalSources } = useMemo(() => {
-    return collectSourcesFromMessage(msg.sources, msg.ragContext);
-  }, [msg.sources, msg.ragContext]);
-
   const citationText = useMemo(() => {
     if (msg.content_parts && msg.content_parts.length > 0) {
       return msg.content_parts
@@ -312,6 +351,10 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
 
     return msg.text;
   }, [msg.content_parts, msg.text]);
+
+  const { citationSources, additionalSources } = useMemo(() => {
+    return collectSourcesFromMessage(msg.sources, msg.ragContext, citationText);
+  }, [msg.sources, msg.ragContext, citationText]);
 
   const { citedSources: parsedCitedSources, resolvedSources } = useMemo(() => {
     return processMessageWithCitations(citationText, citationSources);
@@ -427,29 +470,36 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
               {msg.ragContext && msg.ragContext.length > 0 && (
                 <div className="mt-3 border-t border-border/20 pt-3">
                   <div className="space-y-2">
-                    {msg.ragContext.map((item, idx) => (
-                      <div key={idx} className="flex items-center gap-2 text-sm p-2 bg-background/50 rounded-lg">
-                        {item.type === 'document' ? <FileIcon className="h-4 w-4" /> : <Folder className="h-4 w-4" />}
-                        <span>{item.name}</span>
-                      </div>
-                    ))}
+                    {msg.ragContext.map((item, idx) => {
+                      const isOnlyOffice = item.type === 'onlyoffice' || item.doc_source === 'onlyoffice' || item.name?.startsWith('[OnlyOffice]');
+                      return (
+                        <div key={idx} className="flex items-center gap-2 text-sm p-2 bg-background/50 rounded-lg">
+                          {isOnlyOffice ? (
+                            <FileText className="h-4 w-4 text-blue-500 flex-shrink-0" />
+                          ) : item.type === 'document' ? (
+                            <FileIcon className="h-4 w-4 text-emerald-500 flex-shrink-0" />
+                          ) : (
+                            <Folder className="h-4 w-4 text-amber-500 flex-shrink-0" />
+                          )}
+                          <span className="truncate flex-1">{item.name}</span>
+                          {isOnlyOffice ? (
+                            <span className="text-[10px] font-semibold text-blue-600 bg-blue-50 dark:bg-blue-950/40 px-1.5 py-0.5 rounded flex-shrink-0">
+                              OnlyOffice
+                            </span>
+                          ) : (
+                            <span className="text-[10px] font-semibold text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded flex-shrink-0">
+                              RAG
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
             </div>
           </div>
           <div className="flex items-center gap-1 mt-1 mr-4 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-all">
-            {scrollToBottom && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 w-7 p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/40 rounded-lg transition-all"
-                onClick={() => scrollToBottom('smooth')}
-                title="Ir al final del chat"
-              >
-                <ArrowDown className="h-3.5 w-3.5" />
-              </Button>
-            )}
             <Button
               variant="ghost"
               size="sm"
@@ -578,15 +628,18 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
 
 
                     {/* Embedded PTY terminal if the tool provided a session and wasn't already rendered inside ToolCallBlock */}
-                    {msg.pty_session && (!msg.content_parts || !msg.content_parts.some(p => p.type === 'tool_call' && p.pty_session)) && (
+                    {msg.pty_session && (!msg.content_parts || !msg.content_parts.some((p: any) => p.type === 'tool_call' && (p as any).pty_session)) && (
                       <div className="mb-4">
-                        <PtyTerminalEmbedded
-                          accountId={(user?.account_id || user?.id) as string}
-                          token={token || ''}
-                          sessionId={msg.pty_session.session_id}
-                          apiBaseUrl={process.env.NEXT_PUBLIC_API_URL || ''}
-                          initialCommand={msg.pty_session.command}
-                        />
+                        <div className="overflow-hidden rounded-xl border border-white/10 bg-[#05070d] shadow-[0_0_0_1px_rgba(0,0,0,0.4),0_8px_24px_-12px_rgba(0,0,0,0.8)]">
+                          <PtyTerminalEmbedded
+                            accountId={(user?.account_id || user?.id) as string}
+                            token={token || ''}
+                            sessionId={msg.pty_session.session_id}
+                            apiBaseUrl={process.env.NEXT_PUBLIC_API_URL || ''}
+                            initialCommand={msg.pty_session.command}
+                            active={false}
+                          />
+                        </div>
                       </div>
                     )}
 
@@ -646,17 +699,6 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
                       <ChevronRight className="h-3.5 w-3.5" />
                     </Button>
                   </div>
-                )}
-                {scrollToBottom && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 w-8 p-1.5 opacity-70 hover:opacity-100 hover:bg-accent/40 rounded-lg transition-all"
-                    onClick={() => scrollToBottom('smooth')}
-                    title="Ir al final del chat"
-                  >
-                    <ArrowDown className="h-3.5 w-3.5" />
-                  </Button>
                 )}
                 <Button
                   variant="ghost"

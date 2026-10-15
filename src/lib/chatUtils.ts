@@ -190,7 +190,8 @@ export const processMessageWithCitations = (text: string | any[], allSources: So
 // Helper function to collect and deduplicate sources from various message fields
 export const collectSourcesFromMessage = (
   sources?: Source[],
-  ragContext?: any[]
+  ragContext?: any[],
+  text?: string
 ): { citationSources: Source[], additionalSources: Source[], processedRagContext: any[] } => {
   const normalizedExplicitSources = Array.isArray(sources)
     ? dedupeSources(sources.map((source, index) => normalizeSource(source, index + 1)))
@@ -202,9 +203,33 @@ export const collectSourcesFromMessage = (
 
   // Las citas deben resolverse contra una secuencia estable. Preferimos la lista explícita
   // enviada por el backend y solo usamos ragContext como fallback si no existe.
-  const citationSources = normalizedExplicitSources.length > 0
+  let citationSources = normalizedExplicitSources.length > 0
     ? normalizedExplicitSources
     : normalizedRagSources;
+
+  // Fallback para mensajes que no tienen fuentes adjuntas pero tienen citas en el texto [1], [2], etc.
+  if (citationSources.length === 0 && text) {
+    const citationRegex = /\[(\d+(?:\s*,\s*\d+)*)\]/g;
+    const foundNumbers = new Set<number>();
+    let m: RegExpExecArray | null;
+    while ((m = citationRegex.exec(text)) !== null) {
+      const nums = m[1].split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n));
+      nums.forEach(n => foundNumbers.add(n));
+    }
+
+    if (foundNumbers.size > 0) {
+      const sortedNums = Array.from(foundNumbers).sort((a, b) => a - b);
+      citationSources = sortedNums.map(num => ({
+        id: num,
+        title: `Fuente [${num}]`,
+        url: '',
+        snippet: 'Fuente citada de la base de conocimiento.',
+        type: 'document' as const,
+        name: `Fuente [${num}]`,
+        is_cited: true,
+      }));
+    }
+  }
 
   const additionalSources = dedupeSources([
     ...citationSources,

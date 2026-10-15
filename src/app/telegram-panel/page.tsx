@@ -143,7 +143,7 @@ function PanelContent() {
         }
 
         if (activeTab === "conocimiento") {
-          const res = await apiClient.get("/api/list-documents", { params });
+          const res = await apiClient.get("/api/documents/list-documents", { params });
           setDocuments(Array.isArray(res.data) ? res.data : []);
         } else if (activeTab === "notas") {
           const res = await apiClient.post("/api/notes/list-notes", {
@@ -180,19 +180,19 @@ function PanelContent() {
     setLoading(true);
     try {
       const formData = new FormData();
-      formData.append("file", uploadFiles[0]);
+      Array.from(uploadFiles).forEach((f) => formData.append("files", f));
       formData.append("topic", uploadTopic);
       if (activeWorkspaceId) {
         formData.append("workspace_id", activeWorkspaceId);
       }
 
-      await apiClient.post("/api/upload-document", formData, {
+      await apiClient.post("/api/documents/upload-document", formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
 
       // Recargar
       const params = activeWorkspaceId ? { workspace_id: activeWorkspaceId } : {};
-      const res = await apiClient.get("/api/list-documents", { params });
+      const res = await apiClient.get("/api/documents/list-documents", { params });
       setDocuments(Array.isArray(res.data) ? res.data : []);
       setUploadFiles(null);
       alert("¡Documento subido y procesado con éxito!");
@@ -208,7 +208,7 @@ function PanelContent() {
     if (!confirm(`¿Estás seguro de eliminar "${fileName}"?`)) return;
     setLoading(true);
     try {
-      await apiClient.post("/api/delete-document", {
+      await apiClient.post("/api/documents/delete-document", {
         file_name: fileName,
         topic: topic || "General",
         workspace_id: activeWorkspaceId || null,

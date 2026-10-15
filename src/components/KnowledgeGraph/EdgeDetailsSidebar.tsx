@@ -70,7 +70,11 @@ export const EdgeDetailsSidebar: React.FC<EdgeDetailsSidebarProps> = ({
                                             {sourceNode.type || 'Nodo'}
                                         </Badge>
                                     </div>
-                                    <p className="text-sm font-medium">{sourceNode.label || sourceNode.properties?.name || `ID: ${sourceNode.id}`}</p>
+                                    <p className="text-sm font-medium">
+                                        {sourceNode.type === 'ANTHROPOLOGICAL_QUOTE'
+                                            ? (sourceNode.properties?.description || sourceNode.label || sourceNode.properties?.name || `ID: ${sourceNode.id}`)
+                                            : (sourceNode.label || sourceNode.properties?.name || `ID: ${sourceNode.id}`)}
+                                    </p>
                                 </div>
                             )}
                             
@@ -86,7 +90,11 @@ export const EdgeDetailsSidebar: React.FC<EdgeDetailsSidebarProps> = ({
                                             {targetNode.type || 'Nodo'}
                                         </Badge>
                                     </div>
-                                    <p className="text-sm font-medium">{targetNode.label || targetNode.properties?.name || `ID: ${targetNode.id}`}</p>
+                                    <p className="text-sm font-medium">
+                                        {targetNode.type === 'ANTHROPOLOGICAL_QUOTE'
+                                            ? (targetNode.properties?.description || targetNode.label || targetNode.properties?.name || `ID: ${targetNode.id}`)
+                                            : (targetNode.label || targetNode.properties?.name || `ID: ${targetNode.id}`)}
+                                    </p>
                                 </div>
                             )}
                         </div>

@@ -1047,41 +1047,47 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
                 // Determinar el tipo de análisis
                 let analysisType: AnalysisType = 'document';
                 const fileName = analysis.file_name || '';
+                const rawType = analysis.analysis_type || '';
                 const displayName = analysis.result_payload?.analysis_metadata?.title || analysis.result_payload?.title || analysis.title || fileName;
                 let icon = <FileText className="h-5 w-5 text-blue-500" />;
                 let badgeColor = 'bg-blue-100 text-blue-800 border-blue-200';
                 let typeLabel = 'Documento';
 
-                if (fileName.startsWith('Resumen Semántico:')) {
+                if (fileName.startsWith('Resumen Semántico:') || rawType === 'semantic_summary' || rawType === 'semantic') {
                   analysisType = 'semantic_summary';
                   icon = <Brain className="h-5 w-5 text-indigo-500" />;
                   badgeColor = 'bg-indigo-100 text-indigo-800 border-indigo-200';
                   typeLabel = 'Resumen Semántico';
-                } else if (analysis.analysis_type === 'document_summary') {
+                } else if (rawType === 'document_summary') {
                   analysisType = 'document_summary' as any;
                   icon = <Sparkles className="h-5 w-5 text-teal-500" />;
                   badgeColor = 'bg-teal-100 text-teal-800 border-teal-200';
                   typeLabel = 'Resumen de Documento';
-                } else if (fileName.startsWith('Colección:')) {
+                } else if (fileName.startsWith('Colección:') || rawType === 'collection') {
                   analysisType = 'collection';
                   icon = <FolderKanban className="h-5 w-5 text-green-500" />;
                   badgeColor = 'bg-green-100 text-green-800 border-green-200';
                   typeLabel = 'Colección';
-                } else if (fileName.startsWith('Análisis Personalizado:')) {
+                } else if (fileName.startsWith('Análisis Personalizado:') || rawType === 'custom' || rawType === 'custom_analysis') {
                   analysisType = 'custom_analysis';
                   icon = <Sparkles className="h-5 w-5 text-purple-500" />;
                   badgeColor = 'bg-purple-100 text-purple-800 border-purple-200';
                   typeLabel = 'Personalizado';
-                } else if (fileName.startsWith('Análisis de Grafo de Conocimiento:')) {
+                } else if (fileName.startsWith('Análisis de Grafo de Conocimiento:') || fileName.startsWith('Grafo de Conocimiento:') || rawType === 'knowledge_graph_analysis') {
                   analysisType = 'knowledge_graph_analysis';
                   icon = <Network className="h-5 w-5 text-cyan-500" />;
                   badgeColor = 'bg-cyan-100 text-cyan-800 border-cyan-200';
                   typeLabel = 'Grafo de Conocimiento';
-                } else if (fileName.includes('Investigación') || fileName.includes('Desarrollo de Brecha') || analysis.analysis_type === 'gap_development' || analysis.analysis_type === 'deep_research') {
+                } else if (fileName.includes('Investigación') || fileName.includes('Desarrollo de Brecha') || rawType === 'gap_development' || rawType === 'deep_research') {
                   analysisType = 'gap_development';
                   icon = <Zap className="h-5 w-5 text-fuchsia-500" />;
                   badgeColor = 'bg-fuchsia-100 text-fuchsia-800 border-fuchsia-200';
                   typeLabel = 'Investigación Profunda';
+                } else if (rawType === 'document') {
+                  analysisType = 'document';
+                  icon = <FileText className="h-5 w-5 text-blue-500" />;
+                  badgeColor = 'bg-blue-100 text-blue-800 border-blue-200';
+                  typeLabel = 'Documento';
                 }
 
                 // Obtener el resumen según el tipo
@@ -1090,12 +1096,16 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
                   summary = analysis.result_payload.collection_summary;
                 } else if (analysis.result_payload?.resumen_semantico) {
                   summary = analysis.result_payload.resumen_semantico;
-                } else if (analysis.result_payload?.graph_summary) {
-                  summary = analysis.result_payload.graph_summary;
                 } else if (analysis.result_payload?.executive_summary) {
                   summary = analysis.result_payload.executive_summary;
                 } else if (analysis.result_payload?.resumen_ejecutivo) {
                   summary = analysis.result_payload.resumen_ejecutivo;
+                } else if (analysis.result_payload?.general_analysis) {
+                  summary = analysis.result_payload.general_analysis;
+                } else if (analysis.result_payload?.kai_synthesis) {
+                  summary = analysis.result_payload.kai_synthesis;
+                } else if (analysis.result_payload?.graph_summary) {
+                  summary = analysis.result_payload.graph_summary;
                 } else if (analysis.result_payload?.analysis_result) {
                   summary = analysis.result_payload.analysis_result;
                 } else if (analysis.result_payload?.report?.summary || analysis.result_payload?.summary) {
@@ -1120,10 +1130,11 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
                         try { payload = JSON.parse(payload); } catch (e) {}
                       }
 
-                      const isDocSummary = (analysis.analysis_type === 'document_summary' || analysisType === 'document_summary');
+                      const resolvedType = (rawType === 'custom' ? 'custom_analysis' : (rawType || analysisType));
+                      const isDocSummary = (resolvedType === 'document_summary');
                       const newAnalysis: Analysis = {
                         id: analysis.id,
-                        type: analysis.analysis_type || analysisType,
+                        type: resolvedType,
                         title: isDocSummary ? `Resumen de: ${displayName}` : displayName,
                         created_at: analysis.created_at,
                         result: payload,
@@ -1254,6 +1265,7 @@ export function DocumentCollectionDisplay({ topic, workspaceId, collectionName, 
         isOpen={isCustomAnalysisOpen}
         onOpenChange={setIsCustomAnalysisOpen}
         topic={topic}
+        workspaceId={workspaceId}
         onAnalysisStart={(taskId) => {
           setCollectionPollingId(taskId); // Usar el mismo polling para análisis de colección
           toast.info("Análisis personalizado iniciado. Esperando resultados...");

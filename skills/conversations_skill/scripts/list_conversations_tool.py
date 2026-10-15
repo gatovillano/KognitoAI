@@ -18,7 +18,8 @@ class ListConversationsTool(BaseTool):
     name: str = "list_conversations_tool"
     description: str = (
         "Lista los hilos de conversación recientes del usuario actual en KAI. "
-        "Permite buscar por título e inyecta automáticamente el ID de la cuenta."
+        "Permite buscar por título e inyecta automáticamente el ID de la cuenta. "
+        "Filtra automáticamente por el workspace del chat actual (inyectado)."
     )
     args_schema: Type[BaseModel] = ListConversationsInput
     account_id: Optional[str] = Field(None, description="ID de la cuenta a la que pertenecen las conversaciones, inyectado automáticamente.")
@@ -30,7 +31,7 @@ class ListConversationsTool(BaseTool):
         search_query: Optional[str] = None,
         **kwargs: Any,
     ) -> str:
-        logger.info(f"Listando conversaciones para la cuenta: {self.account_id}")
+        logger.info(f"Listando conversaciones para la cuenta: {self.account_id} | workspace: {self.workspace_id}")
         if not self.account_id:
             return "Error: No se inyectó el ID de cuenta de usuario."
 
@@ -40,9 +41,27 @@ class ListConversationsTool(BaseTool):
         except Exception:
             return f"Error: ID de cuenta inválido: {self.account_id}"
 
+        # Resolver filtro de workspace: solo listar hilos del workspace actual.
+        # Si workspace_id es None / vacío / "none" -> hilos sin workspace (chat general).
+        ws_uuid = None
+        filter_by_null_workspace = False
+        raw_ws = str(self.workspace_id).strip() if self.workspace_id else None
+        if raw_ws and raw_ws.lower() != "none":
+            try:
+                ws_uuid = uuid.UUID(raw_ws)
+            except Exception:
+                return f"Error: ID de workspace inválido: {self.workspace_id}"
+        else:
+            filter_by_null_workspace = True
+
         try:
             async with DBSession(SessionLocal) as session:
                 stmt = select(ChatThread).where(ChatThread.account_id == acc_uuid)
+
+                if ws_uuid is not None:
+                    stmt = stmt.where(ChatThread.workspace_id == ws_uuid)
+                elif filter_by_null_workspace:
+                    stmt = stmt.where(ChatThread.workspace_id.is_(None))
                 
                 if search_query:
                     stmt = stmt.where(ChatThread.title.ilike(f"%{search_query}%"))
