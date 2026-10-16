@@ -84,3 +84,4 @@ SECURITY_AUDIT_REPORT_2025.md
 .worktrees/
 
 bandit_report.json
+bandit_report.json
