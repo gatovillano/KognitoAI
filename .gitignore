@@ -83,3 +83,4 @@ SECURITY_AUDIT_REPORT_2025.md
 .kogniterm/
 .worktrees/
 
+bandit_report.json
