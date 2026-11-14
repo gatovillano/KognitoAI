@@ -116,7 +116,7 @@ export const SourceButton: React.FC<{
     <PopoverContent className="max-w-lg p-0 overflow-hidden shadow-2xl border-border/40 backdrop-blur-xl bg-background/95 rounded-xl max-h-[400px] overflow-y-auto">
       <div className={`p-4 border-b border-border/10 ${color.split(' ')[0]}`}>
         <div className="flex items-center gap-3">
-          {source.type === 'web' ? (
+          {source.type === 'web' && (source.url?.startsWith('http://') || source.url?.startsWith('https://')) ? (
             /* eslint-disable-next-line @next/next/no-img-element */
             <img
               src={`https://www.google.com/s2/favicons?sz=32&domain=${source.url}`}
@@ -182,7 +182,7 @@ export const SourceButton: React.FC<{
           <div className="pt-3 border-t border-border/10">
             <div className="text-[9px] font-black text-muted-foreground uppercase tracking-widest mb-1">Origen</div>
             <div className="text-[10px] break-all opacity-80">
-              {source.type === 'web' ? (
+              {source.type === 'web' && (source.url.startsWith('http://') || source.url.startsWith('https://')) ? (
                 <a
                   href={getTextFragmentUrl(source.url, source.snippet)}
                   target="_blank"
@@ -211,7 +211,7 @@ export const SourceButton: React.FC<{
                   {source.url}
                 </a>
               ) : (
-                <span className="font-mono">{source.url}</span>
+                <span className="font-mono text-muted-foreground">{source.metadata?.file_name || source.title || source.url}</span>
               )}
             </div>
           </div>
@@ -231,7 +231,7 @@ export const SourceButton: React.FC<{
             className="flex items-center gap-2 text-left text-xs font-medium p-1.5 rounded-lg border border-border/40 hover:border-border/80 bg-muted/20 hover:bg-muted/50 cursor-pointer w-full max-w-full transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-primary/20 group/source-item animate-in fade-in-50 duration-200"
           >
             <span className={badgeClasses}>
-              {source.type === 'web' ? (
+              {source.type === 'web' && (source.url?.startsWith('http://') || source.url?.startsWith('https://')) ? (
                 /* eslint-disable-next-line @next/next/no-img-element */
                 <img
                   src={`https://www.google.com/s2/favicons?sz=16&domain=${source.url}`}
@@ -255,7 +255,7 @@ export const SourceButton: React.FC<{
   }
 
   // Web sources: botón con favicon + popover (no navegar directo, mostrar snippet primero)
-  if (source.type === 'web') {
+  if (source.type === 'web' && (source.url?.startsWith('http://') || source.url?.startsWith('https://'))) {
     return (
       <Popover>
         <PopoverTrigger asChild>

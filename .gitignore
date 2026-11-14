@@ -84,4 +84,10 @@ SECURITY_AUDIT_REPORT_2025.md
 .worktrees/
 
 bandit_report.json
-bandit_report.json
+
+# Large binaries / foreign assets (exceed GitHub's 100 MB limit)
+Kontakt 8/
+
+# Real credentials / env backups
+.env.bak.*
+.env.disroot

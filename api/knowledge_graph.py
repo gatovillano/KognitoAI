@@ -727,18 +727,23 @@ async def process_documents_anthropologically(
             from sqlalchemy import text
 
             query = text("""
-                SELECT DISTINCT cmetadata->>'file_name' as file_name
+                SELECT DISTINCT cmetadata->>'file_name' as file_name, workspace_id
                 FROM langchain_pg_embedding
                 WHERE account_id = :account_id
-                  AND cmetadata->>'topic' = :topic
+                  AND (cmetadata->>'topic' = :topic OR topic = :topic)
             """)
             db_res = await db.execute(query, {"account_id": account_id, "topic": topic})
             rows = db_res.fetchall()
 
             for row in rows:
                 fname = row[0]
+                doc_ws = str(row[1]) if row[1] else workspace_id
                 if fname:
-                    content = await get_full_document_content(account_id=account_id, file_name=fname, workspace_id=workspace_id)
+                    content = await get_full_document_content(account_id=account_id, file_name=fname, workspace_id=doc_ws)
+                    if not content and doc_ws != workspace_id and workspace_id:
+                        content = await get_full_document_content(account_id=account_id, file_name=fname, workspace_id=workspace_id)
+                    if not content:
+                        content = await get_full_document_content(account_id=account_id, file_name=fname)
                     if content:
                         documents.append({"title": fname, "content": content})
 

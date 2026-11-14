@@ -58,7 +58,7 @@ from core.citation_models import (
     format_context_with_sources,
 )
 from core.config import settings
-from core.database import Account, ChatThread, SessionLocal, Workspace
+from core.database import Account, ChatThread, CustomHeartbeat, SessionLocal, Workspace
 from core.enhanced_memory_manager import EnhancedMemoryManager
 from core.llm_manager import (
     get_configured_fallback_llm,
@@ -102,6 +102,11 @@ THREAD_TITLE_UPDATE_SEMAPHORE = asyncio.Semaphore(
 
 MAX_PARALLEL_TOOLS = getattr(settings, "max_parallel_tools", 10)
 _TOOL_EXECUTION_SEMAPHORE = asyncio.Semaphore(MAX_PARALLEL_TOOLS)
+
+# Red de seguridad global: ninguna ejecución de herramienta puede colgarse para
+# siempre. Sin esto, una herramienta MCP que no responde deja el turno (y el
+# spinner "cargando herramienta" en la UI) bloqueados indefinidamente.
+TOOL_EXECUTION_TIMEOUT = float(getattr(settings, "tool_execution_timeout", 180))
 
 _graph_db_instance: Optional[GraphDB] = None
 _enhanced_memory_manager_instance: Optional[EnhancedMemoryManager] = None
@@ -205,6 +210,20 @@ async def fetch_relevant_procedural_skills(
                 if r_id and r_id not in seen_ids:
                     seen_ids.add(r_id)
                     relevant_skills.append(res)
+
+        # 3. Emparejamiento directo por palabras clave académicas críticas
+        academic_kws = ["cita", "citas", "citar", "bibliograf", "referencia", "paper", "tesina", "coautor", "fuente"]
+        if any(kw in user_message.lower() for kw in academic_kws):
+            if "academic_research_skill" not in seen_ids and "academic-citation-rigor" not in seen_ids:
+                all_mds = await skill_mgr._load_skill_markdowns(account_id, workspace_name)
+                for s in all_mds:
+                    sid = (s.get("id") or "").lower()
+                    sname = (s.get("name") or "").lower()
+                    if "academic" in sid or "academic" in sname or "citation" in sid or "citation" in sname:
+                        if s.get("id") not in seen_ids:
+                            seen_ids.add(s.get("id"))
+                            relevant_skills.append(s)
+                            break
     except Exception as e:
         logger.warning(f"Error recuperando procedural skills: {e}")
 
@@ -223,9 +242,11 @@ def is_multimodal_model(model_name: Optional[str]) -> bool:
     if not model_name:
         return False
     indicators = [
-        "gemini", "gpt-4o", "gpt-4-turbo", "gpt-4-vision", "claude-3",
-        "claude-3-5", "vision", "pixtral", "llava", "bakllava", "nova-canvas",
-        "nova-pro", "nova-lite", "qwen-vl", "qwen2.5-vl", "-vl", "deepseek-vl", "step-"
+        "gemini", "gpt-4o", "gpt-4-turbo", "gpt-4-vision", "gpt-4.5", "o1", "o3",
+        "claude-3", "claude-3-5", "claude-3-7", "claude-4", "vision", "pixtral",
+        "llava", "bakllava", "nova-canvas", "nova-pro", "nova-lite", "qwen-vl",
+        "qwen2.5-vl", "-vl", "deepseek-vl", "step-", "glm-4v", "phi-3-vision",
+        "internvl"
     ]
     name_lower = model_name.lower()
     return any(ind in name_lower for ind in indicators)
@@ -585,6 +606,12 @@ async def summarize_history_in_background(
             type="thread_summary",
             workspace_id=workspace_id,
         )
+        # Disparar el procesamiento hacia el grafo de conocimiento (por umbral)
+        from knowledge_graph.memory_graph_processor import (
+            schedule_memory_graph_processing,
+        )
+
+        asyncio.create_task(schedule_memory_graph_processing(account_id=account_id))
     except Exception as e:
         logger.error(f"Error en sumarización en segundo plano: {e}")
 
@@ -824,6 +851,44 @@ class NativeAgentRunner:
                             type=SourceType.DOCUMENT,
                         )
                     )
+                relevant_memories_text = format_context_with_sources(sources_list)
+
+        # Inyección de nota activa (Contextual Chat o RAG) como fuente local
+        if context and context.get("type") == "note":
+            ctx_snapshot = context.get("snapshot") or {}
+            note_title = ctx_snapshot.get("title") or context.get("title") or "Nota activa"
+            note_content = ctx_snapshot.get("content") or context.get("full_text") or context.get("content") or ""
+            note_id = str(context.get("id") or ctx_snapshot.get("id") or "1")
+
+            _register_source(
+                Source(
+                    id=len(sources_list) + 1,
+                    title=note_title,
+                    url=f"/notes/{note_id}",
+                    snippet=note_content[:3000] if note_content else "Nota sin contenido",
+                    type=SourceType.NOTE,
+                    metadata={"note_id": note_id, "category": ctx_snapshot.get("category", "")},
+                )
+            )
+            relevant_memories_text = format_context_with_sources(sources_list)
+
+        if rag_context:
+            for item in rag_context:
+                if str(item.get("type") or "").lower() == "note":
+                    note_title = item.get("title") or item.get("name") or f"Nota #{item.get('id')}"
+                    note_content = item.get("content") or ""
+                    note_id = str(item.get("id") or "1")
+                    _register_source(
+                        Source(
+                            id=len(sources_list) + 1,
+                            title=note_title,
+                            url=f"/notes/{note_id}",
+                            snippet=note_content[:3000] if note_content else "Nota sin contenido",
+                            type=SourceType.NOTE,
+                            metadata={"note_id": note_id},
+                        )
+                    )
+            if sources_list:
                 relevant_memories_text = format_context_with_sources(sources_list)
 
         # 5. Capa 1 y 4: Construir System Prompt consolidado
@@ -1086,8 +1151,9 @@ class NativeAgentRunner:
                         tc_args = json.loads(tc_args)
                     except Exception:
                         tc_args = {}
-                # Evitar duplicados
-                if not any(v["id"] == tc.get("id") for v in valid_tool_calls):
+                # Evitar duplicados pero actualizar args si ya existía con argumentos vacíos
+                existing = next((v for v in valid_tool_calls if v.get("id") == tc.get("id")), None)
+                if not existing:
                     valid_tool_calls.append(
                         {
                             "name": tc_name,
@@ -1095,6 +1161,9 @@ class NativeAgentRunner:
                             "id": tc.get("id") or str(uuid.uuid4()),
                         }
                     )
+                else:
+                    if not existing.get("args") and tc_args:
+                        existing["args"] = tc_args if isinstance(tc_args, dict) else {}
 
             # ------------------------------------------------------------------
             # EJECUCIÓN CONCURRENTE O(1) DE HERRAMIENTAS
@@ -1164,10 +1233,41 @@ class NativeAgentRunner:
                         selected_tool.task_id = str(task_id) if task_id else None
                     if hasattr(selected_tool, "progress_callback") and not getattr(selected_tool, "progress_callback", None):
                         selected_tool.progress_callback = agent_progress_callback
+                    if hasattr(selected_tool, "is_multimodal") and getattr(selected_tool, "is_multimodal", None) is None:
+                        _eff_model = getattr(llm, "model_name", None) or getattr(llm, "model", None)
+                        selected_tool.is_multimodal = is_multimodal_model(_eff_model)
+                    if hasattr(selected_tool, "account_id") and not getattr(selected_tool, "account_id", None):
+                        selected_tool.account_id = str(account_id) if account_id else None
+                    if hasattr(selected_tool, "workspace_id") and not getattr(selected_tool, "workspace_id", None):
+                        selected_tool.workspace_id = str(workspace_id) if workspace_id else None
+
+                    # Respaldo de argumentos: autocompletar query o credenciales si faltan en tool_args
+                    if isinstance(tool_args, dict):
+                        tool_args = dict(tool_args)
+                        schema_cls = getattr(selected_tool, "args_schema", None)
+                        if schema_cls:
+                            schema_props = getattr(schema_cls, "model_fields", None)
+                            if schema_props is None:
+                                schema_props = getattr(schema_cls, "__fields__", {})
+
+                            if "account_id" in schema_props and not tool_args.get("account_id") and account_id:
+                                tool_args["account_id"] = str(account_id)
+                            if "workspace_id" in schema_props and not tool_args.get("workspace_id") and workspace_id:
+                                tool_args["workspace_id"] = str(workspace_id)
+
+                            for q_key in ("query", "natural_language_query", "search_query", "question", "search"):
+                                if q_key in schema_props:
+                                    val = tool_args.get(q_key)
+                                    if val is None or (isinstance(val, str) and not val.strip()):
+                                        tool_args[q_key] = user_message_text or "consulta general"
+                                    break
 
                     try:
                         async with _TOOL_EXECUTION_SEMAPHORE:
-                            out = await selected_tool.ainvoke(tool_args, config=run_config)
+                            out = await asyncio.wait_for(
+                                selected_tool.ainvoke(tool_args, config=run_config),
+                                timeout=TOOL_EXECUTION_TIMEOUT,
+                            )
                         try:
                             global _PENDING_RAW_TOOL_OUTPUTS
                             _PENDING_RAW_TOOL_OUTPUTS.append(out)
@@ -1330,18 +1430,54 @@ class NativeAgentRunner:
                         else:
                             out_str = str(out)
 
-                        # Registrar fuentes de la herramienta a la lista acumulada
+                        # Registrar fuentes de la herramienta a la lista acumulada y sincronizar IDs globales
+                        source_id_map: Dict[str, str] = {}
                         for s in tool_sources:
+                            old_id = str(getattr(s, "id", "") or "")
                             s_dict = (
                                 s.model_dump()
                                 if hasattr(s, "model_dump")
                                 else (s.dict() if hasattr(s, "dict") else s)
                             )
                             ident = get_source_identifier(s_dict)
-                            if ident not in seen_source_ids:
+                            if ident in seen_source_ids:
+                                existing_src = next(
+                                    (existing for existing in sources_list if get_source_identifier(existing) == ident),
+                                    None
+                                )
+                                assigned_id = existing_src.id if existing_src else s_dict.get("id")
+                            else:
                                 seen_source_ids.add(ident)
-                                s_dict["id"] = len(sources_list) + 1
+                                assigned_id = len(sources_list) + 1
+                                s_dict["id"] = assigned_id
                                 sources_list.append(Source(**s_dict))
+
+                            if hasattr(s, "id"):
+                                s.id = assigned_id
+                            if old_id:
+                                source_id_map[old_id] = str(assigned_id)
+
+                        # Sincronizar el contenido del ToolMessage (out_str) con los nuevos IDs asignados
+                        if tool_sources:
+                            if isinstance(out, ToolOutputWithSources) and "Contexto [" in getattr(out, "context_for_llm", ""):
+                                out_str = format_context_with_sources(tool_sources)
+                            elif isinstance(out, dict) and "Contexto [" in str(out.get("context_for_llm", "")):
+                                out_str = format_context_with_sources(tool_sources)
+                            elif source_id_map:
+                                def _remap_match(m):
+                                    num = m.group(1)
+                                    return f"[{source_id_map.get(num, num)}]"
+                                if isinstance(out_str, str):
+                                    out_str = re.sub(r'\[(\d+)\]', _remap_match, out_str)
+
+                        is_doc_reading_tool = (
+                            tool_name in (
+                                "read_onlyoffice_document",
+                                "read_onlyoffice_document_tool",
+                                "get_document_content_tool",
+                            )
+                            or ("onlyoffice" in str(tool_name).lower() and "read" in str(tool_name).lower())
+                        )
 
                         notify_ws_async(
                             {
@@ -1350,9 +1486,13 @@ class NativeAgentRunner:
                                 "tool_name": tool_name,
                                 "status": "success",
                                 "result": (
-                                    out_str[:1500]
-                                    if isinstance(out_str, str)
-                                    else json.dumps(out_str, ensure_ascii=False)[:1500]
+                                    (out_str if isinstance(out_str, str) else json.dumps(out_str, ensure_ascii=False))
+                                    if is_doc_reading_tool
+                                    else (
+                                        out_str[:1500]
+                                        if isinstance(out_str, str)
+                                        else json.dumps(out_str, ensure_ascii=False)[:1500]
+                                    )
                                 ),
                                 "sources": [
                                     s.model_dump() if hasattr(s, "model_dump") else (s.dict() if hasattr(s, "dict") else s)
@@ -1374,21 +1514,24 @@ class NativeAgentRunner:
                             str(task_id) if task_id else None,
                             tool_trace=f"[tool:{tool_name}:success] {_trace_txt}",
                         )
-                        # [SAFETY] Evitar payload gigante en ToolMessage (base64/texto masivo)
-                        if isinstance(out_str, str) and len(out_str) > 5000:
-                            out_str = out_str[:4000] + "\n...[contenido truncado por seguridad de contexto]"
-                        elif isinstance(out_str, list):
-                            _safe_blocks = []
-                            for _b in out_str:
-                                if isinstance(_b, str) and len(_b) > 5000:
-                                    _safe_blocks.append(_b[:4000] + "...[truncado]")
-                                elif isinstance(_b, dict) and _b.get("type") == "text" and isinstance(_b.get("text"), str) and len(_b["text"]) > 5000:
-                                    _b = dict(_b)
-                                    _b["text"] = _b["text"][:4000] + "...[truncado]"
-                                    _safe_blocks.append(_b)
-                                else:
-                                    _safe_blocks.append(_b)
-                            out_str = _safe_blocks
+                        # [SAFETY] Evitar payload gigante en ToolMessage (base64/texto masivo).
+                        # Las herramientas de lectura de documentos (ej. OnlyOffice, RAG) NO deben truncarse
+                        # para permitir que el agente analice y procese documentos completos sin pérdida de contenido.
+                        if not is_doc_reading_tool:
+                            if isinstance(out_str, str) and len(out_str) > 5000:
+                                out_str = out_str[:4000] + "\n...[contenido truncado por seguridad de contexto]"
+                            elif isinstance(out_str, list):
+                                _safe_blocks = []
+                                for _b in out_str:
+                                    if isinstance(_b, str) and len(_b) > 5000:
+                                        _safe_blocks.append(_b[:4000] + "...[truncado]")
+                                    elif isinstance(_b, dict) and _b.get("type") == "text" and isinstance(_b.get("text"), str) and len(_b["text"]) > 5000:
+                                        _b = dict(_b)
+                                        _b["text"] = _b["text"][:4000] + "...[truncado]"
+                                        _safe_blocks.append(_b)
+                                    else:
+                                        _safe_blocks.append(_b)
+                                out_str = _safe_blocks
                         logger.error(f"EXEC DEBUG pre-collect type={type(out_str).__name__} len={len(str(out_str))} islist={isinstance(out_str,list)} img_count={sum(1 for x in (out_str if isinstance(out_str,list) else []) if isinstance(x,dict) and x.get('type')=='image_url')}")
                         _collected_image_blocks = []
                         # Recolección amplia: cualquier estructura que contenga image_url / base64
@@ -1411,7 +1554,21 @@ class NativeAgentRunner:
                         if _collected_image_blocks:
                             global _PENDING_SCREENSHOT_IMAGES
                             _PENDING_SCREENSHOT_IMAGES.extend(_collected_image_blocks)
-                            out_str = "[Captura de pantalla proporcionada; ver imagen adjunta]"
+                            # Preservar el contenido de texto y tablas si la herramienta produjo texto además de imágenes
+                            _text_parts = []
+                            if isinstance(out_str, list):
+                                for b in out_str:
+                                    if isinstance(b, dict) and b.get("type") == "text":
+                                        _text_parts.append(b.get("text", ""))
+                                    elif isinstance(b, str) and not b.startswith("data:image"):
+                                        _text_parts.append(b)
+                            elif isinstance(out_str, str) and not out_str.startswith("data:image"):
+                                _text_parts.append(out_str)
+
+                            if _text_parts:
+                                out_str = "\n".join(_text_parts) + f"\n\n[Se adjuntaron {len(_collected_image_blocks)} imagen(es) del documento para tu inspección visual]"
+                            else:
+                                out_str = "[Captura de pantalla o imagen adjunta para análisis visual]"
                         tool_msg = ToolMessage(content=out_str, tool_call_id=tool_id)
                         if _collected_image_blocks:
                             tool_msg.additional_kwargs["image_blocks"] = _collected_image_blocks
@@ -1421,6 +1578,32 @@ class NativeAgentRunner:
                                 for s in tool_sources
                             ]
                         return tool_msg
+
+                    except asyncio.TimeoutError:
+                        logger.error(
+                            f"Timeout ({TOOL_EXECUTION_TIMEOUT:.0f}s) ejecutando '{tool_name}'"
+                        )
+                        err_msg = (
+                            f"Error ejecutando '{tool_name}': la herramienta superó el límite de "
+                            f"{TOOL_EXECUTION_TIMEOUT:.0f}s y fue cancelada. "
+                            "Si es una herramienta MCP de navegador (Playwright), revisa que el "
+                            "navegador pueda arrancar en este entorno."
+                        )
+                        track_partial_chunk(
+                            str(task_id) if task_id else None,
+                            tool_trace=f"[tool:{tool_name}:timeout] {err_msg[:500]}",
+                        )
+                        notify_ws_async(
+                            {
+                                "type": "tool_end",
+                                "taskId": task_id,
+                                "tool_name": tool_name,
+                                "status": "error",
+                                "result": err_msg,
+                                "error": True,
+                            }
+                        )
+                        return ToolMessage(content=err_msg, tool_call_id=tool_id)
 
                     except Exception as t_err:
                         logger.error(f"Error ejecutando '{tool_name}': {t_err}", exc_info=True)
@@ -1524,13 +1707,17 @@ class NativeAgentRunner:
                         pass
 
                 if collected_images:
-                    logger.error(f"IMAGES DEBUG sent={len(collected_images)} sizes={[len(x.get('image_url',{}).get('url','')) for x in collected_images]}")
-                    messages.append(
-                        HumanMessage(
-                            content=[{"type": "text", "text": "Captura de pantalla del resultado de la herramienta:"}]
-                            + collected_images
+                    _eff_model = getattr(llm, "model_name", None) or getattr(llm, "model", None)
+                    if is_multimodal_model(_eff_model):
+                        logger.info(f"Enviando {len(collected_images)} imágenes al modelo multimodal ({_eff_model}).")
+                        messages.append(
+                            HumanMessage(
+                                content=[{"type": "text", "text": "Imágenes adjuntas del resultado de la herramienta para tu inspección visual:"}]
+                                + collected_images
+                            )
                         )
-                    )
+                    else:
+                        logger.info(f"Modelo {_eff_model} no es multimodal; omitiendo envío directo de bloques de imagen al contexto.")
 
                 # Siguiente turno para que el LLM sintetice los resultados
                 continue
@@ -1636,15 +1823,60 @@ get_native_agent = get_langgraph_agent
 
 async def run_custom_user_heartbeat(
     account_id: str,
-    heartbeat_id: str,
-    heartbeat_name: str,
-    instructions: str,
+    heartbeat_id: Optional[str] = None,
+    heartbeat_name: Optional[str] = None,
+    instructions: Optional[str] = None,
     workspace_id: Optional[str] = None,
+    allowed_tools: Optional[list] = None,
 ) -> str:
     """
     Ejecuta un ciclo de Heartbeat Personalizado en segundo plano para el usuario.
+    Recupera nombre e instrucciones de la base de datos si no se proporcionan directamente.
     """
-    logger.info(f"Iniciando ciclo de heartbeat '{heartbeat_name}' para cuenta {account_id}...")
+    # 1. Si tenemos heartbeat_id pero faltan nombre o instrucciones, buscarlos en CustomHeartbeat
+    if heartbeat_id and (not heartbeat_name or not instructions):
+        try:
+            hb_uuid = uuid.UUID(heartbeat_id)
+            async with DBSession(SessionLocal) as db:
+                hb = await db.get(CustomHeartbeat, hb_uuid)
+                if hb:
+                    heartbeat_name = heartbeat_name or hb.name
+                    instructions = instructions or hb.instructions
+                    if allowed_tools is None:
+                        allowed_tools = hb.allowed_tools
+        except Exception as e:
+            logger.warning(f"No se pudo cargar CustomHeartbeat {heartbeat_id}: {e}")
+
+    # 2. Si no hay heartbeat_id ni instrucciones, intentar cargar de la cuenta (modo legacy)
+    if not heartbeat_id and not instructions:
+        try:
+            account_uuid = uuid.UUID(account_id)
+            async with DBSession(SessionLocal) as db:
+                account = await db.get(Account, account_uuid)
+                if account and account.custom_heartbeat_instructions:
+                    instructions = account.custom_heartbeat_instructions
+                    heartbeat_name = heartbeat_name or "Heartbeat Personalizado"
+                    heartbeat_id = f"legacy_{account_id[:8]}"
+                    if allowed_tools is None:
+                        allowed_tools = account.custom_heartbeat_allowed_tools or []
+        except Exception as e:
+            logger.warning(f"No se pudo cargar configuración de heartbeat legacy para cuenta {account_id}: {e}")
+
+    if not instructions:
+        return "No hay heartbeat personalizado configurado o faltan instrucciones."
+
+    heartbeat_name = heartbeat_name or "Heartbeat Personalizado"
+    heartbeat_id = heartbeat_id or f"default_{account_id[:8]}"
+
+    # Si hay herramientas restringidas, anexar regla a las instrucciones
+    effective_instructions = instructions
+    if allowed_tools:
+        effective_instructions += (
+            f"\n\nATENCIÓN: Para esta tarea, SOLO tienes permitido utilizar las siguientes herramientas: "
+            f"{', '.join(allowed_tools)}. Limita tu ejecución a estas capacidades."
+        )
+
+    logger.info(f"Iniciando ciclo de heartbeat '{heartbeat_name}' ({heartbeat_id}) para cuenta {account_id}...")
     agent_app = get_native_agent()
 
     thread_id = await get_or_create_specific_heartbeat_thread(
@@ -1654,7 +1886,7 @@ async def run_custom_user_heartbeat(
     initial_human_message = HumanMessage(
         content=(
             f"--- INSTRUCCIÓN DE HEARTBEAT PERSONALIZADO: '{heartbeat_name}' ---\n"
-            f"{instructions}\n"
+            f"{effective_instructions}\n"
             f"REGLA: Ejecuta las acciones necesarias proactivamente usando tus herramientas."
         )
     )
@@ -1668,7 +1900,11 @@ async def run_custom_user_heartbeat(
         "rag_context": None,
         "sources": [],
         "thread_id": thread_id,
-        "context": {"type": "custom_heartbeat"},
+        "context": {
+            "type": "custom_heartbeat",
+            "heartbeat_id": heartbeat_id,
+            "heartbeat_name": heartbeat_name,
+        },
         "loop_count": 0,
         "turn_count": 0,
     }

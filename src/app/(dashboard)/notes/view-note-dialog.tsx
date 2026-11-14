@@ -43,6 +43,12 @@ export function ViewNoteDialog({ note, isOpen, onOpenChange, onNoteUpdated }: Vi
   const [isChatOpen, setIsChatOpen] = useState(false); // Estado para abrir el chat contextual
 
   useEffect(() => {
+    if (!isOpen) {
+      setIsChatOpen(false);
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
     const fetchContactProfiles = async () => {
       setLoadingContactProfiles(true);
       try {

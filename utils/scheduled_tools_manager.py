@@ -132,6 +132,7 @@ class ScheduledToolsManager:
                     account_id=str(hb.account_id),
                     schedule_type=hb.schedule_type,
                     instructions=hb.instructions,
+                    heartbeat_name=hb.name,
                     allowed_tools=hb.allowed_tools,
                     interval_minutes=hb.interval_minutes,
                     hour=hb.hour,

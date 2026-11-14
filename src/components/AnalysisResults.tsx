@@ -10,7 +10,7 @@ import {
     Loader2, Info, Filter, ChevronDown, Search, BarChart3, FileText, FolderKanban,
     Lightbulb, Code, Calendar, Eye, Plus, TrendingUp, AlertTriangle, HelpCircle,
     CheckCircle, Clock, XCircle, ArrowLeft, StickyNote, TrendingDown, Users,
-    Activity, Target, PieChart, Sparkles, RefreshCcw, Zap, Network
+    Activity, Target, PieChart, Sparkles, RefreshCcw, Zap, Network, BrainCircuit
 } from 'lucide-react';
 import { toast } from 'sonner';
 import apiClient from '@/lib/api';
@@ -64,6 +64,8 @@ const getAnalysisIcon = (type: string) => {
             return <Zap className="h-5 w-5 text-fuchsia-500" />;
         case 'deep_research':
             return <Search className="h-5 w-5 text-blue-500" />;
+        case 'anthropological_deep_research':
+            return <BrainCircuit className="h-5 w-5 text-purple-500" />;
         case 'comprehensive_web_analysis':
             return <Network className="h-5 w-5 text-cyan-500" />;
         default:
@@ -87,6 +89,7 @@ const getAnalysisTypeLabel = (type: string) => {
         case 'note_collection_analysis': return 'Colección de Notas';
         case 'gap_development': return 'Investigación Profunda';
         case 'deep_research': return 'Investigación Profunda';
+        case 'anthropological_deep_research': return 'Investigación Antropológica';
         case 'comprehensive_web_analysis': return 'Análisis Web Integral';
         default: return 'Análisis';
     }
@@ -106,6 +109,7 @@ const getAnalysisTypeBadgeColor = (type: string) => {
         case 'note_collection_analysis': return 'bg-orange-100 text-orange-800 border-orange-200';
         case 'gap_development': return 'bg-fuchsia-100 text-fuchsia-800 border-fuchsia-200';
         case 'deep_research': return 'bg-blue-100 text-blue-800 border-blue-200';
+        case 'anthropological_deep_research': return 'bg-purple-100 text-purple-800 border-purple-200';
         case 'comprehensive_web_analysis': return 'bg-cyan-100 text-cyan-800 border-cyan-200';
         default: return 'bg-gray-100 text-gray-800 border-gray-200';
     }
@@ -276,6 +280,7 @@ export function AnalysisResults() {
         { value: 'semantic_summary', label: 'Resumen Semántico' },
         { value: 'gap_development', label: 'Investigación Profunda' },
         { value: 'deep_research', label: 'Investigación Profunda' },
+        { value: 'anthropological_deep_research', label: 'Investigación Antropológica' },
         { value: 'comprehensive_web_analysis', label: 'Análisis Web Integral' }
 
     ];
@@ -616,7 +621,7 @@ export function AnalysisResults() {
                             onOpenChange={(open) => !open && setSelectedAnalysis(null)}
                         />
                     );
-                } else if (selectedAnalysis.type === 'gap_development' || selectedAnalysis.type === 'deep_research') {
+                } else if (selectedAnalysis.type === 'gap_development' || selectedAnalysis.type === 'deep_research' || selectedAnalysis.type === 'anthropological_deep_research') {
                     return (
                         <DeepResearchDetailDialog
                             analysis={selectedAnalysis}

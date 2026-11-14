@@ -360,7 +360,7 @@ export type AnalysisType =
   | 'comprehensive_web_analysis'
   | 'scoped_rag_analysis'
   | 'deep_research'
-  | 'deep_research'
+  | 'anthropological_deep_research'
   | 'proactive_insight'
   | 'neural_insight';
 

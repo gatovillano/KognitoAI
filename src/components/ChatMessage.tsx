@@ -8,9 +8,10 @@ import { motion, AnimatePresence } from 'framer-motion'; // Importar motion
 import { ChatAvatar } from './ChatAvatar';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTrigger } from '@/components/ui/dialog';
-import { BrainCircuit, ChevronDown, ChevronUp, Check, X, Edit3, ChevronLeft, ChevronRight, Trash2, ExternalLink } from 'lucide-react';
+import { BrainCircuit, ChevronDown, ChevronUp, Check, X, Edit3, ChevronLeft, ChevronRight, Trash2, ExternalLink, Globe } from 'lucide-react';
 import { Copy, Play, Loader2, Pause, RefreshCw, Folder, File as FileIcon, FileText, Network, Download } from 'lucide-react';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
+import DeepResearchVisualizer from '@/components/DeepResearchVisualizer';
 import { Source, SourceButton, ContentPart } from '@/components/SourceButton';
 import { processMessageWithCitations, collectSourcesFromMessage, getSourceIdentityKey } from '@/lib/chatUtils';
 import { useUserSettings } from '@/contexts/UserSettingsContext';
@@ -30,6 +31,9 @@ export interface MessageContentPart {
   id?: string;
   status?: 'start' | 'end' | 'error';
   tool_name?: string;
+  progress?: number;
+  status_message?: string;
+  current_node?: string;
   pty_session?: { session_id: string; command?: string };
 }
 
@@ -174,6 +178,12 @@ const stripHtml = (text: string) => {
 const ToolCallBlock = ({ part }: { part: MessageContentPart }) => {
   const { user, token } = useAuth();
   const isTerminal = part.tool_name === 'terminal_executor' && !!part.pty_session;
+  const isResearch =
+    part.tool_name === 'anthropological_deep_research' ||
+    part.tool_name === 'deep_research' ||
+    part.tool_name === 'deep_research_tool';
+  const isAnthro = part.tool_name === 'anthropological_deep_research';
+
   // La terminal es persistente y desplegada (estilo kogniterm-desktop):
   // siempre visible, nunca colapsada, con input interactivo en vivo.
   const [isExpanded, setIsExpanded] = useState(isTerminal || part.status === 'error');
@@ -188,6 +198,103 @@ const ToolCallBlock = ({ part }: { part: MessageContentPart }) => {
   }, [isTerminal, part.status]);
 
   const isError = part.status === 'error';
+
+  // ── Indicador de progreso de Investigación Profunda / Antropológica ──
+  if (isResearch) {
+    const isRunning = part.status === 'start';
+    const progress = typeof part.progress === 'number' ? part.progress : (isRunning ? 5 : 100);
+    const defaultStatus = isRunning
+      ? (isAnthro ? 'Iniciando investigación antropológica profunda...' : 'Iniciando investigación profunda...')
+      : (isAnthro ? 'Investigación antropológica completada' : 'Investigación profunda completada');
+    const statusText = part.status_message || defaultStatus;
+    const title = isAnthro ? 'Investigación Antropológica Profunda' : 'Deep Research';
+    const subtitle = isAnthro ? 'ANÁLISIS CUALITATIVO Y MARCO TEÓRICO' : 'PROCESANDO CONOCIMIENTO GLOBAL';
+
+    return (
+      <div className="mb-4">
+        <div className="flex flex-col overflow-hidden transition-all duration-300">
+          {isRunning ? (
+            <div className="my-2">
+              <DeepResearchVisualizer
+                progress={progress}
+                statusText={statusText}
+                currentStep={part.current_node}
+                title={title}
+                subtitle={subtitle}
+                isAnthropological={isAnthro}
+              />
+            </div>
+          ) : (
+            <>
+              <button
+                onClick={() => hasContent && setIsExpanded(!isExpanded)}
+                disabled={!hasContent}
+                className="flex items-center gap-3 w-full text-left p-3 rounded-2xl border border-primary/20 bg-primary/5 hover:bg-primary/10 transition-all shadow-sm"
+              >
+                {isError ? (
+                  <div className="p-2 rounded-xl bg-destructive/10 text-destructive">
+                    <X className="h-4 w-4" />
+                  </div>
+                ) : (
+                  <div className="p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-500">
+                    <BrainCircuit className="h-4 w-4" />
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <p className={`text-xs font-semibold ${isError ? 'text-destructive' : 'text-primary'}`}>
+                      {title}
+                    </p>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                      isError ? 'bg-destructive/10 text-destructive' : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                    }`}>
+                      {isError ? 'Falló' : 'Completado • 100%'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground truncate mt-0.5">
+                    {isError ? (part.content || 'Error durante la investigación') : statusText}
+                  </p>
+                </div>
+                {hasContent && (
+                  <motion.div
+                    animate={{ rotate: isExpanded ? 180 : 0 }}
+                    transition={{ duration: 0.3 }}
+                  >
+                    <ChevronDown className={`h-3.5 w-3.5 ${isError ? 'text-destructive/80' : 'text-primary/60'}`} />
+                  </motion.div>
+                )}
+              </button>
+
+              <AnimatePresence>
+                {isExpanded && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.3 }}
+                  >
+                    <div className="py-3 px-4 mt-2 rounded-2xl border border-primary/10 bg-muted/20">
+                      <div className="flex items-center gap-2 mb-2 text-[10px] font-bold uppercase tracking-widest text-primary/70">
+                        <ExternalLink className="h-3 w-3" />
+                        Resultados de la investigación
+                      </div>
+                      <div className="max-h-[350px] overflow-y-auto pr-2 custom-scrollbar">
+                        <MarkdownRenderer
+                          content={part.content}
+                          fontSize="text-[12px]"
+                          style={{ color: 'var(--foreground)', opacity: 0.9 }}
+                        />
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   // ── Terminal interactiva en tiempo real: render directo, sin colapso ──
   if (isTerminal) {
@@ -753,7 +860,7 @@ const ChatMessageComponent: React.FC<ChatMessageProps> = ({
   );
 };
 
-// ─── Sources toggle (OpenWebUI-inspired grouping, original SourceButton cards) ─
+// ─── Sources toggle (OpenWebUI-inspired grouping, separated Local vs Web) ─
 const SourcesList: React.FC<{
   sources: Source[];
   citationNumberBySource: Map<string, number>;
@@ -761,29 +868,48 @@ const SourcesList: React.FC<{
 }> = ({ sources, citationNumberBySource, onSourceClick }) => {
   const [open, setOpen] = useState(false);
 
-  const webSources = sources.filter(s => s.type === 'web' && s.url?.startsWith('http'));
+  // Separar fuentes de búsqueda web / externas de fuentes locales (documentos, notas, memorias)
+  const searchSources = sources.filter(s => (s.type === 'web' || s.type === 'github') && s.url?.startsWith('http'));
+  const localSources = sources.filter(s => !((s.type === 'web' || s.type === 'github') && s.url?.startsWith('http')));
+
+  const hasBoth = localSources.length > 0 && searchSources.length > 0;
 
   return (
     <div className="mt-3 -mx-0.5 w-full">
       <button
         onClick={() => setOpen(v => !v)}
-        className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground px-3 h-8 rounded-full hover:bg-muted/60 transition-colors border border-border/30"
+        className="flex items-center gap-2 text-xs font-medium text-muted-foreground px-3 h-8 rounded-full hover:bg-muted/60 transition-colors border border-border/30"
       >
-        {webSources.length > 0 && (
-          <span className="flex -space-x-1 items-center mr-0.5">
-            {webSources.slice(0, 3).map((s, i) => (
-              /* eslint-disable-next-line @next/next/no-img-element */
-              <img
-                key={i}
-                src={`https://www.google.com/s2/favicons?sz=16&domain=${s.url}`}
-                alt=""
-                className="w-4 h-4 rounded-full border border-background bg-muted"
-                onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
-              />
-            ))}
-          </span>
-        )}
-        {sources.length === 1 ? '1 fuente' : `${sources.length} fuentes`}
+        <div className="flex items-center gap-1">
+          {localSources.length > 0 && (
+            <span className="flex items-center justify-center w-4 h-4 rounded-full bg-orange-500/15 text-orange-600 dark:text-orange-400" title="Fuentes locales">
+              <FileText className="w-2.5 h-2.5" />
+            </span>
+          )}
+          {searchSources.length > 0 && (
+            <span className="flex -space-x-1 items-center" title="Fuentes de búsqueda web">
+              {searchSources.slice(0, 3).map((s, i) => (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img
+                  key={i}
+                  src={`https://www.google.com/s2/favicons?sz=16&domain=${s.url}`}
+                  alt=""
+                  className="w-4 h-4 rounded-full border border-background bg-muted"
+                  onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                />
+              ))}
+            </span>
+          )}
+        </div>
+
+        <span>
+          {hasBoth
+            ? `${localSources.length} locales · ${searchSources.length} web`
+            : localSources.length > 0
+              ? (localSources.length === 1 ? '1 fuente local' : `${localSources.length} fuentes locales`)
+              : (searchSources.length === 1 ? '1 fuente web' : `${searchSources.length} fuentes web`)}
+        </span>
+
         {open ? <ChevronUp className="h-3 w-3 ml-0.5" /> : <ChevronDown className="h-3 w-3 ml-0.5" />}
       </button>
 
@@ -797,23 +923,62 @@ const SourcesList: React.FC<{
             transition={{ duration: 0.28, ease: 'easeInOut' }}
             className="overflow-hidden mt-3 pt-2"
           >
-            <div className="flex flex-col gap-2 pl-1 max-w-xl w-full">
-              {sources.map((source, idx) => (
-                <motion.div
-                  key={idx}
-                  initial={{ opacity: 0, y: -8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -8 }}
-                  transition={{ duration: 0.2, delay: idx * 0.03, ease: 'easeOut' }}
-                >
-                  <SourceButton
-                    source={source}
-                    citationNumber={citationNumberBySource.get(getSourceIdentityKey(source)) ?? idx + 1}
-                    onSourceClick={onSourceClick}
-                    showTitle={true}
-                  />
-                </motion.div>
-              ))}
+            <div className="flex flex-col gap-4 pl-1 max-w-xl w-full">
+              {/* Sección de Fuentes Locales */}
+              {localSources.length > 0 && (
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-1.5 text-[11px] font-semibold text-orange-600 dark:text-orange-400 uppercase tracking-wider pl-0.5">
+                    <FileText className="w-3.5 h-3.5" />
+                    <span>Fuentes Locales / Base de Conocimiento ({localSources.length})</span>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    {localSources.map((source, idx) => (
+                      <motion.div
+                        key={`local-${source.id}-${idx}`}
+                        initial={{ opacity: 0, y: -6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -6 }}
+                        transition={{ duration: 0.2, delay: idx * 0.02, ease: 'easeOut' }}
+                      >
+                        <SourceButton
+                          source={source}
+                          citationNumber={citationNumberBySource.get(getSourceIdentityKey(source)) ?? idx + 1}
+                          onSourceClick={onSourceClick}
+                          showTitle={true}
+                        />
+                      </motion.div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Sección de Fuentes de Búsqueda Web */}
+              {searchSources.length > 0 && (
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-1.5 text-[11px] font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wider pl-0.5">
+                    <Globe className="w-3.5 h-3.5" />
+                    <span>Búsqueda Web y Fuentes Externas ({searchSources.length})</span>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    {searchSources.map((source, idx) => (
+                      <motion.div
+                        key={`search-${source.id}-${idx}`}
+                        initial={{ opacity: 0, y: -6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -6 }}
+                        transition={{ duration: 0.2, delay: (localSources.length + idx) * 0.02, ease: 'easeOut' }}
+                      >
+                        <SourceButton
+                          source={source}
+                          citationNumber={citationNumberBySource.get(getSourceIdentityKey(source)) ?? (localSources.length + idx + 1)}
+                          onSourceClick={onSourceClick}
+                          showTitle={true}
+                        />
+                      </motion.div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </motion.div>
         )}

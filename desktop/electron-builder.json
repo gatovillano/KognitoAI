@@ -1,0 +1,37 @@
+{
+  "appId": "com.kognito.ai",
+  "productName": "KognitoAI",
+  "directories": {
+    "output": "release"
+  },
+  "files": [
+    "dist/**/*",
+    "assets/**/*",
+    "package.json"
+  ],
+  "linux": {
+    "target": [
+      "AppImage",
+      "deb"
+    ],
+    "maintainer": "KognitoAI <contacto@kognitoai.cloud>",
+    "category": "Office",
+    "icon": "assets/icon.png"
+  },
+  "win": {
+    "target": [
+      "nsis"
+    ],
+    "icon": "assets/icon.png"
+  },
+  "mac": {
+    "target": [
+      "dmg"
+    ],
+    "category": "public.app-category.productivity",
+    "icon": "assets/icon.png"
+  },
+  "deb": {
+    "afterInstall": "build/afterInstall.sh"
+  }
+}

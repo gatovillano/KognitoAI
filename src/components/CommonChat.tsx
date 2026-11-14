@@ -54,6 +54,9 @@ interface MessageContentPart {
   id?: string;
   status?: 'start' | 'end' | 'error';
   tool_name?: string;
+  progress?: number;
+  status_message?: string;
+  current_node?: string;
   pty_session?: { session_id: string; command?: string };
 }
 
@@ -488,10 +491,15 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
           break;
         case 'tool_start': {
           const toolStartMessage = data as ToolStatusMessage;
-          if (toolStartMessage.tool_name === 'deep_research') {
+          const isDeepResearch = toolStartMessage.tool_name === 'deep_research';
+          const isAnthroResearch = toolStartMessage.tool_name === 'anthropological_deep_research';
+          if (isDeepResearch || isAnthroResearch) {
             setIsDeepResearchActive(true);
             setResearchProgress((prev) => (prev > 0 ? prev : 5));
-            setResearchStatus(toolStartMessage.message || 'Iniciando investigación profunda...');
+            setResearchStatus(
+              toolStartMessage.message ||
+              (isAnthroResearch ? 'Iniciando investigación antropológica profunda...' : 'Iniciando investigación profunda...')
+            );
             if (threadIdRef.current) {
               localStorage.setItem('deep_research_active_' + threadIdRef.current, 'true');
             }
@@ -524,16 +532,18 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
         case 'tool_error': {
           const toolEndMessage = data as ToolStatusMessage;
           const isBackgroundCompletion = (data as any).background_completion === true;
+          const isDeepResearch = toolEndMessage.tool_name === 'deep_research';
+          const isAnthroResearch = toolEndMessage.tool_name === 'anthropological_deep_research';
 
           // Si es deep_research pero NO es la finalización del hilo de fondo (es decir, es el retorno síncrono inicial), lo ignoramos.
-          if (toolEndMessage.tool_name === 'deep_research' && !isBackgroundCompletion) {
+          if (isDeepResearch && !isBackgroundCompletion) {
             setToolName(undefined);
             setReactState(undefined);
             setIsThinking(false);
             break;
           }
 
-          if (toolEndMessage.tool_name === 'deep_research') {
+          if (isDeepResearch || isAnthroResearch) {
             setIsDeepResearchActive(false);
             setResearchProgress(0);
             if (threadIdRef.current) {
@@ -548,26 +558,57 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
             setBackgroundTasks((prev) => prev.filter((t) => t.taskId !== toolEndMessage.task_id));
           }
           
-          if (toolEndMessage.tool_name !== 'deep_research') {
+          if (!isDeepResearch && !isAnthroResearch) {
             toast[type === 'tool_end' ? 'success' : 'error'](`Herramienta ${toolEndMessage.tool_name || 'una herramienta'} ${type === 'tool_end' ? 'completada' : 'falló'}.`);
           } else {
+            const toolLabel = isAnthroResearch ? "Investigación antropológica" : "Investigación profunda";
             if (type === 'tool_end') {
-              toast.success("Investigación profunda completada de forma exitosa.", { duration: 5000 });
+              toast.success(`${toolLabel} completada de forma exitosa.`, { duration: 5000 });
               setResearchCompletedEvent(true);
             } else {
-              toast.error("La investigación profunda falló o fue cancelada.");
+              toast.error(`${toolLabel} falló o fue cancelada.`);
             }
           }
           break;
         }
-        case 'progress':
+        case 'progress': {
+          const progVal = Number(data.progress);
+          const progMsg = data.message || '';
+          const currNode = data.current_node || '';
           if (data.progress !== undefined) {
-            setResearchProgress(Number(data.progress));
+            setResearchProgress(progVal);
           }
           if (data.message) {
-            setResearchStatus(data.message);
+            setResearchStatus(progMsg);
           }
+
+          // Actualizar en tiempo real el part de la herramienta en ChatMessage
+          setMessages((prevMessages) => {
+            const lastIdx = prevMessages.length - 1;
+            if (lastIdx < 0) return prevMessages;
+            const lastMsg = prevMessages[lastIdx];
+            if (!lastMsg.content_parts || lastMsg.content_parts.length === 0) return prevMessages;
+
+            const partIdx = lastMsg.content_parts.findIndex(
+              (p) => p.type === 'tool_call' &&
+                     (p.tool_name === 'anthropological_deep_research' || p.tool_name === 'deep_research' || p.tool_name === data.tool_name) &&
+                     p.status === 'start'
+            );
+            if (partIdx === -1) return prevMessages;
+
+            const updatedParts = [...lastMsg.content_parts];
+            updatedParts[partIdx] = {
+              ...updatedParts[partIdx],
+              progress: progVal,
+              status_message: progMsg,
+              current_node: currNode,
+            };
+            const updated = [...prevMessages];
+            updated[lastIdx] = { ...lastMsg, content_parts: updatedParts };
+            return updated;
+          });
           break;
+        }
         case 'error': {
           setIsResponding(false);
           setIsThinking(false);
@@ -762,12 +803,21 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
               const existingPartIndex = incomingSessionId
                 ? newParts.findIndex((p: any) => p?.type === 'tool_call' && p?.pty_session?.session_id === incomingSessionId)
                 : -1;
+              const isResearchTool = toolStartMessage.tool_name === 'anthropological_deep_research' || toolStartMessage.tool_name === 'deep_research';
+              const initialStatusMsg = toolStartMessage.message || (
+                toolStartMessage.tool_name === 'anthropological_deep_research'
+                  ? 'Iniciando investigación antropológica profunda...'
+                  : 'Iniciando investigación profunda...'
+              );
+
               if (existingPartIndex === -1) {
                 newParts.push({
                   type: 'tool_call',
                   content: toolContent,
                   tool_name: toolStartMessage.tool_name,
                   status: 'start',
+                  progress: isResearchTool ? 5 : undefined,
+                  status_message: isResearchTool ? initialStatusMsg : undefined,
                   pty_session: incomingPty
                 } as any);
                 updatedMessages[chunkMessageIndex] = { ...existingMessage, content_parts: newParts };
@@ -783,6 +833,8 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                   content: toolContent,
                   tool_name: toolStartMessage.tool_name,
                   status: 'start',
+                  progress: isResearchTool ? 5 : undefined,
+                  status_message: isResearchTool ? initialStatusMsg : undefined,
                 } as any);
                 updatedMessages[chunkMessageIndex] = { ...existingMessage, content_parts: newParts };
               }
@@ -829,9 +881,18 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
 
               const lastPartIndex = findLatestToolCallIndex(newParts, toolEndMessage.tool_name);
               if (lastPartIndex !== -1) {
+                 const isResearchEnd = toolEndMessage.tool_name === 'anthropological_deep_research' || toolEndMessage.tool_name === 'deep_research';
+                 const defaultEndMsg = toolEndMessage.tool_name === 'anthropological_deep_research' 
+                   ? 'Investigación antropológica completada' 
+                   : (toolEndMessage.message || 'Investigación completada');
+
                  newParts[lastPartIndex] = {
                    ...newParts[lastPartIndex],
                    status: type === 'tool_error' ? 'error' : 'end',
+                   progress: type === 'tool_error' ? newParts[lastPartIndex].progress : (isResearchEnd ? 100 : newParts[lastPartIndex].progress),
+                   status_message: type === 'tool_error' 
+                     ? (toolEndMessage.error || 'Falló la investigación')
+                     : (isResearchEnd ? defaultEndMsg : newParts[lastPartIndex].status_message),
                    content: toolEndMessage.result || toolEndMessage.error || newParts[lastPartIndex].content
                  };
               }
@@ -1985,10 +2046,13 @@ export function CommonChat({ threadId, workspaceId, initialMessage, initialRagCo
                 })}
                 {(isResponding || toolName || isDeepResearchActive) && (
                   <div className="-mt-4">
-                    {isDeepResearchActive ? (
+                    {isDeepResearchActive && !messages[messages.length - 1]?.content_parts?.some(p => (p.tool_name === 'anthropological_deep_research' || p.tool_name === 'deep_research') && p.status === 'start') ? (
                       <DeepResearchVisualizer
                         progress={researchProgress}
                         statusText={researchStatus}
+                        title={toolName === 'anthropological_deep_research' ? 'Investigación Antropológica' : 'Deep Research'}
+                        subtitle={toolName === 'anthropological_deep_research' ? 'ANÁLISIS CUALITATIVO Y MARCO TEÓRICO' : 'PROCESANDO CONOCIMIENTO GLOBAL'}
+                        isAnthropological={toolName === 'anthropological_deep_research'}
                       />
                     ) : (
                       <LoadingIndicator

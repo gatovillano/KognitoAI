@@ -1,0 +1,23 @@
+[Unit]
+Description=KognitoAI Local Stack (backend, frontend, telegram gateway)
+Documentation=file:///home/gato/Proyectos/KognitoAI/start_local.sh
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=simple
+User=gato
+Group=gato
+WorkingDirectory=/home/gato/Proyectos/KognitoAI
+Environment=PATH=/home/gato/.local/bin:/home/gato/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=PYTHONPATH=/home/gato/Proyectos/KognitoAI
+ExecStart=/bin/bash /home/gato/Proyectos/KognitoAI/start_local.sh
+ExecStop=/bin/kill -TERM $MAINPID
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

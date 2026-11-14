@@ -347,7 +347,7 @@ export default function KognitoChatPanel() {
   // Copiar Enlace de Sala
   const handleCopyHeaderLink = () => {
     if (!activeRoomId) return;
-    const url = `${window.location.origin}/kognito-chat?join=${activeRoomId}`;
+    const url = `${window.location.origin}/join/${activeRoomId}`;
     navigator.clipboard.writeText(url);
     setCopiedHeaderLink(true);
     setTimeout(() => setCopiedHeaderLink(false), 2500);

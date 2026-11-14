@@ -1,0 +1,47 @@
+name: Build Desktop App
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'desktop/**'
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: 'desktop/package-lock.json'
+
+      - name: Install Dependencies
+        working-directory: desktop
+        run: npm ci
+
+      - name: Build Application & Packages
+        working-directory: desktop
+        run: npm run dist
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: KognitoAI-Desktop-${{ matrix.os }}
+          path: |
+            desktop/release/*.AppImage
+            desktop/release/*.deb
+            desktop/release/*.exe
+            desktop/release/*.dmg
+            desktop/release/*.zip
+          if-no-files-found: warn

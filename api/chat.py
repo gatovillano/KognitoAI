@@ -6,6 +6,7 @@ import re
 import json
 import asyncio
 import os
+from pathlib import Path
 from typing import Annotated, Optional, AsyncGenerator, Any, List, Dict, Union
 from io import BytesIO
 import httpx
@@ -96,6 +97,71 @@ def normalize_image_url(url_or_base64: Optional[str]) -> str:
     else:
         mime = "image/jpeg"
     return f"data:{mime};base64,{url_str}"
+
+
+def persist_chat_images(account_id: str, images_data: List[str]) -> List[Dict[str, str]]:
+    """
+    Guarda las imágenes recibidas en el chat en disco de forma persistente.
+    Retorna una lista de diccionarios con info de cada archivo:
+    [{"path": "/abs/path/to/img.png", "filename": "img.png", "url": "/media/chat_images/.../img.png"}]
+    """
+    import base64
+    from core.config import settings
+
+    saved_images: List[Dict[str, str]] = []
+    if not images_data:
+        return saved_images
+
+    chat_images_dir = Path(settings.media_root) / "chat_images" / str(account_id)
+    chat_images_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    for idx, raw_img in enumerate(images_data, start=1):
+        if not raw_img or not str(raw_img).strip():
+            continue
+
+        raw_str = str(raw_img).strip()
+        # Determinar extensión y extraer bytes Base64 limpios
+        ext = "png"
+        clean_b64 = raw_str
+
+        if raw_str.startswith("data:"):
+            # Formato data:image/png;base64,...
+            header, _, body = raw_str.partition(",")
+            clean_b64 = body
+            if "image/jpeg" in header or "image/jpg" in header:
+                ext = "jpg"
+            elif "image/webp" in header:
+                ext = "webp"
+            elif "image/gif" in header:
+                ext = "gif"
+            elif "image/png" in header:
+                ext = "png"
+        elif raw_str.startswith("/9j/"):
+            ext = "jpg"
+        elif raw_str.startswith("UklGR"):
+            ext = "webp"
+        elif raw_str.startswith("R0lGOD"):
+            ext = "gif"
+
+        try:
+            img_bytes = base64.b64decode(clean_b64)
+            file_uuid = uuid.uuid4().hex[:8]
+            filename = f"chat_{timestamp}_{file_uuid}_{idx}.{ext}"
+            file_path = chat_images_dir / filename
+            file_path.write_bytes(img_bytes)
+
+            saved_images.append({
+                "path": str(file_path.resolve()),
+                "filename": filename,
+                "url": f"/media/chat_images/{account_id}/{filename}"
+            })
+            logger.info(f"💾 Imagen del chat persistida con éxito en: {file_path}")
+        except Exception as err:
+            logger.warning(f"No se pudo guardar imagen del chat en disco: {err}")
+
+    return saved_images
 
 # get_db eliminado en favor de core.dependencies.get_db_session
 
@@ -195,6 +261,8 @@ class CreateThreadRequest(BaseModel):
     title: str = "Nuevo Chat"
     platform: str = "web"
     workspace_id: Optional[str] = None
+    context: Optional[Dict[str, Any]] = None
+    persistent_rag_context: Optional[List[Dict[str, Any]]] = None
 
 
 class ChatThreadResponse(BaseModel):
@@ -223,6 +291,23 @@ async def create_thread(
     """
     try:
         new_thread_id = uuid.uuid4()
+        initial_persistent_rag = request.persistent_rag_context or []
+        if not initial_persistent_rag and request.context:
+            if request.context.get("type") == "note":
+                snap = request.context.get("snapshot") or {}
+                note_id = str(request.context.get("id") or "")
+                note_title = snap.get("title") or request.title
+                note_content = snap.get("content") or request.context.get("full_text") or ""
+                initial_persistent_rag = [
+                    {
+                        "type": "note",
+                        "id": note_id,
+                        "name": note_title,
+                        "title": note_title,
+                        "content": note_content,
+                    }
+                ]
+
         new_thread = ChatThread(
             id=new_thread_id,
             title=request.title,
@@ -231,6 +316,7 @@ async def create_thread(
             workspace_id=uuid.UUID(request.workspace_id)
             if request.workspace_id
             else None,
+            persistent_rag_context=initial_persistent_rag,
             created_at=datetime.now(timezone.utc),
         )
         db.add(new_thread)
@@ -2007,6 +2093,23 @@ async def create_and_run_agent_streaming(
             except Exception as e:
                 logger.warning(f"Error al cargar persistent_rag_context: {e}")
 
+        # Si context no viene en la request pero rag_context tiene una nota, reconstruir context
+        if not context and rag_context:
+            for item in rag_context:
+                if str(item.get("type") or "").lower() == "note":
+                    snap_title = item.get("title") or item.get("name") or "Nota"
+                    snap_content = item.get("content") or ""
+                    context = {
+                        "type": "note",
+                        "id": str(item.get("id") or ""),
+                        "snapshot": {
+                            "title": snap_title,
+                            "content": snap_content,
+                        },
+                        "full_text": f"Título: {snap_title}\n\nContenido:\n{snap_content}",
+                    }
+                    break
+
         # Inyección Automática de Contexto de OnlyOffice
         # Leemos el contenido actualizado del documento y lo inyectamos directamente en el rag_context
         # Esto permite que el agente "vea" el documento en cada turno, incluyendo los cambios que acaba de hacer.
@@ -2041,16 +2144,26 @@ async def create_and_run_agent_streaming(
                             logger.error(f"Error cargando documento OnlyOffice: {result}")
                             continue
                         doc_to_inject, doc_content = result
-                        if doc_content and "--- CONTENIDO" in doc_content:
-                            logger.info(
-                                f"Cargando contenido en vivo del documento OnlyOffice: {doc_to_inject.get('id')}"
-                            )
-                            idx = new_rag_context.index(doc_to_inject)
-                            new_doc = dict(doc_to_inject)
-                            new_doc["content"] = (
-                                f"DOCUMENTO ACTUAL ABIERTO POR EL USUARIO:\n\n{doc_content}\n\nRECUERDA: Tienes herramientas para editar este documento directamente si el usuario lo pide."
-                            )
-                            new_rag_context[idx] = new_doc
+                        if doc_content:
+                            if isinstance(doc_content, list):
+                                text_parts = [
+                                    b["text"] for b in doc_content
+                                    if isinstance(b, dict) and b.get("type") == "text"
+                                ]
+                                doc_text = "\n".join(text_parts)
+                            else:
+                                doc_text = str(doc_content)
+
+                            if "--- CONTENIDO" in doc_text:
+                                logger.info(
+                                    f"Cargando contenido en vivo del documento OnlyOffice: {doc_to_inject.get('id')}"
+                                )
+                                idx = new_rag_context.index(doc_to_inject)
+                                new_doc = dict(doc_to_inject)
+                                new_doc["content"] = (
+                                    f"DOCUMENTO ACTUAL ABIERTO POR EL USUARIO:\n\n{doc_text}\n\nRECUERDA: Tienes herramientas para editar este documento directamente si el usuario lo pide."
+                                )
+                                new_rag_context[idx] = new_doc
 
                     rag_context = new_rag_context
                     logger.info(
@@ -2065,11 +2178,27 @@ async def create_and_run_agent_streaming(
 
         # El user_message se mantiene sin modificar aquí.
 
-        # --- Construcción del Mensaje Multimodal ---
-        # Langchain espera una lista de dicts o strings para el contenido multimodal.
-        # Los dicts deben tener la estructura esperada por el modelo (e.g., {"type": "image_url", "image_url": {"url": "..."}})
-        # Asegurarse de que el mensaje no sea None para evitar errores de validación en LangChain
-        safe_user_message = user_message if user_message is not None else ""
+        # --- Construcción del Mensaje Multimodal y Persistencia de Imágenes ---
+        # Si el usuario envía imágenes en base64, las persistimos en disco local para que las herramientas
+        # (OnlyOffice, etc.) puedan manipularlas, e inyectamos sus rutas físicas en el prompt.
+        raw_images_list: List[str] = []
+        if image_base64:
+            raw_images_list.append(image_base64)
+        if images_base64:
+            raw_images_list.extend(images_base64)
+
+        saved_chat_images = persist_chat_images(account_id, raw_images_list)
+        image_info_text = ""
+        if saved_chat_images:
+            lines = [
+                "\n\n[📷 IMÁGENES SUBIDAS POR EL USUARIO EN ESTE MENSAJE]:",
+                "Puedes usarlas en herramientas de documentos (OnlyOffice edit_onlyoffice_document con 'insert_image') usando su 'image_path':"
+            ]
+            for s_img in saved_chat_images:
+                lines.append(f"- Archivo: {s_img['filename']} | Ruta física local: {s_img['path']}")
+            image_info_text = "\n".join(lines)
+
+        safe_user_message = (user_message if user_message is not None else "") + image_info_text
         content_parts: List[Union[str, Dict[str, Any]]] = [
             {"type": "text", "text": safe_user_message}
         ]
@@ -2093,7 +2222,10 @@ async def create_and_run_agent_streaming(
                     }
                 )
 
-        initial_human_message = HumanMessage(content=content_parts)
+        initial_human_message = HumanMessage(
+            content=content_parts,
+            additional_kwargs={"saved_images": saved_chat_images} if saved_chat_images else {}
+        )
         # --- Fin Construcción ---
 
         initial_state: AgentState = {

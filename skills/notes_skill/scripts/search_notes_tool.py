@@ -15,8 +15,8 @@ from core.citation_models import ToolOutputWithSources, create_document_source, 
 logger = logging.getLogger(__name__) 
 
 class SearchNotesInput(BaseModel):
-    query: str = Field(description="La consulta de búsqueda para encontrar notas relevantes.")
-    account_id: str = Field(description="ID de la cuenta del usuario.")
+    query: str = Field(default="", description="La consulta de búsqueda para encontrar notas relevantes.")
+    account_id: Optional[str] = Field(default=None, description="ID de la cuenta del usuario (inyectado automáticamente).")
     workspace_id: Optional[str] = Field(None, description="ID del espacio de trabajo para filtrar notas.")
     team_id: Optional[str] = Field(None, description="ID del equipo para filtrar notas.")
     k: int = Field(default=5, description="Número de notas a recuperar.")
@@ -36,14 +36,20 @@ class SearchNotesTool(BaseTool):
 
     async def _arun(
         self,
-        query: str,
-        account_id: str,
+        query: str = "",
+        account_id: Optional[str] = None,
         workspace_id: Optional[str] = None,
         team_id: Optional[str] = None,
         k: int = 5,
         **kwargs: Any,
     ) -> ToolOutputWithSources:
-        logger.info(f"🔍 Buscando notas para la cuenta {account_id} con la consulta: '{query}'")
+        acc_id = account_id or self.account_id
+        if not acc_id:
+            logger.error("No se pudo determinar account_id para buscar notas.")
+            return ToolOutputWithSources(context_for_llm="Error: ID de cuenta no disponible.", sources=[])
+        if not query or not str(query).strip():
+            query = "notas recientes"
+        logger.info(f"🔍 Buscando notas para la cuenta {acc_id} con la consulta: '{query}'")
         try:
             embedding_model = get_embedding_model()
             if not embedding_model:
@@ -70,7 +76,7 @@ class SearchNotesTool(BaseTool):
                 query_embedding_str = str(query_embedding) if not isinstance(query_embedding, str) else query_embedding
                 params = {
                     "query_embedding": query_embedding_str,
-                    "account_id": account_id,
+                    "account_id": acc_id,
                 }
 
                 filter_clauses = []

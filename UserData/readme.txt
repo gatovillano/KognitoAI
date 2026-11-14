@@ -1,0 +1,1 @@
+﻿You may backup this folder to restore your KONTAKT settings anytime when required.

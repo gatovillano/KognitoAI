@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
+from telegram.error import InvalidToken
 from telegram.ext import Application
 
 from telegram_gateway.config import config
@@ -78,7 +79,19 @@ async def lifespan(app: FastAPI):
     register_workspace_handlers(ptb_app)
 
     # Inicializar la aplicación PTB
-    await ptb_app.initialize()
+    try:
+        await ptb_app.initialize()
+    except InvalidToken:
+        # El token configurado no es válido (p. ej. un marcador de desarrollo
+        # o un token revocado). Telegram rechaza la conexión al arrancar.
+        logger.error(
+            "❌ El token de Telegram es inválido (Unauthorized). "
+            "Genera un token real con /newtoken en BotFather y actualiza TELEGRAM_BOT_TOKEN. "
+            "El gateway iniciará en modo sin bot (solo health check)."
+        )
+        yield
+        return
+
     app.state.ptb_app = ptb_app
 
     # Configurar los comandos para el autocompletado en Telegram

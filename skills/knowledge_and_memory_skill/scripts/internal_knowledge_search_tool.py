@@ -12,7 +12,15 @@ from datetime import datetime
 
 from langchain_core.tools import BaseTool
 from langchain_core.messages import HumanMessage
-from pydantic import BaseModel, Field, root_validator
+from pydantic import BaseModel, Field
+try:
+    from pydantic import model_validator
+except ImportError:
+    model_validator = None
+try:
+    from pydantic import root_validator
+except ImportError:
+    root_validator = None
 from core.llm_manager import get_llm_for_user
 from core.memory_manager import get_relevant_memories
 
@@ -26,7 +34,7 @@ async def get_interpreter_llm(account_id: str) -> Any:
 class InternalKnowledgeSearchInput(BaseModel):
     """Input schema para la búsqueda de conocimiento interno."""
     query: str = Field(
-        ...,
+        default="",
         description="La consulta completa del usuario en lenguaje natural."
     )
     document_name: Optional[str] = Field(
@@ -38,15 +46,30 @@ class InternalKnowledgeSearchInput(BaseModel):
         description="El ID único de un documento específico (UUID) para buscar solo en él."
     )
 
-    @root_validator(pre=True)
-    def map_aliases(cls, values: dict[str, Any]) -> dict[str, Any]:
-        """Permite mapear alias comunes para el parámetro 'query'."""
-        if "query" not in values:
-            for alias in ["question", "search", "text", "search_query", "content", "prompt", "input"]:
-                if alias in values:
-                    values["query"] = values[alias]
-                    break
-        return values
+    if model_validator:
+        @model_validator(mode="before")
+        @classmethod
+        def map_aliases_v2(cls, values: Any) -> Any:
+            if isinstance(values, dict):
+                if not values.get("query"):
+                    for alias in ["question", "search", "text", "search_query", "content", "prompt", "input"]:
+                        if values.get(alias):
+                            values["query"] = str(values[alias])
+                            break
+                    if not values.get("query"):
+                        values["query"] = ""
+            return values
+    elif root_validator:
+        @root_validator(pre=True)
+        def map_aliases_v1(cls, values: dict[str, Any]) -> dict[str, Any]:
+            if not values.get("query"):
+                for alias in ["question", "search", "text", "search_query", "content", "prompt", "input"]:
+                    if values.get(alias):
+                        values["query"] = str(values[alias])
+                        break
+                if not values.get("query"):
+                    values["query"] = ""
+            return values
 
 class InternalKnowledgeSearchTool(BaseTool):
     name: str = "internal_knowledge_search"
@@ -101,8 +124,10 @@ Responde SOLO en formato JSON válido.
             logger.error(f"Error interpretando consulta (fallo inesperado): {e}", exc_info=True)
             return {"search_terms": query, "k": 15}
 
-    async def _arun(self, query: str, **kwargs: Any) -> str:
+    async def _arun(self, query: str = "", **kwargs: Any) -> str:
         try:
+            if not query or not str(query).strip():
+                query = "memorias recientes y contexto general"
             logger.info(f"🔍 Ejecutando búsqueda interna para: '{query[:100]}...' ")
             interpretation = await self._interpret_query(query)
             logger.info(f"🧠 Interpretación del LLM: {interpretation}") # Nuevo log
@@ -153,15 +178,17 @@ Responde SOLO en formato JSON válido.
                 explicit_document_ids=explicit_document_ids # Pasar el nuevo parámetro
             )
             
+            from core.citation_models import ToolOutputWithSources, format_context_with_sources
             if not results or not results.sources:
-                return f"No se encontró información relevante para: '{query}'."
+                return ToolOutputWithSources(
+                    context_for_llm=f"No se encontró información relevante para: '{query}' en tu base de conocimiento.",
+                    sources=[]
+                ).model_dump()
 
-            formatted_results = []
-            for source in results.sources:
-                source_name = source.title or source.url or "memoria" # Usar source.url
-                formatted_results.append(f"- Fuente: {source_name}\n  Contenido: {source.snippet[:500]}...")
-            
-            return f"Se encontraron {len(results.sources)} resultados en tu base de conocimiento:\n\n" + "\n".join(formatted_results)
+            return ToolOutputWithSources(
+                context_for_llm=format_context_with_sources(results.sources),
+                sources=results.sources
+            ).model_dump()
             
         except Exception as e:
             logger.error(f"Error en InternalKnowledgeSearchTool: {e}", exc_info=True)

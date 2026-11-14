@@ -24,6 +24,7 @@ const MARKDOWN_SANITIZE_OPTIONS: Config = {
     'data-citation-number',
     'data-cmd',
     'data-session-id',
+    'aria-hidden',
   ],
   ADD_TAGS: ['svg', 'path', 'polyline', 'line', 'circle', 'rect'],
   ALLOWED_URI_REGEXP:

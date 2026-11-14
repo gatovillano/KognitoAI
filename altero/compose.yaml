@@ -1,0 +1,91 @@
+# A deployment that survives a reboot and can be upgraded without ceremony:
+#
+#     docker compose -f docker/compose.yaml up -d
+#     docker compose -f docker/compose.yaml exec altero altero user add <name>
+#     docker compose -f docker/compose.yaml exec altero altero user password <name>
+#     docker compose -f docker/compose.yaml exec altero altero login list
+#
+# Run those from the repository root. `-f` is what the file living in docker/
+# costs; `export COMPOSE_FILE=docker/compose.yaml` buys it back for a shell.
+#
+# A checkout is not needed to run altero: the image is published, so this file
+# on its own is a deployment. Downloaded next to a `.env`, it is
+# `docker compose up -d` and nothing else. Building it from a checkout instead
+# is compose.build.yaml beside this file.
+#
+# Point the Zotero client at http://<host>:8000/ and turn its streaming off --
+# see "Point Zotero at altero" in README.md.
+#
+# Named explicitly: the project name otherwise follows the directory the file
+# sits in, and renaming it to "docker" would leave an existing deployment's
+# volumes behind under the old prefix with its library in them.
+name: altero
+
+services:
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: altero
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-altero}
+      POSTGRES_DB: altero
+    # One mount at /var/lib/postgresql, not at .../data: 18 keeps its files in
+    # a major-version subdirectory, and mounting the parent is what the image
+    # asks for, so that a later pg_upgrade --link is not working across a mount
+    # boundary. A volume written by 17 stops the container here with an error
+    # naming the version that wrote it -- it is never adopted silently -- but
+    # that also means moving from 17 is a dump and restore, not a pull.
+    volumes:
+      - db:/var/lib/postgresql
+    # altero waits for this rather than crash-looping until the database is up.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U altero"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  altero:
+    # Pulled rather than built. `latest` is the newest release, prereleases
+    # included, and moves when one is tagged; ALTERO_IMAGE_TAG pins a release
+    # (`1.0.0-beta.7`) or follows master (`dev`) instead. An upgrade is
+    # `docker compose pull && docker compose up -d`.
+    image: ghcr.io/eseifert/altero:${ALTERO_IMAGE_TAG:-latest}
+    # Migrations run on start, so this is also how an upgrade applies them.
+    depends_on:
+      db:
+        condition: service_healthy
+    # Every ALTERO_ setting in docker/.env, not only the ones this file happens
+    # to name: a setting that has to be added here before it does anything is a
+    # setting people set and then report as broken. The whole file is handed to
+    # the container, so keep in it only what the application should hold.
+    # Optional, because an instance on the defaults never writes one.
+    # docs/configuration.md lists what can go in it.
+    env_file:
+      - path: .env
+        required: false
+    # These win over the file above, which is what makes a value exported in
+    # the shell -- a CI job, a systemd unit -- reach the container as well.
+    environment:
+      ALTERO_DATABASE_URL: postgresql+asyncpg://altero:${POSTGRES_PASSWORD:-altero}@db:5432/altero
+      # Outgoing mail. Empty is the working default: the messages go to the
+      # log, which is where the first account reads its own confirmation link.
+      # See docs/email.md.
+      ALTERO_SMTP_URL: ${ALTERO_SMTP_URL:-}
+      ALTERO_MAIL_FROM: ${ALTERO_MAIL_FROM:-altero@localhost}
+      ALTERO_PUBLIC_URL: ${ALTERO_PUBLIC_URL:-}
+    # So that a relay running on the host is reachable as
+    # host.docker.internal: inside the container `localhost` is the container,
+    # and a submission port on the host is not on it.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - storage:/data
+    # Bound to the loopback interface: put a TLS terminator in front rather
+    # than exposing the API to the network directly.
+    ports:
+      - "127.0.0.1:${ALTERO_PUBLISH_PORT:-8000}:8000"
+    restart: unless-stopped
+
+volumes:
+  db:
+  storage:

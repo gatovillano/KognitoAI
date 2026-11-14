@@ -2,6 +2,7 @@ import json
 import logging
 import asyncio
 import os
+from datetime import timedelta
 from typing import List, Dict, Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -25,6 +26,16 @@ from core.database import MCPServer
 from core.utils.logging_utils import AgentLogger
 
 logger = AgentLogger(__name__)
+
+
+def _timeout(name: str, default: int) -> float:
+    """Lee un timeout desde settings con fallback seguro (evita ciclos de import)."""
+    try:
+        from core.config import settings
+        value = getattr(settings, name, None)
+        return float(value) if value else float(default)
+    except Exception:
+        return float(default)
 
 class MCPManager:
     """
@@ -152,8 +163,17 @@ class MCPManager:
                     ready_event.set()
                     return
 
-                session = await exit_stack.enter_async_context(ClientSession(read, write))
-                await session.initialize()
+                # read_timeout_seconds evita que un servidor MCP colgado
+                # (p.ej. Playwright esperando un navegador que no arranca)
+                # bloquee la llamada indefinidamente: falla con McpError.
+                call_timeout = _timeout("mcp_call_timeout", 150)
+                session = await exit_stack.enter_async_context(
+                    ClientSession(read, write, read_timeout_seconds=timedelta(seconds=call_timeout))
+                )
+                await asyncio.wait_for(
+                    session.initialize(),
+                    timeout=_timeout("mcp_connect_timeout", 60),
+                )
                 self._active_sessions[server_id] = session
                 logger.info(f"Servidor MCP {server.name} conectado exitosamente.")
                 ready_event.set()
@@ -209,10 +229,13 @@ class MCPManager:
         self._worker_tasks[server_id] = task
 
         try:
-            await asyncio.wait_for(ready_event.wait(), timeout=15.0)
+            # El arranque vía `npx ...@latest` puede tardar (resolución de registry),
+            # por eso el límite es holgado; initialize() ya tiene su propio timeout.
+            connect_timeout = _timeout("mcp_connect_timeout", 60)
+            await asyncio.wait_for(ready_event.wait(), timeout=connect_timeout)
             return self.is_session_alive(server_id)
         except asyncio.TimeoutError:
-            logger.error(f"Timeout esperando conexión con servidor MCP {server.name}")
+            logger.error(f"Timeout ({connect_timeout}s) esperando conexión con servidor MCP {server.name}")
             await self.disconnect_server(server_id)
             return False
 
@@ -249,9 +272,20 @@ class MCPManager:
             
             session = self._active_sessions[server_id]
             try:
-                # Usamos el adaptador oficial de langchain para cargar las tools
-                tools = await load_mcp_tools(session)
-                
+                # Usamos el adaptador oficial de langchain para cargar las tools.
+                # Con timeout: un servidor MCP que no responde a list_tools no debe
+                # congelar el ensamblado del toolbox (y con él, todo el turno).
+                list_timeout = _timeout("mcp_list_tools_timeout", 45)
+                try:
+                    tools = await asyncio.wait_for(load_mcp_tools(session), timeout=list_timeout)
+                except asyncio.TimeoutError:
+                    logger.error(
+                        f"Timeout ({list_timeout}s) listando herramientas de MCP {server.name}. "
+                        "Se omite el servidor para este turno."
+                    )
+                    await self.disconnect_server(server_id)
+                    continue
+
                 for tool in tools:
                     orig_coro = tool.coroutine
                     # [PATCH MULTIMODAL] Forzar response_format="content" para que
@@ -262,8 +296,23 @@ class MCPManager:
                     if orig_coro:
                         def make_resilient_coroutine(coro, srv, t_name):
                             async def resilient_call(**arguments: Any):
+                                # Doble barrera: la del ClientSession (read_timeout)
+                                # y esta explícita, para cubrir adaptadores que
+                                # reintentan en bucle o ignoran el timeout del SDK.
+                                call_timeout = _timeout("mcp_call_timeout", 150)
                                 try:
-                                    return await coro(**arguments)
+                                    return await asyncio.wait_for(
+                                        coro(**arguments), timeout=call_timeout
+                                    )
+                                except asyncio.TimeoutError:
+                                    logger.error(
+                                        f"Timeout ({call_timeout}s) en herramienta MCP "
+                                        f"{t_name} ({srv.name}). Cancelando para no bloquear el turno."
+                                    )
+                                    raise TimeoutError(
+                                        f"La herramienta '{t_name}' del servidor '{srv.name}' "
+                                        f"no respondió en {call_timeout:.0f}s y fue cancelada."
+                                    )
                                 except Exception as exc:
                                     # Auto-recuperación si el stream se cerró inesperadamente
                                     exc_name = type(exc).__name__
@@ -275,7 +324,10 @@ class MCPManager:
                                         if await self.connect_server(srv):
                                             new_sess = self._active_sessions.get(str(srv.id))
                                             if new_sess:
-                                                new_res = await new_sess.call_tool(t_name, arguments)
+                                                new_res = await asyncio.wait_for(
+                                                    new_sess.call_tool(t_name, arguments),
+                                                    timeout=_timeout("mcp_call_timeout", 150),
+                                                )
                                                 return _convert_call_tool_result(new_res)
                                     raise exc
                             return resilient_call

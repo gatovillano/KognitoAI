@@ -8,7 +8,15 @@ from typing import Dict, Any, List, Union, Optional
 from langchain_core.messages import HumanMessage, AIMessage
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from core.agents.deep_researcher import compile_deep_researcher_graph
-from core.llm_manager import get_main_llm, get_llm_for_user, set_active_account_id
+from core.llm_manager import (
+    get_main_llm,
+    get_llm_for_user,
+    get_llm as core_get_llm,
+    set_active_account_id,
+    set_client_llm_override,
+    get_client_llm_override,
+    get_active_account_id,
+)
 from core.utils.llm_utils import safe_bind_tools  # OpenRouter compatibility
 from langchain_core.language_models.base import BaseLanguageModel
 from langchain_core.messages import BaseMessage
@@ -19,11 +27,12 @@ from core.websocket_manager import manager as websocket_manager
 
 
 def _resolve_effective_account_id(request: Optional[Request], body_account_id: Optional[str]) -> str:
-    """Prioriza el account_id del JWT (modelo configurado en frontend por usuario).
-
-    Antes se usaba solo el account_id del body (por defecto "api_user"),
-    lo que hacía que deep_research usara el LLM global (.env) en vez del
-    modelo configurado por el usuario.
+    """Prioriza el account_id del cliente:
+    1. JWT en Authorization: Bearer <jwt>
+    2. Header X-Account-ID
+    3. account_id en el body si es un UUID válido (no 'api_user')
+    4. ContextVar / variable de entorno KOGNITO_ACCOUNT_ID
+    5. 'api_user' (core/llm_manager lo mapeará automáticamente a la cuenta activa del cliente)
     """
     if request is not None:
         try:
@@ -37,9 +46,49 @@ def _resolve_effective_account_id(request: Optional[Request], body_account_id: O
                             f"account_id del body ('{body_account_id}') difiere del JWT ('{sub}'). Usando JWT."
                         )
                     return sub
+
+            x_acc = request.headers.get("X-Account-ID") or request.headers.get("x-account-id")
+            if x_acc and x_acc != "api_user":
+                return x_acc
         except Exception as e:
-            logger.warning(f"No se pudo resolver account_id desde JWT, usando body: {e}")
+            logger.warning(f"No se pudo resolver account_id desde JWT/headers: {e}")
+
+    if body_account_id and body_account_id != "api_user":
+        return body_account_id
+
+    import os
+    env_acc = os.environ.get("KOGNITO_ACCOUNT_ID") or get_active_account_id()
+    if env_acc:
+        return env_acc
+
     return body_account_id or "api_user"
+
+
+async def get_llm(
+    account_id: Optional[str] = None,
+    purpose: str = "main",
+    model: Optional[str] = None,
+    provider: Optional[str] = None,
+    api_key: Optional[str] = None,
+    api_base: Optional[str] = None,
+    temperature: Optional[float] = None,
+    **kwargs: Any,
+) -> Optional[BaseLanguageModel]:
+    """
+    Obtiene la instancia de LLM para la investigación profunda usando el LLM del cliente.
+    Si el cliente suministra un modelo específico o API key, lo utiliza dinámicamente;
+    de lo contrario, consulta los ajustes guardados de su cuenta de usuario.
+    """
+    return await core_get_llm(
+        account_id=account_id,
+        purpose=purpose,
+        model=model,
+        provider=provider,
+        api_key=api_key,
+        api_base=api_base,
+        temperature=temperature,
+        **kwargs,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +108,16 @@ except Exception as e:
 
 class DeepResearchRequest(BaseModel):
     query: str
-    account_id: str = "api_user"
+    account_id: Optional[str] = "api_user"
     workspace_id: Optional[str] = None
+    # Parámetros directos del LLM del cliente
+    llm_model: Optional[str] = None
+    llm_provider: Optional[str] = None
+    fast_llm_model: Optional[str] = None
+    fast_llm_provider: Optional[str] = None
+    api_key: Optional[str] = None
+    api_base: Optional[str] = None
+    temperature: Optional[float] = None
 
 class ClarificationResponse(BaseModel):
     run_id: str
@@ -77,17 +134,28 @@ class DeepResearchPDFExportRequest(BaseModel):
     visual_schema: Optional[str] = None
     # account_id se obtiene del token, no del body
 
+
+class CitationVerificationRequest(BaseModel):
+    text: str
+    account_id: Optional[str] = "api_user"
+
 async def _run_deep_research_background(run_id: str, inputs: dict, config: dict):
     logger.info(f"Background Task: Invoking Deep Research graph with run_id: {run_id}")
     account_id = inputs.get("account_id") or config.get("configurable", {}).get("account_id")
     thread_id = config.get("configurable", {}).get("thread_id")
+    client_override = config.get("configurable", {}).get("client_llm_override")
+
+    if client_override:
+        set_client_llm_override(client_override)
     if account_id:
         set_active_account_id(account_id)
-        try:
-            await get_llm_for_user(account_id, purpose="fast")
-            await get_llm_for_user(account_id, purpose="main")
-        except Exception as warm_err:
-            logger.warning(f"Error pre-warming user LLMs: {warm_err}")
+
+    try:
+        await get_llm(account_id=account_id, purpose="main")
+        if client_override and client_override.get("fast_llm_model"):
+            await get_llm(account_id=account_id, purpose="fast")
+    except Exception as warm_err:
+        logger.warning(f"Error pre-warming user LLMs: {warm_err}")
 
     async def api_progress_callback(progress: int, message: str, current_node: str = "main"):
         if run_id in research_jobs:
@@ -161,6 +229,15 @@ async def _run_deep_research_background(run_id: str, inputs: dict, config: dict)
                 except Exception as save_err:
                     logger.error(f"Error saving deep research Word document in background task: {save_err}", exc_info=True)
                 
+                # --- AUDIT CITATIONS & BIBLIOGRAPHY ---
+                citation_audit = None
+                try:
+                    from utils.academic_verifier import audit_report_bibliography
+                    report_text = final_state.get("final_report", "")
+                    citation_audit = await audit_report_bibliography(report_text)
+                except Exception as audit_err:
+                    logger.warning(f"Error auditing citations in background task: {audit_err}")
+
                 research_jobs[run_id] = {
                     "status": "success",
                     "report": {
@@ -169,7 +246,8 @@ async def _run_deep_research_background(run_id: str, inputs: dict, config: dict)
                         "findings": final_state.get("findings", ""),
                         "recommendations": final_state.get("recommendations", []),
                         "sources": final_sources,
-                        "visual_schema": final_state.get("visual_schema")
+                        "visual_schema": final_state.get("visual_schema"),
+                        "citation_audit": citation_audit
                     }
                 }
         else:
@@ -195,11 +273,25 @@ async def run_deep_research_async(
     effective_account_id = _resolve_effective_account_id(http_request, request.account_id)
     logger.info(f"Received async deep research request for: '{request.query}' by account '{effective_account_id}'")
 
+    client_override = None
+    if request.llm_model or request.fast_llm_model or request.api_key:
+        client_override = {
+            "llm_model": request.llm_model,
+            "llm_provider": request.llm_provider,
+            "fast_llm_model": request.fast_llm_model,
+            "fast_llm_provider": request.fast_llm_provider,
+            "api_key": request.api_key,
+            "api_base": request.api_base,
+            "temperature": request.temperature,
+        }
+        set_client_llm_override(client_override)
+
     run_id = str(uuid.uuid4())
     config = {
         "configurable": {
             "account_id": effective_account_id,
             "thread_id": run_id,
+            "client_llm_override": client_override,
         }
     }
     inputs = {
@@ -239,11 +331,23 @@ async def run_deep_research(
         raise HTTPException(status_code=500, detail="Deep Researcher agent is not available.")
 
     effective_account_id = _resolve_effective_account_id(http_request, request.account_id)
+    client_override = None
+    if request.llm_model or request.fast_llm_model or request.api_key:
+        client_override = {
+            "llm_model": request.llm_model,
+            "llm_provider": request.llm_provider,
+            "fast_llm_model": request.fast_llm_model,
+            "fast_llm_provider": request.fast_llm_provider,
+            "api_key": request.api_key,
+            "api_base": request.api_base,
+            "temperature": request.temperature,
+        }
+        set_client_llm_override(client_override)
+
     if effective_account_id:
         set_active_account_id(effective_account_id)
         try:
-            await get_llm_for_user(effective_account_id, purpose="fast")
-            await get_llm_for_user(effective_account_id, purpose="main")
+            await get_llm(account_id=effective_account_id, purpose="main")
         except Exception as warm_err:
             logger.warning(f"Error pre-warming user LLMs: {warm_err}")
     logger.info(f"Received deep research request for: '{request.query}' by account '{effective_account_id}'")
@@ -276,6 +380,7 @@ async def run_deep_research(
             "configurable": {
                 "account_id": effective_account_id,
                 "thread_id": run_id,
+                "client_llm_override": client_override,
                 "progress_callback": api_progress_callback,
                 "base_progress": 0,
                 "max_sub_progress": 100,
@@ -338,6 +443,15 @@ async def run_deep_research(
             if isinstance(final_sources, dict) and final_sources.get("type") == "override":
                 final_sources = final_sources.get("value", [])
             
+            # --- AUDIT CITATIONS & BIBLIOGRAPHY ---
+            citation_audit = None
+            try:
+                from utils.academic_verifier import audit_report_bibliography
+                report_text = final_state.get("final_report", "")
+                citation_audit = await audit_report_bibliography(report_text)
+            except Exception as audit_err:
+                logger.warning(f"Error auditing citations in deep research: {audit_err}")
+
             return {
                 "status": "success", 
                 "report": {
@@ -346,7 +460,8 @@ async def run_deep_research(
                     "findings": final_state.get("findings", ""),
                     "recommendations": final_state.get("recommendations", []),
                     "sources": final_sources,
-                    "visual_schema": final_state.get("visual_schema")
+                    "visual_schema": final_state.get("visual_schema"),
+                    "citation_audit": citation_audit
                 }
             }
         else:
@@ -372,8 +487,7 @@ async def clarify_deep_research(
     if effective_account_id:
         set_active_account_id(effective_account_id)
         try:
-            await get_llm_for_user(effective_account_id, purpose="fast")
-            await get_llm_for_user(effective_account_id, purpose="main")
+            await get_llm(account_id=effective_account_id, purpose="main")
         except Exception as warm_err:
             logger.warning(f"Error pre-warming user LLMs: {warm_err}")
     logger.info(f"Received clarification response for run_id: {request.run_id} with response: '{request.user_response}'")
@@ -569,4 +683,25 @@ async def export_deep_research_pdf(
         raise
     except Exception as e:
         logger.error(f"Error generando PDF idéntico: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error al generar el PDF idéntico: {e}")
+
+
+@router.post("/deep_research/verify_citations")
+async def verify_citations(
+    request: CitationVerificationRequest,
+    http_request: Request = None,
+):
+    """
+    Audita y contrasta las citas bibliográficas de un texto o informe contra
+    Crossref, OpenAlex y PubMed en tiempo real. Detecta discrepancias de revistas,
+    autores o páginas, y devuelve la bibliografía oficial formateada en APA 7.
+    """
+    try:
+        from utils.academic_verifier import audit_report_bibliography
+        audit_result = await audit_report_bibliography(request.text)
+        return {"status": "success", "audit": audit_result}
+    except Exception as e:
+        logger.error(f"Error en /deep_research/verify_citations: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error al auditar citas: {e}")
+
         raise HTTPException(status_code=500, detail=f"Error al generar el PDF: {str(e)}")

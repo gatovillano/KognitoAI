@@ -1,4 +1,19 @@
-from extensions.jitsi_meet.backend.router import router as jitsi_meet_router
+import sys
+import os
+sys_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if sys_root not in sys.path:
+    sys.path.insert(0, sys_root)
+try:
+    from extensions.jitsi_meet.backend.router import router as jitsi_meet_router
+    jitsi_meet_router_available = True
+except ImportError:
+    # El paquete extensions/ vive en el repositorio KognitoAI-extensions,
+    # por lo que puede no estar presente en todos los entornos de ejecución.
+    jitsi_meet_router = None
+    jitsi_meet_router_available = False
+except Exception:
+    jitsi_meet_router = None
+    jitsi_meet_router_available = False
 import logging
 import asyncio # Added
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request, status, Depends
@@ -118,15 +133,27 @@ app.add_middleware(AuditMiddleware)
 allowed_origins = [
     "http://localhost:3000",
     "http://localhost:3001",
+    "http://localhost:3002",
     "http://127.0.0.1:3000",
     "http://127.0.0.1:3001",
+    "http://127.0.0.1:3002",
     "http://192.168.1.7:3000",
     "http://192.168.1.7:3001",
     "https://kognito.gatoslibres.art",
     "https://apibase.gatoslibres.art",
     "https://apibase.cuerpolibre.cl",
+    "https://cuerpolibre.cl",
+    "https://www.cuerpolibre.cl",
+    "https://kognito.cuerpolibre.cl",
+    "https://webapp.cuerpolibre.cl",
+    "https://webapp3.cuerpolibre.cl",
     "https://kognitoai.digital",
+    "https://www.kognitoai.digital",
+    "https://app.kognitoai.digital",
     "https://kognitoai.cloud",
+    "https://www.kognitoai.cloud",
+    "https://app.kognitoai.cloud",
+    "https://api.kognitoai.cloud",
     "https://webapp.kognitoai.cloud",
     "http://localhost:8081",
     "http://localhost:8885",
@@ -146,6 +173,7 @@ logger.info(f"CORS allowed_origins: {allowed_origins}")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
+    allow_origin_regex=r"^https?://([a-zA-Z0-9.-]+\.)?(kognitoai\.cloud|kognitoai\.digital|cuerpolibre\.cl|gatoslibres\.art)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
@@ -303,7 +331,13 @@ async def websocket_transcribe(websocket: WebSocket, account_id: str):
         await websocket.send_json({"type": "error", "message": "Modelo de transcripción no disponible."})
         return
 
-    transcriber = StreamingTranscriber(whisper_model)
+    language = websocket.query_params.get('language', 'es')
+    try:
+        chunk_length_s = float(websocket.query_params.get('chunk_length', '2.0'))
+    except ValueError:
+        chunk_length_s = 2.0
+
+    transcriber = StreamingTranscriber(whisper_model, language=language, chunk_length_s=chunk_length_s)
     try:
         await transcriber.start_transcription_session(websocket)
     except Exception as e:
@@ -399,7 +433,8 @@ app.include_router(graph_router, prefix="/api", tags=["graph"])
 app.include_router(search_router, prefix="/api", tags=["search"])
 app.include_router(galleries_router, prefix="/api/galleries", tags=["galleries"])
 app.include_router(gallery_selection_extension_router)
-app.include_router(jitsi_meet_router)
+if jitsi_meet_router is not None:
+    app.include_router(jitsi_meet_router)
 app.include_router(email_extension_router)
 app.include_router(forms_router, prefix="/api", tags=["forms"])
 app.include_router(collections_router, prefix="/api", tags=["collections"])

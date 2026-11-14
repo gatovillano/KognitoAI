@@ -47,6 +47,43 @@ def get_active_account_id() -> Optional[str]:
     return current_active_account_id.get()
 
 
+# ContextVar para sobreescritura dinámica del LLM del cliente
+current_client_llm_override: ContextVar[Optional[Dict[str, Any]]] = ContextVar("current_client_llm_override", default=None)
+
+
+def set_client_llm_override(config: Optional[Dict[str, Any]]) -> Any:
+    """Fija la configuración o sobreescritura de LLM del cliente en el contexto asíncrono actual."""
+    return current_client_llm_override.set(config)
+
+
+def get_client_llm_override() -> Optional[Dict[str, Any]]:
+    """Obtiene la configuración o sobreescritura de LLM del cliente en el contexto asíncrono actual."""
+    return current_client_llm_override.get()
+
+
+class DynamicClientAccount:
+    """Representa la configuración de LLM personalizada provista directamente por el cliente."""
+    def __init__(
+        self,
+        llm_model: str,
+        llm_provider: str,
+        fast_llm_model: Optional[str] = None,
+        fast_llm_provider: Optional[str] = None,
+        llm_api_base: Optional[str] = None,
+        llm_temperature: Optional[float] = None,
+        id: Optional[uuid.UUID] = None,
+    ):
+        self.id = id or uuid.uuid4()
+        self.llm_model = llm_model
+        self.llm_provider = llm_provider
+        self.fast_llm_model = fast_llm_model or llm_model
+        self.fast_llm_provider = fast_llm_provider or llm_provider
+        self.vision_llm_model = None
+        self.vision_llm_provider = None
+        self.llm_api_base = llm_api_base
+        self.llm_temperature = llm_temperature
+
+
 class UnsafeLlmApiBaseError(ValueError):
     """api_base de usuario/admin rechazada por controles anti-SSRF."""
 
@@ -642,18 +679,52 @@ def _sanitize_llm_kwargs(kwargs: dict) -> dict:
 
 
 async def get_llm_for_user(
-    account_id: str, purpose: str = "main"
+    account_id: Optional[str] = None, purpose: str = "main"
 ) -> Optional[ChatLiteLLM]:
     """
     Returns a customized LLM instance for a specific user based on their settings.
     If the user has no custom settings, returns the global default instance.
     """
-    if not account_id:
-        return get_main_llm()
+    # 0. Si hay sobreescritura directa de LLM del cliente en el contexto activo
+    client_override = current_client_llm_override.get()
+    client_api_key = None
+    account = None
+    if client_override:
+        ov_model = None
+        ov_provider = None
+        if purpose == "fast" and client_override.get("fast_llm_model"):
+            ov_model = client_override.get("fast_llm_model")
+            ov_provider = client_override.get("fast_llm_provider")
+        elif client_override.get("llm_model") or client_override.get("model"):
+            ov_model = client_override.get("llm_model") or client_override.get("model")
+            ov_provider = client_override.get("llm_provider") or client_override.get("provider")
 
-    # Check cache first to avoid repeated DB queries
-    cache_key = (account_id, purpose)
-    if cache_key in _llm_cache:
+        if ov_model:
+            logger.info(f"🎯 Usando LLM del cliente provisto en contexto: {ov_model} ({ov_provider or 'auto'}) [propósito: {purpose}]")
+            account = DynamicClientAccount(
+                llm_model=ov_model,
+                llm_provider=ov_provider or detect_provider_from_model(ov_model),
+                fast_llm_model=client_override.get("fast_llm_model"),
+                fast_llm_provider=client_override.get("fast_llm_provider"),
+                llm_api_base=client_override.get("api_base"),
+                llm_temperature=client_override.get("temperature"),
+            )
+            client_api_key = client_override.get("api_key")
+
+    eff_account_id = account_id or get_active_account_id() or os.environ.get("KOGNITO_ACCOUNT_ID")
+    if eff_account_id == "api_user":
+        eff_account_id = os.environ.get("KOGNITO_ACCOUNT_ID") or get_active_account_id()
+
+    account_uuid: Optional[uuid.UUID] = None
+    if eff_account_id and eff_account_id != "api_user":
+        try:
+            account_uuid = uuid.UUID(str(eff_account_id))
+        except (ValueError, AttributeError):
+            account_uuid = None
+
+    # Check cache first to avoid repeated DB queries (solo si no es dynamic override)
+    cache_key = (str(account_uuid or eff_account_id or "default_client"), purpose)
+    if not account and cache_key in _llm_cache:
         instance, ts = _llm_cache[cache_key]
         if time.time() - ts < _LLM_CACHE_TTL:
             return instance
@@ -662,10 +733,22 @@ async def get_llm_for_user(
 
     try:
         async with SessionLocal() as db:
-            # 1. Obtener ajustes del usuario
-            account = await db.get(Account, uuid.UUID(account_id))
+            # 1. Obtener ajustes del usuario si no fueron inyectados por DynamicClientAccount
             if not account:
-                return get_main_llm()
+                if account_uuid:
+                    account = await db.get(Account, account_uuid)
+
+                # Si no se encontró cuenta por UUID o se pasó "api_user", buscar la cuenta de cliente real (no sistema)
+                if not account:
+                    res = await db.execute(
+                        select(Account)
+                        .where(Account.id != SYSTEM_ACCOUNT_ID)
+                        .order_by(Account.created_at.asc())
+                    )
+                    account = res.scalars().first()
+
+                if not account:
+                    return get_main_llm()
 
             # Determinar qué modelo y proveedor usar
             model_target = account.llm_model
@@ -731,6 +814,7 @@ async def get_llm_for_user(
                 return get_main_llm()
 
             # 2. Obtener API Key de los secretos
+            api_key = client_api_key
             secret_repo = SecretRepository(db)
             api_key_name = None
             if provider_target.lower().replace("_", "-") in ["gemini", "google"]:
@@ -742,8 +826,9 @@ async def get_llm_for_user(
                 api_key_name or f"{provider_target.upper().replace('-', '_')}_API_KEY"
             )
 
-            # Intentar obtener la API key del usuario
-            api_key = await secret_repo.get_decrypted_secret(account.id, key_to_search)
+            # Intentar obtener la API key del usuario si no fue provista por el cliente
+            if not api_key:
+                api_key = await secret_repo.get_decrypted_secret(account.id, key_to_search)
             if api_key:
                 logger.info(
                     f"🔑 Clave encontrada para {key_to_search}: {api_key[:4]}...{api_key[-4:] if len(api_key) > 8 else ''}"
@@ -1118,6 +1203,45 @@ async def get_llm_for_user(
             exc_info=True,
         )
         return _get_global_llm_for_purpose(purpose)
+
+
+async def get_llm(
+    account_id: Optional[str] = None,
+    purpose: str = "main",
+    model: Optional[str] = None,
+    provider: Optional[str] = None,
+    api_key: Optional[str] = None,
+    api_base: Optional[str] = None,
+    temperature: Optional[float] = None,
+    **kwargs: Any,
+) -> Optional[ChatLiteLLM]:
+    """
+    Obtiene la instancia de LLM para el cliente.
+
+    1. Si se proporcionan parámetros específicos del cliente (model, provider, etc.),
+       establece la sobreescritura y construye la instancia dinámicamente.
+    2. Si se proporciona `account_id` (o se resuelve la cuenta activa/cliente predeterminado),
+       obtiene el modelo configurado por el usuario en la base de datos.
+    3. Si no hay configuración disponible, recurre al modelo predeterminado del sistema según el propósito.
+    """
+    if model:
+        override = {
+            "llm_model": model,
+            "llm_provider": provider or detect_provider_from_model(model),
+            "fast_llm_model": kwargs.get("fast_llm_model"),
+            "fast_llm_provider": kwargs.get("fast_llm_provider"),
+            "api_key": api_key,
+            "api_base": api_base,
+            "temperature": temperature,
+        }
+        token = set_client_llm_override(override)
+        try:
+            return await get_llm_for_user(account_id=account_id, purpose=purpose)
+        finally:
+            current_client_llm_override.reset(token)
+
+    return await get_llm_for_user(account_id=account_id, purpose=purpose)
+
 
 
 async def get_configured_fallback_llm(

@@ -1,0 +1,15 @@
+[Unit]
+Description=KognitoAI Local Services (Backend, Frontend, Telegram Gateway)
+After=network.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=gato
+WorkingDirectory=/home/gato/Proyectos/KognitoAI
+ExecStart=/home/gato/Proyectos/KognitoAI/start_service.sh
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

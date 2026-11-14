@@ -4,7 +4,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { DeepResearchAnalysisResult, Analysis } from '@/lib/models';
-import { Zap, Link2, FileText, AlertTriangle, LayoutDashboard } from 'lucide-react';
+import { Zap, Link2, FileText, AlertTriangle, LayoutDashboard, BrainCircuit } from 'lucide-react';
 import { SectionTTSButton } from './analysis-detail-dialog';
 import { MarkdownRenderer } from '@/components/MarkdownRenderer';
 import { Source, ContentPart, SourceButton } from '@/components/SourceButton';
@@ -90,6 +90,18 @@ const DeepResearchAnalysis: React.FC<DeepResearchAnalysisProps> = ({
     return new Map(displaySources.map((source, index) => [getSourceIdentityKey(source), index + 1]));
   }, [displaySources]);
 
+  const isAnthro = useMemo(() => {
+    if (!analysis) return false;
+    return (
+      (analysis as any).analysis_type === 'anthropological_deep_research' ||
+      (analysis as any).type === 'anthropological_deep_research' ||
+      (analysis as any).analysis_metadata?.analysis_type === 'anthropological_deep_research' ||
+      (analysis as any).tool_used === 'anthropological_research_tool.py' ||
+      (analysis as any).graph_result !== undefined ||
+      (analysis as any).quotes_count !== undefined
+    );
+  }, [analysis]);
+
   if (!analysis) {
     return (
       <div className="flex flex-col items-center justify-center p-8 border border-dashed border-destructive/50 rounded-lg bg-destructive/5">
@@ -109,12 +121,23 @@ const DeepResearchAnalysis: React.FC<DeepResearchAnalysisProps> = ({
   return (
     <div className="space-y-6 min-w-0 w-full overflow-hidden">
       <div className="flex items-center gap-2 mb-2 min-w-0">
-        <div className="p-2 rounded-xl bg-primary/10 shrink-0">
-          <FileText className={`w-6 h-6 ${gapColors.icon}`} />
+        <div className={`p-2 rounded-xl shrink-0 ${isAnthro ? 'bg-purple-500/10 text-purple-500' : 'bg-primary/10 text-primary'}`}>
+          {isAnthro ? <BrainCircuit className="w-6 h-6" /> : <FileText className="w-6 h-6" />}
         </div>
-        <div className="min-w-0">
-          <h3 className="text-xl sm:text-2xl font-black tracking-tight truncate">Investigación Profunda</h3>
-          <p className="text-[10px] sm:text-xs text-muted-foreground uppercase tracking-widest font-bold truncate">Análisis Detallado Basado en Evidencia</p>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <h3 className="text-xl sm:text-2xl font-black tracking-tight truncate">
+              {isAnthro ? 'Investigación Antropológica Profunda' : 'Investigación Profunda'}
+            </h3>
+            {isAnthro && (
+              <Badge variant="outline" className="text-[10px] bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20">
+                Etnográfico 1:1
+              </Badge>
+            )}
+          </div>
+          <p className="text-[10px] sm:text-xs text-muted-foreground uppercase tracking-widest font-bold truncate">
+            {isAnthro ? 'Análisis Cualitativo, Marco Teórico y Codificación' : 'Análisis Detallado Basado en Evidencia'}
+          </p>
         </div>
       </div>
 

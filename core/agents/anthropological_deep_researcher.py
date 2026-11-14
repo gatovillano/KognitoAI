@@ -154,7 +154,7 @@ async def write_anthropological_brief(state: AnthropologicalAgentState, config: 
     progress_callback = config.get("configurable", {}).get("progress_callback")
 
     if progress_callback:
-        await progress_callback(10, "Formulando resumen de investigación antropológica...", "write_anthropological_brief")
+        await progress_callback(8, "Formulando resumen de investigación antropológica guiada por el marco teórico...", "write_anthropological_brief")
 
     account_id = state.get("account_id")
     if account_id:
@@ -194,6 +194,8 @@ async def write_anthropological_brief(state: AnthropologicalAgentState, config: 
     # Si se solicitó profundizar el marco teórico, realizar una pasada de síntesis teórica inicial
     active_tf = tf_content
     if deepen_tf:
+        if progress_callback:
+            await progress_callback(14, "Profundizando marco teórico y ampliando definiciones conceptuales...", "deepen_theoretical_framework")
         logger.info("🔍 Deepen theoretical framework habilitado. Realizando expansión conceptual...")
         deepen_prompt = f"""Analiza y profundiza los siguientes insumos teóricos para ampliar sus definiciones operacionales:
 Marco Teórico: {tf_content}
@@ -206,7 +208,7 @@ Hipótesis: {hyp}"""
             logger.error(f"❌ Error al profundizar marco teórico: {e}")
 
     if progress_callback:
-        await progress_callback(20, "Resumen antropológico listo. Iniciando supervisión...", "brief_complete")
+        await progress_callback(18, "Resumen antropológico listo. Configurando supervisión metodológica...", "brief_complete")
 
     return {
         "research_brief": brief,
@@ -224,7 +226,7 @@ async def anthropological_supervisor(state: AnthropologicalAgentState, config: R
     total_iterations = cfg.max_researcher_iterations or 1
 
     if progress_callback:
-        progress = int(20 + (current_iteration / total_iterations) * 60)
+        progress = int(20 + (current_iteration / total_iterations) * 58)
         await progress_callback(progress, f"Supervisor Antropológico: Iteración {current_iteration + 1}/{total_iterations}", "supervisor")
 
     account_id = state.get("account_id")
@@ -276,7 +278,7 @@ async def anthropological_final_report_generation(state: AnthropologicalAgentSta
     progress_callback = config.get("configurable", {}).get("progress_callback")
 
     if progress_callback:
-        await progress_callback(85, "Procesando grafo antropológico (codificación 1:1) y redactando informe...", "final_report")
+        await progress_callback(82, "Procesando grafo antropológico: Codificación cualitativa 1:1 (Citas a Códigos y Categorías)...", "final_report")
 
     account_id = state.get("account_id")
     if account_id:
@@ -313,7 +315,13 @@ async def anthropological_final_report_generation(state: AnthropologicalAgentSta
     except Exception as e:
         logger.error(f"❌ Error procesando grafo antropológico: {e}")
 
+    if progress_callback:
+        await progress_callback(90, "Triangulando hallazgos empíricos y marco teórico...", "triangulation")
+
     # REDACCIÓN DEL INFORME FINAL
+    if progress_callback:
+        await progress_callback(95, "Redactando informe final de investigación antropológica...", "report_generation")
+
     prompt = ANTHROPOLOGICAL_FINAL_REPORT_PROMPT.format(
         research_brief=state.get("research_brief", ""),
         theoretical_framework=tf_content[:2500],
@@ -397,9 +405,12 @@ async def run_anthropological_deep_research(
     account_id: Optional[str] = None,
     progress_callback: Optional[Any] = None,
     config: Optional[RunnableConfig] = None,
+    thread_id: Optional[str] = None,
+    task_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Función de conveniencia para ejecutar una investigación antropológica profunda.
+    Emite eventos de progreso WebSocket en tiempo real de forma idéntica a deep_research.py.
     """
     graph = compile_anthropological_deep_researcher_graph()
 
@@ -413,14 +424,54 @@ async def run_anthropological_deep_research(
         "hypothesis": hypothesis,
     }
 
-    run_config = config or RunnableConfig(
-        configurable={
-            "account_id": account_id,
-            "progress_callback": progress_callback,
-            "base_progress": 0,
-            "max_sub_progress": 100,
-        }
-    )
+    effective_task_id = task_id or (config.get("configurable", {}).get("task_id") if config else None) or str(uuid.uuid4())
+    effective_thread_id = thread_id or (config.get("configurable", {}).get("thread_id") if config else None)
 
-    result = await graph.ainvoke(inputs, config=run_config)
+    async def unified_progress_callback(progress: int, message: str, current_node: str = "main"):
+        logger.info(f"📊 [AnthropologicalResearch Progress] {progress}% - {message} ({current_node})")
+        if account_id:
+            payload = {
+                "type": "progress",
+                "progress": progress,
+                "message": message,
+                "current_node": current_node,
+                "tool_name": "anthropological_deep_research",
+                "taskId": effective_task_id,
+            }
+            if effective_thread_id:
+                payload["thread_id"] = str(effective_thread_id)
+            try:
+                from core.websocket_manager import manager as websocket_manager
+                await websocket_manager.send_personal_message(payload, account_id)
+            except Exception as ws_err:
+                logger.warning(f"Error sending progress websocket message in anthropological_deep_research: {ws_err}")
+
+        if progress_callback and progress_callback != unified_progress_callback:
+            try:
+                if asyncio.iscoroutinefunction(progress_callback):
+                    await progress_callback(progress, message, current_node)
+                else:
+                    progress_callback(progress, message, current_node)
+            except Exception as cb_err:
+                logger.warning(f"Error invoking custom progress callback: {cb_err}")
+
+    run_config: Dict[str, Any] = dict(config) if config else {}
+    if "configurable" not in run_config:
+        run_config["configurable"] = {}
+    else:
+        run_config["configurable"] = dict(run_config["configurable"])
+
+    run_config["configurable"]["account_id"] = account_id
+    if effective_thread_id:
+        run_config["configurable"]["thread_id"] = str(effective_thread_id)
+    if effective_task_id:
+        run_config["configurable"]["task_id"] = str(effective_task_id)
+    run_config["configurable"]["progress_callback"] = unified_progress_callback
+    run_config["configurable"].setdefault("base_progress", 0)
+    run_config["configurable"].setdefault("max_sub_progress", 100)
+
+    # Notificar inicio de progreso
+    await unified_progress_callback(5, "Iniciando investigación antropológica profunda...", "init")
+
+    result = await graph.ainvoke(inputs, config=cast(RunnableConfig, run_config))
     return result

@@ -16,8 +16,8 @@ from core.config import settings
 # access to the values within the .ini file in use.
 config = context.config
 
-# Set the sqlalchemy.url dynamically from the application settings
-config.set_main_option("sqlalchemy.url", settings.database_url)
+# Use synchronous driver for Alembic (not asyncpg)
+config.set_main_option("sqlalchemy.url", "postgresql+psycopg://postgres:postgres@localhost:5432/kognito_db")
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

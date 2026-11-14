@@ -1,0 +1,1 @@
+﻿Place your KONTAKT libraries here to make them portable too.

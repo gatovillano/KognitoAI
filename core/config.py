@@ -23,10 +23,26 @@ from typing import Optional, List
 from utils.docker_secrets import get_secret
 
 # Carga las variables de entorno desde un archivo .env en la raíz del proyecto o ~/.kognito/config/.env.
+#
+# NOTA (fix 2026-10-21): `load_dotenv()` sin argumentos usa `find_dotenv()`, que en
+# modo "interactivo" (python -m, entrypoint sin __file__, debugger) busca el .env
+# relativo al CWD y NO a la ruta del módulo. Eso rompía al servidor MCP cuando
+# KogniTerm lo lanzaba desde /home/gato/KogniTerm: el .env de KognitoAI no se
+# encontraba y `Config._validate_config()` abortaba con
+#   ValueError: ERROR CRÍTICO: DATABASE_URL no está definido.
+# Por eso resolvemos el .env por ABSOLUTA PATH desde la raíz del proyecto.
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 user_env_path = os.getenv("KOGNITO_ENV_PATH", os.path.expanduser("~/.kognito/config/.env"))
 if os.path.exists(user_env_path):
     load_dotenv(user_env_path, override=True)
-load_dotenv(override=True)
+
+_project_env = os.path.join(_PROJECT_ROOT, ".env")
+if os.path.exists(_project_env):
+    load_dotenv(_project_env, override=True)
+else:
+    # Fallback: búsqueda clásica (solo si no encontramos el .env del proyecto).
+    load_dotenv(override=True)
 
 def get_model_name_from_provider_format(model_string: str) -> str:
     """
@@ -89,6 +105,15 @@ class Config:
         self.agent_history_limit_default: int = int(os.getenv("AGENT_HISTORY_LIMIT_DEFAULT", 24))
         self.agent_history_limit_ollama: int = int(os.getenv("AGENT_HISTORY_LIMIT_OLLAMA", 24))
         self.thread_title_update_concurrency: int = max(1, int(os.getenv("THREAD_TITLE_UPDATE_CONCURRENCY", 3)))
+
+        # --- Timeouts de herramientas / MCP ---
+        # Sin estos límites, una herramienta MCP colgada (p.ej. Playwright
+        # esperando a que arranque el navegador) bloquea el turno del agente
+        # indefinidamente y la UI se queda girando en "cargando herramienta".
+        self.tool_execution_timeout: int = int(os.getenv("TOOL_EXECUTION_TIMEOUT", 180))  # Timeout genérico por herramienta (s)
+        self.mcp_connect_timeout: int = int(os.getenv("MCP_CONNECT_TIMEOUT", 60))      # Timeout de conexión + initialize (s)
+        self.mcp_call_timeout: int = int(os.getenv("MCP_CALL_TIMEOUT", 150))           # Timeout de cada call_tool MCP (s)
+        self.mcp_list_tools_timeout: int = int(os.getenv("MCP_LIST_TOOLS_TIMEOUT", 45))  # Timeout de list_tools / load_mcp_tools (s)
         
         # --- Configuración de Rate Limiting y Tokens ---
         self.rate_limit_enabled: bool = os.getenv("RATE_LIMIT_ENABLED", "True").lower() in ('true', '1', 't')

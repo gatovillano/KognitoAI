@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>KognitoAI Tabs</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: #070b14;
+      color: #f1f5f9;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      height: 44px;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid #1e293b;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-app-region: drag;
+    }
+
+    .left-controls {
+      display: flex;
+      align-items: center;
+      padding-left: 8px;
+      gap: 4px;
+      -webkit-app-region: no-drag;
+    }
+
+    .nav-btn {
+      background: transparent;
+      border: none;
+      color: #94a3b8;
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 14px;
+      transition: all 0.15s ease;
+    }
+    .nav-btn:hover {
+      background: #1e293b;
+      color: #f8fafc;
+    }
+
+    .tabs-container {
+      display: flex;
+      align-items: center;
+      flex: 1;
+      overflow-x: auto;
+      overflow-y: hidden;
+      padding: 0 8px;
+      gap: 4px;
+      height: 100%;
+      -webkit-app-region: drag;
+    }
+    .tabs-container::-webkit-scrollbar { display: none; }
+
+    .tab-list {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      height: 100%;
+      -webkit-app-region: no-drag;
+    }
+
+    .tab-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      height: 34px;
+      padding: 0 12px;
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      border-radius: 8px 8px 0 0;
+      color: #94a3b8;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      max-width: 220px;
+      min-width: 120px;
+      transition: all 0.15s ease;
+      position: relative;
+    }
+
+    .tab-item:hover {
+      background: #141f36;
+      color: #e2e8f0;
+    }
+
+    .tab-item.active {
+      background: #1e293b;
+      color: #38bdf8;
+      border-color: #334155;
+      border-bottom: 2px solid #0284c7;
+      font-weight: 600;
+    }
+
+    .tab-title {
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .tab-close {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #64748b;
+      font-size: 12px;
+      line-height: 1;
+      transition: all 0.15s;
+    }
+    .tab-close:hover {
+      background: #ef4444;
+      color: #ffffff;
+    }
+
+    .add-tab-btn {
+      background: transparent;
+      border: 1px dashed #334155;
+      color: #94a3b8;
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 16px;
+      transition: all 0.15s;
+      -webkit-app-region: no-drag;
+      margin-left: 4px;
+    }
+    .add-tab-btn:hover {
+      background: #0284c7;
+      color: #ffffff;
+      border-color: #0284c7;
+    }
+
+    .quick-presets {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding-right: 8px;
+      -webkit-app-region: no-drag;
+    }
+
+    .preset-pill {
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      color: #94a3b8;
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-size: 11px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      transition: all 0.15s;
+    }
+    .preset-pill:hover {
+      background: #1e293b;
+      color: #38bdf8;
+      border-color: #38bdf8;
+    }
+
+    .window-controls {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      padding-right: 6px;
+      -webkit-app-region: no-drag;
+    }
+
+    .win-btn {
+      width: 30px;
+      height: 30px;
+      background: transparent;
+      border: none;
+      color: #94a3b8;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+      transition: all 0.15s;
+    }
+    .win-btn:hover {
+      background: #1e293b;
+      color: #ffffff;
+    }
+    .win-btn.close:hover {
+      background: #dc2626;
+      color: #ffffff;
+    }
+
+    .spinner {
+      width: 10px;
+      height: 10px;
+      border: 2px solid rgba(56, 189, 248, 0.2);
+      border-top-color: #38bdf8;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <!-- Controles de navegación y logo -->
+  <div class="left-controls">
+    <img src="icon.png" alt="Kognito" style="width: 18px; height: 18px; margin-right: 4px;" />
+    <button class="nav-btn" id="btn-back" title="Atrás (Alt+←)">←</button>
+    <button class="nav-btn" id="btn-forward" title="Adelante (Alt+→)">→</button>
+    <button class="nav-btn" id="btn-reload" title="Recargar (Ctrl+R)">⟳</button>
+  </div>
+
+  <!-- Contenedor dinámico de pestañas -->
+  <div class="tabs-container">
+    <div class="tab-list" id="tab-list">
+      <!-- Las pestañas se inyectan dinámicamente -->
+    </div>
+    <button class="add-tab-btn" id="btn-add-tab" title="Nueva Pestaña (Ctrl+T)">+</button>
+  </div>
+
+  <!-- Accesos directos rápidos -->
+  <div class="quick-presets">
+    <button class="preset-pill" id="btn-quick-chat" title="Abrir nuevo chat en pestaña">💬 Chat</button>
+    <button class="preset-pill" id="btn-quick-rag" title="Abrir Documentos RAG">📄 RAG</button>
+    <button class="preset-pill" id="btn-quick-graph" title="Abrir Grafo 3D">🕸️ Grafo</button>
+  </div>
+
+  <!-- Botones de ventana nativos -->
+  <div class="window-controls">
+    <button class="win-btn" id="win-min" title="Minimizar">—</button>
+    <button class="win-btn" id="win-max" title="Maximizar">□</button>
+    <button class="win-btn close" id="win-close" title="Cerrar">✕</button>
+  </div>
+
+  <script>
+    const tabListEl = document.getElementById('tab-list');
+    const btnAddTab = document.getElementById('btn-add-tab');
+    const btnBack = document.getElementById('btn-back');
+    const btnForward = document.getElementById('btn-forward');
+    const btnReload = document.getElementById('btn-reload');
+    const btnQuickChat = document.getElementById('btn-quick-chat');
+    const btnQuickRag = document.getElementById('btn-quick-rag');
+    const btnQuickGraph = document.getElementById('btn-quick-graph');
+    const winMin = document.getElementById('win-min');
+    const winMax = document.getElementById('win-max');
+    const winClose = document.getElementById('win-close');
+
+    // Navegación
+    btnBack.addEventListener('click', () => window.kognitoTabs?.goBack());
+    btnForward.addEventListener('click', () => window.kognitoTabs?.goForward());
+    btnReload.addEventListener('click', () => window.kognitoTabs?.reload());
+
+    // Crear pestaña
+    btnAddTab.addEventListener('click', () => window.kognitoTabs?.createTab());
+    btnQuickChat.addEventListener('click', () => window.kognitoTabs?.createTab('/chat'));
+    btnQuickRag.addEventListener('click', () => window.kognitoTabs?.createTab('/rag'));
+    btnQuickGraph.addEventListener('click', () => window.kognitoTabs?.createTab('/knowledge-graph'));
+
+    // Ventana
+    winMin.addEventListener('click', () => window.kognitoDesktop?.minimizeWindow());
+    winMax.addEventListener('click', () => window.kognitoDesktop?.maximizeWindow());
+    winClose.addEventListener('click', () => window.kognitoDesktop?.closeWindow());
+
+    // Renderizar pestañas
+    function renderTabs(tabs, activeId) {
+      tabListEl.innerHTML = '';
+      tabs.forEach(tab => {
+        const item = document.createElement('div');
+        item.className = 'tab-item' + (tab.id === activeId ? ' active' : '');
+        item.title = tab.title || 'Nueva pestaña';
+
+        // Icono o spinner
+        let iconHtml = '<span style="font-size:12px;">💬</span>';
+        if (tab.isLoading) {
+          iconHtml = '<div class="spinner"></div>';
+        } else if (tab.url?.includes('rag') || tab.url?.includes('documents')) {
+          iconHtml = '<span style="font-size:12px;">📄</span>';
+        } else if (tab.url?.includes('graph')) {
+          iconHtml = '<span style="font-size:12px;">🕸️</span>';
+        }
+
+        item.innerHTML = `
+          ${iconHtml}
+          <span class="tab-title">${escapeHtml(tab.title || 'KognitoAI')}</span>
+          <span class="tab-close" title="Cerrar pestaña (Ctrl+W)">×</span>
+        `;
+
+        // Clic en pestaña para cambiar
+        item.addEventListener('click', (e) => {
+          if (e.target.classList.contains('tab-close')) return;
+          window.kognitoTabs?.switchTab(tab.id);
+        });
+
+        // Clic en cerrar
+        const closeBtn = item.querySelector('.tab-close');
+        closeBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          window.kognitoTabs?.closeTab(tab.id);
+        });
+
+        tabListEl.appendChild(item);
+      });
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    // Escuchar actualizaciones desde el proceso principal de Electron
+    window.kognitoTabs?.onTabsUpdated((payload) => {
+      renderTabs(payload.tabs, payload.activeId);
+    });
+  </script>
+</body>
+</html>

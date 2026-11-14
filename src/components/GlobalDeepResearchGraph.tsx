@@ -84,10 +84,12 @@ export function GlobalDeepResearchGraph() {
         (message.type === 'tool_execution' && message.tool_name === 'deep_research') ||
         (message.type === 'agent_progress' && typeof message.message === 'string' &&
          (message.message.includes('Investigando') || message.message.includes('Deep Research') || message.message.includes('Generando')));
-      const isDeepResearchStart = message.type === 'tool_start' && message.tool_name === 'deep_research';
+      const isDeepResearchStart = message.type === 'tool_start' && 
+        (message.tool_name === 'deep_research' || message.tool_name === 'anthropological_deep_research');
       const isDeepResearchProgress = message.type === 'progress' && !!activeTaskIdRef.current && isActiveTask;
       const isDeepResearchEnd =
-        ((message.type === 'tool_end' || message.type === 'tool_error') && message.tool_name === 'deep_research' && isActiveTask) ||
+        ((message.type === 'tool_end' || message.type === 'tool_error') && 
+         (message.tool_name === 'deep_research' || message.tool_name === 'anthropological_deep_research') && isActiveTask) ||
         ((message.status === 'completed' || message.status === 'failed') && isLegacyDeepResearch);
 
       if ((isLegacyDeepResearch && message.status !== 'completed' && message.status !== 'failed') || isDeepResearchStart || isDeepResearchProgress) {

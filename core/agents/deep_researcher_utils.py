@@ -102,11 +102,9 @@ async def tavily_search(
     logger.info(f"🔎 [tavily_search] Resolviendo LLM para summarization con account_id: {account_id}")
     summarization_llm = None
     if account_id:
-        summarization_llm = await get_llm_for_user(account_id, purpose="fast")
-        if not summarization_llm:
-            summarization_llm = await get_llm_for_user(account_id, purpose="main")
+        summarization_llm = await get_llm_for_user(account_id, purpose="main")
     if not summarization_llm:
-        summarization_llm = get_fast_llm() or get_main_llm()
+        summarization_llm = get_main_llm() or get_fast_llm()
     if not summarization_llm:
         logger.warning("⚠️ No hay LLM disponible para summarization en tavily_search. Usando contenido crudo.")
 
@@ -278,6 +276,7 @@ async def get_all_tools(config: Optional[RunnableConfig]): # Changed to Optional
     from skills.knowledge_and_memory_skill.scripts.knowledge_graph_tool import KnowledgeGraphTool
     from skills.knowledge_and_memory_skill.scripts.graph_cypher_generator_tool import GraphCypherGeneratorTool
     from skills.search_and_research_skill.scripts.comprehensive_web_analysis_tool import ComprehensiveWebAnalysisTool
+    from skills.search_and_research_skill.scripts.academic_citation_tool import AcademicCitationTool
 
     # Extract account_id and workspace_id from config
     configurable = config.get("configurable", {}) if config else {}
@@ -291,6 +290,7 @@ async def get_all_tools(config: Optional[RunnableConfig]): # Changed to Optional
     graph_cypher = GraphCypherGeneratorTool()
     knowledge_search = KnowledgeSearchTool()
     comprehensive_analyzer = ComprehensiveWebAnalysisTool()
+    academic_verifier = AcademicCitationTool(account_id=account_id or "api_user")
 
     # Inject dependencies if account_id is available
     if account_id:
@@ -306,6 +306,7 @@ async def get_all_tools(config: Optional[RunnableConfig]): # Changed to Optional
         deep_research_think_tool,
         web_scraper,
         web_search,
+        academic_verifier,
         knowledge_search,
         knowledge_graph,
         graph_cypher,
@@ -393,6 +394,15 @@ async def execute_tool_safely(tool, args, config: Optional[RunnableConfig]): # C
         if acc_id:
             from core.llm_manager import set_active_account_id
             set_active_account_id(acc_id)
+
+        override = None
+        if isinstance(config, dict):
+            override = config.get("configurable", {}).get("client_llm_override")
+        elif hasattr(config, "configurable") and isinstance(config.configurable, dict):
+            override = config.configurable.get("client_llm_override")
+        if override:
+            from core.llm_manager import set_client_llm_override
+            set_client_llm_override(override)
 
         return await tool.ainvoke(tool_args, config)
     except Exception as e:

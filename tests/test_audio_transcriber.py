@@ -52,3 +52,20 @@ def test_transcribe_audio_file_returns_transcription(monkeypatch):
     result = asyncio.run(audio_transcriber.transcribe_audio_file(BytesIO(b"valid-audio"), "webm"))
 
     assert result == "hola mundo"
+
+
+def test_decode_audio_compatible_with_modern_pyav():
+    import wave
+    from faster_whisper.audio import decode_audio
+
+    buf = BytesIO()
+    with wave.open(buf, "wb") as wav_out:
+        wav_out.setnchannels(1)
+        wav_out.setsampwidth(2)
+        wav_out.setframerate(16000)
+        wav_out.writeframes(b"\x00\x00" * 1600)
+    buf.seek(0)
+
+    decoded = decode_audio(buf, sampling_rate=16000)
+    assert decoded.shape == (1600,)
+

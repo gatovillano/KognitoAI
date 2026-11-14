@@ -54,6 +54,8 @@ const PtyTerminalDynamic = dynamic(() => import('@/components/terminal/PtyTermin
 });
 import { SourceButton, Source, ContentPart } from './SourceButton'; // Importar SourceButton, Source, ContentPart
 import { sanitizeMarkdownHtml } from '@/lib/sanitizeHtml';
+import { extractAndRenderMath } from '@/lib/latexUtils';
+import 'katex/dist/katex.min.css';
 
 
 
@@ -219,7 +221,10 @@ const MarkdownRendererComponent = ({ content, contentParts, fontSize, isStreamin
         async: false,
       };
 
-      let html = marked.parse(textToProcess) as string;
+      // Preprocesar símbolos y expresiones LaTeX ($...$, $$...$$) antes de marked.parse
+      const { processedText, restoreMathHtml } = extractAndRenderMath(textToProcess);
+
+      let html = restoreMathHtml(marked.parse(processedText) as string);
 
       if (inline) {
         const match = html.match(/^<p>(.*)<\/p>$/s);

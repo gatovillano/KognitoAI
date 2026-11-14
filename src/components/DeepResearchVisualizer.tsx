@@ -8,11 +8,44 @@ interface DeepResearchVisualizerProps {
     progress: number;
     statusText: string;
     currentStep?: string;
+    title?: string;
+    subtitle?: string;
+    isAnthropological?: boolean;
 }
 
 const mapStatusToFirstPerson = (status: string): string => {
     if (!status) return 'Iniciando investigación...';
     
+    // Antropológico / Cualitativo
+    if (status.includes('Formulando resumen de investigación antropológica')) {
+        return 'Estoy formulando el resumen de investigación etnográfica guiado por el marco teórico...';
+    }
+    if (status.includes('Profundizando marco teórico')) {
+        return 'Estoy analizando y profundizando los conceptos del marco teórico para ampliar sus definiciones...';
+    }
+    if (status.includes('Resumen antropológico listo')) {
+        return 'Resumen antropológico establecido. Configurando la supervisión y trabajo de campo...';
+    }
+    if (status.includes('Supervisor Antropológico')) {
+        const match = status.match(/iteración\s*(\d+)\/(\d+)/i);
+        if (match) {
+            return `Como supervisor antropológico, estoy planificando la iteración de investigación ${match[1]} de ${match[2]}...`;
+        }
+        return 'Como supervisor antropológico, estoy coordinando el levantamiento de datos empíricos y análisis...';
+    }
+    if (status.includes('Procesando grafo antropológico') || status.includes('codificación 1:1')) {
+        return 'Estoy procesando el grafo antropológico: codificación cualitativa exhaustiva 1:1 (citas a códigos atómicos)...';
+    }
+    if (status.includes('Triangulando hallazgos')) {
+        return 'Estoy triangulando los hallazgos empíricos y categorías emergentes con el marco teórico...';
+    }
+    if (status.includes('informe final de investigación antropológica') || status.includes('informe final etnográfico')) {
+        return 'Estoy estructurando y redactando el informe etnográfico final con su matriz sintética de codificación...';
+    }
+    if (status.includes('Investigación antropológica completada')) {
+        return 'Investigación antropológica y codificación cualitativa completadas exitosamente.';
+    }
+
     // 1. Verificando claridad de la consulta...
     if (status.includes('Verificando claridad')) {
         return 'Estoy analizando tu consulta para estructurar los objetivos de la investigación.';
@@ -97,7 +130,14 @@ const mapStatusToFirstPerson = (status: string): string => {
     return status;
 };
 
-export default function DeepResearchVisualizer({ progress, statusText, currentStep }: DeepResearchVisualizerProps) {
+export default function DeepResearchVisualizer({
+    progress,
+    statusText,
+    currentStep,
+    title,
+    subtitle,
+    isAnthropological = false,
+}: DeepResearchVisualizerProps) {
     const [logs, setLogs] = useState<string[]>([]);
 
     useEffect(() => {
@@ -112,40 +152,82 @@ export default function DeepResearchVisualizer({ progress, statusText, currentSt
 
     const latestFirstPersonMsg = logs[0] || mapStatusToFirstPerson(statusText);
 
-    const milestones = useMemo(() => [
-        {
-            id: 'plan',
-            title: 'Planificación y Configuración',
-            description: 'Analizando la consulta y configurando el plan de investigación.',
-            minProgress: 0,
-            maxProgress: 20,
-            icon: BrainCircuit,
-        },
-        {
-            id: 'search',
-            title: 'Exploración de Fuentes',
-            description: 'Buscando en la web y recolectando fuentes relevantes.',
-            minProgress: 21,
-            maxProgress: 60,
-            icon: Globe,
-        },
-        {
-            id: 'expert',
-            title: 'Análisis de Expertos',
-            description: 'Agentes especialistas investigando a fondo cada tema.',
-            minProgress: 61,
-            maxProgress: 90,
-            icon: Cpu,
-        },
-        {
-            id: 'report',
-            title: 'Generación de Informe',
-            description: 'Estructurando y redactando el informe y recomendaciones.',
-            minProgress: 91,
-            maxProgress: 100,
-            icon: CheckCircle2,
+    const milestones = useMemo(() => {
+        if (isAnthropological) {
+            return [
+                {
+                    id: 'theory',
+                    title: 'Marco Teórico y Resumen',
+                    description: 'Estructurando el resumen metodológico y profundizando conceptos teóricos.',
+                    minProgress: 0,
+                    maxProgress: 20,
+                    icon: BrainCircuit,
+                },
+                {
+                    id: 'fieldwork',
+                    title: 'Corpus y Evidencia Empírica',
+                    description: 'Exploración bibliográfica, fuentes secundarias y material etnográfico.',
+                    minProgress: 21,
+                    maxProgress: 60,
+                    icon: Globe,
+                },
+                {
+                    id: 'coding',
+                    title: 'Codificación Cualitativa (1:1)',
+                    description: 'Extracción de citas, asignación de códigos atómicos y categorización.',
+                    minProgress: 61,
+                    maxProgress: 85,
+                    icon: Database,
+                },
+                {
+                    id: 'report',
+                    title: 'Triangulación e Informe Final',
+                    description: 'Síntesis etnográfica, contrastación teórica y matriz analítica.',
+                    minProgress: 86,
+                    maxProgress: 100,
+                    icon: CheckCircle2,
+                }
+            ];
         }
-    ], []);
+
+        return [
+            {
+                id: 'plan',
+                title: 'Planificación y Configuración',
+                description: 'Analizando la consulta y configurando el plan de investigación.',
+                minProgress: 0,
+                maxProgress: 20,
+                icon: BrainCircuit,
+            },
+            {
+                id: 'search',
+                title: 'Exploración de Fuentes',
+                description: 'Buscando en la web y recolectando fuentes relevantes.',
+                minProgress: 21,
+                maxProgress: 60,
+                icon: Globe,
+            },
+            {
+                id: 'expert',
+                title: 'Análisis de Expertos',
+                description: 'Agentes especialistas investigando a fondo cada tema.',
+                minProgress: 61,
+                maxProgress: 90,
+                icon: Cpu,
+            },
+            {
+                id: 'report',
+                title: 'Generación de Informe',
+                description: 'Estructurando y redactando el informe y recomendaciones.',
+                minProgress: 91,
+                maxProgress: 100,
+                icon: CheckCircle2,
+            }
+        ];
+    }, [isAnthropological]);
+
+    const displayTitle = title || (isAnthropological ? 'Investigación Antropológica' : 'Deep Research');
+    const displaySubtitle = subtitle || (isAnthropological ? 'ANÁLISIS CUALITATIVO Y MARCO TEÓRICO' : 'PROCESANDO CONOCIMIENTO GLOBAL');
 
     return (
         <motion.div
@@ -190,7 +272,7 @@ export default function DeepResearchVisualizer({ progress, statusText, currentSt
                         <div>
                             <div className="flex items-center gap-2">
                                 <h3 className="text-xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-foreground via-primary to-blue-400">
-                                    Deep Research
+                                    {displayTitle}
                                 </h3>
                                 <Sparkles className="h-4 w-4 text-primary/60" />
                             </div>
@@ -199,7 +281,7 @@ export default function DeepResearchVisualizer({ progress, statusText, currentSt
                                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
                                     <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
                                 </span>
-                                PROCESANDO CONOCIMIENTO GLOBAL
+                                {displaySubtitle}
                             </p>
                         </div>
                     </div>

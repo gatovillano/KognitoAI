@@ -430,13 +430,19 @@ def _parse_and_render_markdown(doc_obj, md_text: str):
                 if bm:
                     indent_level = len(bm.group(1)) // 2
                     content = bm.group(3).strip()
+                    try:
                     p.style = 'List Bullet'
+                except Exception:
+                    pass
                     p.paragraph_format.left_indent = Pt(18 * (indent_level + 1))
                     _add_inline_formatted_text(p, content, default_font="Segoe UI", default_size=Pt(10.5), default_color=RGBColor(51, 65, 85))
                 else:
                     indent_level = len(nm.group(1)) // 2
                     content = nm.group(3).strip()
+                    try:
                     p.style = 'List Number'
+                except Exception:
+                    pass
                     p.paragraph_format.left_indent = Pt(18 * (indent_level + 1))
                     _add_inline_formatted_text(p, content, default_font="Segoe UI", default_size=Pt(10.5), default_color=RGBColor(51, 65, 85))
             continue
@@ -848,7 +854,10 @@ class EditOnlyOfficeDocumentTool(BaseTool):
                 if not list_items:
                     return "❌ La acción 'append_list' requiere el campo 'list_items'."
                 for item in list_items:
+                    try:
                     doc_obj.add_paragraph(item, style="List Bullet")
+                except Exception:
+                    doc_obj.add_paragraph(f"• {item}")
                 msg = f"✅ Lista de {len(list_items)} ítems añadida a '{filename}'."
 
             elif action == "replace":
@@ -1226,10 +1235,47 @@ class EditOnlyOfficeDocumentTool(BaseTool):
         else:
             return "❌ La acción 'edit_paragraph' requiere 'paragraph_index' o 'search_text'."
 
+    def _resolve_image_path(self, raw_path: str) -> Optional[str]:
+        """Resuelve rutas relativas o directas a media_root."""
+        if not raw_path:
+            return None
+        clean = raw_path.strip().strip("'\"")
+        # 1. Ruta absoluta directa
+        if os.path.exists(clean):
+            return clean
+
+        # 2. Rutas relativas tipo /media/... o media/...
+        media_root = getattr(settings, "media_root", "/media")
+        if clean.startswith("/media/"):
+            rel = clean[len("/media/"):]
+            candidate = os.path.join(media_root, rel)
+            if os.path.exists(candidate):
+                return candidate
+        elif clean.startswith("media/"):
+            rel = clean[len("media/"):]
+            candidate = os.path.join(media_root, rel)
+            if os.path.exists(candidate):
+                return candidate
+
+        # 3. Buscar en chat_images/{account_id}/
+        candidate_chat = os.path.join(media_root, "chat_images", str(self.account_id), os.path.basename(clean))
+        if os.path.exists(candidate_chat):
+            return candidate_chat
+
+        # 4. Buscar por nombre en todo chat_images
+        chat_root = os.path.join(media_root, "chat_images")
+        if os.path.exists(chat_root):
+            for root, _, files in os.walk(chat_root):
+                if os.path.basename(clean) in files:
+                    return os.path.join(root, os.path.basename(clean))
+
+        return None
+
     def _handle_insert_image(self, doc_obj, image_path: str, image_width: Optional[float], image_height: Optional[float]) -> str:
         """Inserta una imagen en el documento."""
-        if not os.path.exists(image_path):
-            return f"❌ La imagen '{image_path}' no existe."
+        resolved_path = self._resolve_image_path(image_path)
+        if not resolved_path or not os.path.exists(resolved_path):
+            return f"❌ La imagen '{image_path}' no existe en el servidor."
         
         try:
             width_cm = image_width if image_width else 10.0
@@ -1238,13 +1284,13 @@ class EditOnlyOfficeDocumentTool(BaseTool):
             if height_cm:
                 # Tamaño fijo especificado
                 run = doc_obj.add_paragraph().add_run()
-                run.add_picture(image_path, width=Cm(width_cm), height=Cm(height_cm))
+                run.add_picture(resolved_path, width=Cm(width_cm), height=Cm(height_cm))
             else:
                 # Ancho fijo, alto automático
                 run = doc_obj.add_paragraph().add_run()
-                run.add_picture(image_path, width=Cm(width_cm))
+                run.add_picture(resolved_path, width=Cm(width_cm))
             
-            return f"✅ Imagen '{os.path.basename(image_path)}' insertada (ancho: {width_cm}cm)."
+            return f"✅ Imagen '{os.path.basename(resolved_path)}' insertada con éxito (ancho: {width_cm}cm)."
         except Exception as e:
             logger.error(f"Error insertando imagen: {e}")
             return f"❌ Error al insertar imagen: {str(e)}"

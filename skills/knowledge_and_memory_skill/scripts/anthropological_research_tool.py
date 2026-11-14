@@ -49,6 +49,9 @@ class AnthropologicalResearchTool(BaseTool):
     args_schema: type[BaseModel] = AnthropologicalResearchSchema
     account_id: Optional[str] = None
     workspace_id: Optional[str] = None
+    thread_id: Optional[str] = None
+    task_id: Optional[str] = None
+    progress_callback: Optional[Any] = None
 
     async def _arun(
         self,
@@ -71,18 +74,89 @@ class AnthropologicalResearchTool(BaseTool):
                 research_question=research_question,
                 hypothesis=hypothesis,
                 account_id=self.account_id,
+                thread_id=self.thread_id,
+                task_id=self.task_id,
+                progress_callback=self.progress_callback,
             )
 
             report = result.get("final_report", "No se pudo generar el informe final.")
             graph_info = result.get("graph_result", {})
 
+            # Guardar en base de datos como AnalysisTask para que aparezca en las tarjetas de resultados
+            saved_analysis_id = None
+            if self.account_id:
+                try:
+                    from core.database import SessionLocal, AnalysisTask
+                    from datetime import datetime
+                    import uuid
+
+                    async with SessionLocal() as db_session:
+                        date_prefix = datetime.now().strftime("%Y-%m-%d")
+                        title = f"Investigación Antropológica: {query[:50]} ({date_prefix})"
+
+                        result_payload = {
+                            "report": {
+                                "final_report": report,
+                                "summary": report[:500] if len(report) > 500 else report,
+                                "graph_result": graph_info,
+                                "quotes_count": len(graph_info.get("quotes", [])),
+                                "codes_count": len(graph_info.get("codes", [])),
+                                "categories_count": len(graph_info.get("categories", [])),
+                                "theoretical_framework": theoretical_framework_content[:1500],
+                                "research_question": research_question,
+                                "hypothesis": hypothesis,
+                                "sources": result.get("sources", []),
+                            },
+                            "analysis_metadata": {
+                                "tool_used": "anthropological_research_tool.py",
+                                "analysis_type": "anthropological_deep_research",
+                                "query": query,
+                                "workspace_id": self.workspace_id,
+                                "created_at": datetime.now().isoformat()
+                            }
+                        }
+
+                        try:
+                            account_uuid = uuid.UUID(str(self.account_id))
+                        except Exception:
+                            account_uuid = None
+
+                        if account_uuid:
+                            new_task = AnalysisTask(
+                                account_id=account_uuid,
+                                file_name=title,
+                                analysis_type="anthropological_deep_research",
+                                status="completed",
+                                result_payload=result_payload
+                            )
+                            db_session.add(new_task)
+                            await db_session.commit()
+                            saved_analysis_id = str(new_task.id)
+                            logger.info(f"✅ Investigación antropológica guardada en AnalysisTask con ID: {new_task.id}")
+
+                            # Guardar en paralelo como documento Word
+                            try:
+                                from utils.deep_research_word_saver import save_deep_research_as_word
+                                await save_deep_research_as_word(
+                                    account_id=str(self.account_id),
+                                    query=f"Investigación Antropológica: {query}",
+                                    report_text=report,
+                                    workspace_id=self.workspace_id
+                                )
+                            except Exception as word_err:
+                                logger.warning(f"Error guardando documento Word de investigación antropológica: {word_err}")
+
+                except Exception as db_err:
+                    logger.error(f"Error guardando investigación antropológica en DB: {db_err}", exc_info=True)
+
             return {
                 "status": "success",
                 "report": report,
+                "analysis_id": saved_analysis_id,
                 "quotes_count": len(graph_info.get("quotes", [])),
                 "codes_count": len(graph_info.get("codes", [])),
                 "categories_count": len(graph_info.get("categories", [])),
-                "message": "Investigación antropológica completada exitosamente.",
+                "message": "Investigación antropológica completada exitosamente y registrada en tarjetas de resultados.",
             }
 
         except Exception as e:

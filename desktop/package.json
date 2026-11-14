@@ -1,0 +1,29 @@
+{
+  "name": "kognito-desktop",
+  "version": "1.0.0",
+  "description": "KognitoAI Desktop Application",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "start": "electron . --no-sandbox",
+    "dev": "tsc && electron . --no-sandbox",
+    "pack": "tsc && electron-builder --dir",
+    "dist": "tsc && electron-builder"
+  },
+  "keywords": [
+    "kognito",
+    "ai",
+    "desktop",
+    "electron"
+  ],
+  "author": "KognitoAI <contacto@kognitoai.cloud>",
+  "homepage": "https://kognitoai.cloud",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.6.3"
+  }
+}

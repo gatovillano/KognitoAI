@@ -778,14 +778,14 @@ export default function RagCollectionsPage() {
         onOpenChange={setIsDatasetDialogOpen}
         onConfirm={handleConfirmProcessGraph}
         defaultTopic={processingTopic}
-        workspaceId={collections.length > 0 ? collections[0].workspace_id : undefined}
+        workspaceId={processingWorkspaceId || undefined}
       />
       <AnthropologicalProcessDialog
         isOpen={isAnthroDialogOpen}
         onOpenChange={setIsAnthroDialogOpen}
         onConfirm={handleConfirmAnthropologicalProcess}
         defaultTopic={processingTopic}
-        workspaceId={collections.length > 0 ? collections[0].workspace_id : undefined}
+        workspaceId={processingWorkspaceId || undefined}
       />
 
       {/* {linkingCollection && (

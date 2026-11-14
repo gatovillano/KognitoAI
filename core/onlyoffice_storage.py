@@ -46,6 +46,7 @@ def resolve_onlyoffice_file_path(file_path: Union[str, os.PathLike[str]]) -> Pat
         Path(settings.media_root).resolve() if hasattr(settings, "media_root") and settings.media_root else None,
         Path.home() / ".kognito" / "storage" / "onlyoffice" / "documents",
         Path.home() / "KognitoAI" / "storage" / "onlyoffice" / "documents",
+        project_root / "storage" / "onlyoffice" / "documents",
         Path.home() / "KognitoAI" / "media" / "documents",
         project_root / "media" / "documents" / "documents",
         project_root / "media" / "documents",

@@ -1,0 +1,1 @@
+La petición o pregunta específica del usuario para el análisis.

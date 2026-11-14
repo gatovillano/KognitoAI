@@ -34,7 +34,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem('authToken');
     setToken(null);
     setUser(null);
-    window.location.href = '/login';
+    if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/share')) {
+      window.location.href = '/login';
+    }
   }, [setToken, setUser]);
 
   const login = useCallback(async (newToken: string) => {

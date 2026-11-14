@@ -26,10 +26,32 @@ def filter_relevant_tools(query: str, tools: List[Any], limit: int = 12) -> List
         "deep_research",
         "web_scraper_tool",
         "comprehensive_web_analyzer",
+        "academic_citation_verifier",
     }
 
     # 2. Mapeo de Categorías de Intención
     category_map = {
+        "academic": [
+            "cita",
+            "citas",
+            "citar",
+            "fuente",
+            "fuentes",
+            "paper",
+            "papers",
+            "bibliografia",
+            "bibliografía",
+            "referencia",
+            "referencias",
+            "doi",
+            "crossref",
+            "openalex",
+            "pubmed",
+            "tesina",
+            "investigacion",
+            "investigación",
+            "academic",
+        ],
         "notes": [
             "nota",
             "escribe",

@@ -116,7 +116,9 @@ export const handleAPIError = (error) => {
   if (error.message.includes('401')) {
     // Token expirado o no válido
     localStorage.removeItem('authToken');
-    window.location.href = '/login';
+    if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/share')) {
+      window.location.href = '/login';
+    }
     return 'Sesión expirada. Por favor, inicia sesión nuevamente.';
   }
   

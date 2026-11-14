@@ -57,7 +57,8 @@ const SharedAlbumPage: React.FC = () => {
         payload.password = submitPassword;
       }
 
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/galleries/share/${token}`, {
+      const apiBase = process.env.NEXT_PUBLIC_API_URL || '';
+      const response = await fetch(`${apiBase}/api/galleries/share/${token}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -155,7 +156,7 @@ const SharedAlbumPage: React.FC = () => {
   // mount estatico /media: ese solo expone MEDIA_ROOT y da 404 cuando la cuenta
   // tiene cloud_storage_path configurado.
   const sharedPhotoUrl = (photoId: string) =>
-    `${process.env.NEXT_PUBLIC_API_URL}/api/galleries/share/${token}/photos/${photoId}/file`;
+    `${process.env.NEXT_PUBLIC_API_URL || ''}/api/galleries/share/${token}/photos/${photoId}/file`;
 
   const slides = album.photos.map((photo) => ({
       src: sharedPhotoUrl(photo.id),
@@ -173,7 +174,7 @@ const SharedAlbumPage: React.FC = () => {
     setIsDownloading(true);
     try {
       console.log('Attempting to download album:', album.name, 'ID:', album.id);
-      const downloadUrl = `${process.env.NEXT_PUBLIC_API_URL}/api/galleries/albums/${album.id}/download`;
+      const downloadUrl = `${process.env.NEXT_PUBLIC_API_URL || ''}/api/galleries/albums/${album.id}/download`;
       console.log('Download URL:', downloadUrl);
       const response = await fetch(downloadUrl);
       if (!response.ok) {

@@ -126,7 +126,7 @@ export const SourcesTab: React.FC<SourcesTabProps> = ({ sources, onSourceClick }
                 <div className="bg-background p-4 rounded-full shadow-sm mb-4">
                     <ExternalLink className="w-8 h-8 opacity-20" />
                 </div>
-                <p className="font-medium text-lg">No se registraron fuentes externas</p>
+                <p className="font-medium text-lg">No se registraron fuentes</p>
                 <p className="text-sm opacity-60">Esta investigación se generó sin referencias explícitas.</p>
             </div>
         );
@@ -324,8 +324,10 @@ const SourceCard: React.FC<SourceCardProps> = ({
                         onClick={() => {
                             if (source.type === 'graph' && source.url?.startsWith('analysis://') && onClick) {
                                 onClick(source);
-                            } else if (source.url) {
+                            } else if (source.url?.startsWith('http://') || source.url?.startsWith('https://')) {
                                 window.open(source.url, '_blank', 'noopener,noreferrer');
+                            } else if (onClick) {
+                                onClick(source);
                             }
                         }}
                     >

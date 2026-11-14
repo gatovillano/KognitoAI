@@ -25,16 +25,30 @@ export const getSourceIdentityKey = (source: Source): string => {
 };
 
 const detectSourceType = (url: string, rawType: string | undefined, metadata: Record<string, any>): Source['type'] => {
-  // Explicit type from backend takes priority if it's a known value
+  const isHttp = Boolean(url && (url.startsWith('http://') || url.startsWith('https://')));
+  const isGithub = Boolean(isHttp && url.includes('github.com'));
+
+  // REGLA CRÍTICA: Si rawType vino como 'web' pero la URL NO es HTTP/HTTPS, fue mal clasificada por el backend.
+  // Las fuentes locales (UUIDs de documentos, notas, memorias) nunca son web.
+  if (rawType === 'web' && !isHttp) {
+    if (url.startsWith('note://') || metadata.note_id) return 'note';
+    if (url.startsWith('memory://') || metadata.memory_id) return 'memory';
+    if (url.startsWith('graph://') || url.startsWith('analysis://') || metadata.node_id || metadata.graph_id) return 'graph';
+    return 'document';
+  }
+
+  // Explicit type from backend takes priority if it's a known valid value
   const knownTypes = ['web', 'document', 'memory', 'code', 'database', 'graph', 'note', 'github'];
-  if (rawType && knownTypes.includes(rawType)) return rawType as Source['type'];
+  if (rawType && knownTypes.includes(rawType)) {
+    if (rawType === 'github') return 'github';
+    if (rawType === 'web' && isHttp) return isGithub ? 'github' : 'web';
+    return rawType as Source['type'];
+  }
 
   // Infer from URL scheme / domain
   if (!url) return (metadata.type as Source['type']) || 'document';
-  if (url.startsWith('http://') || url.startsWith('https://')) {
-    if (url.includes('github.com')) return 'github';
-    return 'web';
-  }
+  if (isGithub) return 'github';
+  if (isHttp) return 'web';
   if (url.startsWith('note://')) return 'note';
   if (url.startsWith('graph://') || url.startsWith('analysis://')) return 'graph';
   if (url.startsWith('memory://')) return 'memory';
@@ -42,9 +56,10 @@ const detectSourceType = (url: string, rawType: string | undefined, metadata: Re
   if (url.startsWith('code://') || metadata.language) return 'code';
 
   // Infer from metadata hints
-  if (metadata.file_id || metadata.page !== undefined) return 'document';
+  if (metadata.file_id || metadata.document_id || metadata.page !== undefined || metadata.file_name) return 'document';
   if (metadata.node_id || metadata.graph_id) return 'graph';
   if (metadata.note_id) return 'note';
+  if (metadata.memory_id) return 'memory';
 
   return 'document';
 };
@@ -54,13 +69,26 @@ const normalizeSource = (rawSource: any, fallbackIndex: number): Source => {
   const metadata = rawSource.metadata || {};
   const detectedType = detectSourceType(url, rawSource.type || metadata.type, metadata);
 
-  const title =
-    rawSource.name ||
-    rawSource.title ||
-    metadata.title ||
-    (detectedType === 'github' ? 'GitHub Repository' :
-     detectedType === 'web' ? new URL(url).hostname.replace(/^www\./, '') :
-     'Fuente');
+  let title = rawSource.name || rawSource.title || metadata.title || metadata.file_name;
+  if (!title) {
+    if (detectedType === 'github') {
+      title = 'Repositorio GitHub';
+    } else if (detectedType === 'web' && (url.startsWith('http://') || url.startsWith('https://'))) {
+      try {
+        title = new URL(url).hostname.replace(/^www\./, '');
+      } catch {
+        title = 'Fuente Web';
+      }
+    } else if (detectedType === 'document') {
+      title = metadata.file_name || 'Documento local';
+    } else if (detectedType === 'note') {
+      title = 'Nota local';
+    } else if (detectedType === 'memory') {
+      title = 'Memoria del usuario';
+    } else {
+      title = 'Fuente local';
+    }
+  }
 
   const snippet =
     rawSource.snippet ||
@@ -243,13 +271,15 @@ export const collectSourcesFromMessage = (
   };
 };
 
+import { normalizeLatexSymbols } from './latexUtils';
+
 /**
  * Limpia el texto de símbolos de Markdown para que sea apto para TTS (Text-to-Speech).
  */
 export const stripMarkdown = (text: string): string => {
   if (!text) return '';
 
-  let cleanText = text;
+  let cleanText = normalizeLatexSymbols(text);
 
   // 1. Eliminar bloques de código (``` ... ```)
   cleanText = cleanText.replace(/```[\s\S]*?```/g, '');

@@ -5,9 +5,17 @@ Herramienta para que el agente consulte explícitamente su propio grafo de memor
 """
 
 import logging
-from typing import Optional, Type
+from typing import Optional, Type, Any
 
 from pydantic import BaseModel, Field
+try:
+    from pydantic import model_validator
+except ImportError:
+    model_validator = None
+try:
+    from pydantic import root_validator
+except ImportError:
+    root_validator = None
 from langchain_core.tools import BaseTool
 
 from knowledge_graph.graph_database import GraphDB
@@ -20,9 +28,34 @@ logger = logging.getLogger(__name__)
 class QueryMemoryGraphInput(BaseModel):
     """Esquema de entrada para la herramienta QueryMemoryGraphTool."""
     query: str = Field(
-        ...,
+        default="",
         description="La consulta o pregunta para buscar en el grafo de conocimiento de memorias personales."
     )
+
+    if model_validator:
+        @model_validator(mode="before")
+        @classmethod
+        def map_aliases_v2(cls, values: Any) -> Any:
+            if isinstance(values, dict):
+                if not values.get("query"):
+                    for alias in ["question", "search", "text", "search_query", "content", "prompt", "input"]:
+                        if values.get(alias):
+                            values["query"] = str(values[alias])
+                            break
+                    if not values.get("query"):
+                        values["query"] = ""
+            return values
+    elif root_validator:
+        @root_validator(pre=True)
+        def map_aliases_v1(cls, values: dict[str, Any]) -> dict[str, Any]:
+            if not values.get("query"):
+                for alias in ["question", "search", "text", "search_query", "content", "prompt", "input"]:
+                    if values.get(alias):
+                        values["query"] = str(values[alias])
+                        break
+                if not values.get("query"):
+                    values["query"] = ""
+            return values
 
 class QueryMemoryGraphTool(BaseTool):
     """
@@ -56,7 +89,7 @@ class QueryMemoryGraphTool(BaseTool):
         """La ejecución síncrona no está soportada."""
         raise NotImplementedError("QueryMemoryGraphTool no soporta ejecución síncrona.")
 
-    async def _arun(self, query: str, **kwargs) -> str:
+    async def _arun(self, query: str = "", **kwargs) -> str:
         """Ejecuta la búsqueda en el grafo de memorias."""
         if not self._graph_integration:
             return "Error: La integración con el grafo de conocimiento no está disponible."
@@ -66,6 +99,9 @@ class QueryMemoryGraphTool(BaseTool):
         if not account_id_value or account_id_value == "None":
             logger.error("❌ account_id no está definido correctamente")
             return "Error: No se pudo determinar el ID de cuenta para la búsqueda."
+
+        if not query or not str(query).strip():
+            query = "conceptos clave y memorias recientes"
 
         logger.info(f"🧠 Consultando el grafo de memorias para la cuenta {account_id_value} con la consulta: '{query}'")
         

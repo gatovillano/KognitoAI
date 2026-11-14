@@ -228,6 +228,13 @@ async def invoke_structured_output(
             data = safe_json_loads(clean_content)
             if data is None:
                 raise ValueError("Failed to parse JSON from LLM response")
+            
+            # Sanitización proactiva para campos que puedan venir como dicts inesperados
+            if isinstance(data, dict):
+                for k, v in list(data.items()):
+                    if isinstance(v, dict) and not v: # Diccionario vacío {} donde se esperaba string/null
+                        data[k] = ""
+
             # Usar parse_obj si está disponible (Pydantic V2), si no, usar el constructor
             if hasattr(schema, "parse_obj"):
                 return schema.parse_obj(data)

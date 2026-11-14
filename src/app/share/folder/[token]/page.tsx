@@ -95,7 +95,7 @@ export default function SharedFolderPage() {
   // State for direct Media preview (Image, Video, Audio, PDF)
   const [previewMediaDoc, setPreviewMediaDoc] = useState<{ doc: SharedDocument; mediaType: MediaType } | null>(null);
 
-  const apiBase = process.env.NEXT_PUBLIC_API_URL || 'https://apibase.cuerpolibre.cl';
+  const apiBase = process.env.NEXT_PUBLIC_API_URL || '';
 
   const loadFolderContent = async (subId?: string | null) => {
     if (!token) return;

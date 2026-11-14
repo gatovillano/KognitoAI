@@ -1,10 +1,10 @@
 # core/agents/deep_researcher_state.py
 
 import operator
-from typing import Annotated, Optional, List, TypedDict
+from typing import Annotated, Optional, List, TypedDict, Any
 
 from langchain_core.messages import MessageLikeRepresentation
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # --- Structured Outputs ---
 
@@ -57,14 +57,32 @@ class Summary(BaseModel):
 class ClarifyWithUser(BaseModel):
     """Model for user clarification requests."""
     need_clarification: bool = Field(
+        default=False,
         description="Whether the user needs to be asked a clarifying question.",
     )
     question: Optional[str] = Field(
+        default="",
         description="A question to ask the user to clarify the report scope",
     )
     verification: Optional[str] = Field(
+        default="",
         description="Verify message that we will start research after the user has provided the necessary information.",
     )
+
+    @model_validator(mode='before')
+    @classmethod
+    def sanitize_fields(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            # Asegurar que question y verification sean strings o None, nunca diccionarios vacíos {}
+            for field in ('question', 'verification'):
+                val = data.get(field)
+                if isinstance(val, dict):
+                    data[field] = ""
+                elif val is None:
+                    data[field] = ""
+            if "need_clarification" not in data:
+                data["need_clarification"] = False
+        return data
 
 class ResearchQuestion(BaseModel):
     """Research question and brief for guiding research."""

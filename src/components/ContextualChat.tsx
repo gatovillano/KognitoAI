@@ -45,34 +45,92 @@ export function ContextualChat({ isOpen, onClose, context, title }: ContextualCh
     const [threadId, setThreadId] = useState<string | null>(null);
 
     const scrollRef = useRef<HTMLDivElement>(null);
+    const prevContextIdRef = useRef<string | null>(null);
     const { registerMessageHandler } = useWebSocketContext();
     const { user } = useAuth();
 
+    // Helper para enriquecer el contexto asegurando que la nota tenga contenido cargado
+    const buildEnrichedContext = async () => {
+        const enriched = { ...context };
+        if (enriched.type === 'note') {
+            let noteTitle = enriched.snapshot?.title || title || 'Nota sin título';
+            let noteContent = enriched.snapshot?.content || '';
+            let noteCategory = enriched.snapshot?.category || '';
+
+            // Si por algún motivo el snapshot no tiene contenido, cargarlo desde la API
+            if (!noteContent && enriched.id) {
+                try {
+                    const res = await apiClient.get(`/api/notes/${enriched.id}`);
+                    if (res.data) {
+                        noteContent = res.data.content || '';
+                        if (res.data.title) noteTitle = res.data.title;
+                        if (res.data.category) noteCategory = res.data.category;
+                    }
+                } catch (e) {
+                    console.error('Error al cargar contenido de la nota para el chat contextual:', e);
+                }
+            }
+
+            enriched.snapshot = {
+                ...enriched.snapshot,
+                id: enriched.id,
+                title: noteTitle,
+                content: noteContent,
+                category: noteCategory
+            };
+            enriched.full_text = `Título: ${noteTitle}\n\nContenido:\n${noteContent}`;
+            return { enriched, noteTitle, noteContent };
+        } else if (enriched.type === 'analysis' && enriched.snapshot) {
+            enriched.full_text = typeof enriched.snapshot === 'string'
+                ? enriched.snapshot
+                : JSON.stringify(enriched.snapshot, null, 2);
+        }
+        return { enriched, noteTitle: title, noteContent: '' };
+    };
+
+    // Limpiar estado cuando se cierra o cambia de contexto/nota
+    useEffect(() => {
+        if (!isOpen) {
+            setThreadId(null);
+            setMessages([]);
+            setInput('');
+        } else if (prevContextIdRef.current && prevContextIdRef.current !== context?.id) {
+            setThreadId(null);
+            setMessages([]);
+            setInput('');
+        }
+        prevContextIdRef.current = context?.id || null;
+    }, [isOpen, context?.id]);
+
     // Inicializar hilo de chat
     useEffect(() => {
+        let isMounted = true;
+
         const initChat = async () => {
             try {
-                const enrichedContext = { ...context };
-                if (enrichedContext.type === 'analysis' && enrichedContext.snapshot) {
-                    enrichedContext.full_text = typeof enrichedContext.snapshot === 'string'
-                        ? enrichedContext.snapshot
-                        : JSON.stringify(enrichedContext.snapshot, null, 2);
-                } else if (enrichedContext.type === 'note' && enrichedContext.snapshot) {
-                    enrichedContext.full_text = `Título: ${enrichedContext.snapshot.title || 'Sin título'}\n\nContenido:\n${enrichedContext.snapshot.content || ''}`;
-                }
+                const { enriched } = await buildEnrichedContext();
+                if (!isMounted) return;
 
                 const response = await apiClient.post('/api/threads', {
                     title: `Chat: ${title}`,
-                    context: enrichedContext // Enviar contexto enriquecido al crear el hilo
+                    context: enriched // Enviar contexto enriquecido al crear el hilo
                 });
-                setThreadId(response.data.id);
+
+                if (isMounted) {
+                    setThreadId(response.data.id);
+                }
             } catch (error) {
                 console.error('Error creating thread:', error);
             }
         };
+
         if (isOpen && !threadId) {
             initChat();
         }
+
+        return () => {
+            isMounted = false;
+        };
     }, [isOpen, threadId, title, context]);
 
     // Manejar mensajes de WebSocket
@@ -192,19 +250,24 @@ export function ContextualChat({ isOpen, onClose, context, title }: ContextualCh
         setIsSending(true);
 
         try {
-            const enrichedContext = { ...context };
-            if (enrichedContext.type === 'analysis' && enrichedContext.snapshot) {
-                enrichedContext.full_text = typeof enrichedContext.snapshot === 'string'
-                    ? enrichedContext.snapshot
-                    : JSON.stringify(enrichedContext.snapshot, null, 2);
-            } else if (enrichedContext.type === 'note' && enrichedContext.snapshot) {
-                enrichedContext.full_text = `Título: ${enrichedContext.snapshot.title || 'Sin título'}\n\nContenido:\n${enrichedContext.snapshot.content || ''}`;
-            }
+            const { enriched, noteTitle, noteContent } = await buildEnrichedContext();
+
+            // Si es una nota, también construir rag_context para compatibilidad máxima con RAG y citación
+            const ragContextPayload = enriched.type === 'note' ? [
+                {
+                    type: 'note',
+                    id: enriched.id,
+                    name: noteTitle,
+                    title: noteTitle,
+                    content: noteContent
+                }
+            ] : undefined;
 
             await apiClient.post('/api/chat', {
                 thread_id: threadId,
                 user_message: userMsg,
-                context: enrichedContext, // Enviar el contexto enriquecido!
+                context: enriched, // Enviar el contexto enriquecido!
+                rag_context: ragContextPayload ? JSON.stringify(ragContextPayload) : undefined,
                 account_id: user.id // Usar el ID real del usuario autenticado
             });
         } catch (error) {
@@ -237,13 +300,13 @@ export function ContextualChat({ isOpen, onClose, context, title }: ContextualCh
             >
                 <Card className="h-full border-0 rounded-none flex flex-col">
                     <CardHeader className="p-4 bg-primary text-primary-foreground flex flex-row items-center justify-between space-y-0">
-                        <div className="flex items-center gap-2">
-                            <Sparkles className="h-4 w-4" />
-                            <CardTitle className="text-sm font-bold">
-                                Analista IA: {title}
+                        <div className="flex items-center gap-2 overflow-hidden">
+                            <Sparkles className="h-4 w-4 shrink-0" />
+                            <CardTitle className="text-sm font-bold truncate">
+                                {context.type === 'note' ? `Nota: ${title}` : `Analista IA: ${title}`}
                             </CardTitle>
                         </div>
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1 shrink-0">
                             <Button variant="ghost" size="icon" className="h-7 w-7 hover:bg-white/20" onClick={() => setIsMinimized(!isMinimized)}>
                                 {isMinimized ? <Maximize2 className="h-4 w-4" /> : <Minimize2 className="h-4 w-4" />}
                             </Button>
@@ -259,7 +322,11 @@ export function ContextualChat({ isOpen, onClose, context, title }: ContextualCh
                                 {messages.length === 0 && (
                                     <div className="text-center py-10 text-muted-foreground">
                                         <MessageSquare className="h-10 w-10 mx-auto mb-2 opacity-20" />
-                                        <p className="text-xs">Pregúntame cualquier cosa sobre estos datos.</p>
+                                        <p className="text-xs">
+                                            {context.type === 'note'
+                                                ? `Pregúntame cualquier cosa sobre la nota "${title}".`
+                                                : 'Pregúntame cualquier cosa sobre estos datos.'}
+                                        </p>
                                     </div>
                                 )}
                                 {messages.map((msg, i) => {

@@ -42,7 +42,7 @@ class Source(BaseModel):
     title: str = Field(..., description="Título descriptivo de la fuente")
     url: str = Field(..., description="URL o identificador de la fuente")
     snippet: str = Field(..., description="Fragmento relevante de la fuente")
-    type: SourceType = Field(default=SourceType.WEB, description="Tipo de fuente")
+    type: SourceType = Field(default=SourceType.DOCUMENT, description="Tipo de fuente")
     is_cited: bool = Field(default=False, description="Indica si la fuente fue citada en la respuesta")
     metadata: Optional[Dict[str, Any]] = Field(default=None, description="Metadatos adicionales")
 
@@ -52,6 +52,49 @@ class Source(BaseModel):
         if v is None:
             return ""
         return str(v)
+
+    @field_validator("type", mode="before")
+    @classmethod
+    def _validate_or_infer_type(cls, v: Any, info: Any) -> SourceType:
+        values = info.data if hasattr(info, "data") else {}
+        url = str(values.get("url", "") or "").strip()
+        metadata = values.get("metadata") or {}
+
+        if isinstance(v, SourceType):
+            resolved = v
+        elif isinstance(v, str) and v.lower() in [e.value for e in SourceType]:
+            resolved = SourceType(v.lower())
+        else:
+            resolved = None
+
+        # Si se indicó explícitamente "web", verificar que la URL sea realmente HTTP/HTTPS
+        # para evitar que UUIDs o archivos locales se clasifiquen como web
+        if resolved == SourceType.WEB:
+            if url and not (url.startswith("http://") or url.startswith("https://")):
+                if url.startswith("note://") or metadata.get("note_id"):
+                    return SourceType.NOTE
+                if url.startswith("memory://") or metadata.get("memory_id"):
+                    return SourceType.MEMORY
+                if url.startswith("graph://") or url.startswith("analysis://") or metadata.get("node_id"):
+                    return SourceType.GRAPH
+                return SourceType.DOCUMENT
+            return SourceType.WEB
+
+        if resolved:
+            return resolved
+
+        # Inferir si no fue provisto
+        if url.startswith("http://") or url.startswith("https://"):
+            if "github.com" in url:
+                return SourceType.GITHUB
+            return SourceType.WEB
+        if url.startswith("note://") or metadata.get("note_id"):
+            return SourceType.NOTE
+        if url.startswith("memory://") or metadata.get("memory_id"):
+            return SourceType.MEMORY
+        if url.startswith("graph://") or url.startswith("analysis://") or metadata.get("node_id") or metadata.get("graph_id"):
+            return SourceType.GRAPH
+        return SourceType.DOCUMENT
 
 
 class ToolOutputWithSources(BaseModel):
@@ -101,6 +144,8 @@ class CitationResponse(BaseModel):
 def format_context_with_sources(sources: List[Source]) -> str:
     """
     Formatea una lista de fuentes en un contexto legible para el LLM.
+    Distingue explícitamente entre fuentes locales (documentos/notas/memoria)
+    y fuentes de búsqueda (web/github).
     Args:
         sources: Lista de fuentes a formatear
     Returns:
@@ -110,9 +155,21 @@ def format_context_with_sources(sources: List[Source]) -> str:
         return ""
     context_parts = []
     for source in sources:
+        source_type_val = source.type.value if hasattr(source.type, "value") else str(source.type)
+        if source_type_val in ("web", "github"):
+            type_label = "Fuente Web / Externa"
+        elif source_type_val == "note":
+            type_label = "Nota Local"
+        elif source_type_val == "memory":
+            type_label = "Memoria del Usuario"
+        elif source_type_val == "graph":
+            type_label = "Grafo de Conocimiento"
+        else:
+            type_label = "Documento Local"
+
         # No incluir la URL en el snippet que se pasa al LLM para evitar que la repita
         context_parts.append(
-            f"Contexto [{source.id}] - {source.title}:\n{source.snippet}\n"
+            f"Contexto [{source.id}] ({type_label}) - {source.title}:\n{source.snippet}\n"
         )
     return "\n".join(context_parts)
 
@@ -251,6 +308,10 @@ Reglas para las citas:
 3. Si usas información de múltiples fuentes en una oración, incluye todas las citas por separado. Por ejemplo, en lugar de `[1, 2, 3]`, debes usar `[1] [2] [3]`.
 4. NO inventes números de citas que no correspondan a las fuentes proporcionadas
 5. Sé preciso: solo cita las fuentes que realmente usaste para esa información específica
+6. INTEGRIDAD CIENTÍFICA Y BIBLIOGRÁFICA (TOLERANCIA CERO A ALUCINACIONES): Si redactas referencias bibliográficas o mencionas autores y estudios científicos:
+   - Queda estrictamente PROHIBIDO inventar o suponer de memoria revistas científicas, títulos, números de volumen, páginas, iniciales o coautores.
+   - Si necesitas verificar o citar fuentes académicas formales, invoca la herramienta `academic_citation_verifier` para obtener los metadatos oficiales y verificados de Crossref, OpenAlex o PubMed.
+   - Si no dispones del registro oficial indexado o su DOI, declara explícitamente "[Referencia no verificada: Autor, Año, Tema]" o regístralo como cita secundaria. Jamás conjetures revistas ni iniciales.
 """
 
 CONTEXT_TEMPLATE = """

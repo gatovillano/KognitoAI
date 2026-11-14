@@ -322,6 +322,7 @@ async def schedule_custom_heartbeat(
     account_id: str,
     schedule_type: str,
     instructions: str,
+    heartbeat_name: Optional[str] = None,
     allowed_tools: Optional[list] = None,
     interval_minutes: Optional[int] = None,
     hour: Optional[int] = None,
@@ -342,6 +343,8 @@ async def schedule_custom_heartbeat(
             account_id=account_id,
             workspace_id=kwargs.get("workspace_id"),
             heartbeat_id=kwargs.get("heartbeat_id"),
+            heartbeat_name=kwargs.get("heartbeat_name"),
+            instructions=kwargs.get("instructions"),
             allowed_tools=kwargs.get("allowed_tools")
         )
 
@@ -352,6 +355,13 @@ async def schedule_custom_heartbeat(
 
     # Programar según schedule_type
     try:
+        job_kwargs = {
+            "heartbeat_id": heartbeat_id,
+            "heartbeat_name": heartbeat_name,
+            "instructions": instructions,
+            "workspace_id": workspace_id,
+            "allowed_tools": allowed_tools
+        }
         if schedule_type == "interval":
             if not interval_minutes:
                 return False
@@ -361,11 +371,7 @@ async def schedule_custom_heartbeat(
                 minutes=interval_minutes,
                 id=job_id,
                 args=["custom_heartbeat", custom_heartbeat_task, account_id],
-                kwargs={
-                    "heartbeat_id": heartbeat_id,
-                    "workspace_id": workspace_id,
-                    "allowed_tools": allowed_tools
-                }
+                kwargs=job_kwargs
             )
         elif schedule_type == "daily":
             if hour is None:
@@ -377,11 +383,7 @@ async def schedule_custom_heartbeat(
                 minute=minute if minute is not None else 0,
                 id=job_id,
                 args=["custom_heartbeat", custom_heartbeat_task, account_id],
-                kwargs={
-                    "heartbeat_id": heartbeat_id,
-                    "workspace_id": workspace_id,
-                    "allowed_tools": allowed_tools
-                }
+                kwargs=job_kwargs
             )
         elif schedule_type == "weekly":
             if day_of_week is None or hour is None:
@@ -394,11 +396,7 @@ async def schedule_custom_heartbeat(
                 minute=minute if minute is not None else 0,
                 id=job_id,
                 args=["custom_heartbeat", custom_heartbeat_task, account_id],
-                kwargs={
-                    "heartbeat_id": heartbeat_id,
-                    "workspace_id": workspace_id,
-                    "allowed_tools": allowed_tools
-                }
+                kwargs=job_kwargs
             )
         else:
             logger.error(f"Tipo de programación desconocido para heartbeat personalizado: {schedule_type}")

@@ -2674,7 +2674,7 @@ async def get_all_analysis_endpoint(
 
         analysis_task_types = [
             'document', 'collection', 'code', 'semantic_summary', 'semantic', 'custom', 
-            'gap_development', 'deep_research', 'comprehensive_web_analysis', 'neural_insight',
+            'gap_development', 'deep_research', 'anthropological_deep_research', 'comprehensive_web_analysis', 'neural_insight',
             'note_analysis', 'note_collection_analysis', 'single_note', 'single_note_summary', 'notes_collection'
         ]
 
@@ -2770,11 +2770,14 @@ async def get_all_analysis_endpoint(
                         summary = "Análisis personalizado sin contenido"
                     elif 'formatted_result' in payload_dict:
                         summary = str(payload_dict['formatted_result'])[:200] + "..."
-                    elif (analysis_type == "gap_development" or task_analysis_type == "gap_development" or analysis_type == "deep_research") and ('report' in payload_dict or 'final_report' in payload_dict or 'summary' in payload_dict):
+                    elif (analysis_type in ("gap_development", "deep_research", "anthropological_deep_research") or task_analysis_type in ("gap_development", "deep_research", "anthropological_deep_research")) and ('report' in payload_dict or 'final_report' in payload_dict or 'summary' in payload_dict):
                         if 'report' in payload_dict:
                             report_obj = payload_dict['report']
-                            if isinstance(report_obj, dict) and 'summary' in report_obj:
+                            if isinstance(report_obj, dict) and 'summary' in report_obj and report_obj['summary']:
                                 summary = str(report_obj['summary'])
+                            elif isinstance(report_obj, dict) and 'final_report' in report_obj and report_obj['final_report']:
+                                report_content = str(report_obj['final_report'])
+                                summary = report_content[:200] + "..." if len(report_content) > 200 else report_content
                             else:
                                 report_content = str(report_obj)
                                 summary = report_content[:200] + "..." if len(report_content) > 200 else report_content

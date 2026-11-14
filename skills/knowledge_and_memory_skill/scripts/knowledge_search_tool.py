@@ -7,10 +7,18 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-from pydantic import BaseModel, Field, validator, root_validator
+try:
+    from pydantic import model_validator
+except ImportError:
+    model_validator = None
+try:
+    from pydantic import root_validator
+except ImportError:
+    root_validator = None
+from pydantic import BaseModel, Field, validator
 
 class KnowledgeSearchInput(BaseModel):
-    query: str = Field(description="La consulta de búsqueda para encontrar información relevante.")
+    query: str = Field(default="", description="La consulta de búsqueda para encontrar información relevante.")
     content_types: Optional[List[str]] = Field(None, description="Lista de tipos de contenido para filtrar la búsqueda (ej. 'document', 'note').")
     filter_topics: Optional[List[str]] = Field(None, description="Lista de temas para filtrar la búsqueda.")
     category: Optional[str] = Field(None, description="Categoría para filtrar la búsqueda.")
@@ -20,15 +28,30 @@ class KnowledgeSearchInput(BaseModel):
     document_name: Optional[str] = Field(None, description="Nombre exacto de un documento para focalizar la búsqueda.")
     document_id: Optional[str] = Field(None, description="ID único de un documento para focalizar la búsqueda.")
 
-    @root_validator(pre=True)
-    def map_aliases(cls, values: dict[str, Any]) -> dict[str, Any]:
-        """Permite mapear alias comunes para el parámetro 'query'."""
-        if "query" not in values:
-            for alias in ["question", "search", "text", "search_query", "content", "prompt", "input"]:
-                if alias in values:
-                    values["query"] = values[alias]
-                    break
-        return values
+    if model_validator:
+        @model_validator(mode="before")
+        @classmethod
+        def map_aliases_v2(cls, values: Any) -> Any:
+            if isinstance(values, dict):
+                if not values.get("query"):
+                    for alias in ["question", "search", "text", "search_query", "content", "prompt", "input"]:
+                        if values.get(alias):
+                            values["query"] = str(values[alias])
+                            break
+                    if not values.get("query"):
+                        values["query"] = ""
+            return values
+    elif root_validator:
+        @root_validator(pre=True)
+        def map_aliases_v1(cls, values: dict[str, Any]) -> dict[str, Any]:
+            if not values.get("query"):
+                for alias in ["question", "search", "text", "search_query", "content", "prompt", "input"]:
+                    if values.get(alias):
+                        values["query"] = str(values[alias])
+                        break
+                if not values.get("query"):
+                    values["query"] = ""
+            return values
 
     @validator('filter_topics', 'content_types', pre=True, allow_reuse=True)
     def parse_stringified_list(cls, v):
@@ -66,6 +89,8 @@ class KnowledgeSearchTool(BaseTool):
         document_id: Optional[str] = None,
     ) -> str:
         try:
+            if not query or not str(query).strip():
+                query = "memorias y conocimientos generales"
             if not self.account_id:
                 raise ValueError("El 'account_id' es requerido para la búsqueda en la base de conocimiento, pero no fue proporcionado.")
 
@@ -101,8 +126,9 @@ class KnowledgeSearchTool(BaseTool):
             )
 
             formatted_results = []
-            if results and results.sources:
-                for i, source in enumerate(results.sources):
+            sources_to_return = results.sources if (results and results.sources) else []
+            if sources_to_return:
+                for i, source in enumerate(sources_to_return):
                     formatted_result = {
                         "rank": i + 1,
                         "content": source.snippet,
@@ -115,22 +141,12 @@ class KnowledgeSearchTool(BaseTool):
                     }
                     formatted_results.append(formatted_result)
 
-            return json.dumps({
-                "status": "success",
-                "query": query,
-                "total_results": len(formatted_results),
-                "filters_applied": {
-                    "content_types": content_types,
-                    "filter_topics": filter_topics,
-                    "category": category,
-                    "workspace_id": self.workspace_id,
-                    "hybrid_search": hybrid_search,
-                    "reranking": reranking,
-                    "document_name": document_name,
-                    "document_id": document_id,
-                },
-                "results": formatted_results
-            }, ensure_ascii=False, indent=2)
+            from core.citation_models import ToolOutputWithSources, format_context_with_sources
+            context_text = format_context_with_sources(sources_to_return) if sources_to_return else f"No se encontró información relevante para '{query}' en la base de conocimiento."
+            return ToolOutputWithSources(
+                context_for_llm=context_text,
+                sources=sources_to_return
+            ).model_dump()
 
         except Exception as e:
             logger.error(f"Error en KnowledgeSearchTool: {e}", exc_info=True)

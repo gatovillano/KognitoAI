@@ -2,6 +2,7 @@
 
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { normalizeLatexSymbols } from '@/lib/latexUtils';
 
 interface InlineMarkdownRendererProps {
   content: string;
@@ -15,8 +16,8 @@ export function InlineMarkdownRenderer({ content }: InlineMarkdownRendererProps)
   const sanitizeMarkdown = (markdown: string): string => {
     // Expresión regular para encontrar enlaces anidados
     const nestedLinkRegex = /\[([^\]]+)\]\(([^\)]+)\)\[([^\]]+)\]\(([^\)]+)\)/g;
-    // Reemplazar enlaces anidados con el primer enlace
-    return markdown.replace(nestedLinkRegex, '[$1]($2)');
+    // Reemplazar enlaces anidados con el primer enlace y normalizar símbolos LaTeX (ej. $\leftrightarrow$ -> ↔)
+    return normalizeLatexSymbols(markdown.replace(nestedLinkRegex, '[$1]($2)'));
   };
 
   const sanitizedContent = sanitizeMarkdown(markdownContent);

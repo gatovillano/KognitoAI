@@ -95,10 +95,19 @@ def get_account_id() -> Optional[str]:
     if not token: return None
     try:
         import jwt
-        jwt_secret = os.getenv("JWT_SECRET_KEY", "")
-        payload = jwt.decode(token, jwt_secret, algorithms=["HS256"])
+        payload = jwt.decode(token, options={"verify_signature": False, "verify_exp": True})
         return payload.get("sub")
-    except Exception: return None
+    except Exception:
+        try:
+            import base64
+            parts = token.split(".")
+            if len(parts) >= 2:
+                padded = parts[1] + "=" * (-len(parts[1]) % 4)
+                payload = json.loads(base64.urlsafe_b64decode(padded).decode("utf-8"))
+                return payload.get("sub")
+        except Exception:
+            pass
+        return None
 
 # --- LÓGICA DE SEGURIDAD ---
 DANGEROUS_PATTERNS = [r"\brm\b", r"\bdelete\b", r"\bdrop\b", r"\btruncate\b", r"\bunlink\b", r"\b-rf\b"]
@@ -1356,6 +1365,9 @@ async def interactive_chat():
         try:
             with Status("[dim]Sincronizando...", console=console):
                 resp = await client.get(f"{api_url}/api/threads?limit=1", headers={"Authorization": f"Bearer {token}"})
+                if resp.status_code in [401, 403]:
+                    console.print("[error]❌ Token expirado o inválido. Ejecuta 'python3 kai.py login' nuevamente.[/error]")
+                    return
                 threads_data = resp.json() if isinstance(resp.json(), dict) else {}
                 if resp.status_code == 200 and threads_data.get("threads"):
                     thread_id = threads_data["threads"][0]["id"]

@@ -123,19 +123,17 @@ class AntigravityClient:
         logger.info("Token de Antigravity refrescado correctamente.")
         return cls._access_token
 
-    CODE_ASSIST_ENDPOINT_DAILY = "https://daily-cloudcode-pa.sandbox.googleapis.com"
-    CODE_ASSIST_ENDPOINT_AUTOPUSH = "https://autopush-cloudcode-pa.sandbox.googleapis.com"
-    CODE_ASSIST_ENDPOINT_PROD = "https://cloudcode-pa.googleapis.com"
+    CODE_ASSIST_ENDPOINT_DAILY = "https://daily-cloudcode-pa.googleapis.com"
+    CODE_ASSIST_ENDPOINT_SANDBOX = "https://daily-cloudcode-pa.sandbox.googleapis.com"
 
     CODE_ASSIST_ENDPOINTS = [
         CODE_ASSIST_ENDPOINT_DAILY,
-        CODE_ASSIST_ENDPOINT_AUTOPUSH,
-        CODE_ASSIST_ENDPOINT_PROD,
+        CODE_ASSIST_ENDPOINT_SANDBOX,
     ]
 
     @classmethod
     def get_endpoints(cls) -> List[str]:
-        custom_ep = os.getenv("KOGNITERM_ANTIGRAVITY_ENDPOINT")
+        custom_ep = os.getenv("KOGNITERM_ANTIGRAVITY_ENDPOINT") or os.getenv("ANTIGRAVITY_ENDPOINT")
         if custom_ep:
             return [custom_ep.rstrip("/")]
         return list(cls.CODE_ASSIST_ENDPOINTS)
@@ -530,7 +528,7 @@ class AntigravityClient:
                     continue
                 seen_names.add(sanitized_name)
                 
-                def convert_schema(schema):
+                def convert_schema(schema, is_top_level: bool = False):
                     # Gemini FunctionDeclarations solo acepta un subconjunto de
                     # OpenAPI Schema: type, description, enum, properties,
                     # required, items, nullable (+ min/max items/properties).
@@ -550,13 +548,41 @@ class AntigravityClient:
                     }
 
                     new_schema: Dict[str, Any] = {}
+
+                    # Extraer variantes de anyOf / oneOf comunes en Pydantic / OpenAPI
+                    if "type" not in schema:
+                        for union_key in ("anyOf", "oneOf", "allOf"):
+                            if union_key in schema and isinstance(schema[union_key], list):
+                                variants = [v for v in schema[union_key] if isinstance(v, dict) and v.get("type") != "null"]
+                                if variants:
+                                    merged = convert_schema(variants[0])
+                                    if isinstance(merged, dict):
+                                        for mk, mv in merged.items():
+                                            if mk not in new_schema:
+                                                new_schema[mk] = mv
+                                    if len(variants) < len(schema[union_key]):
+                                        new_schema["nullable"] = True
+                                    break
+
                     for k, v in schema.items():
                         if k not in ALLOWED_KEYS:
                             continue
 
                         if k == "type":
                             if isinstance(v, str):
-                                new_schema["type"] = v.upper()
+                                val = v.upper()
+                                if val in ("INT", "INTEGER"):
+                                    new_schema["type"] = "INTEGER"
+                                elif val in ("FLOAT", "DOUBLE", "NUMBER"):
+                                    new_schema["type"] = "NUMBER"
+                                elif val in ("BOOL", "BOOLEAN"):
+                                    new_schema["type"] = "BOOLEAN"
+                                elif val in ("LIST", "ARRAY"):
+                                    new_schema["type"] = "ARRAY"
+                                elif val in ("DICT", "OBJECT"):
+                                    new_schema["type"] = "OBJECT"
+                                else:
+                                    new_schema["type"] = "STRING"
                             elif isinstance(v, list):
                                 non_null = [t for t in v if isinstance(t, str) and t.lower() != "null"]
                                 new_schema["type"] = non_null[0].upper() if non_null else "STRING"
@@ -574,7 +600,7 @@ class AntigravityClient:
                         elif k == "required" and isinstance(v, list):
                             new_schema["required"] = [r for r in v if isinstance(r, str)]
                         elif k == "enum" and isinstance(v, list):
-                            new_schema["enum"] = v
+                            new_schema["enum"] = [str(r) for r in v]
                         else:
                             new_schema[k] = v
 
@@ -583,12 +609,33 @@ class AntigravityClient:
                     if "items" in new_schema and "type" not in new_schema:
                         new_schema["type"] = "ARRAY"
 
+                    if is_top_level:
+                        if new_schema.get("type") != "OBJECT":
+                            new_schema["type"] = "OBJECT"
+                        if "properties" not in new_schema:
+                            new_schema["properties"] = {}
+                    else:
+                        if "type" not in new_schema:
+                            if "properties" in new_schema:
+                                new_schema["type"] = "OBJECT"
+                            elif "items" in new_schema:
+                                new_schema["type"] = "ARRAY"
+                            else:
+                                new_schema["type"] = "STRING"
+
+                    # Regla estricta de Gemini API: Si type == ARRAY, DEBE tener 'items' no vacío con un 'type' válido
+                    if new_schema.get("type") == "ARRAY":
+                        if "items" not in new_schema or not isinstance(new_schema["items"], dict) or not new_schema["items"]:
+                            new_schema["items"] = {"type": "STRING"}
+                        elif "type" not in new_schema["items"]:
+                            new_schema["items"]["type"] = "STRING"
+
                     return new_schema
                 
                 decl = {
                     "name": sanitized_name,
                     "description": fn.get("description") or "",
-                    "parameters": convert_schema(fn.get("parameters", {}))
+                    "parameters": convert_schema(fn.get("parameters", {}), is_top_level=True)
                 }
                 function_declarations.append(decl)
         if function_declarations:
@@ -787,15 +834,22 @@ class AntigravityClient:
                     break
 
                 if resp.status_code in (429, 503, 529):
-                    # Si no es el último endpoint y es el primer intento en este endpoint, rotar al siguiente inmediatamente
-                    if ep_idx < len(endpoints_to_try) - 1 and attempt == 0:
+                    err_msg = ""
+                    try:
+                        err_msg = resp.json().get("error", {}).get("message", "")
+                    except Exception:
+                        pass
+
+                    # Si el modelo agotó explícitamente su cuota individual asignada, rotar de inmediato si hay endpoint alternativo
+                    if "Individual quota reached" in err_msg and ep_idx < len(endpoints_to_try) - 1:
                         logger.warning(
-                            f"⚠️ Antigravity endpoint {endpoint} devolvió {resp.status_code}. "
+                            f"⚠️ Antigravity endpoint {endpoint} agotó cuota individual para el modelo ({err_msg}). "
                             f"Probando endpoint alternativo..."
                         )
                         endpoint_failed = True
                         break
-                    
+
+                    # Para límites de tasa temporales (RPM/TPM) o 503/529, reintentar con backoff en este endpoint
                     if attempt < max_retries:
                         retry_after = resp.headers.get("retry-after") or resp.headers.get("retry-after-ms")
                         wait_s = retry_delay
@@ -805,12 +859,21 @@ class AntigravityClient:
                             except Exception:
                                 pass
                         logger.warning(
-                            f"⚠️ Antigravity API Rate Limit ({resp.status_code}) en {endpoint}, "
+                            f"⚠️ Antigravity API Rate Limit ({resp.status_code}) en {endpoint}: {err_msg or 'esperando backoff'}, "
                             f"reintentando (intento {attempt+1}/{max_retries+1}) en {wait_s:.1f}s..."
                         )
                         time.sleep(wait_s)
                         retry_delay *= 2
                         continue
+
+                    # Si se agotaron los reintentos en este endpoint y hay otro endpoint disponible, rotar
+                    if ep_idx < len(endpoints_to_try) - 1:
+                        logger.warning(
+                            f"⚠️ Reintentos agotados en {endpoint} ({resp.status_code}: {err_msg}). Probando endpoint alternativo..."
+                        )
+                        endpoint_failed = True
+                        break
+
                     endpoint_failed = True
                     break
 

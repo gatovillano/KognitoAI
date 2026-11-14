@@ -19,6 +19,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+from telegram.error import InvalidToken
 from telegram.ext import Application
 
 from core.config import settings
@@ -75,8 +76,19 @@ async def lifespan(app: FastAPI):
     register_callback_query_handler(ptb_app)
     
     # 3. Inicializar la aplicación. Prepara el bot, el dispatcher, etc.
-    await ptb_app.initialize()
-    
+    try:
+        await ptb_app.initialize()
+    except InvalidToken:
+        # El token configurado no es válido (p. ej. un marcador de desarrollo
+        # o un token revocado). Telegram rechaza la conexión al arrancar.
+        logger.error(
+            "❌ El token de Telegram es inválido (Unauthorized). "
+            "Genera un token real con /newtoken en BotFather y actualiza TELEGRAM_BOT_TOKEN. "
+            "El bot no se iniciará."
+        )
+        yield
+        return
+
     # 4. Guardar la aplicación en el estado de FastAPI para usarla en el apagado.
     app.state.ptb_app = ptb_app
     

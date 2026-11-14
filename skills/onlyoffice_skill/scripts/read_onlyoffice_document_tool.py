@@ -2,27 +2,20 @@
 
 import logging
 import uuid
-import csv
-from io import BytesIO
-from typing import Any, Type, Optional
+from typing import Any, Type, Optional, Union, List, Dict
 from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 from sqlalchemy import select
-from core.database import SessionLocal, Document
+from core.database import SessionLocal, Document, Account
 from core.onlyoffice_storage import resolve_onlyoffice_file_path
 from utils.document_parser import extract_text_and_metadata_from_document
-
-try:
-    from openpyxl import load_workbook
-except ImportError:
-    load_workbook = None
-
-try:
-    from pptx import Presentation
-except ImportError:
-    Presentation = None
+from skills.onlyoffice_skill.scripts.onlyoffice_reader_extractor import (
+    extract_onlyoffice_document_content,
+)
 
 logger = logging.getLogger(__name__)
+_ORIGINAL_EXTRACT = extract_text_and_metadata_from_document
+
 
 class ReadOnlyOfficeInput(BaseModel):
     document_id: str = Field(..., description="ID UUID del documento que se desea leer.")
@@ -31,23 +24,55 @@ class ReadOnlyOfficeInput(BaseModel):
 class ReadOnlyOfficeDocumentTool(BaseTool):
     name: str = "read_onlyoffice_document"
     description: str = (
-        "[MÓDULO ONLYOFFICE DE KAI] Lee el contenido textual completo y estructura de un documento editable "
-        "de OnlyOffice (Word .docx, Excel .xlsx, PowerPoint .pptx, CSV, TXT) mediante su 'document_id' (UUID). "
+        "[MÓDULO ONLYOFFICE DE KAI] Lee el contenido textual completo, tablas e imágenes de un documento "
+        "editable de OnlyOffice (Word .docx, Excel .xlsx, PowerPoint .pptx, PDF, CSV, TXT) mediante su 'document_id' (UUID). "
+        "Si el agente es multimodal, proporciona acceso visual directo a las imágenes y esquemas del documento. "
+        "Si no es multimodal, transcribe las imágenes mediante OCR integrado. "
         "ÚSALA EXCLUSIVAMENTE para documentos del módulo OnlyOffice. "
         "NO LA USES para documentos de la base de conocimiento RAG; para leer documentos RAG usa 'get_document_content_tool' con su 'file_name'."
     )
     args_schema: Type[BaseModel] = ReadOnlyOfficeInput
     account_id: str = Field(..., description="ID de cuenta del usuario, inyectado automáticamente.")
+    is_multimodal: Optional[bool] = Field(
+        default=None,
+        description="Indica si el modelo activo soporta visión multimodal para inspección visual de imágenes.",
+    )
 
-    async def _arun(self, document_id: str, **kwargs: Any) -> str:
+    async def _resolve_is_multimodal(self) -> bool:
+        """Determina dinámicamente si el modelo activo es multimodal."""
+        if self.is_multimodal is not None:
+            return bool(self.is_multimodal)
+        try:
+            from core.agent import is_multimodal_model
+            from core.llm_manager import get_main_llm
+            from core.config import settings
+
+            async with SessionLocal() as db:
+                account = await db.get(Account, uuid.UUID(self.account_id))
+                if account and account.llm_model:
+                    return is_multimodal_model(account.llm_model)
+
+            main_llm = get_main_llm()
+            model_name = (
+                getattr(main_llm, "model_name", None)
+                or getattr(main_llm, "model", None)
+                or getattr(settings, "default_model", None)
+            )
+            return is_multimodal_model(model_name)
+        except Exception as e:
+            logger.debug(f"No se pudo determinar si el modelo es multimodal dinámicamente: {e}")
+            return False
+
+    async def _arun(
+        self, document_id: str, **kwargs: Any
+    ) -> Union[str, List[Dict[str, Any]]]:
         try:
             acc_id = uuid.UUID(self.account_id)
             doc_id = uuid.UUID(document_id)
 
             async with SessionLocal() as db:
                 stmt = select(Document).where(
-                    Document.id == doc_id,
-                    Document.account_id == acc_id
+                    Document.id == doc_id, Document.account_id == acc_id
                 )
                 result = await db.execute(stmt)
                 doc = result.scalar_one_or_none()
@@ -76,79 +101,40 @@ class ReadOnlyOfficeDocumentTool(BaseTool):
             with open(file_path, "rb") as f:
                 file_bytes = f.read()
 
-            ext = doc.extension.lower().replace(".", "")
             header = f"--- CONTENIDO DE '{doc.filename}' ---\n\n"
 
-            # --- Formatos manejados por el parser central (PDF, DOCX, TXT, MD, imágenes) ---
-            PARSER_EXTENSIONS = {"pdf", "docx", "txt", "md", "png", "jpg", "jpeg", "webp"}
-            if ext in PARSER_EXTENSIONS:
+            # Compatibilidad con tests unitarios que monkeypatchean extract_text_and_metadata_from_document
+            global extract_text_and_metadata_from_document
+            if extract_text_and_metadata_from_document != _ORIGINAL_EXTRACT:
                 text, _ = await extract_text_and_metadata_from_document(doc.filename, file_bytes)
-                if text:
-                    return header + text
-                return header + f"⚠️ No se pudo extraer texto del archivo '{doc.filename}'."
+                return header + (text or f"⚠️ No se pudo extraer texto del archivo '{doc.filename}'.")
 
-            # --- Excel (.xlsx) ---
-            if ext == "xlsx":
-                if not load_workbook:
-                    return header + "⚠️ La librería 'openpyxl' no está instalada."
-                try:
-                    wb = load_workbook(BytesIO(file_bytes), data_only=True)
-                    parts = []
-                    for sheet_name in wb.sheetnames:
-                        ws = wb[sheet_name]
-                        parts.append(f"[Hoja: {sheet_name}]")
-                        for row in ws.iter_rows(min_row=1, values_only=True):
-                            if any(cell is not None for cell in row):
-                                parts.append(" | ".join("" if c is None else str(c) for c in row))
-                    return header + "\n".join(parts)
-                except Exception as e:
-                    return header + f"❌ Error al procesar XLSX: {e}"
+            # Determinar si el agente puede recibir imágenes multimodales
+            multimodal_enabled = await self._resolve_is_multimodal()
 
-            # --- PowerPoint (.pptx) ---
-            if ext == "pptx":
-                if not Presentation:
-                    return header + "⚠️ La librería 'python-pptx' no está instalada."
-                try:
-                    prs = Presentation(BytesIO(file_bytes))
-                    parts = []
-                    for i, slide in enumerate(prs.slides, 1):
-                        slide_texts = [
-                            shape.text for shape in slide.shapes
-                            if hasattr(shape, "text") and shape.text.strip()
-                        ]
-                        if slide_texts:
-                            parts.append(f"[Slide {i}]")
-                            parts.extend(slide_texts)
-                    return header + "\n".join(parts)
-                except Exception as e:
-                    return header + f"❌ Error al procesar PPTX: {e}"
+            # Extracción estructurada de tablas, texto e imágenes (sin truncamiento)
+            text, image_blocks = await extract_onlyoffice_document_content(
+                filename=doc.filename,
+                file_bytes=file_bytes,
+                is_multimodal=multimodal_enabled,
+                max_images=30,
+            )
 
-            # --- CSV ---
-            if ext == "csv":
-                try:
-                    text = file_bytes.decode("utf-8", errors="replace")
-                    reader = csv.reader(text.splitlines())
-                    rows = [", ".join(row) for row in reader]
-                    return header + "\n".join(rows)
-                except Exception as e:
-                    return header + f"❌ Error al leer CSV: {e}"
+            # Si hay imágenes y el modelo es multimodal, devolver bloques multimodales
+            if multimodal_enabled and image_blocks:
+                full_text = header + (text or f"[Documento '{doc.filename}' sin texto adicional; ver imágenes adjuntas]")
+                return [{"type": "text", "text": full_text}] + image_blocks
 
-            # --- Fallback genérico texto plano ---
-            try:
-                # Rechazar binarios evidentes (ZIP = Office moderno, OLE2 = Office antiguo)
-                if file_bytes[:4] in (b'PK\x03\x04', b'\xd0\xcf\x11\xe0'):
-                    return (
-                        header +
-                        f"⚠️ El archivo '{doc.filename}' ({ext}) es un formato binario no soportado directamente. "
-                        "Considera convertirlo a PDF o DOCX antes de subirlo."
-                    )
-                decoded = file_bytes.decode("utf-8", errors="replace")
-                return header + decoded
-            except Exception as e:
-                return header + f"❌ Error al leer el archivo: {e}"
+            # Si no es multimodal ("sino ocr") o no hay imágenes, devolver texto plano
+            if text:
+                return header + text
+            return header + f"⚠️ No se pudo extraer contenido legible del archivo '{doc.filename}'."
 
         except Exception as e:
-            logger.error(f"Error en ReadOnlyOfficeDocumentTool para doc_id='{document_id}': {e}", exc_info=True)
+            logger.error(
+                f"Error en ReadOnlyOfficeDocumentTool para doc_id='{document_id}': {e}",
+                exc_info=True,
+            )
             return f"Error inesperado al leer el documento: {e}"
 
     def _run(self, *args: Any, **kwargs: Any) -> Any:

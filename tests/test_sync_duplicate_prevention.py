@@ -8,7 +8,9 @@ import sys
 
 # Add repo to sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../cli")))
+# NOTE: do not insert the "cli" directory at position 0 — its "core" package
+# would shadow the project's real "core" package for all later imports.
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../cli")))
 
 from cli.sync_logic import KognitoSyncManager, is_ignored_path
 

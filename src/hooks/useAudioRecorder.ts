@@ -1,10 +1,15 @@
 // src/hooks/useAudioRecorder.ts
-import { useState, useRef, useCallback, useEffect } from 'react'; // Añadir useEffect
-import apiClient from '@/lib/api';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { toast } from 'sonner';
-import { useAuth } from '@/contexts/AuthContext'; // Importar useAuth para obtener el userId
+import { useAuth } from '@/contexts/AuthContext';
 
-interface AudioRecorderHook {
+export interface AudioRecorderOptions {
+  onTranscriptChunk?: (chunk: string) => void;
+  onFinalTranscript?: () => void;
+  language?: string;
+}
+
+export interface AudioRecorderHook {
   isRecording: boolean;
   isProcessingAudio: boolean;
   transcript: string;
@@ -13,17 +18,39 @@ interface AudioRecorderHook {
   clearTranscript: () => void;
 }
 
-export const useAudioRecorder = (): AudioRecorderHook => {
-  const { user } = useAuth(); // Obtener el usuario autenticado
+export const useAudioRecorder = (options?: AudioRecorderOptions): AudioRecorderHook => {
+  const { user } = useAuth();
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessingAudio, setIsProcessingAudio] = useState(false);
   const [transcript, setTranscript] = useState('');
+  
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const wsRef = useRef<WebSocket | null>(null); // Referencia al WebSocket
+  const streamRef = useRef<MediaStream | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const finishTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectAttempts = useRef(0);
-  const maxReconnectAttempts = 5;
+  const maxReconnectAttempts = 3;
   const isIntentionalClosure = useRef(false);
+
+  // Mantener referencia fresca a los callbacks
+  const optionsRef = useRef(options);
+  useEffect(() => {
+    optionsRef.current = options;
+  }, [options]);
+
+  const cleanupAudioTracks = useCallback(() => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => {
+        try {
+          track.stop();
+        } catch (e) {
+          // ignore
+        }
+      });
+      streamRef.current = null;
+    }
+  }, []);
 
   const startRecording = useCallback(async () => {
     if (!user?.id) {
@@ -32,14 +59,38 @@ export const useAudioRecorder = (): AudioRecorderHook => {
     }
     isIntentionalClosure.current = false;
 
+    if (finishTimeoutRef.current) {
+      clearTimeout(finishTimeoutRef.current);
+      finishTimeoutRef.current = null;
+    }
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const options = { mimeType: 'audio/webm;codecs=opus' };
-      if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-        console.warn(`${options.mimeType} no soportado, intentando con audio/webm`);
-        options.mimeType = 'audio/webm';
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          sampleRate: 16000,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        }
+      });
+      streamRef.current = stream;
+
+      const mimeTypes = [
+        'audio/webm;codecs=opus',
+        'audio/webm',
+        'audio/ogg;codecs=opus',
+        'audio/ogg',
+      ];
+      let selectedMimeType = 'audio/webm';
+      for (const mt of mimeTypes) {
+        if (MediaRecorder.isTypeSupported(mt)) {
+          selectedMimeType = mt;
+          break;
+        }
       }
-      mediaRecorderRef.current = new MediaRecorder(stream, options);
+
+      mediaRecorderRef.current = new MediaRecorder(stream, { mimeType: selectedMimeType });
 
       // Establecer conexión WebSocket
       const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || window.location.origin;
@@ -54,37 +105,37 @@ export const useAudioRecorder = (): AudioRecorderHook => {
         console.error("WS: Error parsing API_BASE_URL, falling back to window.location.origin", e);
       }
 
-      const token = localStorage.getItem('authToken'); // Obtener el token de autenticación
+      const token = localStorage.getItem('authToken');
       if (!token) {
+        cleanupAudioTracks();
         toast.error('No se encontró el token de autenticación. Por favor, inicia sesión.');
         return;
       }
 
-      // --- INICIO DE LOS CONSOLE.LOG AÑADIDOS ---
-      console.log('DEBUG WS Transcribe Frontend: user.id from useAuth:', user.id);
-      console.log('DEBUG WS Transcribe Frontend: authToken from localStorage:', token ? token.substring(0, 30) + '...' : 'No token');
-      // --- FIN DE LOS CONSOLE.LOG AÑADIDOS ---
+      const lang = optionsRef.current?.language || 'es';
+      const wsUrl = `${wsProtocol}://${wsHost}/ws/audio/transcribe/${user.id}?token=${encodeURIComponent(token)}&language=${encodeURIComponent(lang)}`;
+      
+      const socket = new WebSocket(wsUrl);
+      wsRef.current = socket;
 
-      const wsUrl = `${wsProtocol}://${wsHost}/ws/audio/transcribe/${user.id}?token=${encodeURIComponent(token)}`; // Añadir el token a la URL
-      console.log('DEBUG WS Transcribe Frontend: Constructed WebSocket URL:', wsUrl); // Añadir log de la URL completa
-      wsRef.current = new WebSocket(wsUrl);
-
-      wsRef.current.onopen = () => {
-        console.log('WS Transcribe: Conectado.');
+      socket.onopen = () => {
         setIsRecording(true);
+        setIsProcessingAudio(false);
         setTranscript('');
-        toast.info('Grabación iniciada...');
-        reconnectAttempts.current = 0; // Resetear intentos de reconexión
-        mediaRecorderRef.current?.start(500); // Enviar fragmentos cada 500ms
+        reconnectAttempts.current = 0;
+        // Iniciar captura enviando fragmentos cada 400ms para mantener el streaming fluido
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'inactive') {
+          mediaRecorderRef.current.start(400);
+        }
       };
 
-      wsRef.current.onmessage = (event) => {
+      socket.onmessage = (event) => {
         const msgStr = event.data as string;
         if (!msgStr) return;
 
         if (msgStr === 'ping') {
-          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-            wsRef.current.send('pong');
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.send('pong');
           }
           return;
         }
@@ -96,84 +147,107 @@ export const useAudioRecorder = (): AudioRecorderHook => {
         try {
           const message = JSON.parse(msgStr);
           if (message.type === 'transcript_chunk') {
-            setTranscript(prev => prev + message.text); // Acumular transcripciones parciales
+            const chunkText = message.text || '';
+            setTranscript(prev => prev + chunkText);
+            optionsRef.current?.onTranscriptChunk?.(chunkText);
           } else if (message.type === 'final_transcript') {
-            setTranscript(prev => prev + message.text); // Añadir el fragmento final
-            toast.success('Transcripción finalizada.');
+            if (message.text) {
+              setTranscript(prev => prev + message.text);
+              optionsRef.current?.onTranscriptChunk?.(message.text);
+            }
+            setIsProcessingAudio(false);
+            optionsRef.current?.onFinalTranscript?.();
+            if (socket.readyState === WebSocket.OPEN) {
+              socket.close(1000, 'Transcripción completada');
+            }
           } else if (message.type === 'error') {
             toast.error(`Error de transcripción: ${message.message}`);
-            console.error('WS Transcribe Error:', message.message);
+            setIsProcessingAudio(false);
+            setIsRecording(false);
           }
         } catch (error) {
-          console.error('WS Transcribe: ❌ ERROR CRÍTICO al parsear mensaje WebSocket:', error, 'Mensaje RAW recibido:', msgStr);
+          console.error('WS Transcribe: Error al parsear mensaje:', error, msgStr);
         }
       };
 
-      wsRef.current.onclose = (event) => {
-        console.log(`WS Transcribe: Desconectado. Código: ${event.code}, Razón: "${event.reason}", Limpio: ${event.wasClean}.`);
+      socket.onclose = (event) => {
         setIsRecording(false);
         setIsProcessingAudio(false);
+        cleanupAudioTracks();
 
         if (isIntentionalClosure.current) {
-          console.log('WS Transcribe: Cierre intencional, no se reconectará.');
-          isIntentionalClosure.current = false; // Reset for next time
           return;
         }
 
-        if (reconnectAttempts.current < maxReconnectAttempts) {
-          const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 30000);
-          console.log(`WS Transcribe: 🔄 Reintentando conexión en ${delay}ms (intento ${reconnectAttempts.current + 1}/${maxReconnectAttempts}).`);
-
+        if (reconnectAttempts.current < maxReconnectAttempts && !isIntentionalClosure.current) {
+          const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 5000);
           reconnectTimeoutRef.current = setTimeout(() => {
             reconnectAttempts.current++;
-            startRecording(); // Reintentar la grabación
+            startRecording();
           }, delay) as unknown as NodeJS.Timeout;
-        } else if (reconnectAttempts.current >= maxReconnectAttempts) {
-          const errorMessage = 'No se pudo reconectar al servidor de transcripción después de varios intentos.';
-          console.error(`WS Transcribe: ${errorMessage}`);
-          toast.error(errorMessage);
         }
       };
 
-      wsRef.current.onerror = (event) => {
+      socket.onerror = (event) => {
         console.error('WS Transcribe Error:', event);
-        // Intentar obtener más detalles si el evento lo permite
-        if (event instanceof ErrorEvent) {
-          console.error('WS Transcribe Error Message:', event.message);
-        }
-        toast.error('Error en la conexión de transcripción. Revisa la consola para más detalles.');
         setIsRecording(false);
         setIsProcessingAudio(false);
+        cleanupAudioTracks();
       };
 
       mediaRecorderRef.current.ondataavailable = (event) => {
-        if (event.data.size > 0 && wsRef.current?.readyState === WebSocket.OPEN) {
-          wsRef.current.send(event.data); // Enviar fragmento de audio por WebSocket
+        if (event.data.size > 0 && socket.readyState === WebSocket.OPEN) {
+          socket.send(event.data);
         }
       };
 
       mediaRecorderRef.current.onstop = () => {
-        console.log('MediaRecorder: Detenido.');
-        if (wsRef.current?.readyState === WebSocket.OPEN) {
-          wsRef.current.close(); // Cerrar el WebSocket cuando la grabación se detiene
-        }
-        setIsProcessingAudio(true); // Indicar que se está esperando la transcripción final
+        cleanupAudioTracks();
       };
 
     } catch (error) {
       console.error('Error al acceder al micrófono o iniciar WebSocket:', error);
-      toast.error('No se pudo acceder al micrófono o iniciar la transcripción. Asegúrate de dar permisos.');
+      toast.error('No se pudo acceder al micrófono o iniciar la transcripción. Asegúrate de otorgar permisos.');
+      cleanupAudioTracks();
+      setIsRecording(false);
+      setIsProcessingAudio(false);
     }
-  }, [user?.id]);
+  }, [user?.id, cleanupAudioTracks]);
 
   const stopRecording = useCallback(() => {
-    if (mediaRecorderRef.current && isRecording) {
-      isIntentionalClosure.current = true;
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-      toast.info('Grabación detenida. Esperando transcripción final...');
+    isIntentionalClosure.current = true;
+    setIsRecording(false);
+
+    // Detener MediaRecorder
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      try {
+        mediaRecorderRef.current.stop();
+      } catch (e) {
+        // ignore
+      }
     }
-  }, [isRecording]);
+    cleanupAudioTracks();
+
+    // Notificar al servidor que se detuvo la entrada para que transcriba el remanente
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      setIsProcessingAudio(true);
+      try {
+        wsRef.current.send(JSON.stringify({ type: 'stop' }));
+      } catch (e) {
+        console.error('Error enviando stop al WebSocket:', e);
+      }
+
+      // Timeout de seguridad en caso de que el backend no responda final_transcript
+      finishTimeoutRef.current = setTimeout(() => {
+        setIsProcessingAudio(false);
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.close(1000, 'Timeout cierre seguro');
+        }
+      }, 4000);
+    } else {
+      setIsProcessingAudio(false);
+    }
+  }, [cleanupAudioTracks]);
 
   const clearTranscript = useCallback(() => {
     setTranscript('');
@@ -182,18 +256,28 @@ export const useAudioRecorder = (): AudioRecorderHook => {
   // Limpiar recursos al desmontar el componente
   useEffect(() => {
     return () => {
+      isIntentionalClosure.current = true;
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
         reconnectTimeoutRef.current = null;
       }
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-        mediaRecorderRef.current.stop();
+      if (finishTimeoutRef.current) {
+        clearTimeout(finishTimeoutRef.current);
+        finishTimeoutRef.current = null;
       }
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        try {
+          mediaRecorderRef.current.stop();
+        } catch (e) {
+          // ignore
+        }
+      }
+      cleanupAudioTracks();
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
         wsRef.current.close();
       }
     };
-  }, []);
+  }, [cleanupAudioTracks]);
 
   return {
     isRecording,

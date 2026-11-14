@@ -1,7 +1,5 @@
 # docker-compose.yml - VERSIÓN CORREGIDA
 
-version: "3.8"
-
 services:
   # 1. Base de Datos (ubicada en /run/media/gato/Almacenamiento para más espacio)
   db:
@@ -16,7 +14,7 @@ services:
       - "5432:5432"
     command: postgres -c synchronous_commit=off -c checkpoint_timeout=30min -c checkpoint_completion_target=0.9
     volumes:
-      - /run/media/gato/Almacenamiento/kognito-db-data:/var/lib/postgresql/data
+      - /home/gato/kognito-db-data:/var/lib/postgresql/data
     networks:
       - kognito_network
     healthcheck:
@@ -156,7 +154,7 @@ services:
     networks:
       - kognito_network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8011/"]
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8011/', timeout=5).status==200 else 1)"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -193,7 +191,7 @@ services:
 
   # === EXPORTERS PARA PROMETHEUS ===
   postgres_exporter:
-    image: prometheuscommunity/postgres_exporter:latest
+    image: prometheuscommunity/postgres-exporter:latest
     container_name: postgres_exporter
     restart: always
     ports:
@@ -236,8 +234,26 @@ services:
       - NEO4J_PASSWORD=${NEO4J_PASSWORD}
     volumes:
       - ./scripts/backup.sh:/backup.sh
-      - /run/media/gato/Almacenamiento/kognito-backups:/backups  # Backups guardados en Almacenamiento
+      - /run/media/gato/Almacenamiento1/BACKUP_DOCKER/kognito-backups:/backups  # Disco externo persistente (NTFS)
     command: ["sh", "-c", "while true; do /backup.sh; sleep 3600; done"]
+    networks:
+      - kognito_network
+
+  # OnlyOffice Document Server
+  onlyoffice:
+    image: onlyoffice/documentserver:latest
+    container_name: kognito_onlyoffice
+    restart: always
+    ports:
+      - "8081:80"
+    environment:
+      - JWT_ENABLED=${ONLYOFFICE_JWT_ENABLED:-true}
+      - JWT_SECRET=${ONLYOFFICE_JWT_SECRET:-sQc6rBGkZOdi9PxKlPOKCiYvCq1TvC4L}
+      - JWT_HEADER=Authorization
+      - JWT_IN_BODY=true
+    volumes:
+      - onlyoffice_data:/var/www/onlyoffice/Data
+      - onlyoffice_log:/var/log/onlyoffice
     networks:
       - kognito_network
 
@@ -251,3 +267,5 @@ volumes:
   credentials:
   prometheus_data:
   grafana_data:
+  onlyoffice_data:
+  onlyoffice_log:

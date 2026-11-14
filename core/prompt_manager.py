@@ -75,6 +75,12 @@ def _format_selected_context_items(items: List[Dict[str, Any]]) -> str:
                 f"    * Herramienta para listar documentos de la colección: get_document_list_tool(topic=\"{coll_topic}\")\n"
                 f"    * Herramienta para análisis de la colección: scoped_rag_analysis(topic=\"{coll_topic}\")"
             )
+        elif raw_type == "note":
+            manifest_lines.append(
+                f"- 📝 [NOTA LOCAL (CONTEXTO ACTIVO)]: \"{raw_name}\"\n"
+                f"    * ID de Nota: \"{item_id}\"\n"
+                f"    * Herramienta para editar o actualizar: update_note(note_id={item_id}, ...)\n"
+            )
         else:
             extras = []
             if title and title != raw_name:
@@ -186,11 +192,31 @@ El usuario ha adjuntado EXPLICITAMENTE este contexto activo para esta consulta:
             ctx_snapshot = context.get("snapshot", {})
             ctx_full_text = context.get("full_text")
             
-            if ctx_full_text:
+            if ctx_type == "note":
+                note_title = ctx_snapshot.get('title') or context.get('title') or 'Sin título'
+                note_category = ctx_snapshot.get('category') or context.get('category') or ''
+                note_content = ctx_snapshot.get('content') or ctx_full_text or context.get('content') or 'Sin contenido'
+
                 context_instructions = f"""
---- CONTEXTO DETALLADO ACTIVO ({ctx_type.upper() if ctx_type else 'GENERAL'}) ---
-{ctx_full_text}
--------------------------------
+================================================================================
+📝 CONTEXTO DE NOTA ACTIVA (DESDE DONDE SE ABRIÓ EL CHAT) 📝
+================================================================================
+Estás asistiendo al usuario en un chat contextual abierto DIRECTAMENTE desde la siguiente nota:
+- ID de la Nota: {ctx_id}
+- Título: {note_title}
+{f"- Categoría: {note_category}" if note_category else ""}
+
+CONTENIDO COMPLETO DE LA NOTA:
+\"\"\"
+{note_content}
+\"\"\"
+
+INSTRUCCIONES OBLIGATORIAS:
+1. El usuario tiene esta nota abierta en pantalla y te está consultando sobre ella.
+2. Si el usuario hace preguntas como "¿de qué trata esta nota?", "¿qué dice?", "hazme un resumen", "corrige esto", "redacta...", "continúa la nota", o cualquier consulta referencial ("esto", "la nota", "este texto"), SE REFIERE AL CONTENIDO DE ESTA NOTA.
+3. Basa tus respuestas e insights directamente en el contenido proporcionado arriba. Tienes acceso completo a ella.
+4. Si el usuario solicita modificar, enriquecer o actualizar la nota, puedes usar las herramientas disponibles de notas como `update_note` utilizando el ID {ctx_id}.
+================================================================================
 """
             elif ctx_type == "table":
                 context_instructions = f"""
@@ -290,23 +316,18 @@ Documentos: {ctx_snapshot.get('document_count', 0)}
 Instrucción: El usuario está interesado en la información contenida en esta colección. Prioriza el uso de herramientas de búsqueda en documentos (RAG) filtrando por esta colección si es posible, o simplemente utiliza el conocimiento que ya tienes sobre ella.
 ------------------------------------
 """
-            elif ctx_type == "note":
-                context_instructions = f"""
---- CONTEXTO DE NOTA ACTIVA ---
-Estás asistiendo al usuario en la vista de la nota '{ctx_snapshot.get('title', 'Sin título')}'.
-ID de la Nota: {ctx_id}
-Contenido de la nota:
-{ctx_snapshot.get('content', '') or ctx_full_text or 'Sin contenido'}
-
-Instrucción: El usuario te está consultando con esta nota abierta. Responde sus dudas o ayúdale a expandir, resumir o editar el contenido basándote en esta nota.
--------------------------------
-"""
             elif ctx_type == "custom_heartbeat":
                 context_instructions = """
 --- CONTEXTO DE HEARTBEAT PERSONALIZADO ---
 Estás ejecutando un ciclo de Heartbeat Personalizado en segundo plano para el usuario.
 ⚠️ REGLA CRÍTICA OBLIGATORIA: Si durante este ciclo decides crear, guardar o apuntar notas utilizando la herramienta `add_note` u otra herramienta similar, debes establecer SIEMPRE el parámetro `send_as_agent_message` en `true`. Esto garantiza que el contenido se guarde como un mensaje enviado al usuario en su Bandeja de entrada. Nunca dejes este parámetro en `false` o ausente.
 --------------------------------------------
+"""
+            elif ctx_full_text:
+                context_instructions = f"""
+--- CONTEXTO DETALLADO ACTIVO ({ctx_type.upper() if ctx_type else 'GENERAL'}) ---
+{ctx_full_text}
+-------------------------------
 """
 
         # 1. Construir contexto del usuario

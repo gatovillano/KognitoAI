@@ -323,6 +323,7 @@ async def create_custom_heartbeat(
             account_id=current_account_id,
             schedule_type=new_hb.schedule_type,
             instructions=new_hb.instructions,
+            heartbeat_name=new_hb.name,
             allowed_tools=new_hb.allowed_tools,
             interval_minutes=new_hb.interval_minutes,
             hour=new_hb.hour,
@@ -397,6 +398,7 @@ async def update_custom_heartbeat(
             account_id=current_account_id,
             schedule_type=hb.schedule_type,
             instructions=hb.instructions,
+            heartbeat_name=hb.name,
             allowed_tools=hb.allowed_tools,
             interval_minutes=hb.interval_minutes,
             hour=hb.hour,
@@ -471,7 +473,10 @@ async def trigger_custom_heartbeat(
         from core.agent import run_custom_user_heartbeat
         result = await run_custom_user_heartbeat(
             account_id=current_account_id,
-            heartbeat_id=str(hb.id)
+            heartbeat_id=str(hb.id),
+            heartbeat_name=hb.name,
+            instructions=hb.instructions,
+            allowed_tools=hb.allowed_tools
         )
         return {"status": "success", "message": "Heartbeat iniciado", "detail": result}
     except Exception as e:

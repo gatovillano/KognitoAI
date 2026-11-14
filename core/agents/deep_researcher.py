@@ -106,21 +106,25 @@ async def clarify_with_user(state: AgentState, config: RunnableConfig) -> dict:
     
     # Get and increment clarification attempts
     account_id = state.get("account_id")
+    override = config.get("configurable", {}).get("client_llm_override") if config else None
+    if override:
+        from core.llm_manager import set_client_llm_override
+        set_client_llm_override(override)
     if account_id:
         set_active_account_id(account_id)
     from core.llm_manager import get_llm_for_user
     
     if account_id:
-        fast_llm = await get_llm_for_user(account_id, purpose="fast")
         main_llm = await get_llm_for_user(account_id, purpose="main")
+        fast_llm = (await get_llm_for_user(account_id, purpose="fast")) if (override and override.get("fast_llm_model")) else main_llm
     else:
-        fast_llm = get_fast_llm()
         main_llm = get_main_llm()
+        fast_llm = main_llm
 
-    if not fast_llm:
-        raise ValueError("Fast LLM not initialized.")
     if not main_llm:
         raise ValueError("Main LLM not initialized.")
+    if not fast_llm:
+        fast_llm = main_llm
 
     clarification_attempts = state.get("clarification_attempts", 0) + 1
     logger.debug(f"🔄 [DeepResearcher] Clarification attempt: {clarification_attempts}")
@@ -181,7 +185,7 @@ async def clarify_with_user(state: AgentState, config: RunnableConfig) -> dict:
     if response is None and 'e' in locals() and is_token_limit_exceeded(e):
         logger.warning("⚠️ [DeepResearcher] clarify_with_user - Context length exceeded. Trying fallback LLM.")
         if account_id:
-            fallback_llm = await get_configured_fallback_llm(account_id, failed_purpose="fast")
+            fallback_llm = await get_configured_fallback_llm(account_id, failed_purpose="main")
         else:
             fallback_llm = get_fallback_llm()
         if fallback_llm:
@@ -211,12 +215,14 @@ async def clarify_with_user(state: AgentState, config: RunnableConfig) -> dict:
         response.verification = "Se ha excedido el número máximo de intentos de clarificación. Procederé con la investigación basada en la información disponible."
         # No return here, let the normal flow handle the response.need_clarification = False
 
-    if response.need_clarification:
+    # FIX: Si need_clarification es True pero question está vacío o es inválido, no pausar indefinidamente
+    if response.need_clarification and response.question and response.question.strip():
         return {"messages": [AIMessage(content=response.question)], "final_report": "CLARIFICATION", "clarification_attempts": clarification_attempts}
     else:
-        # If not need_clarification (either by LLM or forced by max attempts), proceed
+        # If not need_clarification (either by LLM or forced by max attempts, or missing question), proceed
         # Explicitly set final_report to None to ensure should_start_research proceeds
-        return {"messages": [AIMessage(content=response.verification)], "final_report": None, "clarification_attempts": clarification_attempts}
+        verif_msg = response.verification if (response.verification and response.verification.strip()) else "Entendido. Iniciando la investigación profunda sobre el tema solicitado."
+        return {"messages": [AIMessage(content=verif_msg)], "final_report": None, "clarification_attempts": clarification_attempts}
 
 
 async def write_research_brief(state: AgentState, config: RunnableConfig) -> dict:
@@ -233,19 +239,25 @@ async def write_research_brief(state: AgentState, config: RunnableConfig) -> dic
         await progress_callback(progress, "Generando el resumen de investigación...", "write_research_brief")
     
     account_id = state.get("account_id")
+    override = config.get("configurable", {}).get("client_llm_override") if config else None
+    if override:
+        from core.llm_manager import set_client_llm_override
+        set_client_llm_override(override)
     if account_id:
         set_active_account_id(account_id)
     from core.llm_manager import get_llm_for_user
 
     if account_id:
-        fast_llm = await get_llm_for_user(account_id, purpose="fast")
         main_llm = await get_llm_for_user(account_id, purpose="main")
+        fast_llm = (await get_llm_for_user(account_id, purpose="fast")) if (override and override.get("fast_llm_model")) else main_llm
     else:
-        fast_llm = get_fast_llm()
         main_llm = get_main_llm()
+        fast_llm = main_llm
 
-    if not fast_llm or not main_llm:
-        raise ValueError("LLMs not initialized.")
+    if not main_llm:
+        raise ValueError("Main LLM not initialized.")
+    if not fast_llm:
+        fast_llm = main_llm
 
     messages_from_state = [cast(BaseMessage, msg) for msg in state.get("messages", [])]
     
@@ -607,14 +619,18 @@ async def supervisor(state: SupervisorState, config: RunnableConfig) -> dict:
         await progress_callback(current_global_progress, f"Supervisor: Planificando iteración de investigación {current_iteration + 1}/{total_iterations}", "supervisor")
 
     account_id = state.get("account_id")
+    override = config.get("configurable", {}).get("client_llm_override") if config else None
+    if override:
+        from core.llm_manager import set_client_llm_override
+        set_client_llm_override(override)
     if account_id:
         set_active_account_id(account_id)
     from core.llm_manager import get_llm_for_user
     
     if account_id:
-        llm = await get_llm_for_user(account_id, purpose="fast")
+        llm = await get_llm_for_user(account_id, purpose="main")
     else:
-        llm = get_fast_llm()
+        llm = get_main_llm()
 
     if not llm:
         raise ValueError("Main LLM not initialized.")
@@ -1229,14 +1245,36 @@ async def researcher_tools(state: ResearcherState, config: RunnableConfig) -> di
 
 
 def _normalize_source_dict(source_dict: dict, tool_name: str, tool_call_id: str | None, message_index: int) -> dict:
-    """Normaliza un dict de fuente: asegura id, metadata y tipo."""
-    # Asegurar que el dict tenga los campos mínimos
-    if "url" not in source_dict or not source_dict["url"]:
-        # Fallback: generar ID único sin URL
-        source_id = generate_stable_id("", prefix="unknown")
+    """Normaliza un dict de fuente: asegura id, metadata y tipo distinguiendo locales de web."""
+    url = str(source_dict.get("url") or "").strip()
+    raw_type = source_dict.get("type")
+    
+    # Inferencia precisa de tipo: evitar que fuentes locales se llamen "web"
+    if raw_type and str(raw_type).lower() != "web":
+        source_type = str(raw_type).lower()
+    elif url.startswith("http://") or url.startswith("https://"):
+        source_type = "github" if "github.com" in url else "web"
+    elif url.startswith("note://"):
+        source_type = "note"
+    elif url.startswith("memory://"):
+        source_type = "memory"
+    elif url.startswith("graph://") or url.startswith("analysis://"):
+        source_type = "graph"
+    elif tool_name in (
+        "knowledge_search",
+        "internal_knowledge_search",
+        "get_document_content_tool",
+        "search_onlyoffice_documents_tool",
+        "read_onlyoffice_document"
+    ):
+        source_type = "document"
     else:
-        url = source_dict["url"]
-        source_type = source_dict.get("type", "web").lower()
+        source_type = "document" if not (url.startswith("http://") or url.startswith("https://")) else "web"
+
+    # Asegurar que el dict tenga los campos mínimos
+    if not url:
+        source_id = generate_stable_id("", prefix=source_type)
+    else:
         source_id = generate_stable_id(url, prefix=source_type)
     
     # Inicializar metadata si no existe
@@ -1254,9 +1292,9 @@ def _normalize_source_dict(source_dict: dict, tool_name: str, tool_call_id: str 
     # Construir dict normalizado
     normalized = {
         "title": source_dict.get("title", ""),
-        "url": source_dict.get("url", ""),
+        "url": url,
         "snippet": source_dict.get("snippet", ""),
-        "type": source_dict.get("type", "web").lower(),
+        "type": source_type,
         "id": source_id,
         "metadata": metadata
     }
@@ -1280,14 +1318,18 @@ async def compress_research(state: ResearcherState, config: RunnableConfig) -> d
         await progress_callback(final_researcher_progress, f"Sintetizando hallazgos para: {state['research_topic']}", f"compress_research_{state['research_topic']}")
 
     account_id = state.get("account_id")
+    override = config.get("configurable", {}).get("client_llm_override") if config else None
+    if override:
+        from core.llm_manager import set_client_llm_override
+        set_client_llm_override(override)
     if account_id:
         set_active_account_id(account_id)
     from core.llm_manager import get_llm_for_user
     
     if account_id:
-        synthesizer_model = await get_llm_for_user(account_id, purpose="fast")
+        synthesizer_model = (await get_llm_for_user(account_id, purpose="fast")) if (override and override.get("fast_llm_model")) else (await get_llm_for_user(account_id, purpose="main"))
     else:
-        synthesizer_model = get_fast_llm()
+        synthesizer_model = get_main_llm()
 
     if not synthesizer_model:
         raise ValueError("Main LLM not initialized.")
@@ -1853,14 +1895,18 @@ async def compress_expert_research(state: ExpertAgentState, config: RunnableConf
         )
 
     account_id = state.get("account_id")
+    override = config.get("configurable", {}).get("client_llm_override") if config else None
+    if override:
+        from core.llm_manager import set_client_llm_override
+        set_client_llm_override(override)
     if account_id:
         set_active_account_id(account_id)
     from core.llm_manager import get_llm_for_user
     
     if account_id:
-        synthesizer_model = await get_llm_for_user(account_id, purpose="fast")
+        synthesizer_model = (await get_llm_for_user(account_id, purpose="fast")) if (override and override.get("fast_llm_model")) else (await get_llm_for_user(account_id, purpose="main"))
     else:
-        synthesizer_model = get_fast_llm()
+        synthesizer_model = get_main_llm()
 
     if not synthesizer_model:
         raise ValueError("Fast LLM not initialized.")

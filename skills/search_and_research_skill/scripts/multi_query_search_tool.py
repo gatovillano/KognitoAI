@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from langchain_core.tools import BaseTool
 
 from utils.multi_query_retriever import multi_query_search
-from core.citation_models import Source, ToolOutputWithSources  # Importamos las clases necesarias
+from core.citation_models import Source, ToolOutputWithSources, SourceType, format_context_with_sources  # Importamos las clases necesarias
 
 logger = logging.getLogger(__name__)
 
@@ -184,28 +184,31 @@ class MultiQuerySearchTool(BaseTool):
                     "similarity_score": result.get('similarity_score')
                 }
                 formatted_results.append(formatted_result)
+                cmetadata = result.get('cmetadata', {})
+                c_type = str(cmetadata.get('type', '')).lower()
+                if 'memories' in c_type or 'memory' in c_type:
+                    src_type = SourceType.MEMORY
+                elif 'notes' in c_type or 'note' in c_type:
+                    src_type = SourceType.NOTE
+                else:
+                    src_type = SourceType.DOCUMENT
+
+                doc_url = cmetadata.get('document_id') or cmetadata.get('note_id') or cmetadata.get('file_name') or f"doc_{i+1}"
+                doc_title = cmetadata.get('file_name') or result.get('topic') or "Documento local"
+
                 # Crear objeto Source para cada resultado
                 source = Source(
                     id=i + 1,
-                    title=result.get('topic') or "Sin título",  # Usar topic como título
-                    url="N/A",  # No hay URL disponible
-                    snippet=result.get('document', '')[:200],  # Primeros 200 caracteres del documento
-                    metadata=result.get('cmetadata', {})
+                    title=doc_title,
+                    url=doc_url,
+                    snippet=result.get('document', '')[:400],
+                    type=src_type,
+                    metadata=cmetadata
                 )
                 sources.append(source)
 
-            # Crear el contexto para el LLM
-            context_for_llm = json.dumps({
-                "status": "success",
-                "query": query,
-                "method": "multi_query_retrieval",
-                "fusion_method": fusion_method or "rrf",
-                "num_queries_generated": num_queries or 3,
-                "total_results": len(formatted_results),
-                "results": formatted_results,
-                "document_name": document_name,
-                "document_id": document_id,
-            }, ensure_ascii=False, indent=2)
+            # Crear el contexto formateado para el LLM distinguiendo fuentes locales
+            context_for_llm = format_context_with_sources(sources)
 
             return ToolOutputWithSources(context_for_llm=context_for_llm, sources=sources)
 

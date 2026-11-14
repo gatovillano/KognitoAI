@@ -36,10 +36,9 @@ BACKEND_PID=$!
 
 echo -e "${BLUE}Iniciando el servidor Frontend (Next.js)...${NC}"
 echo -e "${BLUE}  → Logs: ./logs/frontend.log${NC}"
-# Detener cualquier servidor Next.js anterior en el puerto 3002 antes de compilar
+# Detener cualquier servidor Next.js anterior en el puerto 3002
 fuser -k 3002/tcp >/dev/null 2>&1 || true
-echo -e "${YELLOW}Compilando el frontend con los últimos cambios...${NC}"
-PORT=3002 npm run build >> logs/frontend.log 2>&1
+# El frontend usa el build existente. Si hiciste cambios, compila antes con: PORT=3002 npm run build
 PORT=3002 npm run start >> logs/frontend.log 2>&1 &
 FRONTEND_PID=$!
 echo -e "${YELLOW}Iniciando Telegram Gateway (ultraligero)...${NC}"

@@ -71,6 +71,16 @@ async def start(update: Update, context: CallbackContext) -> None:
 
         await update.message.reply_text(welcome_message)
 
+        # Si el usuario abrió el bot desde KognitoAI Desktop
+        if context.args and any('desk' in str(arg).lower() for arg in context.args) and jwt_token:
+            await update.message.reply_text(
+                f"💻 **Acceso a KognitoAI Desktop**\n\n"
+                f"Tu token de acceso es:\n\n"
+                f"`{jwt_token}`\n\n"
+                f"Copia y pega este código en la aplicación de escritorio para iniciar sesión.",
+                parse_mode="Markdown"
+            )
+
     except Exception as e:
         logger.error(f"Error en el handler /start para el usuario {user.id}: {e}", exc_info=True)
         await update.message.reply_text("Lo siento, ocurrió un error al procesar tu inicio. Por favor, intenta de nuevo.")
@@ -165,6 +175,33 @@ async def open_documents_panel(update: Update, context: CallbackContext) -> None
     )
 
 
+async def token_command(update: Update, context: CallbackContext) -> None:
+    """Envía el token JWT al usuario para su uso en aplicaciones de escritorio."""
+    if not update.message or not update.message.from_user:
+        return
+    user = update.message.from_user
+    try:
+        auth_data = await get_or_create_account(
+            platform_user_id=str(user.id),
+            first_name=user.first_name,
+            last_name=getattr(user, 'last_name', None),
+            username=user.username
+        )
+        if auth_data and auth_data.get('access_token'):
+            jwt_token = auth_data['access_token']
+            await update.message.reply_text(
+                f"🔑 **Tu Token de Acceso KognitoAI Desktop:**\n\n"
+                f"`{jwt_token}`\n\n"
+                f"Copia este código y pégalo en la app de escritorio.",
+                parse_mode="Markdown"
+            )
+        else:
+            await update.message.reply_text("No se pudo obtener el token. Por favor intenta con /start primero.")
+    except Exception as e:
+        logger.error(f"Error en token_command: {e}")
+        await update.message.reply_text("Ocurrió un error al generar tu token.")
+
+
 def register_command_handlers(application: Application, group: int = 2):
     """
     Registra todos los manejadores de comandos en la aplicación de Telegram.
@@ -174,6 +211,7 @@ def register_command_handlers(application: Application, group: int = 2):
         group: El grupo de prioridad para los handlers.
     """
     application.add_handler(CommandHandler("start", start), group=group)
+    application.add_handler(CommandHandler("token", token_command), group=group)
     application.add_handler(CommandHandler("help", help_command), group=group)
     application.add_handler(CommandHandler("documentos", open_documents_panel), group=group)
     logger.info("✅ Handlers de comandos registrados.")

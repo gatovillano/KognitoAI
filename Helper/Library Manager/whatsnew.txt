@@ -1,0 +1,30 @@
+﻿v8.13.1
+FIXED Auto search could add Non-Kontakt content in Classic Browser.
+v8.12.1
+FIXED Patches of unregistered RAS1 libraries were opened in demo mode (7.xx regression).
+v8.10.0
+ADDED support for new Aftertouch Tool.
+v8.8.0
+CHANGED: 7z.dll has been removed from resources (antivirus warnings).
+IMPROVED database handling: paths to be deleted are processed first.
+v8.7.0
+ADDED Automatic generation of missing images from classic wallpapers for libraries in Default View.
+ADDED Applying custom images located in the root library folder (MST_artwork.png, VB_logo.png, NKS2_hardware_banner.webp)
+FIXED Tiles without images for some libraries on Loops/OneShots tabs. You may need to remove these libraries from the NKS browser, restart Kontakt and add them again.
+v8.6.1
+ADDED save command with rescan options.
+v8.6.0
+ADDED support for new Tools (new factory contents).
+v8.3.0
+FIXED issues with non-ASCII characters when adding libraries to the NKS browser.
+FIXED spelling error in user interface (Options > View > Hidden columns > Comment)
+v8.2.0
+ADDED support for Patterns Tool (new factory contents).
+v8.1.0
+ADDED The "Quick Search" context menu item is replaced by a dialog (with advanced settings and the ability to search for Maschine expansions).
+ADDED Selective removal of registered libraries from NKS browser (only those libraries that are marked by the ||\ icon will be scanned).
+v8.0.1
+FIXED Some libraries (Spitfire Tutti) were not registered correctly.
+v8.0.0
+Initial release.
+Not compatible with older versions of Kontakt Portable.

@@ -4,16 +4,17 @@ API endpoints for sharing analysis reports.
 import logging
 import secrets
 import hashlib
-from datetime import datetime, timedelta
-from typing import Optional, Dict, Any
+import uuid
+from datetime import datetime, timedelta, timezone
+from typing import Optional, Dict, Any, List
 
 from fastapi import APIRouter, HTTPException, Depends, status, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import select, and_, or_
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.dependencies import get_db_session
-from core.config import settings
+from core.database import AnalysisTask, SharedAnalysisLink
 from utils.security import get_current_account_id
 
 logger = logging.getLogger(__name__)
@@ -68,6 +69,23 @@ class SharedAnalysisDetailResponse(BaseModel):
 
 # --- Helper Functions ---
 
+def to_uuid(val: Any) -> uuid.UUID:
+    """Safely convert a string or UUID to uuid.UUID."""
+    if isinstance(val, uuid.UUID):
+        return val
+    return uuid.UUID(str(val))
+
+
+def is_link_expired(expiry_date: Optional[datetime]) -> bool:
+    """Check if an expiry date has passed."""
+    if not expiry_date:
+        return False
+    now = datetime.now(timezone.utc)
+    if expiry_date.tzinfo is None:
+        expiry_date = expiry_date.replace(tzinfo=timezone.utc)
+    return expiry_date < now
+
+
 def hash_password(password: str) -> str:
     """Hash a password using SHA-256."""
     return hashlib.sha256(password.encode()).hexdigest()
@@ -87,9 +105,8 @@ async def create_share_analysis_link(
     """
     try:
         # Verify the analysis exists and belongs to the current user
-        import uuid
-        analysis_uuid = uuid.UUID(request.analysis_id)
-        account_uuid = uuid.UUID(current_account_id)
+        analysis_uuid = to_uuid(request.analysis_id)
+        account_uuid = to_uuid(current_account_id)
         
         stmt = select(AnalysisTask).where(
             AnalysisTask.id == analysis_uuid,
@@ -120,11 +137,11 @@ async def create_share_analysis_link(
         # Calculate expiry date
         expiry_date = None
         if request.expiry_days:
-            expiry_date = datetime.utcnow() + timedelta(days=request.expiry_days)
+            expiry_date = datetime.now(timezone.utc) + timedelta(days=request.expiry_days)
         
         # Create shared link
         shared_link = SharedAnalysisLink(
-            analysis_id=request.analysis_id,
+            analysis_id=analysis_uuid,
             token=token,
             password_hash=password_hash,
             expiry_date=expiry_date,
@@ -154,7 +171,7 @@ async def create_share_analysis_link(
         )
 
 
-@router.get("/list", response_model=list[ShareAnalysisResponse], summary="List shared analysis links")
+@router.get("/list", response_model=List[ShareAnalysisResponse], summary="List shared analysis links")
 async def list_share_analysis_links(
     analysis_id: str = Query(..., description="ID of the analysis"),
     current_account_id: str = Depends(get_current_account_id),
@@ -164,9 +181,8 @@ async def list_share_analysis_links(
     List all shared links for a specific analysis.
     """
     try:
-        import uuid
-        analysis_uuid = uuid.UUID(analysis_id)
-        account_uuid = uuid.UUID(current_account_id)
+        analysis_uuid = to_uuid(analysis_id)
+        account_uuid = to_uuid(current_account_id)
         
         # Verify the analysis exists and belongs to the current user
         stmt = select(AnalysisTask).where(
@@ -184,7 +200,7 @@ async def list_share_analysis_links(
         
         # Get all shared links for this analysis
         stmt = select(SharedAnalysisLink).where(
-            SharedAnalysisLink.analysis_id == analysis_id
+            SharedAnalysisLink.analysis_id == analysis_uuid
         ).order_by(SharedAnalysisLink.created_at.desc())
         
         result = await db.execute(stmt)
@@ -235,9 +251,8 @@ async def revoke_share_analysis_link(
             )
         
         # Verify the analysis belongs to the current user
-        import uuid
-        analysis_uuid = uuid.UUID(shared_link.analysis_id)
-        account_uuid = uuid.UUID(current_account_id)
+        analysis_uuid = to_uuid(shared_link.analysis_id)
+        account_uuid = to_uuid(current_account_id)
         
         stmt = select(AnalysisTask).where(
             AnalysisTask.id == analysis_uuid,
@@ -290,7 +305,7 @@ async def access_shared_analysis(
             )
         
         # Check if link has expired
-        if shared_link.expiry_date and shared_link.expiry_date < datetime.utcnow():
+        if is_link_expired(shared_link.expiry_date):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="This shared link has expired."
@@ -311,9 +326,7 @@ async def access_shared_analysis(
                 )
         
         # Get the analysis
-        import uuid
-        # shared_link.analysis_id is already a UUID from the database
-        analysis_uuid = shared_link.analysis_id if isinstance(shared_link.analysis_id, uuid.UUID) else uuid.UUID(shared_link.analysis_id)
+        analysis_uuid = to_uuid(shared_link.analysis_id)
         
         stmt = select(AnalysisTask).where(AnalysisTask.id == analysis_uuid)
         result = await db.execute(stmt)
@@ -385,9 +398,7 @@ async def get_shared_analysis_info(
             )
         
         # Check if link has expired
-        is_expired = False
-        if shared_link.expiry_date and shared_link.expiry_date < datetime.utcnow():
-            is_expired = True
+        is_expired = is_link_expired(shared_link.expiry_date)
         
         # Check password if required
         if shared_link.password_hash and not is_expired:
@@ -412,9 +423,7 @@ async def get_shared_analysis_info(
                 )
         
         # Get the analysis
-        import uuid
-        # shared_link.analysis_id is already a UUID from the database
-        analysis_uuid = shared_link.analysis_id if isinstance(shared_link.analysis_id, uuid.UUID) else uuid.UUID(shared_link.analysis_id)
+        analysis_uuid = to_uuid(shared_link.analysis_id)
         
         stmt = select(AnalysisTask).where(AnalysisTask.id == analysis_uuid)
         result = await db.execute(stmt)

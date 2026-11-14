@@ -1,0 +1,1 @@
+The complete text content extracted from the document.

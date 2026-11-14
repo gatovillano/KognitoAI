@@ -46,8 +46,13 @@ apiClient.interceptors.response.use(
       localStorage.removeItem('authToken');
       localStorage.removeItem('access_token');
 
-      // Solo redirigir si no estamos ya en la página de login o en telegram
-      if (!window.location.pathname.includes('/login') && !window.location.pathname.includes('/telegram')) {
+      // Solo redirigir si no estamos ya en la página de login, telegram o en una ruta pública /share
+      const isPublicOrAuthPath =
+        window.location.pathname.includes('/login') ||
+        window.location.pathname.includes('/telegram') ||
+        window.location.pathname.startsWith('/share');
+
+      if (!isPublicOrAuthPath) {
         console.warn('🔄 Redirigiendo al login...');
         window.location.href = '/login';
       }

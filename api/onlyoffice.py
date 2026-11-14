@@ -964,7 +964,7 @@ async def get_onlyoffice_public_config(
     )
     backend_url = onlyoffice_internal_backend.rstrip('/')
 
-    file_url = f"{backend_url}/api/onlyoffice/download/{doc.id}"
+    file_url = f"{backend_url}/api/onlyoffice/share/document/{token}/download"
     callback_url = f"{backend_url}/api/onlyoffice/office-callback/{doc.id}"
 
     from hashlib import md5
@@ -1012,7 +1012,55 @@ async def get_onlyoffice_public_config(
         token_value = jwt.encode(config, jwt_secret, algorithm="HS256")
         config["token"] = token_value if isinstance(token_value, str) else token_value.decode("utf-8")
 
-    return {"config": config, "onlyoffice_url": onlyoffice_api_url}
+    return {
+        "config": config,
+        "onlyoffice_url": onlyoffice_api_url,
+        "document": {
+            "id": str(doc.id),
+            "filename": doc.filename,
+            "extension": doc.extension,
+            "can_edit": share_entry.can_edit,
+        }
+    }
+
+
+@router.get("/share/document/{token}/download")
+async def download_shared_document(
+    token: str,
+    inline: bool = Query(False, description="Servir el archivo inline para previsualización"),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """Permite descargar o previsualizar un documento compartido públicamente sin requerir login."""
+    share_stmt = select(OnlyOfficeDocumentShare).where(
+        OnlyOfficeDocumentShare.token == token,
+        OnlyOfficeDocumentShare.is_public == True,
+    )
+    share_entry = (await db.execute(share_stmt)).scalars().first()
+    if not share_entry:
+        raise HTTPException(status_code=404, detail="Enlace de compartición no encontrado o no público")
+
+    doc = await db.get(Document, share_entry.document_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Documento no encontrado")
+
+    try:
+        file_full_path = resolve_onlyoffice_file_path(doc.file_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail="Ruta física del documento inválida") from exc
+
+    if not file_full_path.exists() or not file_full_path.is_file():
+        raise HTTPException(status_code=404, detail="Archivo físico del documento no encontrado")
+
+    media_type, _ = mimetypes.guess_type(doc.filename or "")
+    safe_filename = (doc.filename or "documento").replace('"', "")
+    disposition = "inline" if inline else "attachment"
+    response_headers = {"Content-Disposition": f'{disposition}; filename="{safe_filename}"'}
+
+    return FileResponse(
+        str(file_full_path),
+        media_type=media_type or "application/octet-stream",
+        headers=response_headers,
+    )
 
 
 @router.post("/{document_id}/share-links")
@@ -1743,6 +1791,19 @@ async def download_document(
             if user_id:
                 is_authenticated = True
                 logger.debug(f"Acceso a descarga de documento {document_id} verificado mediante JWT de usuario.")
+        except Exception:
+            pass
+
+    share_token = request.query_params.get("share_token") or token
+    if not is_authenticated and share_token:
+        try:
+            public_share_stmt = select(OnlyOfficeDocumentShare).where(
+                OnlyOfficeDocumentShare.token == share_token,
+                OnlyOfficeDocumentShare.is_public == True,
+            )
+            if (await db.execute(public_share_stmt)).scalars().first():
+                is_authenticated = True
+                logger.debug(f"Acceso a descarga de documento {document_id} verificado mediante token público.")
         except Exception:
             pass
             
